@@ -13,7 +13,6 @@ pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
     pub const STATUS: &str = "status";
     pub const LABEL: &str = "label";
-    pub const REASON: &str = "reason";
     pub const FAILURE_REASON: &str = "failure_reason";
 }
 
@@ -131,49 +130,9 @@ pub const CH_MEMORY_USAGE: MetricSpec = MetricSpec::histogram_u64(
     DOMAIN,
 );
 
-pub const ERROR_SECURITY_REJECTED: MetricSpec = MetricSpec::counter(
-    "gkg.query.pipeline.error.security_rejected",
-    "Pipeline rejected due to invalid or missing security context.",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
-pub const ERROR_EXECUTION_FAILED: MetricSpec = MetricSpec::counter(
-    "gkg.query.pipeline.error.execution_failed",
-    "ClickHouse query execution failed.",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
-pub const ERROR_AUTHORIZATION_FAILED: MetricSpec = MetricSpec::counter(
-    "gkg.query.pipeline.error.authorization_failed",
-    "Authorization exchange with Rails failed.",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
-pub const ERROR_CONTENT_RESOLUTION_FAILED: MetricSpec = MetricSpec::counter(
-    "gkg.query.pipeline.error.content_resolution_failed",
-    "Virtual column resolution from remote service failed.",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
-pub const ERROR_STREAMING_FAILED: MetricSpec = MetricSpec::counter(
-    "gkg.query.pipeline.error.streaming_failed",
-    "Streaming channel unavailable during authorization.",
-    None,
-    &[labels::REASON],
-    DOMAIN,
-);
-
-/// Rolled-up counter for every query that failed during execution (post-compile).
-/// `failure_reason` uses the closed enum derived from `PipelineError::code()`
-/// minus the `_error` suffix: `security`, `execution`, `authorization`,
+/// Counter for every query that failed during pipeline execution (post-compile).
+/// `failure_reason` is a closed enum derived from `PipelineError::code()` with
+/// the `_error` suffix stripped: `security`, `execution`, `authorization`,
 /// `content_resolution`, `streaming`, `custom`. Compile-time rejections are
 /// counted separately under `gkg.query.engine.compiler.rejected`.
 pub const FAILED: MetricSpec = MetricSpec::counter(
@@ -197,10 +156,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &CH_READ_ROWS,
     &CH_READ_BYTES,
     &CH_MEMORY_USAGE,
-    &ERROR_SECURITY_REJECTED,
-    &ERROR_EXECUTION_FAILED,
-    &ERROR_AUTHORIZATION_FAILED,
-    &ERROR_CONTENT_RESOLUTION_FAILED,
-    &ERROR_STREAMING_FAILED,
     &FAILED,
 ];

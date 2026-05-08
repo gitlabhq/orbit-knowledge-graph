@@ -209,7 +209,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(rate(gkg_query_pipeline_error_security_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]) * 60)",
+               "expr": "sum(rate(gkg_query_pipeline_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\", failure_reason=\"security\"}[5m]) * 60)",
                "legendFormat": "rejects/min",
                "refId": "A"
             }

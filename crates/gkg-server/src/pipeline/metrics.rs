@@ -22,11 +22,6 @@ struct QueryPipelineMetrics {
     ch_read_rows: Counter<u64>,
     ch_read_bytes: Counter<u64>,
     ch_memory_usage: Histogram<u64>,
-    security_rejected: Counter<u64>,
-    execution_failed: Counter<u64>,
-    authorization_failed: Counter<u64>,
-    content_resolution_failed: Counter<u64>,
-    streaming_failed: Counter<u64>,
     failed: Counter<u64>,
 }
 
@@ -46,12 +41,6 @@ impl QueryPipelineMetrics {
             ch_read_rows: spec::CH_READ_ROWS.build_counter_u64(&meter),
             ch_read_bytes: spec::CH_READ_BYTES.build_counter_u64(&meter),
             ch_memory_usage: spec::CH_MEMORY_USAGE.build_histogram_u64(&meter),
-            security_rejected: spec::ERROR_SECURITY_REJECTED.build_counter_u64(&meter),
-            execution_failed: spec::ERROR_EXECUTION_FAILED.build_counter_u64(&meter),
-            authorization_failed: spec::ERROR_AUTHORIZATION_FAILED.build_counter_u64(&meter),
-            content_resolution_failed: spec::ERROR_CONTENT_RESOLUTION_FAILED
-                .build_counter_u64(&meter),
-            streaming_failed: spec::ERROR_STREAMING_FAILED.build_counter_u64(&meter),
             failed: spec::FAILED.build_counter_u64(&meter),
         }
     }
@@ -69,20 +58,6 @@ fn failure_reason(err: &PipelineError) -> Option<&'static str> {
         PipelineError::ContentResolution(_) => Some("content_resolution"),
         PipelineError::Streaming(_) => Some("streaming"),
         PipelineError::Custom(_) => Some("custom"),
-    }
-}
-
-fn counter_info(err: &PipelineError) -> Option<(&Counter<u64>, &'static str)> {
-    match err {
-        PipelineError::Security(_) => Some((&METRICS.security_rejected, "security")),
-        PipelineError::Compile { .. } => None,
-        PipelineError::Execution(_) => Some((&METRICS.execution_failed, "execution")),
-        PipelineError::Authorization(_) => Some((&METRICS.authorization_failed, "authorization")),
-        PipelineError::ContentResolution(_) => {
-            Some((&METRICS.content_resolution_failed, "content_resolution"))
-        }
-        PipelineError::Streaming(_) => Some((&METRICS.streaming_failed, "streaming")),
-        PipelineError::Custom(_) => None,
     }
 }
 
@@ -160,10 +135,6 @@ impl PipelineObserver for OTelPipelineObserver {
         METRICS
             .pipeline_duration
             .record(self.start.elapsed().as_secs_f64(), &attrs);
-
-        if let Some((counter, reason)) = counter_info(err) {
-            counter.add(1, &[KeyValue::new(spec::labels::REASON, reason)]);
-        }
 
         if let Some(reason) = failure_reason(err) {
             METRICS

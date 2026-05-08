@@ -4,7 +4,7 @@ local o = import 'lib/orbit.libsonnet';
 
 local pipelineQueries = o.metric('gkg.query.pipeline.queries').prom_name;
 local pipelineDuration = o.metric('gkg.query.pipeline.duration').prom_name;
-local pipelineSecRej = o.metric('gkg.query.pipeline.error.security_rejected').prom_name;
+local pipelineFailed = o.metric('gkg.query.pipeline.failed').prom_name;
 local etlRows = o.metric('gkg.etl.destination.rows.written').prom_name;
 local etlBytes = o.metric('gkg.etl.destination.written').prom_name;
 local etlHandlerDur = o.metric('gkg.etl.handler.duration').prom_name;
@@ -25,7 +25,7 @@ local items = [
     o.target(o.histogramQuantileExpr(pipelineDuration, 0.95, o.GKG_WEB_SEL, '5m', []), 'p95', 'ORBIT_DS'),
     's', 6),
   o.stat('Security rejects / min', 'Pipeline calls rejected for security policy violations.',
-    o.target('sum(rate(%s{%s}[5m]) * 60)' % [pipelineSecRej, o.GKG_WEB_SEL], 'rejects/min', 'ORBIT_DS'),
+    o.target('sum(rate(%s{%s, failure_reason="security"}[5m]) * 60)' % [pipelineFailed, o.GKG_WEB_SEL], 'rejects/min', 'ORBIT_DS'),
     'short', 6),
 
   o.row('GKG indexer'),

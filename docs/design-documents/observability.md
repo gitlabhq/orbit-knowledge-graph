@@ -137,12 +137,7 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.ch.read_rows` | Counter | count | `query_type`, `label` | ClickHouse rows read per query execution (from `X-ClickHouse-Summary` header) |
 | `gkg.query.pipeline.ch.read` | Counter | By | `query_type`, `label` | ClickHouse bytes read per query execution (from `X-ClickHouse-Summary` header) |
 | `gkg.query.pipeline.ch.memory_usage` | Histogram | By | `query_type`, `label` | ClickHouse peak memory usage per query execution (from `X-ClickHouse-Summary` header) |
-| `gkg.query.pipeline.error.security_rejected` | Counter | count | `reason` (security) | Pipeline rejected due to invalid or missing security context |
-| `gkg.query.pipeline.error.execution_failed` | Counter | count | `reason` (execution) | ClickHouse query execution failed |
-| `gkg.query.pipeline.error.authorization_failed` | Counter | count | `reason` (authorization) | Authorization exchange with Rails failed |
-| `gkg.query.pipeline.error.content_resolution_failed` | Counter | count | `reason` (content_resolution) | Virtual column resolution from remote service failed |
-| `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
-| `gkg.query.pipeline.failed` | Counter | count | `failure_reason` (security/execution/authorization/content_resolution/streaming/custom) | Rolled-up post-compile pipeline failure counter. Compile-time rejections are excluded; they are tracked on `gkg.query.engine.compiler.rejected`. |
+| `gkg.query.pipeline.failed` | Counter | count | `failure_reason` (security/execution/authorization/content_resolution/streaming/custom) | Post-compile pipeline failure counter. Compile-time rejections are excluded; they are tracked on `gkg.query.engine.compiler.rejected`. |
 
 *Content resolution metrics:*
 
@@ -158,19 +153,11 @@ The content resolution subsystem instruments Gitaly interactions during virtual 
 
 *Query engine metrics:*
 
-The query engine fires counters during compilation to track security-relevant rejections. Each counter uses a `reason` label for low-cardinality breakdown. Counters marked "server layer" are exported for the gRPC/HTTP layer to increment.
+The query engine fires a single counter during compilation, with a closed-enum `failure_reason` label that maps from the [`QueryError`](../../crates/query-engine/compiler/src/error.rs) discriminant.
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `gkg.query.engine.threat.validation_failed` | Counter | `reason` (parse/schema/reference/pagination) | Query rejected by structural validation |
-| `gkg.query.engine.threat.allowlist_rejected` | Counter | `reason` (ontology/ontology_internal) | Entity, column, or relationship not in the ontology allowlist |
-| `gkg.query.engine.threat.auth_filter_missing` | Counter | `reason` (security) | Security context invalid or absent (server layer) |
-| `gkg.query.engine.threat.timeout` | Counter | `reason` | Query compilation or execution exceeded deadline (server layer) |
-| `gkg.query.engine.threat.rate_limited` | Counter | `reason` | Caller throttled before compilation (server layer) |
-| `gkg.query.engine.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
-| `gkg.query.engine.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
-| `gkg.query.engine.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
-| `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline) | Rolled-up counter for every query the compiler rejected before execution. Use this for SLO dashboards; the per-class threat counters above remain available for finer-grained alerting. |
+| `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline) | Total queries the compiler rejected before execution. Filter on `failure_reason` to recover per-class breakdowns previously held in the per-variant threat counters. |
 
 *Circuit breaker metrics (resilience):*
 
@@ -193,26 +180,25 @@ Prometheus scrapes these metrics into Grafana Mimir. We also maintain dashboards
 
 Alert rules are defined as `PrometheusRule` CRDs, automatically discovered by the Prometheus Operator. Thresholds are configurable via Helm values.
 
-Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG chart. The OTel-to-Prometheus conversion replaces dots with underscores, appends unit suffixes (`_seconds` for "s", `_bytes` for "By"), and appends `_total` for counters (e.g., `gkg.query.engine.threat.auth_filter_missing` → `gkg_query_engine_threat_auth_filter_missing_total`).
+Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG chart. The OTel-to-Prometheus conversion replaces dots with underscores, appends unit suffixes (`_seconds` for "s", `_bytes` for "By"), and appends `_total` for counters (e.g., `gkg.query.engine.compiler.rejected` becomes `gkg_query_engine_compiler_rejected_total`).
 
 **Security alerts** (any non-zero count is anomalous):
 
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
-| `GKGAuthFilterMissing` | `gkg_query_engine_threat_auth_filter_missing_total` | > 0 in 5m | critical | 1m | A query was processed without a valid security context, meaning authorization filtering was bypassed |
-| `GKGPipelineInvariantViolated` | `gkg_query_engine_internal_pipeline_invariant_violated_total` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented — may produce incorrect SQL |
-| `GKGSecurityRejected` | `gkg_query_pipeline_error_security_rejected_total` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
+| `GKGAuthFilterMissing` | `gkg_query_engine_compiler_rejected_total{failure_reason="security"}` | > 0 in 5m | critical | 1m | A query reached compilation without a valid security context, meaning authorization filtering would have been bypassed |
+| `GKGPipelineInvariantViolated` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"lowering\|enforcement\|codegen\|pipeline"}` | > 0 in 5m | critical | 1m | The query compiler reached a state that upstream validation should have prevented, which may produce incorrect SQL |
+| `GKGSecurityRejected` | `gkg_query_pipeline_failed_total{failure_reason="security"}` | > 0 in 5m | warning | 5m | Pipeline rejected a request due to invalid or missing security context |
 
 **Query health alerts** (sustained error rates or latency degradation):
 
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
-| `GKGQueryingErrorRateHigh` | `gkg_query_pipeline_queries_total{status!="ok"}` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold — the availability SLI |
-| `GKGQueryTimeoutRateHigh` | `gkg_query_engine_threat_timeout_total` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | More than 5% of queries time out, indicating ClickHouse saturation or pathological queries |
-| `GKGValidationFailedBurst` | `gkg_query_engine_threat_validation_failed_total` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
-| `GKGAllowlistRejectedBurst` | `gkg_query_engine_threat_allowlist_rejected_total` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
-| `GKGExecutionFailureRate` | `gkg_query_pipeline_error_execution_failed_total` | > 1/min | warning | 5m | ClickHouse query execution is failing |
-| `GKGAuthorizationFailureRate` | `gkg_query_pipeline_error_authorization_failed_total` | > 1/min | warning | 5m | Rails authorization exchange is failing |
+| `GKGQueryingErrorRateHigh` | `gkg_query_pipeline_queries_total{status!="ok"}` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold (the availability SLI) |
+| `GKGValidationFailedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"parse\|schema\|reference\|pagination"}` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
+| `GKGAllowlistRejectedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"ontology\|ontology_internal"}` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
+| `GKGExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="execution"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
+| `GKGAuthorizationFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="authorization"}` | > 1/min | warning | 5m | Rails authorization exchange is failing |
 | `GKGPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
 
 **Resilience alerts** (circuit breaker):
@@ -224,9 +210,7 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG
 
 **Capacity alerts** (traffic and limit pressure):
 
-| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
-|---|---|---|---|---|---|
-| `GKGRateLimitedHigh` | `gkg_query_engine_threat_rate_limited_total` | > 10/min | warning | 5m | High rate of throttled callers — may need capacity scaling |
+Rate-limit and timeout alerts were retired with the per-class threat counters. Once a server-layer rate-limiter or timeout signal is reintroduced, add a new metric with the appropriate `failure_reason` value.
 
 ### Logging
 

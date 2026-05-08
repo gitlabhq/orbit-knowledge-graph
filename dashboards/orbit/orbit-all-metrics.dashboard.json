@@ -5269,261 +5269,6 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Authorization exchange with Rails failed.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 273
-         },
-         "id": 101,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_pipeline_error_authorization_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_pipeline_error_authorization_failed_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Virtual column resolution from remote service failed.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 273
-         },
-         "id": 102,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_pipeline_error_content_resolution_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_pipeline_error_content_resolution_failed_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "ClickHouse query execution failed.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 273
-         },
-         "id": 103,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_pipeline_error_execution_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_pipeline_error_execution_failed_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Pipeline rejected due to invalid or missing security context.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 281
-         },
-         "id": 104,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_pipeline_error_security_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_pipeline_error_security_rejected_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Streaming channel unavailable during authorization.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 281
-         },
-         "id": 105,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_pipeline_error_streaming_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_pipeline_error_streaming_failed_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
          "description": "Time spent executing the compiled query against ClickHouse.",
          "fieldConfig": {
             "defaults": {
@@ -5539,10 +5284,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 281
+            "x": 0,
+            "y": 273
          },
-         "id": 106,
+         "id": 101,
          "options": {
             "legend": {
                "calcs": [
@@ -5608,10 +5353,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 289
+            "x": 8,
+            "y": 273
          },
-         "id": 107,
+         "id": 102,
          "options": {
             "legend": {
                "calcs": [
@@ -5659,10 +5404,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 289
+            "x": 16,
+            "y": 273
          },
-         "id": 108,
+         "id": 103,
          "options": {
             "legend": {
                "calcs": [
@@ -5710,10 +5455,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 289
+            "x": 0,
+            "y": 281
          },
-         "id": 109,
+         "id": 104,
          "options": {
             "legend": {
                "calcs": [
@@ -5779,10 +5524,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 297
+            "x": 8,
+            "y": 281
          },
-         "id": 110,
+         "id": 105,
          "options": {
             "legend": {
                "calcs": [
@@ -5830,10 +5575,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 297
+            "x": 16,
+            "y": 281
          },
-         "id": 111,
+         "id": 106,
          "options": {
             "legend": {
                "calcs": [
@@ -5881,10 +5626,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 297
+            "x": 0,
+            "y": 289
          },
-         "id": 112,
+         "id": 107,
          "options": {
             "legend": {
                "calcs": [
@@ -5950,10 +5695,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 305
+            "x": 8,
+            "y": 289
          },
-         "id": 113,
+         "id": 108,
          "options": {
             "legend": {
                "calcs": [
@@ -6001,10 +5746,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 305
+            "x": 16,
+            "y": 289
          },
-         "id": 114,
+         "id": 109,
          "options": {
             "legend": {
                "calcs": [
@@ -6070,10 +5815,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 305
+            "x": 0,
+            "y": 297
          },
-         "id": 115,
+         "id": 110,
          "options": {
             "legend": {
                "calcs": [
@@ -6107,9 +5852,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 313
+            "y": 305
          },
-         "id": 116,
+         "id": 111,
          "panels": [ ],
          "title": "Query engine — threat counters (webserver)",
          "type": "row"
@@ -6135,9 +5880,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 314
+            "y": 306
          },
-         "id": 117,
+         "id": 112,
          "options": {
             "legend": {
                "calcs": [
@@ -6166,422 +5911,14 @@
          "type": "timeseries"
       },
       {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Lowering or codegen hit a state that upstream validation should have prevented.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 314
-         },
-         "id": 118,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_internal_pipeline_invariant_violated_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_internal_pipeline_invariant_violated_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Query referenced an entity, column, or relationship not in the ontology allowlist.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 314
-         },
-         "id": 119,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_allowlist_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_allowlist_rejected_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Security context was invalid or absent when required.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 322
-         },
-         "id": 120,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_auth_filter_missing_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_auth_filter_missing_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Traversal depth or hop count exceeded the hard cap.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 322
-         },
-         "id": 121,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_depth_exceeded_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_depth_exceeded_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Array cardinality cap exceeded (node_ids count or IN filter value count).",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 322
-         },
-         "id": 122,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_limit_exceeded_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_limit_exceeded_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Caller was throttled before query compilation.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 330
-         },
-         "id": 123,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_rate_limited_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_rate_limited_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Query compilation or execution exceeded the deadline.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 330
-         },
-         "id": 124,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_timeout_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_timeout_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Query rejected by structural validation (schema, references, pagination).",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 330
-         },
-         "id": 125,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum by (reason) (rate(gkg_query_engine_threat_validation_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gkg_query_engine_threat_validation_failed_total — rate/s",
-         "type": "timeseries"
-      },
-      {
          "collapsed": false,
          "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 338
+            "y": 314
          },
-         "id": 126,
+         "id": 113,
          "panels": [ ],
          "title": "Content resolution (webserver)",
          "type": "row"
@@ -6607,9 +5944,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 339
+            "y": 315
          },
-         "id": 127,
+         "id": 114,
          "options": {
             "legend": {
                "calcs": [
@@ -6676,9 +6013,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 339
+            "y": 315
          },
-         "id": 128,
+         "id": 115,
          "options": {
             "legend": {
                "calcs": [
@@ -6727,9 +6064,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 339
+            "y": 315
          },
-         "id": 129,
+         "id": 116,
          "options": {
             "legend": {
                "calcs": [
@@ -6778,9 +6115,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 347
+            "y": 323
          },
-         "id": 130,
+         "id": 117,
          "options": {
             "legend": {
                "calcs": [
@@ -6829,9 +6166,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 347
+            "y": 323
          },
-         "id": 131,
+         "id": 118,
          "options": {
             "legend": {
                "calcs": [
@@ -6880,9 +6217,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 347
+            "y": 323
          },
-         "id": 132,
+         "id": 119,
          "options": {
             "legend": {
                "calcs": [
@@ -6949,9 +6286,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 355
+            "y": 331
          },
-         "id": 133,
+         "id": 120,
          "options": {
             "legend": {
                "calcs": [
@@ -7000,9 +6337,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 355
+            "y": 331
          },
-         "id": 134,
+         "id": 121,
          "options": {
             "legend": {
                "calcs": [
@@ -7069,9 +6406,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 355
+            "y": 331
          },
-         "id": 135,
+         "id": 122,
          "options": {
             "legend": {
                "calcs": [
@@ -7105,9 +6442,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 363
+            "y": 339
          },
-         "id": 136,
+         "id": 123,
          "panels": [ ],
          "title": "Schema watcher (webserver)",
          "type": "row"
@@ -7133,9 +6470,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 364
+            "y": 340
          },
-         "id": 137,
+         "id": 124,
          "options": {
             "legend": {
                "calcs": [
@@ -7169,9 +6506,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 372
+            "y": 348
          },
-         "id": 138,
+         "id": 125,
          "panels": [ ],
          "title": "Siphon producers",
          "type": "row"
@@ -7197,9 +6534,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 373
+            "y": 349
          },
-         "id": 139,
+         "id": 126,
          "options": {
             "legend": {
                "calcs": [
@@ -7233,9 +6570,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 381
+            "y": 357
          },
-         "id": 140,
+         "id": 127,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -7261,9 +6598,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 382
+            "y": 358
          },
-         "id": 141,
+         "id": 128,
          "options": {
             "legend": {
                "calcs": [
@@ -7297,9 +6634,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 390
+            "y": 366
          },
-         "id": 142,
+         "id": 129,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -7325,9 +6662,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 391
+            "y": 367
          },
-         "id": 143,
+         "id": 130,
          "options": {
             "legend": {
                "calcs": [
@@ -7376,9 +6713,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 391
+            "y": 367
          },
-         "id": 144,
+         "id": 131,
          "options": {
             "legend": {
                "calcs": [
@@ -7427,9 +6764,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 391
+            "y": 367
          },
-         "id": 145,
+         "id": 132,
          "options": {
             "legend": {
                "calcs": [
@@ -7478,9 +6815,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 399
+            "y": 375
          },
-         "id": 146,
+         "id": 133,
          "options": {
             "legend": {
                "calcs": [
@@ -7529,9 +6866,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 399
+            "y": 375
          },
-         "id": 147,
+         "id": 134,
          "options": {
             "legend": {
                "calcs": [
@@ -7580,9 +6917,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 399
+            "y": 375
          },
-         "id": 148,
+         "id": 135,
          "options": {
             "legend": {
                "calcs": [
@@ -7631,9 +6968,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 407
+            "y": 383
          },
-         "id": 149,
+         "id": 136,
          "options": {
             "legend": {
                "calcs": [
@@ -7682,9 +7019,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 407
+            "y": 383
          },
-         "id": 150,
+         "id": 137,
          "options": {
             "legend": {
                "calcs": [
@@ -7733,9 +7070,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 407
+            "y": 383
          },
-         "id": 151,
+         "id": 138,
          "options": {
             "legend": {
                "calcs": [
@@ -7784,9 +7121,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 415
+            "y": 391
          },
-         "id": 152,
+         "id": 139,
          "options": {
             "legend": {
                "calcs": [
@@ -7820,9 +7157,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 423
+            "y": 399
          },
-         "id": 153,
+         "id": 140,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -7848,9 +7185,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 424
+            "y": 400
          },
-         "id": 154,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [
@@ -7917,9 +7254,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 424
+            "y": 400
          },
-         "id": 155,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -7968,9 +7305,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 424
+            "y": 400
          },
-         "id": 156,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -8019,9 +7356,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 432
+            "y": 408
          },
-         "id": 157,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [
@@ -8088,9 +7425,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 432
+            "y": 408
          },
-         "id": 158,
+         "id": 145,
          "options": {
             "legend": {
                "calcs": [
@@ -8139,9 +7476,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 432
+            "y": 408
          },
-         "id": 159,
+         "id": 146,
          "options": {
             "legend": {
                "calcs": [
@@ -8208,9 +7545,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 440
+            "y": 416
          },
-         "id": 160,
+         "id": 147,
          "options": {
             "legend": {
                "calcs": [
@@ -8259,9 +7596,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 440
+            "y": 416
          },
-         "id": 161,
+         "id": 148,
          "options": {
             "legend": {
                "calcs": [
@@ -8328,9 +7665,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 440
+            "y": 416
          },
-         "id": 162,
+         "id": 149,
          "options": {
             "legend": {
                "calcs": [
@@ -8379,9 +7716,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 448
+            "y": 424
          },
-         "id": 163,
+         "id": 150,
          "options": {
             "legend": {
                "calcs": [
@@ -8448,9 +7785,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 448
+            "y": 424
          },
-         "id": 164,
+         "id": 151,
          "options": {
             "legend": {
                "calcs": [
@@ -8499,9 +7836,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 448
+            "y": 424
          },
-         "id": 165,
+         "id": 152,
          "options": {
             "legend": {
                "calcs": [
@@ -8568,9 +7905,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 456
+            "y": 432
          },
-         "id": 166,
+         "id": 153,
          "options": {
             "legend": {
                "calcs": [
@@ -8604,9 +7941,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 464
+            "y": 440
          },
-         "id": 167,
+         "id": 154,
          "panels": [ ],
          "title": "Rails KG traversal compaction",
          "type": "row"
@@ -8632,9 +7969,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 465
+            "y": 441
          },
-         "id": 168,
+         "id": 155,
          "options": {
             "legend": {
                "calcs": [
@@ -8701,9 +8038,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 465
+            "y": 441
          },
-         "id": 169,
+         "id": 156,
          "options": {
             "legend": {
                "calcs": [
@@ -8752,9 +8089,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 465
+            "y": 441
          },
-         "id": 170,
+         "id": 157,
          "options": {
             "legend": {
                "calcs": [
@@ -8821,9 +8158,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 473
+            "y": 449
          },
-         "id": 171,
+         "id": 158,
          "options": {
             "legend": {
                "calcs": [
@@ -8872,9 +8209,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 473
+            "y": 449
          },
-         "id": 172,
+         "id": 159,
          "options": {
             "legend": {
                "calcs": [
@@ -8923,9 +8260,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 473
+            "y": 449
          },
-         "id": 173,
+         "id": 160,
          "options": {
             "legend": {
                "calcs": [
