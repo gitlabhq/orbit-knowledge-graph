@@ -1,3 +1,20 @@
+## [0.52.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.51.0...v0.52.0) (2026-05-08)
+
+### Features
+
+* **compiler:** narrow hydration scans via traversal_path pushdown ([00184af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00184afdc6f892085f145effcac1e3e3feb23fc1)) by Michael Usachenko
+* **server:** add Orbit agent command RPCs ([a88c0ef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a88c0ef1988b09e5957047ffabb0542856d6ae26)) by Michael Angelo Rivera
+
+### Performance
+
+* **code-graph:** share IncludeIndex via Arc, cache BFS per-file ([fa1c073](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fa1c073e4ebbaa3b638f7caa8ed4184f3f317064)) by Michael Usachenko
+
+### Other
+
+* add ADR 011 — agent command surface (lazy-mcp pattern) ([ddd1934](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ddd193413d110fee0f937f0d08a888abd639f0da)) by Dmitry Gruzd
+* **billing:** extract gkg-billing crate ([6448153](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/64481533f83cb7ed620e9876de4410c0bbff137b)) by Sharmad Nachnolkar
+* focus linting tasks on specific markdown files ([613626a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/613626a5600289f0dff2161081e65179fa089521)) by Evan Read
+
 ## [0.51.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.50.0...v0.51.0) (2026-05-06)
 
 ### Features
