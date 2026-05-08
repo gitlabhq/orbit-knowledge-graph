@@ -171,7 +171,15 @@ impl<'a> FileResolver<'a> {
             .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
 
+        // A member call on a different receiver (chain is non-empty)
+        // cannot resolve to the enclosing function. Direct calls
+        // (no chain) can be legitimate recursion.
+        let has_receiver = chain.is_some_and(|c| !c.is_empty());
+
         for target in targets {
+            if has_receiver && target == source_node {
+                continue;
+            }
             let target_def_kind = graph.graph[target]
                 .def_id()
                 .map(|did| graph.defs[did.0 as usize].kind);
