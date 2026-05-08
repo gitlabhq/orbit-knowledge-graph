@@ -205,32 +205,124 @@ fn ruby_extract_attr_methods(
         .field("method")
         .map(|m| m.text().to_string())
         .unwrap_or_default();
-    if method != "attr_accessor" && method != "attr_reader" && method != "attr_writer" {
-        return false;
-    }
+
     let Some(args) = node.field("arguments") else {
-        return true;
+        return method == "attr_accessor"
+            || method == "attr_reader"
+            || method == "attr_writer"
+            || method == "delegate"
+            || method == "define_method";
     };
-    for arg in args.children() {
-        if arg.kind().as_ref() != "simple_symbol" {
-            continue;
+
+    match method.as_str() {
+        // attr_accessor :foo, :bar → synthetic getter/setter defs
+        "attr_accessor" | "attr_reader" | "attr_writer" => {
+            for arg in args.children() {
+                if arg.kind().as_ref() != "simple_symbol" {
+                    continue;
+                }
+                let name = arg.text().trim_start_matches(':').to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Attribute",
+                    kind: DefKind::Property,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+            }
+            true
         }
-        let name = arg.text().trim_start_matches(':').to_string();
-        if name.is_empty() {
-            continue;
+        // delegate :foo, :bar, to: :baz → synthetic method defs
+        "delegate" => {
+            for arg in args.children() {
+                if arg.kind().as_ref() != "simple_symbol" {
+                    continue;
+                }
+                let name = arg.text().trim_start_matches(':').to_string();
+                if name.is_empty() || name == "to" {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+            }
+            true
         }
-        let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-        defs.push(crate::v2::types::CanonicalDefinition {
-            definition_type: "Attribute",
-            kind: DefKind::Property,
-            name,
-            fqn,
-            range: crate::v2::types::Range::empty(),
-            is_top_level: false,
-            metadata: None,
-        });
+        // def_delegators :@target, :foo, :bar → synthetic method defs
+        // def_delegator :@target, :foo → synthetic method def
+        "def_delegators" | "def_delegator" => {
+            let mut skip_first = true; // first arg is the target, not a method name
+            for arg in args.children() {
+                if arg.kind().as_ref() != "simple_symbol" {
+                    continue;
+                }
+                if skip_first {
+                    skip_first = false;
+                    continue;
+                }
+                let name = arg.text().trim_start_matches(':').to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+            }
+            true
+        }
+        // define_method(:foo) { ... } → synthetic method def
+        "define_method" => {
+            for arg in args.children() {
+                let kind = arg.kind();
+                let kind_ref = kind.as_ref();
+                if kind_ref != "simple_symbol" && kind_ref != "string" {
+                    continue;
+                }
+                let raw = arg.text().to_string();
+                let name = raw
+                    .trim_start_matches(':')
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+                break; // only first arg is the method name
+            }
+            true
+        }
+        _ => false,
     }
-    true
 }
 
 /// Extract super types: superclass + include/extend calls in the class body.

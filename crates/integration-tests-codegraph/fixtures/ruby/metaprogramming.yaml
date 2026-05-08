@@ -1,0 +1,123 @@
+name: "Ruby metaprogramming — delegate, define_method, def_delegators"
+
+fixtures:
+  - path: lib/base.rb
+    content: |
+      class Base
+        def save!
+          true
+        end
+
+        def valid?
+          true
+        end
+      end
+
+  - path: lib/model.rb
+    content: |
+      require_relative "base"
+
+      class Model < Base
+        attr_accessor :name, :email
+
+        delegate :valid?, to: :base_record
+
+        define_method(:greet) do
+          "Hello #{name}"
+        end
+
+        def update(attrs)
+          self.name = attrs[:name]
+          save!
+          greet
+        end
+      end
+
+  - path: lib/presenter.rb
+    content: |
+      require "forwardable"
+      require_relative "model"
+
+      class Presenter
+        extend Forwardable
+
+        def_delegators :@model, :name, :email, :greet
+
+        def initialize(model)
+          @model = model
+        end
+
+        def display
+          name
+          email
+          greet
+        end
+      end
+
+tests:
+  - name: "attr_accessor generates synthetic defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Model::name', 'Model::email']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Model::name", type: Attribute } }
+      - { row: { fqn: "Model::email", type: Attribute } }
+
+  - name: "delegate generates synthetic method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::valid?'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "define_method generates synthetic method def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::greet'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "def_delegators generates synthetic method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+
+  - name: "Model.update calls name (attr_accessor)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Model::update'
+        AND callee.fqn = 'Model::name'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Model::update", callee: "Model::name", kind: Calls } }
+
+  - name: "Model.update calls greet (define_method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Model::update'
+        AND callee.fqn = 'Model::greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Model::update", callee: "Model::greet", kind: Calls } }
+
+  - name: "Presenter.display calls delegated methods"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Presenter::display'
+        AND callee.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { unique: callee }
