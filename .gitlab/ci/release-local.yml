@@ -82,6 +82,25 @@ local-cli-build-darwin-arm64:
   variables:
     ARCH: aarch64
 
+local-cli-code-sign:
+  extends:
+    - .local-cli-release-rules
+    - .google-oidc:auth
+  stage: build
+  image: ${CI_REGISTRY}/gitlab-com/gl-infra/common-ci-tasks-images/code-signer:1.1.0
+  tags:
+    - saas-linux-medium-amd64
+  needs:
+    - local-cli-build-darwin-amd64
+    - local-cli-build-darwin-arm64
+  script:
+    - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-x86_64.tar.gz macos orbit
+    - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-aarch64.tar.gz macos orbit
+  artifacts:
+    paths:
+      - orbit-local-darwin-*.tar.gz
+    expire_in: 7 days
+
 local-cli-publish:
   extends:
     - .local-cli-release-rules
@@ -92,8 +111,7 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
-    - local-cli-build-darwin-amd64
-    - local-cli-build-darwin-arm64
+    - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils
   script:
