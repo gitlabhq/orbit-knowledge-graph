@@ -662,89 +662,12 @@
       "domain": "indexer.sdlc"
     },
     {
-      "otel_name": "gkg.query.engine.internal.pipeline_invariant_violated",
-      "prom_name": "gkg_query_engine_internal_pipeline_invariant_violated_total",
-      "description": "Lowering or codegen hit a state that upstream validation should have prevented.",
+      "otel_name": "gkg.query.engine.compiler.rejected",
+      "prom_name": "gkg_query_engine_compiler_rejected_total",
+      "description": "Total queries the compiler rejected before execution, labelled by failure reason.",
       "kind": "counter",
       "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.allowlist_rejected",
-      "prom_name": "gkg_query_engine_threat_allowlist_rejected_total",
-      "description": "Query referenced an entity, column, or relationship not in the ontology allowlist.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.auth_filter_missing",
-      "prom_name": "gkg_query_engine_threat_auth_filter_missing_total",
-      "description": "Security context was invalid or absent when required.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.depth_exceeded",
-      "prom_name": "gkg_query_engine_threat_depth_exceeded_total",
-      "description": "Traversal depth or hop count exceeded the hard cap.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.limit_exceeded",
-      "prom_name": "gkg_query_engine_threat_limit_exceeded_total",
-      "description": "Array cardinality cap exceeded (node_ids count or IN filter value count).",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.rate_limited",
-      "prom_name": "gkg_query_engine_threat_rate_limited_total",
-      "description": "Caller was throttled before query compilation.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.timeout",
-      "prom_name": "gkg_query_engine_threat_timeout_total",
-      "description": "Query compilation or execution exceeded the deadline.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.engine"
-    },
-    {
-      "otel_name": "gkg.query.engine.threat.validation_failed",
-      "prom_name": "gkg_query_engine_threat_validation_failed_total",
-      "description": "Query rejected by structural validation (schema, references, pagination).",
-      "kind": "counter",
-      "labels": [
-        "reason"
+        "failure_reason"
       ],
       "stability": "stable",
       "domain": "query.engine"
@@ -879,61 +802,6 @@
       "domain": "query.pipeline"
     },
     {
-      "otel_name": "gkg.query.pipeline.error.authorization_failed",
-      "prom_name": "gkg_query_pipeline_error_authorization_failed_total",
-      "description": "Authorization exchange with Rails failed.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.pipeline"
-    },
-    {
-      "otel_name": "gkg.query.pipeline.error.content_resolution_failed",
-      "prom_name": "gkg_query_pipeline_error_content_resolution_failed_total",
-      "description": "Virtual column resolution from remote service failed.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.pipeline"
-    },
-    {
-      "otel_name": "gkg.query.pipeline.error.execution_failed",
-      "prom_name": "gkg_query_pipeline_error_execution_failed_total",
-      "description": "ClickHouse query execution failed.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.pipeline"
-    },
-    {
-      "otel_name": "gkg.query.pipeline.error.security_rejected",
-      "prom_name": "gkg_query_pipeline_error_security_rejected_total",
-      "description": "Pipeline rejected due to invalid or missing security context.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.pipeline"
-    },
-    {
-      "otel_name": "gkg.query.pipeline.error.streaming_failed",
-      "prom_name": "gkg_query_pipeline_error_streaming_failed_total",
-      "description": "Streaming channel unavailable during authorization.",
-      "kind": "counter",
-      "labels": [
-        "reason"
-      ],
-      "stability": "stable",
-      "domain": "query.pipeline"
-    },
-    {
       "otel_name": "gkg.query.pipeline.execute.duration",
       "prom_name": "gkg_query_pipeline_execute_duration_seconds",
       "description": "Time spent executing the compiled query against ClickHouse.",
@@ -950,6 +818,17 @@
         2.5,
         5.0,
         10.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.failed",
+      "prom_name": "gkg_query_pipeline_failed_total",
+      "description": "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
+      "kind": "counter",
+      "labels": [
+        "failure_reason"
       ],
       "stability": "stable",
       "domain": "query.pipeline"

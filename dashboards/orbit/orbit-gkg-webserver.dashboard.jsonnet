@@ -44,11 +44,8 @@ local pipelineChMem = o.metric('gkg.query.pipeline.ch.memory_usage');
 local pipelineChRead = o.metric('gkg.query.pipeline.ch.read');
 local pipelineChRows = o.metric('gkg.query.pipeline.ch.read_rows');
 
-local pipelineErrAuthZ = 'gkg_query_pipeline_error_authorization_failed_total';
-local pipelineErrContent = 'gkg_query_pipeline_error_content_resolution_failed_total';
-local pipelineErrExec = 'gkg_query_pipeline_error_execution_failed_total';
-local pipelineErrSec = 'gkg_query_pipeline_error_security_rejected_total';
-local pipelineErrStream = 'gkg_query_pipeline_error_streaming_failed_total';
+local compilerRejected = o.metric('gkg.query.engine.compiler.rejected').prom_name;
+local pipelineFailed = o.metric('gkg.query.pipeline.failed').prom_name;
 
 local contentResolveDur = o.metric('gkg.content.resolve.duration');
 local contentResolveBatch = o.metric('gkg.content.resolve.batch_size');
@@ -88,9 +85,9 @@ local health = [
     DS, 's', 6,
   ),
   o.gaugeStat(
-    'Threat rejects / min (5m)',
-    'Pipeline calls rejected for security policy violations. Includes rate-limit, depth, validation, allowlist, auth-filter, and timeout rejects.',
-    'sum(rate(gkg_query_engine_threat_allowlist_rejected_total{%s}[5m]) + rate(gkg_query_engine_threat_auth_filter_missing_total{%s}[5m]) + rate(gkg_query_engine_threat_depth_exceeded_total{%s}[5m]) + rate(gkg_query_engine_threat_limit_exceeded_total{%s}[5m]) + rate(gkg_query_engine_threat_rate_limited_total{%s}[5m]) + rate(gkg_query_engine_threat_timeout_total{%s}[5m]) + rate(gkg_query_engine_threat_validation_failed_total{%s}[5m])) * 60' % [SEL, SEL, SEL, SEL, SEL, SEL, SEL],
+    'Compiler rejects / min (5m)',
+    'Queries the compiler rejected before execution, in calls/min over the last 5 minutes. Use the Reliability row below for the per-reason breakdown.',
+    'sum(rate(%s{%s}[5m])) * 60' % [compilerRejected, SEL],
     DS, 'short', 6,
   ),
 ];
@@ -246,15 +243,12 @@ local latency = [
 local reliability = [
   o.row('Reliability'),
   o.timeseries(
-    'Server: pipeline errors by kind (1h windows)',
-    'GKG-side pipeline error counts in rolling 1h windows, one series per error kind. Lets you tell apart authorization failures, content resolution failures, execution failures, security rejections, and streaming failures.',
-    [
-      o.target('sum(increase(%s{%s}[1h]))' % [pipelineErrAuthZ, SEL], 'authorization_failed', DS, 'A'),
-      o.target('sum(increase(%s{%s}[1h]))' % [pipelineErrContent, SEL], 'content_resolution_failed', DS, 'B'),
-      o.target('sum(increase(%s{%s}[1h]))' % [pipelineErrExec, SEL], 'execution_failed', DS, 'C'),
-      o.target('sum(increase(%s{%s}[1h]))' % [pipelineErrSec, SEL], 'security_rejected', DS, 'D'),
-      o.target('sum(increase(%s{%s}[1h]))' % [pipelineErrStream, SEL], 'streaming_failed', DS, 'E'),
-    ],
+    'Server: pipeline failures by reason (1h windows)',
+    'GKG-side pipeline failure counts in rolling 1h windows, broken down by failure_reason. Reasons are security, execution, authorization, content_resolution, streaming, and custom.',
+    [o.target(
+      'sum by (failure_reason) (increase(%s{%s}[1h]))' % [pipelineFailed, SEL],
+      '{{failure_reason}}', DS, 'A',
+    )],
     'short', 12, 8,
   ),
   o.timeseries(
@@ -267,17 +261,12 @@ local reliability = [
     'short', 12, 8,
   ),
   o.timeseries(
-    'Server: threat counters by kind (1h windows)',
-    'Threat-policy rejections grouped by reason. These are not application errors — they are intentional rejections for rate, depth, validation, allowlist, missing-auth-filter, timeout, or validation issues.',
-    [
-      o.target('sum(increase(gkg_query_engine_threat_rate_limited_total{%s}[1h]))' % SEL, 'rate_limited', DS, 'A'),
-      o.target('sum(increase(gkg_query_engine_threat_depth_exceeded_total{%s}[1h]))' % SEL, 'depth_exceeded', DS, 'B'),
-      o.target('sum(increase(gkg_query_engine_threat_limit_exceeded_total{%s}[1h]))' % SEL, 'limit_exceeded', DS, 'C'),
-      o.target('sum(increase(gkg_query_engine_threat_validation_failed_total{%s}[1h]))' % SEL, 'validation_failed', DS, 'D'),
-      o.target('sum(increase(gkg_query_engine_threat_allowlist_rejected_total{%s}[1h]))' % SEL, 'allowlist_rejected', DS, 'E'),
-      o.target('sum(increase(gkg_query_engine_threat_auth_filter_missing_total{%s}[1h]))' % SEL, 'auth_filter_missing', DS, 'F'),
-      o.target('sum(increase(gkg_query_engine_threat_timeout_total{%s}[1h]))' % SEL, 'timeout', DS, 'G'),
-    ],
+    'Server: compiler rejections by reason (1h windows)',
+    'Compiler rejections grouped by failure_reason. These are intentional rejections by the query compiler before execution: parse, schema, reference, pagination, ontology, ontology_internal, depth, limit, security, lowering, enforcement, codegen, pipeline.',
+    [o.target(
+      'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
+      '{{failure_reason}}', DS, 'A',
+    )],
     'short', 12, 8,
   ),
   o.gaugeStat(
