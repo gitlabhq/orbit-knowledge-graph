@@ -25,6 +25,10 @@ title: Get started with Orbit Remote
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 ## Prerequisites
 
 - Owner role on the top-level group you want to enable Orbit on
@@ -60,8 +64,6 @@ Orbit Remote exposes the same graph through three surfaces. Pick the one that ma
 | **REST API** | Scripts, dashboards, custom tooling | API token | GitLab Credits |
 
 ### GitLab Duo Agent Platform (no setup required)
-
-> [!disclaimer]
 
 Orbit is wired into GitLab Duo Agent Platform. The GitLab Duo Agent, Planner Agent, Security Analyst Agent, Data Analyst Agent, CI Expert Agent, and Duo Developer Flow call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by graph traversal. No tool selection or configuration required.
 
