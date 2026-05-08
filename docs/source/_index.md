@@ -25,6 +25,10 @@ title: Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
 Enable it on a group and Orbit maps everything: projects, users, merge requests, pipelines,
 work items, security findings, and the source code itself, then builds a property graph of how they

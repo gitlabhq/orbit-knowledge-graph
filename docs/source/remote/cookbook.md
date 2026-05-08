@@ -25,6 +25,10 @@ title: Cookbook
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 Ready-to-use queries for the most common Orbit use cases. All examples use the
 REST API format. To run them via MCP, pass the JSON body to `query_graph`.
 

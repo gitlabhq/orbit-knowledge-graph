@@ -25,6 +25,10 @@ title: REST API
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 The Orbit REST API lets you query the knowledge graph directly from scripts,
 CI pipelines, or custom tooling.
 

@@ -25,6 +25,10 @@ title: Orbit query language
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 Use the Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.

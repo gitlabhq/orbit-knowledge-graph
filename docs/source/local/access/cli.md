@@ -16,9 +16,11 @@ title: Use Orbit Local with the orbit CLI
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0.
 
 {{< /history >}}
+
+> [!disclaimer]
 
 The `orbit` CLI builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.

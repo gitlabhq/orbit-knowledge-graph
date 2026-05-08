@@ -16,9 +16,13 @@ title: Schema reference
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0.
 
 {{< /history >}}
+
+> [!disclaimer]
+
+<!-- -->
 
 > [!note]
 > Orbit Local is experimental. Capabilities and command shape may

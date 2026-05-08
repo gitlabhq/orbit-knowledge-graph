@@ -25,6 +25,10 @@ title: Schema reference
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 Orbit indexes 24 node types across 6 domains. Use these as entity names in your queries.
 
 To fetch the live schema at any time:

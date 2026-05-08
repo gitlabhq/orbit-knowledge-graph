@@ -25,6 +25,10 @@ title: What Orbit indexes
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+<!-- -->
+
+> [!disclaimer]
+
 ## Scope
 
 Orbit indexes top-level groups only. Enable Orbit on a top-level group and all its
