@@ -53,7 +53,7 @@ pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 ```mermaid
 flowchart LR
     accTitle: Orbit Remote architecture
-    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and Duo Agent Platform.
+    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and GitLab Duo Agent Platform.
 
     subgraph GitLab["GitLab instance"]
         SDLC[SDLC data]
@@ -67,7 +67,7 @@ flowchart LR
 
     Orbit --> REST[REST API]
     Orbit --> MCP[MCP tools]
-    Orbit --> DAP[Duo Agent Platform]
+    Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
 Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
