@@ -372,12 +372,43 @@ pub fn hydrate_static(
     Ok((nodes, total_ids))
 }
 
+/// Collect distinct traversal paths from static nodes in a dynamic query
+/// result (e.g. the center node in a Neighbors query).
+///
+/// Returns deduplicated, sorted paths. For PathFinding queries where no
+/// static nodes have TP columns, returns an empty vec — the caller can
+/// fall back to security context TPs.
+pub fn collect_dynamic_traversal_paths(
+    result: &QueryResult,
+    static_nodes: &[compiler::RedactionNode],
+) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for node in static_nodes {
+        let tp_col = traversal_path_column(&node.alias);
+        for row in result.authorized_rows() {
+            if let Some(tp) = row.get_column_string(&tp_col)
+                && !tp.is_empty()
+            {
+                paths.push(tp);
+            }
+        }
+    }
+    paths.sort_unstable();
+    paths.dedup();
+    paths
+}
+
 /// Dynamic hydration: builds an `Input` with one node per
 /// discovered entity type using pre-resolved column specs from the
 /// compilation plan. No ontology lookups at runtime.
+///
+/// `traversal_paths` narrows hydration scans for entities that have
+/// `traversal_path` in their table. Pass TPs collected from static nodes
+/// or the security context.
 pub fn hydrate_dynamic(
     entity_specs: &[DynamicEntityColumns],
     refs: &HashMap<String, Vec<i64>>,
+    traversal_paths: &[String],
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
@@ -403,12 +434,19 @@ pub fn hydrate_dynamic(
             .collect();
         total_ids += capped_ids.len();
 
+        let tps = if spec.has_traversal_path {
+            traversal_paths.to_vec()
+        } else {
+            Vec::new()
+        };
+
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
             entity: Some(entity_type.clone()),
             table: Some(spec.destination_table.clone()),
             columns: Some(ColumnSelection::List(spec.columns.clone())),
             node_ids: capped_ids,
+            traversal_paths: tps,
             ..InputNode::default()
         });
     }
