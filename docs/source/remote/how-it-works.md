@@ -89,12 +89,12 @@ depending on the size of the change.
 All queries go through the same path:
 
 1. Orbit receives a JSON query payload (via REST, MCP, or GitLab Duo Agent Platform).
-2. The query engine validates the query against the current schema.
-3. Orbit compiles the JSON DSL to ClickHouse SQL.
-4. ClickHouse executes the query against the graph tables.
-5. Orbit applies authorization filtering: results are scoped to entities the
+1. The query engine validates the query against the current schema.
+1. Orbit compiles the JSON DSL to ClickHouse SQL.
+1. ClickHouse executes the query against the graph tables.
+1. Orbit applies authorization filtering: results are scoped to entities the
    requesting user has access to in GitLab.
-6. Orbit returns typed JSON results.
+1. Orbit returns typed JSON results.
 
 You can request the compiled SQL in query responses by setting `options.include_debug_sql: true`.
 This field is only populated for instance administrators and direct GitLab organization members
