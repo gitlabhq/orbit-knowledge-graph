@@ -5220,6 +5220,7 @@ dependencies = [
  "query-engine",
  "reqwest 0.13.3",
  "rustls",
+ "semver",
  "serde",
  "serde_json",
  "strum 0.28.0",

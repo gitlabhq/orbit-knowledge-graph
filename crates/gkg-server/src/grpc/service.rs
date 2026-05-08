@@ -849,7 +849,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(
             parsed.get("version").and_then(serde_json::Value::as_str),
-            Some(ToolService::build_query_dsl_version())
+            Some(ToolService::build_query_dsl_version().as_str())
         );
 
         let llm = service

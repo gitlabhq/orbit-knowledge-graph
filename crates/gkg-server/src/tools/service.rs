@@ -157,7 +157,7 @@ impl ToolService {
     }
 
     /// Semver string for the query DSL grammar. Matches `config/QUERY_DSL_VERSION`.
-    pub fn build_query_dsl_version() -> &'static str {
+    pub fn build_query_dsl_version() -> String {
         query_dsl_version()
     }
 
@@ -220,7 +220,7 @@ impl ToolService {
                 if let Value::Object(ref mut object) = schema {
                     object.insert(
                         "version".to_string(),
-                        Value::String(Self::build_query_dsl_version().to_string()),
+                        Value::String(Self::build_query_dsl_version()),
                     );
                 }
                 schema
@@ -648,7 +648,7 @@ mod tests {
         );
         assert_eq!(
             result.get("version").and_then(Value::as_str),
-            Some(ToolService::build_query_dsl_version())
+            Some(ToolService::build_query_dsl_version().as_str())
         );
     }
 

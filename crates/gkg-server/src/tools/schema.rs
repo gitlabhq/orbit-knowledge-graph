@@ -1,10 +1,21 @@
+use std::sync::LazyLock;
+
+use semver::Version;
 use serde_json::{Map, Value};
 use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 const QUERY_RESPONSE_SCHEMA: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/query_response.json"));
-const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
+const QUERY_DSL_VERSION_TEXT: &str =
+    include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
+
+pub static QUERY_DSL_VERSION: LazyLock<Version> = LazyLock::new(|| {
+    QUERY_DSL_VERSION_TEXT
+        .trim()
+        .parse()
+        .expect("QUERY_DSL_VERSION must be valid semver")
+});
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
@@ -27,8 +38,8 @@ pub fn raw_query_schema() -> &'static str {
     BASE_SCHEMA
 }
 
-pub fn query_dsl_version() -> &'static str {
-    QUERY_DSL_VERSION.trim()
+pub fn query_dsl_version() -> String {
+    QUERY_DSL_VERSION.to_string()
 }
 
 pub fn query_response_schema() -> &'static str {
@@ -161,6 +172,30 @@ mod tests {
         assert!(
             !toon.contains("AUTHORED"),
             "Should not include relationship types (use get_graph_entities)"
+        );
+    }
+
+    #[test]
+    fn query_schema_id_major_matches_query_dsl_version() {
+        let schema: Value =
+            serde_json::from_str(BASE_SCHEMA).expect("query DSL schema must be valid JSON");
+
+        let id = schema
+            .get("$id")
+            .and_then(Value::as_str)
+            .expect("query DSL schema must declare $id");
+
+        let id_major: u64 = id
+            .rsplit('/')
+            .next()
+            .and_then(|segment| segment.strip_prefix('v'))
+            .and_then(|major| major.parse().ok())
+            .unwrap_or_else(|| panic!("$id '{id}' must end with /vN"));
+
+        assert_eq!(
+            id_major, QUERY_DSL_VERSION.major,
+            "graph_query.schema.json $id '{id}' does not match QUERY_DSL_VERSION major ({})",
+            QUERY_DSL_VERSION.major,
         );
     }
 }
