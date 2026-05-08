@@ -10,7 +10,7 @@ title: Queries
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 
@@ -137,4 +137,4 @@ path and returns the raw file text.
 ```
 
 For the full syntax, available fields, and validation rules, see
-[Orbit query language](query_language.md).
+[Orbit query language](query-language.md).

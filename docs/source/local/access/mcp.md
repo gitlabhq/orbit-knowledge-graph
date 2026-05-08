@@ -10,13 +10,13 @@ title: Connect to Orbit Local via MCP
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 {{< /history >}}
 

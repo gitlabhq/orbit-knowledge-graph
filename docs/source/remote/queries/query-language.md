@@ -10,7 +10,7 @@ title: Orbit query language
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 

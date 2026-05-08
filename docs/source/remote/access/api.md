@@ -10,7 +10,7 @@ title: REST API
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 
@@ -77,7 +77,7 @@ curl --request POST \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
-See the [query language reference](../queries/query_language.md) for the full DSL.
+See the [query language reference](../queries/query-language.md) for the full DSL.
 
 **Example - find projects with the most pipeline failures:**
 

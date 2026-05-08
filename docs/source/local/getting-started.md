@@ -10,13 +10,13 @@ title: Get started with Orbit Local
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 {{< /history >}}
 
@@ -46,7 +46,7 @@ transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
 
 > [!note]
 > `glab orbit local` is the planned packaging path. Until it ships, use the
-> `orbit` binary directly - see [Use the orbit CLI directly](access/cli.md).
+> `orbit` binary directly - see [Use the `orbit` CLI directly](access/cli.md).
 > The shapes shown below match what `glab orbit local` will support.
 
 Index a repository and inspect what Orbit found:

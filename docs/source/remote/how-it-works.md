@@ -10,7 +10,7 @@ title: How Orbit Remote works
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experimental
+- Status: Experiment
 
 {{< /details >}}
 
