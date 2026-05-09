@@ -139,8 +139,10 @@ local-cli-build-windows-mingw:
     CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
     AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
-    # Bundle libgcc/libstdc++ so the .exe has no external DLL deps.
-    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+    # Bundle libgcc/libstdc++/winpthread so the .exe has no external mingw
+    # runtime DLL deps. Without -Wl,-Bstatic -lpthread the binary still pulls
+    # libwinpthread-1.dll; -static covers the rest.
+    RUSTFLAGS: "-C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++ -C link-arg=-Wl,-Bstatic -C link-arg=-lpthread"
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends

@@ -88,6 +88,25 @@ if [ "$PLATFORM" = "windows" ]; then
         echo "smoke check failed: size $size_bytes outside 50MB..250MB range" >&2
         exit 1
     fi
+    # Audit DLL imports: anything outside the Windows system DLL allowlist
+    # (msvcrt + ws2_32 + bcrypt + ...) is a portability bug because users
+    # won't have the mingw/gcc/c++ runtime DLLs installed.
+    if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
+        OBJDUMP=x86_64-w64-mingw32-objdump
+    elif command -v llvm-objdump-19 >/dev/null 2>&1; then
+        OBJDUMP=llvm-objdump-19
+    else
+        OBJDUMP=objdump
+    fi
+    echo "DLL imports:"
+    "$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" || true
+    bad=$("$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" \
+        | grep -iEv "(api-ms-win|msvcrt|ucrtbase|kernel32|advapi32|user32|ws2_32|bcrypt|secur32|crypt32|ntdll|userenv|shell32|ole32|oleaut32|gdi32|rpcrt4|psapi|powrprof|version|ws2_32|cfgmgr32|opengl32|imm32|imagehlp|msimg32|winspool|synchronization|dbghelp|wininet|winhttp|setupapi|iphlpapi)\.dll" || true)
+    if [ -n "$bad" ]; then
+        echo "smoke check failed: binary depends on non-system DLLs:" >&2
+        echo "$bad" >&2
+        exit 1
+    fi
     ARCHIVE="orbit-local-${PLATFORM}-${ARCH}-${WINDOWS_METHOD}.zip"
     (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" "$BIN")
 else
