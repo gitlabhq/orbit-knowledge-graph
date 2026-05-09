@@ -150,13 +150,10 @@ local-cli-build-windows-mingw:
     # libstdc++ only as a DLL, which is why -static-libstdc++ couldn't fully
     # detach the runtime.
     LLVM_MINGW_VERSION: "20260505"
-    CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
-    CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
-    AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-g++
-    # llvm-mingw's libc++ is already static; we still pin libwinpthread static
-    # for safety.
-    RUSTFLAGS: "-C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+    CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
+    CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
+    AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: x86_64-w64-mingw32-clang++
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip

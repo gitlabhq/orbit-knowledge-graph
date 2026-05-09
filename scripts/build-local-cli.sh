@@ -51,7 +51,10 @@ case "$PLATFORM" in
                 TARGET="x86_64-pc-windows-gnullvm"
                 ;;
             mingw)
-                TARGET="x86_64-pc-windows-gnu"
+                # gnullvm pairs with llvm-mingw: rustc skips the GNU-only
+                # `-lstdc++ -lgcc_eh -lgcc` auto-links and the toolchain's
+                # libc++/libunwind/compiler_rt are static by default.
+                TARGET="x86_64-pc-windows-gnullvm"
                 ;;
             *)
                 echo "unknown WINDOWS_METHOD: $WINDOWS_METHOD (want xwin|zigbuild|mingw)" >&2
