@@ -106,12 +106,12 @@ local-cli-build-windows-zigbuild:
     # stripped before zig clang sees them. zig's bundled libc has -Werror
     # niceties enabled by default; clear -Wdate-time too so __DATE__/__TIME__
     # in mimalloc/duckdb stay warnings.
-    CC_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
-    CXX_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cxx.sh
-    AR_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-ar.sh
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
-    CFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
-    CXXFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
+    CC_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
+    CXX_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cxx.sh
+    AR_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-ar.sh
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
+    CFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
+    CXXFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file zip

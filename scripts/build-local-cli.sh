@@ -45,10 +45,10 @@ case "$PLATFORM" in
                 CARGO_BUILD=(cargo xwin build)
                 ;;
             zigbuild)
-                # zig cc as the C/C++ compiler, plain `cargo build`. Wrappers
-                # in scripts/ci/zig-windows-*.sh strip aws-lc-sys's GCC-only
-                # `-Wp,*` flags before forwarding to zig.
-                TARGET="x86_64-pc-windows-gnu"
+                # gnullvm avoids mingw's dlltool; zig provides the LLVM tooling.
+                # Wrappers in scripts/ci/zig-windows-*.sh strip aws-lc-sys's
+                # GCC-only `-Wp,*` flags before forwarding to zig.
+                TARGET="x86_64-pc-windows-gnullvm"
                 ;;
             mingw)
                 TARGET="x86_64-pc-windows-gnu"
