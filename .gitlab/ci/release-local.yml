@@ -84,11 +84,8 @@ local-cli-build-windows-xwin:
     XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.xwin-cache
     # MSVC SDK requires clang >= 19; bookworm ships 14.
     LLVM_VERSION: "19"
-    XWIN_CROSS_COMPILER: clang-cl-19
-    CC_x86_64_pc_windows_msvc: clang-cl-19
-    CXX_x86_64_pc_windows_msvc: clang-cl-19
-    AR_x86_64_pc_windows_msvc: llvm-lib-19
-    CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link-19
+    # cargo-xwin's --cross-compiler only accepts `clang-cl|clang`, no version
+    # suffix; the /usr/local/bin/clang-cl symlink already pins v19.
   cache:
     key: "xwin-sdk-v17"
     paths:
