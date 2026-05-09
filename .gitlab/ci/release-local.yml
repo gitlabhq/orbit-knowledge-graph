@@ -44,14 +44,16 @@ local-cli-build-linux-arm64:
   variables:
     ARCH: aarch64
 
-# Windows cross-compile spike
+# Cross-compile orbit.exe for Windows x86_64 from a Linux runner using
+# llvm-mingw + Rust's gnullvm target. llvm-mingw is UCRT-based with libc++ and
+# libunwind shipped as both static (.a) and shared (.dll); we delete the
+# import libraries so `-static-libstdc++ -static-libgcc` resolves only the
+# static archives, producing a self-contained orbit.exe with no extra DLL
+# dependencies (only Windows system DLLs remain, all present on Win10+).
 #
-# Runs three independent jobs in parallel on MR pipelines, each using a
-# different Linux->Windows cross-compile toolchain. After we pick a winner
-# the other two jobs are removed and the survivor inherits
-# `.local-cli-release-rules` so it ships on tag pipelines.
-
-.local-cli-build-windows:
+# Currently MR-only while we validate; flip to `.local-cli-release-rules` to
+# ship on tag pipelines once we're confident.
+local-cli-build-windows-amd64:
   extends:
     - .job-template
     - .sccache-template
@@ -65,99 +67,16 @@ local-cli-build-linux-arm64:
   variables:
     PLATFORM: windows
     ARCH: x86_64
-  artifacts:
-    paths:
-      - orbit-local-windows-x86_64-*.zip
-    expire_in: 7 days
-
-local-cli-build-windows-xwin:
-  extends: .local-cli-build-windows
-  # Spike: DuckDB amalgamation hits clang-19 strictness on `__declspec(dllexport)`
-  # applied to `= delete` methods. Either drop xwin or upstream a DuckDB patch.
-  allow_failure: true
-  variables:
-    PLATFORM: windows
-    ARCH: x86_64
-    WINDOWS_METHOD: xwin
-    # Tool version (cargo-xwin release). NOT the MSVC SDK version — that env
-    # is `XWIN_VERSION` and is read directly by cargo-xwin, so don't set it.
-    CARGO_XWIN_VERSION: "0.22.0"
-    XWIN_ARCH: x86_64
-    XWIN_ACCEPT_LICENSE: "1"
-    XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.xwin-cache
-    # MSVC SDK requires clang >= 19; bookworm ships 14.
-    LLVM_VERSION: "19"
-    # cargo-xwin's --cross-compiler only accepts `clang-cl|clang`, no version
-    # suffix; the /usr/local/bin/clang-cl symlink already pins v19.
-  cache:
-    key: "xwin-sdk-v17"
-    paths:
-      - .xwin-cache/
-  before_script:
-    - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file zip lsb-release wget gnupg software-properties-common
-    - curl -fsSL https://apt.llvm.org/llvm.sh | bash -s -- ${LLVM_VERSION}
-    - apt-get install -y -qq --no-install-recommends lld-${LLVM_VERSION} llvm-${LLVM_VERSION}
-    # cargo-xwin defaults to bare `clang-cl` / `lld-link` / `llvm-lib`; override
-    # the bookworm 14 binaries with 19 via /usr/local/bin (earlier in PATH).
-    - ln -sf /usr/bin/clang-cl-${LLVM_VERSION} /usr/local/bin/clang-cl
-    - ln -sf /usr/bin/lld-link-${LLVM_VERSION} /usr/local/bin/lld-link
-    - ln -sf /usr/bin/llvm-lib-${LLVM_VERSION} /usr/local/bin/llvm-lib
-    - ln -sf /usr/bin/llvm-rc-${LLVM_VERSION} /usr/local/bin/llvm-rc
-    - which clang-cl && clang-cl --version
-    - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${CARGO_XWIN_VERSION}/cargo-xwin-v${CARGO_XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
-        | tar -xz -C /opt/cargo/bin cargo-xwin
-    - chmod +x /opt/cargo/bin/cargo-xwin
-  script:
-    - ./scripts/build-local-cli.sh
-    - sccache --show-stats || true
-
-local-cli-build-windows-zigbuild:
-  extends: .local-cli-build-windows
-  # Spike: zig's lld can't resolve windows-sys's per-target `.lib` import
-  # libraries with no_fallback strategy at link time (e.g. `windows.0.53.0`).
-  # Compiles fine; deeper rust+lld plumbing needed.
-  allow_failure: true
-  variables:
-    PLATFORM: windows
-    ARCH: x86_64
-    WINDOWS_METHOD: zigbuild
-    # Drive cc-rs to our wrappers so aws-lc-sys's hard-coded -Wp,* flags get
-    # stripped before zig clang sees them. zig's bundled libc has -Werror
-    # niceties enabled by default; clear -Wdate-time too so __DATE__/__TIME__
-    # in mimalloc/duckdb stay warnings.
-    CC_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
-    CXX_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cxx.sh
-    AR_x86_64_pc_windows_gnullvm: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-ar.sh
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
-    CFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
-    CXXFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
-  before_script:
-    - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file zip
-  script:
-    - ./scripts/build-local-cli.sh
-    - sccache --show-stats || true
-
-local-cli-build-windows-mingw:
-  extends: .local-cli-build-windows
-  variables:
-    PLATFORM: windows
-    ARCH: x86_64
-    WINDOWS_METHOD: mingw
-    # llvm-mingw is a static, UCRT-based mingw toolchain (libc++ static by
-    # default, no libstdc++-6.dll runtime dep). Debian's mingw-w64 ships
-    # libstdc++ only as a DLL, which is why -static-libstdc++ couldn't fully
-    # detach the runtime.
     LLVM_MINGW_VERSION: "20260505"
     CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
     CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
     AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
     CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: x86_64-w64-mingw32-clang++
-    # llvm-mingw ships libc++ and libunwind as both shared (libc++.dll,
-    # libunwind.dll) and static; default is shared. -static-libstdc++ +
-    # -static-libgcc tell clang++ to use the static archives.
     RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+  artifacts:
+    paths:
+      - orbit-local-windows-x86_64.zip
+    expire_in: 7 days
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip
@@ -165,11 +84,10 @@ local-cli-build-windows-mingw:
         | tar -xJ -C /opt
     - mv "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64" /opt/llvm-mingw
     - export PATH="/opt/llvm-mingw/bin:$PATH"
-    - echo "/opt/llvm-mingw/bin" >> "$CI_PROJECT_DIR/.path"
-    - x86_64-w64-mingw32-gcc --version | head -1
-    # Drop the libc++/libunwind DLL import libs; rustc's gnullvm target spec
-    # pulls -lc++/-lunwind which would resolve to libc++.dll.a alongside the
-    # .a from -static-libstdc++, producing duplicate-symbol link errors.
+    - x86_64-w64-mingw32-clang --version | head -1
+    # rustc's gnullvm spec auto-adds -lc++/-lunwind; without removing the .dll
+    # import libs the linker pulls them alongside the static archives that
+    # -static-libstdc++ requested, producing duplicate-symbol errors.
     - rm -f /opt/llvm-mingw/x86_64-w64-mingw32/lib/libc++.dll.a
         /opt/llvm-mingw/x86_64-w64-mingw32/lib/libunwind.dll.a
         /opt/llvm-mingw/x86_64-w64-mingw32/bin/libc++.dll

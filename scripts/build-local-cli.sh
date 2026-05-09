@@ -2,18 +2,16 @@
 set -euo pipefail
 
 # Build the `orbit` local CLI binary and package it as
-# orbit-local-<platform>-<arch>[-<method>].(tar.gz|zip) in the repository root.
+# orbit-local-<platform>-<arch>.(tar.gz|zip) in the repository root.
 # The binary inside the archive is `orbit` (or `orbit.exe` on Windows); the
 # `orbit-local-` prefix on the archive matches the orbit-local crate name and
 # disambiguates from the gkg-server image release. PLATFORM/ARCH default to
-# the host (linux/macOS amd64 or arm64). For windows builds, WINDOWS_METHOD
-# selects the cross-compile toolchain: xwin|zigbuild|mingw.
+# the host (linux/macOS amd64 or arm64).
 #
 # Supported triples:
 #   {x86_64,aarch64}-unknown-linux-gnu
 #   {x86_64,aarch64}-apple-darwin
-#   x86_64-pc-windows-msvc       (WINDOWS_METHOD=xwin)
-#   x86_64-pc-windows-gnu        (WINDOWS_METHOD=zigbuild|mingw)
+#   x86_64-pc-windows-gnullvm        (cross-compiled with llvm-mingw on Linux)
 
 PLATFORM="${PLATFORM:-$(uname -s)}"
 PLATFORM=$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')
@@ -22,8 +20,6 @@ ARCH="${ARCH:-$(uname -m)}"
 case "$ARCH" in
     arm64) ARCH="aarch64" ;;
 esac
-
-CARGO_BUILD=(cargo build)
 
 case "$PLATFORM" in
     darwin)
@@ -39,27 +35,8 @@ case "$PLATFORM" in
         esac
         ;;
     windows)
-        case "${WINDOWS_METHOD:?WINDOWS_METHOD must be set to xwin|zigbuild|mingw}" in
-            xwin)
-                TARGET="x86_64-pc-windows-msvc"
-                CARGO_BUILD=(cargo xwin build)
-                ;;
-            zigbuild)
-                # gnullvm avoids mingw's dlltool; zig provides the LLVM tooling.
-                # Wrappers in scripts/ci/zig-windows-*.sh strip aws-lc-sys's
-                # GCC-only `-Wp,*` flags before forwarding to zig.
-                TARGET="x86_64-pc-windows-gnullvm"
-                ;;
-            mingw)
-                # gnullvm pairs with llvm-mingw: rustc skips the GNU-only
-                # `-lstdc++ -lgcc_eh -lgcc` auto-links and the toolchain's
-                # libc++/libunwind/compiler_rt are static by default.
-                TARGET="x86_64-pc-windows-gnullvm"
-                ;;
-            *)
-                echo "unknown WINDOWS_METHOD: $WINDOWS_METHOD (want xwin|zigbuild|mingw)" >&2
-                exit 1
-                ;;
+        case "$ARCH" in
+            x86_64) TARGET="x86_64-pc-windows-gnullvm" ;;
         esac
         ;;
 esac
@@ -72,9 +49,9 @@ fi
 # Idempotent; no-op if the target is already installed.
 rustup target add "$TARGET"
 
-echo "Building orbit for $PLATFORM/$ARCH ($TARGET) via ${CARGO_BUILD[*]}"
+echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
 # Bundle libduckdb (compile from C++) so the released binary is self-contained.
-"${CARGO_BUILD[@]}" --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
+cargo build --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
 
 BIN_DIR="target/${TARGET}/release"
 
@@ -91,16 +68,9 @@ if [ "$PLATFORM" = "windows" ]; then
         echo "smoke check failed: size $size_bytes outside 50MB..250MB range" >&2
         exit 1
     fi
-    # Audit DLL imports: anything outside the Windows system DLL allowlist
-    # (msvcrt + ws2_32 + bcrypt + ...) is a portability bug because users
-    # won't have the mingw/gcc/c++ runtime DLLs installed.
-    if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-        OBJDUMP=x86_64-w64-mingw32-objdump
-    elif command -v llvm-objdump-19 >/dev/null 2>&1; then
-        OBJDUMP=llvm-objdump-19
-    else
-        OBJDUMP=objdump
-    fi
+    # Reject any non-system DLL imports — mingw/libc++/libunwind runtimes
+    # would mean the binary isn't self-contained on a stock Win10+ box.
+    OBJDUMP=$(command -v x86_64-w64-mingw32-objdump || command -v llvm-objdump || echo objdump)
     echo "DLL imports:"
     "$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" || true
     bad=$("$OBJDUMP" -p "$BIN_DIR/$BIN" \
@@ -112,7 +82,7 @@ if [ "$PLATFORM" = "windows" ]; then
         echo "$bad" >&2
         exit 1
     fi
-    ARCHIVE="orbit-local-${PLATFORM}-${ARCH}-${WINDOWS_METHOD}.zip"
+    ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.zip"
     (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" "$BIN")
 else
     BIN="orbit"
