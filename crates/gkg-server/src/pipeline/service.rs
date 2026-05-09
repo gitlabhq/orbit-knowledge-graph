@@ -118,25 +118,41 @@ impl QueryPipelineService {
             phases: TypeMap::default(),
         };
 
-        let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&SecurityStage)
-            .await?
-            .then(&CompilationStage)
-            .await?
-            .then(&ClickHouseExecutor)
-            .await?
-            .then(&ExtractionStage)
-            .await?
-            .then(&AuthorizationStage)
-            .await?
-            .then(&RedactionStage)
-            .await?
-            .then(&HydrationStage)
-            .await?
-            .then(&OutputStage)
-            .await?
-            .finish()
-            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
+        // Run the pipeline, ensuring `record_error` fires exactly once on
+        // any failure path. Per-stage `inspect_err` calls remain as a
+        // belt-and-suspenders, but the orchestrator-level call below
+        // catches stages that don't yet wire it up themselves
+        // (execution, authorization, redaction, extraction, output).
+        let result = async {
+            PipelineRunner::start(&mut ctx, &mut obs)
+                .then(&SecurityStage)
+                .await?
+                .then(&CompilationStage)
+                .await?
+                .then(&ClickHouseExecutor)
+                .await?
+                .then(&ExtractionStage)
+                .await?
+                .then(&AuthorizationStage)
+                .await?
+                .then(&RedactionStage)
+                .await?
+                .then(&HydrationStage)
+                .await?
+                .then(&OutputStage)
+                .await?
+                .finish()
+                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+        }
+        .await;
+
+        let output = match result {
+            Ok(o) => o,
+            Err(e) => {
+                obs.record_error(&e);
+                return Err(e);
+            }
+        };
 
         obs.finish(output.row_count, output.redacted_count);
         Ok(output)

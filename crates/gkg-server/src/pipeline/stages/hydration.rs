@@ -178,9 +178,7 @@ impl PipelineStage for HydrationStage {
                 let (nodes, ids_count) =
                     hydration_helpers::hydrate_static(templates, &query_result)?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count)
-                        .await
-                        .inspect_err(|e| obs.record_error(e))?;
+                    Self::execute_hydration(ctx, nodes, ids_count).await?;
                 hydration_queries = debug;
                 for exec in &executions {
                     obs.query_executed(
