@@ -1197,7 +1197,12 @@ impl LanguageSpec {
                     }
                 );
             }
-            if let Some((name, _range, expression)) = ref_result {
+            if let Some((mut name, _range, expression)) = ref_result {
+                if let Some(rewrite) = self.hooks.ref_name_rewrite
+                    && let Some(new_name) = rewrite(node, &name)
+                {
+                    name = new_name;
+                }
                 // For chains, read SSA for the base identifier (not the terminal).
                 // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {

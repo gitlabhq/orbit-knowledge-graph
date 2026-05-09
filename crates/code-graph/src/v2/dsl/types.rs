@@ -804,6 +804,11 @@ pub struct LanguageHooks {
     /// When the engine encounters one of these nodes with a `=` child,
     /// all refs within are treated as implicit returns.
     pub expression_body_kinds: &'static [&'static str],
+    /// Rewrite a reference name after extraction. Called with the AST
+    /// node and the extracted name. Returns `Some(new_name)` to replace,
+    /// `None` to keep the original. Used by Ruby to resolve
+    /// `obj.send(:foo)` as `obj.foo`.
+    pub ref_name_rewrite: Option<fn(&N<'_>, &str) -> Option<String>>,
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

@@ -1,0 +1,511 @@
+name: "Ruby GitLab monolith patterns — controllers, services, models, workers, concerns"
+
+fixtures:
+  # ── Base classes ───────────────────────────────────────────────
+
+  - path: app/models/application_record.rb
+    content: |
+      class ApplicationRecord
+        def self.find(id)
+        end
+
+        def save!
+        end
+
+        def destroy!
+        end
+
+        def update(attrs)
+        end
+      end
+
+  - path: app/controllers/application_controller.rb
+    content: |
+      class ApplicationController
+        def render(opts = {})
+        end
+
+        def redirect_to(path)
+        end
+
+        def head(status)
+        end
+
+        def params
+        end
+
+        def current_user
+        end
+      end
+
+  - path: app/services/base_service.rb
+    content: |
+      class BaseService
+        attr_reader :project, :current_user, :params
+
+        def initialize(project:, current_user:, params: {})
+          @project = project
+          @current_user = current_user
+          @params = params
+        end
+      end
+
+  # ── Concerns / Mixins ─────────────────────────────────────────
+
+  - path: app/models/concerns/issuable.rb
+    content: |
+      module Issuable
+        def to_reference
+          "##{iid}"
+        end
+
+        def subscribed?(user)
+          false
+        end
+      end
+
+  - path: app/models/concerns/noteable.rb
+    content: |
+      module Noteable
+        def notes
+          []
+        end
+
+        def discussions
+          []
+        end
+      end
+
+  # ── Model ──────────────────────────────────────────────────────
+
+  - path: app/models/merge_request.rb
+    content: |
+      class MergeRequest < ApplicationRecord
+        include Issuable
+        include Noteable
+
+        belongs_to :target_project
+        belongs_to :source_project
+        belongs_to :merge_user
+        has_many :merge_request_diffs
+        has_one :merge_request_diff
+        has_one :metrics
+
+        scope :merged, -> { where(state: :merged) }
+        scope :opened, -> { where(state: :opened) }
+        scope :drafts, -> { where(draft: true) }
+        scope :from_source_branches, ->(branches) { where(source_branch: branches) }
+
+        delegate :suggested_reviewers, to: :predictions
+
+        def draft?
+          title.start_with?("Draft:")
+        end
+
+        def mergeable?
+          !draft? && merge_status == "can_be_merged"
+        end
+
+        def create_merge_request_diff
+          merge_request_diffs
+        end
+      end
+
+  - path: app/models/project.rb
+    content: |
+      class Project < ApplicationRecord
+        has_many :merge_requests
+        has_many :issues
+        has_many :pipelines
+
+        scope :visible_to_user, ->(user) { where(visibility: :public) }
+
+        class_attribute :max_attachment_size, default: 10
+
+        def repository
+          @repository
+        end
+
+        def team
+          @team
+        end
+      end
+
+  # ── Service ────────────────────────────────────────────────────
+
+  - path: app/services/merge_requests/create_service.rb
+    content: |
+      module MergeRequests
+        class CreateService < BaseService
+          def execute
+            set_projects!
+            merge_request = MergeRequest.new
+            created = create(merge_request)
+            after_create(created)
+            created
+          end
+
+          def after_create(issuable)
+            NewMergeRequestWorker.perform_async(issuable.id, current_user.id)
+          end
+
+          private
+
+          def set_projects!
+            project
+          end
+
+          def create(mr)
+            mr.save!
+            mr
+          end
+        end
+      end
+
+  - path: app/services/merge_requests/update_service.rb
+    content: |
+      module MergeRequests
+        class UpdateService < BaseService
+          def execute(merge_request)
+            merge_request.update(params)
+            notify_subscribers(merge_request)
+            merge_request
+          end
+
+          private
+
+          def notify_subscribers(mr)
+            NotificationService.new.send_notification(mr)
+          end
+        end
+      end
+
+  - path: app/services/notification_service.rb
+    content: |
+      class NotificationService
+        def send_notification(noteable)
+          noteable.subscribed?(nil)
+        end
+      end
+
+  # ── Worker ─────────────────────────────────────────────────────
+
+  - path: app/workers/new_merge_request_worker.rb
+    content: |
+      class NewMergeRequestWorker
+        def perform(merge_request_id, user_id)
+          mr = MergeRequest.find(merge_request_id)
+          MergeRequests::AfterCreateService
+            .new(project: mr.target_project, current_user: nil)
+            .execute(mr)
+        end
+      end
+
+  - path: app/services/merge_requests/after_create_service.rb
+    content: |
+      module MergeRequests
+        class AfterCreateService < BaseService
+          def execute(merge_request)
+            merge_request.create_merge_request_diff
+            merge_request.mergeable?
+          end
+        end
+      end
+
+  # ── Controller ─────────────────────────────────────────────────
+
+  - path: app/controllers/projects/merge_requests_controller.rb
+    content: |
+      class Projects::MergeRequestsController < ApplicationController
+        before_action :authenticate_user!
+        before_action :set_merge_request, only: [:show, :update]
+
+        def index
+          @merge_requests = MergeRequest.opened
+          render json: @merge_requests
+        end
+
+        def show
+          render json: @merge_request
+        end
+
+        def create
+          service = MergeRequests::CreateService
+            .new(project: @project, current_user: current_user, params: params)
+          result = service.execute
+          render json: result
+        end
+
+        def update
+          service = MergeRequests::UpdateService
+            .new(project: @project, current_user: current_user, params: params)
+          result = service.execute(@merge_request)
+          render json: result
+        end
+
+        private
+
+        def set_merge_request
+          @merge_request = MergeRequest.find(params[:id])
+        end
+
+        def authenticate_user!
+          head :unauthorized unless current_user
+        end
+      end
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # INHERITANCE CHAIN
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "MergeRequest extends ApplicationRecord"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'MergeRequest'
+        AND parent.fqn = 'ApplicationRecord'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "MergeRequests::CreateService extends BaseService"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'MergeRequests::CreateService'
+        AND parent.fqn = 'BaseService'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "Controller extends ApplicationController"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Projects::MergeRequestsController'
+        AND parent.fqn = 'ApplicationController'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # MIXINS / INCLUDES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "MergeRequest includes Issuable and Noteable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'MergeRequest'
+        AND e.edge_kind = 'Extends'
+        AND parent.fqn IN ['Issuable', 'Noteable']
+      RETURN parent.fqn AS mixin
+    assert:
+      - { row_count: 2 }
+      - { unique: mixin }
+
+  # ══════════════════════════════════════════════════════════════
+  # RAILS DSL SYNTHETIC DEFS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "MergeRequest associations"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'MergeRequest::target_project',
+        'MergeRequest::source_project',
+        'MergeRequest::merge_user',
+        'MergeRequest::merge_request_diffs',
+        'MergeRequest::merge_request_diff',
+        'MergeRequest::metrics'
+      ] AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { unique: fqn }
+
+  - name: "MergeRequest scopes"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'MergeRequest::merged',
+        'MergeRequest::opened',
+        'MergeRequest::drafts',
+        'MergeRequest::from_source_branches'
+      ] AND d.definition_type = 'StaticMethod'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "MergeRequest delegate"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'MergeRequest::suggested_reviewers'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Project class_attribute"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Project::max_attachment_size'
+        AND d.definition_type = 'Attribute'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "BaseService attr_reader"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['BaseService::project', 'BaseService::current_user', 'BaseService::params']
+        AND d.definition_type = 'Attribute'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+
+  # ══════════════════════════════════════════════════════════════
+  # CONTROLLER → SERVICE → MODEL (the full Rails stack)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Controller#index calls MergeRequest.opened (scope)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Projects::MergeRequestsController::index'
+        AND callee.fqn = 'MergeRequest::opened'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Controller#create calls CreateService.execute via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Projects::MergeRequestsController::create'
+        AND callee.fqn = 'MergeRequests::CreateService::execute'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Controller#update calls UpdateService.execute via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Projects::MergeRequestsController::update'
+        AND callee.fqn = 'MergeRequests::UpdateService::execute'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # SERVICE INTERNALS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "CreateService#execute calls set_projects!, create, after_create"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequests::CreateService::execute'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "MergeRequests::CreateService::set_projects!" } }
+      - { row: { callee: "MergeRequests::CreateService::create" } }
+      - { row: { callee: "MergeRequests::CreateService::after_create" } }
+
+  - name: "CreateService#execute calls MergeRequest (class-ref from constructor chain)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequests::CreateService::execute'
+        AND callee.fqn = 'MergeRequest'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # KNOWN GAP: mr.save! where mr is a method parameter. The
+  # parameter type is inferrable from context (mr was just created
+  # via MergeRequest.new) but we don't track parameter types yet.
+  - name: "(gap) CreateService#create calls mr.save! via parameter type"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequests::CreateService::create'
+        AND callee.fqn = 'ApplicationRecord::save!'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 0 }
+
+  - name: "CreateService inherits project from BaseService"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequests::CreateService::set_projects!'
+        AND callee.fqn = 'BaseService::project'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # WORKER → SERVICE CHAIN
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Worker calls MergeRequest.find (class method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'NewMergeRequestWorker::perform'
+        AND callee.fqn = 'ApplicationRecord::find'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Worker calls AfterCreateService.execute via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'NewMergeRequestWorker::perform'
+        AND callee.fqn = 'MergeRequests::AfterCreateService::execute'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # MIXIN METHOD RESOLUTION (via Extends ancestor walk)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "AfterCreateService calls mergeable? which calls draft? (intra-model)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequest::mergeable?'
+        AND callee.fqn = 'MergeRequest::draft?'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-SERVICE CALLS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "UpdateService calls NotificationService.send_notification via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MergeRequests::UpdateService::notify_subscribers'
+        AND callee.fqn = 'NotificationService::send_notification'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # FILE COUNT
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "All 14 files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 13 }
+      - { unique: path }

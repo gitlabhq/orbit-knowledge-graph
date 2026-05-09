@@ -1,0 +1,381 @@
+name: "Ruby metaprogramming — delegate, define_method, def_delegators"
+
+fixtures:
+  - path: lib/base.rb
+    content: |
+      class Base
+        def save!
+          true
+        end
+
+        def valid?
+          true
+        end
+      end
+
+  - path: lib/model.rb
+    content: |
+      require_relative "base"
+
+      class Model < Base
+        attr_accessor :name, :email
+
+        delegate :valid?, to: :base_record
+
+        define_method(:greet) do
+          "Hello #{name}"
+        end
+
+        def update(attrs)
+          self.name = attrs[:name]
+          save!
+          greet
+        end
+      end
+
+  - path: lib/presenter.rb
+    content: |
+      require "forwardable"
+      require_relative "model"
+
+      class Presenter
+        extend Forwardable
+
+        def_delegators :@model, :name, :email, :greet
+
+        def initialize(model)
+          @model = model
+        end
+
+        def display
+          name
+          email
+          greet
+        end
+      end
+
+  - path: app/models/post.rb
+    content: |
+      class Post < Base
+        has_many :comments
+        belongs_to :author
+        has_one :featured_image
+
+        scope :published, -> { where(published: true) }
+        scope :recent, -> { order(created_at: :desc) }
+
+        class_attribute :max_length, default: 5000
+
+        def summarize
+          published
+          recent
+          comments
+          author
+          max_length
+        end
+      end
+
+  - path: app/controllers/posts_controller.rb
+    content: |
+      class PostsController
+        before_action :authenticate_user!
+        after_action :log_request
+
+        def authenticate_user!
+          true
+        end
+
+        def log_request
+          true
+        end
+
+        def index
+          Post.published
+          Post.recent
+        end
+      end
+
+  - path: app/workers/update_worker.rb
+    content: |
+      class UpdateWorker
+        def perform(project_id)
+          project = Project.new(project_id)
+          Model.new(project).update(name: "test")
+        end
+      end
+
+  - path: lib/dynamic.rb
+    content: |
+      class Dynamic
+        define_method(some_variable) do
+          "should not produce a def"
+        end
+
+        def dispatch
+          __send__(:notify)
+        end
+
+        def notify
+          true
+        end
+      end
+
+  - path: lib/dispatcher.rb
+    content: |
+      class Dispatcher
+        def notify
+          true
+        end
+
+        def alert
+          true
+        end
+
+        def dispatch(action)
+          send(:notify)
+          public_send(:alert)
+        end
+      end
+
+tests:
+  - name: "attr_accessor generates synthetic defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Model::name', 'Model::email']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Model::name", type: Attribute } }
+      - { row: { fqn: "Model::email", type: Attribute } }
+
+  - name: "delegate generates synthetic method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::valid?'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "define_method generates synthetic method def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::greet'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "def_delegators generates synthetic method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+
+  - name: "Model.update calls name (attr_accessor)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Model::update'
+        AND callee.fqn = 'Model::name'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Model::update", callee: "Model::name", kind: Calls } }
+
+  - name: "Model extends Base"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Model'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+      - { row: { child: "Model", parent: "Base" } }
+
+  - name: "Model.update calls save! (inherited from Base via Extends)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Model::update'
+        AND callee.fqn = 'Base::save!'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Model::update", callee: "Base::save!", kind: Calls } }
+
+  - name: "Model.update calls greet (define_method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Model::update'
+        AND callee.fqn = 'Model::greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Model::update", callee: "Model::greet", kind: Calls } }
+
+  - name: "Presenter.display calls delegated methods"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Presenter::display'
+        AND callee.fqn IN ['Presenter::name', 'Presenter::email', 'Presenter::greet']
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { unique: callee }
+
+  # ══════════════════════════════════════════════════════════════
+  # RAILS ASSOCIATIONS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "has_many/belongs_to/has_one generate association methods"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Post::comments', 'Post::author', 'Post::featured_image']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  # ══════════════════════════════════════════════════════════════
+  # RAILS SCOPES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "scope generates class method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Post::published', 'Post::recent']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Post::published", type: StaticMethod } }
+      - { row: { fqn: "Post::recent", type: StaticMethod } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CLASS ATTRIBUTES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "class_attribute generates synthetic def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Post::max_length'
+        AND d.definition_type = 'Attribute'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # CALLS TO GENERATED METHODS
+  # ══════════════════════════════════════════════════════════════
+
+  # ══════════════════════════════════════════════════════════════
+  # SEND / PUBLIC_SEND
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "send(:notify) resolves to Dispatcher::notify"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Dispatcher::dispatch'
+        AND callee.fqn = 'Dispatcher::notify'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::notify", kind: Calls } }
+
+  - name: "public_send(:alert) resolves to Dispatcher::alert"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Dispatcher::dispatch'
+        AND callee.fqn = 'Dispatcher::alert'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CALLS TO GENERATED METHODS
+  # ══════════════════════════════════════════════════════════════
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-CLASS CHAIN RESOLUTION (Controller -> Service -> Model)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "PostsController.index calls Post.published (qualified receiver chain)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'PostsController::index'
+        AND callee.fqn = 'Post::published'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PostsController::index", callee: "Post::published", kind: Calls } }
+
+  - name: "UpdateWorker.perform calls Model.update via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'UpdateWorker::perform'
+        AND callee.fqn = 'Model::update'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "UpdateWorker::perform", callee: "Model::update", kind: Calls } }
+
+  - name: "PostsController.index calls Post.recent (qualified receiver chain)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'PostsController::index'
+        AND callee.fqn = 'Post::recent'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PostsController::index", callee: "Post::recent", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CALLS TO GENERATED METHODS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Post.summarize calls association and scope methods"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Post::summarize'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "Post::published" } }
+      - { row: { callee: "Post::recent" } }
+      - { row: { callee: "Post::comments" } }
+      - { row: { callee: "Post::author" } }
+      - { row: { callee: "Post::max_length" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE TESTS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "delegate to: target does NOT produce synthetic def for target"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::base_record'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "define_method with non-literal arg produces no synthetic def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Dynamic::some_variable'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "__send__(:notify) resolves to Dynamic::notify"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Dynamic::dispatch'
+        AND callee.fqn = 'Dynamic::notify'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify", kind: Calls } }

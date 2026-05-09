@@ -886,6 +886,31 @@ impl<'a> ResolveCtx<'a> {
             return self.chain_fallback(r, chain);
         }
 
+        // When a chain starts with a class and the next step is a
+        // constructor (e.g. MergeRequest.new.execute), emit a Calls
+        // edge to the class itself alongside the terminal target.
+        let mut base_class_nodes: Vec<NodeIndex> = Vec::new();
+        if chain.len() > 1 {
+            let next_is_constructor = match &chain[1] {
+                ExpressionStep::Call(n) | ExpressionStep::Field(n) => {
+                    self.rules.hooks.constructor_methods.contains(&n.as_str())
+                }
+                _ => false,
+            };
+            if next_is_constructor {
+                for type_fqn in &current_types {
+                    for &node in self.graph.resolve_scope_nodes(type_fqn).iter() {
+                        if self.graph.graph[node]
+                            .def_id()
+                            .is_some_and(|d| self.graph.defs[d.0 as usize].kind.is_type_container())
+                        {
+                            base_class_nodes.push(node);
+                        }
+                    }
+                }
+            }
+        }
+
         for (depth, step) in chain[1..].iter().enumerate() {
             if depth >= self.settings.max_chain_depth || current_types.is_empty() {
                 break;
@@ -948,10 +973,12 @@ impl<'a> ResolveCtx<'a> {
                 }
             }
 
-            // Constructor method hook: when Call("new") (or similar) finds no
-            // nested member, the call returns an instance of the receiver type.
+            // Constructor method hook: when Call("new") or Field("new")
+            // (or similar) finds no nested member, the call returns an
+            // instance of the receiver type. Field variant covers chains
+            // like `Foo.new.bar` where `.new` is an intermediate step.
             if found_nodes.is_empty()
-                && matches!(step, ExpressionStep::Call(_))
+                && matches!(step, ExpressionStep::Call(_) | ExpressionStep::Field(_))
                 && self.rules.hooks.constructor_methods.contains(&member_name)
             {
                 next_types.extend(current_types.iter().cloned());
@@ -981,6 +1008,7 @@ impl<'a> ResolveCtx<'a> {
             );
 
             if is_last {
+                found_nodes.extend(base_class_nodes.iter().copied());
                 let mut seen = rustc_hash::FxHashSet::default();
                 found_nodes.retain(|n| seen.insert(*n));
                 return Ok(found_nodes);
@@ -1191,6 +1219,16 @@ impl<'a> ResolveCtx<'a> {
                 if types.is_empty()
                     && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
                 {
+                    // Language hook: resolve identifier as a type directly.
+                    // Ruby uses this for constants like `Model` that are class names.
+                    if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type
+                        && let Some(fqn) = resolve_fn(self.graph, name)
+                    {
+                        types.push(fqn);
+                    }
+                    if !types.is_empty() {
+                        return Ok(types);
+                    }
                     let fallback = RefData {
                         name,
                         chain: None,
@@ -1291,6 +1329,7 @@ impl<'a> ResolveCtx<'a> {
             let fqn = self.graph.str(gdef.fqn);
             let mut scope = fqn;
             loop {
+                // Look for the member in this scope's nested definitions.
                 self.graph.indexes.nested.lookup_into(
                     scope,
                     name,
@@ -1304,6 +1343,37 @@ impl<'a> ResolveCtx<'a> {
                 if !result.is_empty() {
                     break;
                 }
+
+                // Walk ancestor chain (Extends edges) to find inherited
+                // members. Collect all candidates across all ancestors
+                // so diamond/mixin cases surface all matches (consistent
+                // with lookup_nested_cached's ancestor walk).
+                let scope_nodes = self.graph.resolve_scope_nodes(scope);
+                for &scope_node in &scope_nodes {
+                    if let Some(ancestors) = self.graph.ancestors(scope_node) {
+                        for &ancestor in ancestors {
+                            if let Some(ancestor_did) = self.graph.graph[ancestor].def_id() {
+                                let ancestor_fqn =
+                                    self.graph.str(self.graph.defs[ancestor_did.0 as usize].fqn);
+                                self.graph.indexes.nested.lookup_into(
+                                    ancestor_fqn,
+                                    name,
+                                    |idx| {
+                                        self.graph.graph[idx].def_id().is_some_and(|d| {
+                                            self.graph.str(self.graph.defs[d.0 as usize].name)
+                                                == name
+                                        })
+                                    },
+                                    &mut result,
+                                );
+                            }
+                        }
+                    }
+                }
+                if !result.is_empty() {
+                    break;
+                }
+
                 match scope.rfind(sep) {
                     Some(pos) => scope = &scope[..pos],
                     None => break,
