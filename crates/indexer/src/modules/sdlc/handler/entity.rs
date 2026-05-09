@@ -226,5 +226,4 @@ mod tests {
             "sdlc.entity.indexing.requested.>"
         );
     }
-
 }
