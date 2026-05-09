@@ -84,9 +84,6 @@ local-cli-build-windows-xwin:
     XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.xwin-cache
     # MSVC SDK requires clang >= 19; bookworm ships 14.
     LLVM_VERSION: "19"
-    CC_x86_64_pc_windows_msvc: clang-cl-19
-    CXX_x86_64_pc_windows_msvc: clang-cl-19
-    AR_x86_64_pc_windows_msvc: llvm-lib-19
   cache:
     key: "xwin-sdk-v17"
     paths:
@@ -96,6 +93,9 @@ local-cli-build-windows-xwin:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file zip lsb-release wget gnupg software-properties-common
     - curl -fsSL https://apt.llvm.org/llvm.sh | bash -s -- ${LLVM_VERSION}
     - apt-get install -y -qq --no-install-recommends lld-${LLVM_VERSION} llvm-${LLVM_VERSION}
+    # cargo-xwin defaults to bare `clang-cl` / `lld-link` / `llvm-lib`; override
+    # the bookworm 14 binaries with 19 via /usr/local/bin (earlier in PATH).
+    - ln -sf /usr/bin/clang-cl-${LLVM_VERSION} /usr/local/bin/clang-cl
     - ln -sf /usr/bin/lld-link-${LLVM_VERSION} /usr/local/bin/lld-link
     - ln -sf /usr/bin/llvm-lib-${LLVM_VERSION} /usr/local/bin/llvm-lib
     - ln -sf /usr/bin/llvm-rc-${LLVM_VERSION} /usr/local/bin/llvm-rc
