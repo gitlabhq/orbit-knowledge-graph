@@ -1,3 +1,4 @@
+pub(super) mod entity;
 mod global;
 mod namespace;
 
