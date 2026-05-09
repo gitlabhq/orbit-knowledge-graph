@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use tracing::info;
 
-use crate::checkpoint::entity_checkpoint_key;
+use crate::checkpoint::{CheckpointStore, entity_checkpoint_key};
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
@@ -36,6 +36,7 @@ pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
 pub(in crate::modules::sdlc) struct SimpleEntityPipeline {
     plan: PipelinePlan,
     partition_strategy: Option<Arc<dyn PartitionStrategy>>,
+    checkpoint_store: Arc<dyn CheckpointStore>,
     pipeline: Arc<Pipeline>,
 }
 
@@ -43,11 +44,13 @@ impl SimpleEntityPipeline {
     pub fn new(
         plan: PipelinePlan,
         partition_strategy: Option<Arc<dyn PartitionStrategy>>,
+        checkpoint_store: Arc<dyn CheckpointStore>,
         pipeline: Arc<Pipeline>,
     ) -> Self {
         Self {
             plan,
             partition_strategy,
+            checkpoint_store,
             pipeline,
         }
     }
@@ -117,7 +120,7 @@ impl SimpleEntityPipeline {
         request: &EntityIndexingRequest,
     ) -> Result<CheckpointState, HandlerError> {
         let unified_key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, None);
-        if let Some(cp) = self.pipeline.load_checkpoint_option(&unified_key).await?
+        if let Some(cp) = self.load_checkpoint(&unified_key).await?
             && cp.watermark.timestamp_micros() > 0
         {
             return Ok(CheckpointState::Completed);
@@ -299,7 +302,7 @@ impl SimpleEntityPipeline {
         for i in 0..partition_count {
             let spec = stub_partition_spec(i, partition_count);
             let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
-            match self.pipeline.load_checkpoint_option(&key).await? {
+            match self.load_checkpoint(&key).await? {
                 Some(cp) if cp.cursor_values.is_none() => {}
                 _ => pending.push(i),
             }
@@ -324,7 +327,7 @@ impl SimpleEntityPipeline {
         for i in 0..partition_count {
             let spec = stub_partition_spec(i, partition_count);
             let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
-            if let Some(cp) = self.pipeline.load_checkpoint_option(&key).await? {
+            if let Some(cp) = self.load_checkpoint(&key).await? {
                 let wm = cp.watermark;
                 min_watermark = Some(match min_watermark {
                     Some(current) if wm < current => wm,
@@ -336,9 +339,14 @@ impl SimpleEntityPipeline {
 
         let watermark = min_watermark.unwrap_or_else(Utc::now);
         let unified_key = self.plan_checkpoint_key(scope, entity_kind, None);
-        self.pipeline
+        self.checkpoint_store
             .save_completed(&unified_key, &watermark)
-            .await?;
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to save consolidated checkpoint for {unified_key}: {err}"
+                ))
+            })?;
 
         info!(
             partitions = partition_count,
@@ -347,6 +355,15 @@ impl SimpleEntityPipeline {
         );
 
         Ok(())
+    }
+
+    async fn load_checkpoint(
+        &self,
+        key: &str,
+    ) -> Result<Option<crate::checkpoint::Checkpoint>, HandlerError> {
+        self.checkpoint_store.load(key).await.map_err(|err| {
+            HandlerError::Processing(format!("failed to load checkpoint for {key}: {err}"))
+        })
     }
 
     fn plan_checkpoint_key(
@@ -403,13 +420,16 @@ mod tests {
     use crate::testkit::MockDestination;
     use ontology::Ontology;
 
-    fn make_pipeline() -> Arc<Pipeline> {
-        Arc::new(Pipeline::new(
+    fn make_pipeline() -> (Arc<dyn crate::checkpoint::CheckpointStore>, Arc<Pipeline>) {
+        let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
+            Arc::new(MockCheckpointStore);
+        let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
-            Arc::new(MockCheckpointStore),
+            Arc::clone(&checkpoint_store),
             test_metrics(),
             Default::default(),
-        ))
+        ));
+        (checkpoint_store, pipeline)
     }
 
     #[tokio::test]
@@ -423,7 +443,9 @@ mod tests {
             .find(|p| p.name == "User")
             .expect("User plan should exist");
 
-        let pipeline = SimpleEntityPipeline::new(user_plan, None, make_pipeline());
+        let (checkpoint_store, pipeline) = make_pipeline();
+        let entity_pipeline =
+            SimpleEntityPipeline::new(user_plan, None, checkpoint_store, pipeline);
         let destination = MockDestination::new();
         let request = EntityIndexingRequest {
             entity_kind: "User".to_string(),
@@ -431,7 +453,7 @@ mod tests {
             scope: IndexingScope::Global,
         };
 
-        let result = pipeline
+        let result = entity_pipeline
             .execute(&request, &destination, &ProgressNotifier::noop())
             .await;
         assert!(result.is_ok());
@@ -448,7 +470,8 @@ mod tests {
             .find(|p| p.name == "MergeRequest")
             .expect("MergeRequest plan should exist");
 
-        let pipeline = SimpleEntityPipeline::new(mr_plan, None, make_pipeline());
+        let (checkpoint_store, pipeline) = make_pipeline();
+        let entity_pipeline = SimpleEntityPipeline::new(mr_plan, None, checkpoint_store, pipeline);
         let destination = MockDestination::new();
         let request = EntityIndexingRequest {
             entity_kind: "MergeRequest".to_string(),
@@ -459,7 +482,7 @@ mod tests {
             },
         };
 
-        let result = pipeline
+        let result = entity_pipeline
             .execute(&request, &destination, &ProgressNotifier::noop())
             .await;
         assert!(result.is_ok());

@@ -160,17 +160,23 @@ mod tests {
             .find(|p| p.name == "User")
             .expect("User plan should exist");
 
+        let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
+            Arc::new(MockCheckpointStore);
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
-            Arc::new(MockCheckpointStore),
+            Arc::clone(&checkpoint_store),
             test_metrics(),
             Default::default(),
         ));
 
         let handler = test_handler(HashMap::from([(
             "User".to_string(),
-            Arc::new(SimpleEntityPipeline::new(user_plan, None, pipeline))
-                as Arc<dyn EntityPipeline>,
+            Arc::new(SimpleEntityPipeline::new(
+                user_plan,
+                None,
+                checkpoint_store,
+                pipeline,
+            )) as Arc<dyn EntityPipeline>,
         )]));
 
         let payload = serde_json::json!({
@@ -196,16 +202,23 @@ mod tests {
             .find(|p| p.name == "MergeRequest")
             .expect("MergeRequest plan should exist");
 
+        let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
+            Arc::new(MockCheckpointStore);
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
-            Arc::new(MockCheckpointStore),
+            Arc::clone(&checkpoint_store),
             test_metrics(),
             Default::default(),
         ));
 
         let handler = test_handler(HashMap::from([(
             "MergeRequest".to_string(),
-            Arc::new(SimpleEntityPipeline::new(mr_plan, None, pipeline)) as Arc<dyn EntityPipeline>,
+            Arc::new(SimpleEntityPipeline::new(
+                mr_plan,
+                None,
+                checkpoint_store,
+                pipeline,
+            )) as Arc<dyn EntityPipeline>,
         )]));
 
         let payload = serde_json::json!({

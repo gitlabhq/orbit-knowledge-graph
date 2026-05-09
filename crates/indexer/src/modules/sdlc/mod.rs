@@ -109,7 +109,7 @@ pub async fn register_entity_handlers(
 
     let pipeline = Arc::new(Pipeline::new(
         Arc::clone(&datalake),
-        checkpoint_store,
+        Arc::clone(&checkpoint_store),
         metrics.clone(),
         config.engine.datalake_retry.clone(),
     ));
@@ -135,9 +135,13 @@ pub async fn register_entity_handlers(
         let partition_strategy =
             build_partition_strategy(&entity_kind, scope, ontology, entity_config, &datalake);
 
-        let entity_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(
-            SimpleEntityPipeline::new(plan, partition_strategy, Arc::clone(&pipeline)),
-        );
+        let entity_pipeline: Arc<dyn entity_pipeline::EntityPipeline> =
+            Arc::new(SimpleEntityPipeline::new(
+                plan,
+                partition_strategy,
+                Arc::clone(&checkpoint_store),
+                Arc::clone(&pipeline),
+            ));
 
         pipelines.insert(entity_kind, entity_pipeline);
     }

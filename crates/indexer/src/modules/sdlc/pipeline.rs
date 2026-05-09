@@ -57,30 +57,6 @@ impl Pipeline {
         }
     }
 
-    pub(in crate::modules::sdlc) async fn load_checkpoint_option(
-        &self,
-        key: &str,
-    ) -> Result<Option<Checkpoint>, HandlerError> {
-        self.checkpoint_store.load(key).await.map_err(|err| {
-            HandlerError::Processing(format!("failed to load checkpoint for {key}: {err}"))
-        })
-    }
-
-    pub(in crate::modules::sdlc) async fn save_completed(
-        &self,
-        key: &str,
-        watermark: &DateTime<Utc>,
-    ) -> Result<(), HandlerError> {
-        self.checkpoint_store
-            .save_completed(key, watermark)
-            .await
-            .map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to save completed checkpoint for {key}: {err}"
-                ))
-            })
-    }
-
     pub async fn run(
         &self,
         plans: &[PipelinePlan],
