@@ -96,6 +96,7 @@ impl DslLanguage for RubyDsl {
         LanguageHooks {
             on_scope: Some(ruby_extract_attr_methods),
             on_import: Some(ruby_extract_imports),
+            ref_name_rewrite: Some(ruby_rewrite_send),
             ..LanguageHooks::default()
         }
     }
@@ -410,6 +411,29 @@ const RUBY_DSL_METHODS: &[&str] = &[
     "has_one",
     "has_and_belongs_to_many",
 ];
+
+/// Rewrite `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)` to resolve
+/// as `obj.foo(...)`. Only rewrites when the first argument is a literal
+/// symbol or string.
+fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
+    if name != "send" && name != "public_send" && name != "__send__" {
+        return None;
+    }
+    let args = node.field("arguments")?;
+    let first_arg = args.children().find(|c| {
+        let k = c.kind();
+        k.as_ref() == "simple_symbol" || k.as_ref() == "string"
+    })?;
+    let raw = first_arg.text().to_string();
+    let cleaned = raw
+        .trim_start_matches(':')
+        .trim_matches('"')
+        .trim_matches('\'');
+    if cleaned.is_empty() {
+        return None;
+    }
+    Some(cleaned.to_string())
+}
 
 /// Extract super types: superclass + include/extend calls in the class body.
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
