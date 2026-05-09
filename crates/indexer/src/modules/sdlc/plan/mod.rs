@@ -222,6 +222,23 @@ pub(in crate::modules::sdlc) fn build_plans(
     )
 }
 
+#[allow(
+    dead_code,
+    reason = "used at handler registration in a follow-up commit"
+)]
+pub(in crate::modules::sdlc) fn build_entity_plans(
+    ontology: &ontology::Ontology,
+    default_batch_size: u64,
+    batch_size_overrides: &std::collections::HashMap<String, u64>,
+) -> Vec<(PipelinePlan, ontology::EtlScope)> {
+    lower::lower_flat(
+        input::from_ontology(ontology),
+        ontology,
+        default_batch_size,
+        batch_size_overrides,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,5 +483,33 @@ mod tests {
 
         assert!(sql.contains("id >= '0' AND id < '25000000'"), "sql: {sql}");
         assert!(sql.contains("(id > '42')"), "sql: {sql}");
+    }
+
+    #[test]
+    fn build_entity_plans_returns_all_entities_with_scope() {
+        use ontology::EtlScope;
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let plans = super::build_entity_plans(&ontology, 1000, &Default::default());
+
+        let global_names: Vec<&str> = plans
+            .iter()
+            .filter(|(_, scope)| *scope == EtlScope::Global)
+            .map(|(plan, _)| plan.name.as_str())
+            .collect();
+        let namespaced_names: Vec<&str> = plans
+            .iter()
+            .filter(|(_, scope)| *scope == EtlScope::Namespaced)
+            .map(|(plan, _)| plan.name.as_str())
+            .collect();
+
+        assert!(
+            global_names.contains(&"User"),
+            "should include User as global"
+        );
+        assert!(
+            namespaced_names.contains(&"MergeRequest"),
+            "should include MergeRequest as namespaced"
+        );
+        assert!(!plans.is_empty(), "should produce at least one plan");
     }
 }

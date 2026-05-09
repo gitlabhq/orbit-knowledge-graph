@@ -59,6 +59,39 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
+#[allow(dead_code, reason = "used by build_entity_plans in a follow-up commit")]
+pub(in crate::modules::sdlc) fn lower_flat(
+    inputs: PlanInput,
+    ontology: &Ontology,
+    default_batch_size: u64,
+    batch_size_overrides: &std::collections::HashMap<String, u64>,
+) -> Vec<(PipelinePlan, EtlScope)> {
+    let mut plans = Vec::new();
+
+    for node in inputs.node_plans {
+        let batch_size = batch_size_overrides
+            .get(&node.name)
+            .copied()
+            .unwrap_or(default_batch_size);
+        let scope = node.scope;
+        plans.push((lower_node_plan(node, batch_size, ontology), scope));
+    }
+
+    for edge in inputs.standalone_edge_plans {
+        let batch_size = batch_size_overrides
+            .get(&edge.relationship_kind)
+            .copied()
+            .unwrap_or(default_batch_size);
+        let scope = edge.scope;
+        plans.push((
+            lower_standalone_edge_plan(edge, batch_size, ontology),
+            scope,
+        ));
+    }
+
+    plans
+}
+
 fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> PipelinePlan {
     let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
