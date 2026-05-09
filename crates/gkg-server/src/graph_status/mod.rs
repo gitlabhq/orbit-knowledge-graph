@@ -125,11 +125,17 @@ impl GraphStatusService {
             .map(|node| node.name.clone())
             .collect();
 
+        let futures: Vec<_> = entity_kinds
+            .iter()
+            .map(|entity_kind| store.get_entity(traversal_path, entity_kind))
+            .collect();
+        let results = futures::future::join_all(futures).await;
+
         let mut entity_progresses: Vec<(IndexingState, IndexingProgress)> = Vec::new();
         let mut had_read_error = false;
 
-        for entity_kind in &entity_kinds {
-            match store.get_entity(traversal_path, entity_kind).await {
+        for (entity_kind, result) in entity_kinds.iter().zip(results) {
+            match result {
                 Ok(Some(progress)) => {
                     let state = derive_indexing_state(&progress);
                     entity_progresses.push((state, progress));
