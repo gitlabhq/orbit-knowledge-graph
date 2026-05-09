@@ -96,6 +96,7 @@ impl DslLanguage for RubyDsl {
         LanguageHooks {
             on_scope: Some(ruby_extract_attr_methods),
             on_import: Some(ruby_extract_imports),
+            ref_name_rewrite: Some(ruby_rewrite_send),
             ..LanguageHooks::default()
         }
     }
@@ -145,7 +146,7 @@ impl DslLanguage for RubyDsl {
 
     fn chain_config() -> Option<ChainConfig> {
         Some(ChainConfig {
-            ident_kinds: &["identifier", "constant"],
+            ident_kinds: &["identifier", "constant", "scope_resolution"],
             this_kinds: &["self"],
             super_kinds: &["super"],
             field_access: vec![FieldAccessEntry {
@@ -205,32 +206,222 @@ fn ruby_extract_attr_methods(
         .field("method")
         .map(|m| m.text().to_string())
         .unwrap_or_default();
-    if method != "attr_accessor" && method != "attr_reader" && method != "attr_writer" {
-        return false;
-    }
+
     let Some(args) = node.field("arguments") else {
-        return true;
+        return RUBY_DSL_METHODS.contains(&method.as_str());
     };
-    for arg in args.children() {
-        if arg.kind().as_ref() != "simple_symbol" {
-            continue;
+
+    // Helper: extract a method name from a simple_symbol node.
+    // `:foo` → `"foo"`. Returns None for non-symbol nodes.
+    let symbol_name = |node: &N<'_>| -> Option<String> {
+        if node.kind().as_ref() != "simple_symbol" {
+            return None;
         }
-        let name = arg.text().trim_start_matches(':').to_string();
-        if name.is_empty() {
-            continue;
+        let text = node.text();
+        let name = text.strip_prefix(':')?;
+        (!name.is_empty()).then(|| name.to_string())
+    };
+
+    // Helper: extract a method name from a simple_symbol OR string node.
+    // `:foo` → `"foo"`, `"foo"` → `"foo"`. Returns None for anything else.
+    let literal_name = |node: &N<'_>| -> Option<String> {
+        match node.kind().as_ref() {
+            "simple_symbol" => {
+                let text = node.text();
+                text.strip_prefix(':')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+            }
+            "string" => node
+                .children()
+                .find(|c| c.kind().as_ref() == "string_content")
+                .map(|c| c.text().to_string())
+                .filter(|s| !s.is_empty()),
+            _ => None,
         }
-        let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-        defs.push(crate::v2::types::CanonicalDefinition {
-            definition_type: "Attribute",
-            kind: DefKind::Property,
-            name,
-            fqn,
-            range: crate::v2::types::Range::empty(),
-            is_top_level: false,
-            metadata: None,
-        });
+    };
+
+    // Helper: push a synthetic def for each symbol arg (skips non-symbol children like pairs)
+    let push_symbol_defs = |args: &N<'_>,
+                            defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+                            def_type: &'static str,
+                            kind: DefKind| {
+        for arg in args.children() {
+            let Some(name) = symbol_name(&arg) else {
+                continue;
+            };
+            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+            defs.push(crate::v2::types::CanonicalDefinition {
+                definition_type: def_type,
+                kind,
+                name,
+                fqn,
+                range: crate::v2::types::Range::empty(),
+                is_top_level: false,
+                metadata: None,
+            });
+        }
+    };
+
+    // Helper: push one synthetic def from the first symbol arg
+    let push_first_symbol = |args: &N<'_>,
+                             defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+                             def_type: &'static str,
+                             kind: DefKind| {
+        for arg in args.children() {
+            let Some(name) = symbol_name(&arg) else {
+                continue;
+            };
+            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+            defs.push(crate::v2::types::CanonicalDefinition {
+                definition_type: def_type,
+                kind,
+                name,
+                fqn,
+                range: crate::v2::types::Range::empty(),
+                is_top_level: false,
+                metadata: None,
+            });
+            break;
+        }
+    };
+
+    match method.as_str() {
+        "attr_accessor" | "attr_reader" | "attr_writer" => {
+            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
+            true
+        }
+        "class_attribute" | "mattr_accessor" | "cattr_accessor" | "mattr_reader"
+        | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
+            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
+            true
+        }
+        "delegate" => {
+            push_symbol_defs(&args, defs, "Method", DefKind::Method);
+            true
+        }
+        "def_delegators" | "def_delegator" => {
+            let mut skip_first = true;
+            for arg in args.children() {
+                let Some(name) = symbol_name(&arg) else {
+                    continue;
+                };
+                if skip_first {
+                    skip_first = false;
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+            }
+            true
+        }
+        "define_method" => {
+            for arg in args.children() {
+                let Some(name) = literal_name(&arg) else {
+                    continue;
+                };
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+                break;
+            }
+            true
+        }
+        "scope" => {
+            push_first_symbol(&args, defs, "StaticMethod", DefKind::Method);
+            true
+        }
+        "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
+            push_first_symbol(&args, defs, "Method", DefKind::Method);
+            true
+        }
+        // Callbacks: not handled here. Symbol args are refs, not defs.
+        "before_action" | "after_action" | "around_action" | "before_filter" | "after_filter"
+        | "around_filter" | "before_validation" | "after_validation" | "after_create"
+        | "after_save" | "before_save" | "before_create" | "after_update" | "before_update"
+        | "after_destroy" | "before_destroy" | "after_commit" | "after_rollback" => false,
+        _ => false,
     }
-    true
+}
+
+/// DSL methods recognized by the on_scope hook. Used for early-return
+/// when the call has no arguments.
+const RUBY_DSL_METHODS: &[&str] = &[
+    "attr_accessor",
+    "attr_reader",
+    "attr_writer",
+    "class_attribute",
+    "mattr_accessor",
+    "cattr_accessor",
+    "mattr_reader",
+    "mattr_writer",
+    "cattr_reader",
+    "cattr_writer",
+    "delegate",
+    "def_delegators",
+    "def_delegator",
+    "define_method",
+    "scope",
+    "has_many",
+    "belongs_to",
+    "has_one",
+    "has_and_belongs_to_many",
+];
+
+/// Resolve a constant identifier as a class/module FQN for chain
+/// resolution. `Model.new.save!` needs `Model` to resolve to the
+/// `Model` class so the chain can look up `Model::save!`.
+fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
+    let nodes = graph.resolve_scope_nodes(name);
+    for &node in &nodes {
+        if let Some(did) = graph.graph[node].def_id() {
+            let gdef = &graph.defs[did.0 as usize];
+            if gdef.kind.is_type_container() {
+                return Some(graph.str(gdef.fqn).to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Rewrite `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)` to resolve
+/// as `obj.foo(...)`. Only rewrites when the first argument is a literal
+/// symbol or string.
+fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
+    if name != "send" && name != "public_send" && name != "__send__" {
+        return None;
+    }
+    let args = node.field("arguments")?;
+    for arg in args.children() {
+        let k = arg.kind();
+        match k.as_ref() {
+            "simple_symbol" => return arg.text().strip_prefix(':').map(|s| s.to_string()),
+            "string" => {
+                return arg
+                    .children()
+                    .find(|c| c.kind().as_ref() == "string_content")
+                    .map(|c| c.text().to_string())
+                    .filter(|s| !s.is_empty());
+            }
+            _ => continue,
+        }
+    }
+    None
 }
 
 /// Extract super types: superclass + include/extend calls in the class body.
@@ -238,8 +429,19 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
     // Direct superclass: class Dog < Animal
-    if let Some(s) = node.field("superclass") {
-        types.push(s.text().to_string());
+    // The "superclass" field wraps the type in a `superclass` node
+    // that includes the `<` token. Extract the inner constant or
+    // scope_resolution child directly.
+    if let Some(s) = node.field("superclass")
+        && let Some(type_node) = s.children().find(|c| {
+            let k = c.kind();
+            k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
+        })
+    {
+        let name = type_node.text().to_string();
+        if !name.is_empty() {
+            types.push(name);
+        }
     }
 
     // include/extend in body: include Foo, extend Bar
@@ -422,6 +624,7 @@ impl HasRules for RubyRules {
         .with_hooks(ResolverHooks {
             constructor_methods: CONSTRUCTOR_METHODS,
             imported_symbol_candidates: Some(ruby_imported_symbol_candidates),
+            resolve_ident_type: Some(ruby_resolve_ident_type),
             ..Default::default()
         })
     }
@@ -460,6 +663,41 @@ mod tests {
                 && import.name.is_none()
                 && import.alias.is_none()
         }));
+    }
+
+    #[test]
+    fn constructor_chain_produces_refs() {
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                b"class Foo\n  def bar; end\nend\nclass Worker\n  def run\n    Foo.new.bar\n  end\nend\n",
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        let ref_chains: Vec<_> = result
+            .refs
+            .iter()
+            .filter(|r| r.chain.is_some())
+            .map(|r| {
+                (
+                    r.name.as_str(),
+                    r.chain
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|s| format!("{s:?}"))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        eprintln!("refs: {ref_names:?}");
+        eprintln!("chains: {ref_chains:?}");
+        assert!(
+            ref_chains.iter().any(|(name, _)| *name == "bar"),
+            "should have a chain ref for 'bar', got: {ref_chains:?}"
+        );
     }
 
     #[test]
