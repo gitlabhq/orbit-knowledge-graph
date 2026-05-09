@@ -1,5 +1,6 @@
 mod datalake;
 pub mod dispatch;
+mod entity_pipeline;
 mod handler;
 mod metrics;
 mod pipeline;
