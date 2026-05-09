@@ -90,7 +90,7 @@ fn enforce_traversal_path_filters(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
-        let (Some(entity), Some(filter)) = (
+        let (Some(entity), Some(traversal_path_filter)) = (
             node.entity.as_deref(),
             node.filters.get(TRAVERSAL_PATH_COLUMN),
         ) else {
@@ -105,21 +105,21 @@ fn enforce_traversal_path_filters(
             .map(|r| r.required_role.as_access_level())
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
-        validate_traversal_path_filter(
+        validate_traversal_path_filter_scope(
             &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-            filter,
+            traversal_path_filter,
             &eligible_paths,
         )?;
     }
 
     for (i, rel) in input.relationships.iter().enumerate() {
-        let Some(filter) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
+        let Some(traversal_path_filter) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
             continue;
         };
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
-        validate_traversal_path_filter(
+        validate_traversal_path_filter_scope(
             &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-            filter,
+            traversal_path_filter,
             &eligible_paths,
         )?;
     }
@@ -127,20 +127,23 @@ fn enforce_traversal_path_filters(
     Ok(())
 }
 
-fn validate_traversal_path_filter(
+fn validate_traversal_path_filter_scope(
     label: &str,
-    filter: &InputFilter,
+    traversal_path_filter: &InputFilter,
     eligible_paths: &[&str],
 ) -> Result<()> {
-    for path in traversal_path_values(label, filter)? {
+    for path in traversal_path_values(label, traversal_path_filter)? {
         validate_requested_traversal_path(label, path, eligible_paths)?;
     }
     Ok(())
 }
 
-fn traversal_path_values<'a>(label: &str, filter: &'a InputFilter) -> Result<Vec<&'a str>> {
-    match filter.op.unwrap_or(FilterOp::Eq) {
-        FilterOp::Eq | FilterOp::StartsWith => filter
+fn traversal_path_values<'a>(
+    label: &str,
+    traversal_path_filter: &'a InputFilter,
+) -> Result<Vec<&'a str>> {
+    match traversal_path_filter.op.unwrap_or(FilterOp::Eq) {
+        FilterOp::Eq | FilterOp::StartsWith => traversal_path_filter
             .value
             .as_ref()
             .and_then(|v| v.as_str())
@@ -151,7 +154,7 @@ fn traversal_path_values<'a>(label: &str, filter: &'a InputFilter) -> Result<Vec
                 ))
             }),
         FilterOp::In => {
-            let paths = filter
+            let paths = traversal_path_filter
                 .value
                 .as_ref()
                 .and_then(|v| v.as_array())

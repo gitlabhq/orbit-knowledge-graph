@@ -497,8 +497,10 @@ impl<'a> Validator<'a> {
     }
 
     fn check_traversal_path_value(label: &str, path: &str) -> Result<()> {
-        SecurityContext::validate_traversal_path(path)
-            .map_err(|err| QueryError::Validation(format!("{label}: {err}")))
+        SecurityContext::validate_traversal_path(path).map_err(|err| match err {
+            QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
+            other => other,
+        })
     }
 
     fn check_one_filter(
