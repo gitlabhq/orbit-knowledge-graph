@@ -72,6 +72,9 @@ local-cli-build-linux-arm64:
 
 local-cli-build-windows-xwin:
   extends: .local-cli-build-windows
+  # Spike: DuckDB amalgamation hits clang-19 strictness on `__declspec(dllexport)`
+  # applied to `= delete` methods. Either drop xwin or upstream a DuckDB patch.
+  allow_failure: true
   variables:
     PLATFORM: windows
     ARCH: x86_64
@@ -111,6 +114,10 @@ local-cli-build-windows-xwin:
 
 local-cli-build-windows-zigbuild:
   extends: .local-cli-build-windows
+  # Spike: zig's lld can't resolve windows-sys's per-target `.lib` import
+  # libraries with no_fallback strategy at link time (e.g. `windows.0.53.0`).
+  # Compiles fine; deeper rust+lld plumbing needed.
+  allow_failure: true
   variables:
     PLATFORM: windows
     ARCH: x86_64
@@ -141,11 +148,11 @@ local-cli-build-windows-mingw:
     CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
     CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
     AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
-    # Bundle libgcc/libstdc++/winpthread so the .exe has no external mingw
-    # runtime DLL deps. Without -Wl,-Bstatic -lpthread the binary still pulls
-    # libwinpthread-1.dll; -static covers the rest.
-    RUSTFLAGS: "-C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++ -C link-arg=-Wl,-Bstatic -C link-arg=-lpthread"
+    # Use g++ as the linker driver so -static-libstdc++ actually applies; with
+    # gcc, libstdc++ ends up dynamic. The trailing -Wl,-Bdynamic puts system
+    # DLLs (kernel32 etc.) back to their default dynamic linkage.
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-g++
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++ -C link-arg=-Wl,-Bstatic -C link-arg=-lpthread -C link-arg=-Wl,-Bdynamic"
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends
