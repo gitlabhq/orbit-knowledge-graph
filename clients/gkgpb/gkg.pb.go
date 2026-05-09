@@ -1106,6 +1106,7 @@ type SchemaProperty struct {
 	DataType      string                 `protobuf:"bytes,2,opt,name=data_type,json=dataType,proto3" json:"data_type,omitempty"` // e.g. "int64", "string", "datetime"
 	Nullable      bool                   `protobuf:"varint,3,opt,name=nullable,proto3" json:"nullable,omitempty"`
 	EnumValues    []string               `protobuf:"bytes,4,rep,name=enum_values,json=enumValues,proto3" json:"enum_values,omitempty"` // allowed values for enum-typed properties
+	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`                 // human-readable description from the ontology
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1166,6 +1167,13 @@ func (x *SchemaProperty) GetEnumValues() []string {
 		return x.EnumValues
 	}
 	return nil
+}
+
+func (x *SchemaProperty) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
 }
 
 // A named relationship type with its valid source/target combinations.
@@ -3164,13 +3172,14 @@ const file_gkg_proto_rawDesc = "" +
 	"properties\x12-\n" +
 	"\x05style\x18\a \x01(\v2\x17.gkg.v1.SchemaNodeStyleR\x05style\x12%\n" +
 	"\x0eoutgoing_edges\x18\b \x03(\tR\routgoingEdges\x12%\n" +
-	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\"~\n" +
+	"\x0eincoming_edges\x18\t \x03(\tR\rincomingEdges\"\xa0\x01\n" +
 	"\x0eSchemaProperty\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
 	"\tdata_type\x18\x02 \x01(\tR\bdataType\x12\x1a\n" +
 	"\bnullable\x18\x03 \x01(\bR\bnullable\x12\x1f\n" +
 	"\venum_values\x18\x04 \x03(\tR\n" +
-	"enumValues\"y\n" +
+	"enumValues\x12 \n" +
+	"\vdescription\x18\x05 \x01(\tR\vdescription\"y\n" +
 	"\n" +
 	"SchemaEdge\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
