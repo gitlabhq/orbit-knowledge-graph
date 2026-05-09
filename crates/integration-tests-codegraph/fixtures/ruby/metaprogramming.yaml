@@ -104,6 +104,22 @@ fixtures:
         end
       end
 
+  - path: lib/dynamic.rb
+    content: |
+      class Dynamic
+        define_method(some_variable) do
+          "should not produce a def"
+        end
+
+        def dispatch
+          __send__(:notify)
+        end
+
+        def notify
+          true
+        end
+      end
+
   - path: lib/dispatcher.rb
     content: |
       class Dispatcher
@@ -332,3 +348,34 @@ tests:
       - { row: { callee: "Post::comments" } }
       - { row: { callee: "Post::author" } }
       - { row: { callee: "Post::max_length" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE TESTS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "delegate to: target does NOT produce synthetic def for target"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Model::base_record'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "define_method with non-literal arg produces no synthetic def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Dynamic::some_variable'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "__send__(:notify) resolves to Dynamic::notify"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Dynamic::dispatch'
+        AND callee.fqn = 'Dynamic::notify'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "Dynamic::dispatch", callee: "Dynamic::notify", kind: Calls } }

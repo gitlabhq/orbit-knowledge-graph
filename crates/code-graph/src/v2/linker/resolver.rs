@@ -1319,10 +1319,10 @@ impl<'a> ResolveCtx<'a> {
                 }
 
                 // Walk ancestor chain (Extends edges) to find inherited
-                // members. e.g. save! in Model resolves to Base::save!
-                // when Model < Base.
+                // members. Collect all candidates across all ancestors
+                // so diamond/mixin cases surface all matches (consistent
+                // with lookup_nested_cached's ancestor walk).
                 let scope_nodes = self.graph.resolve_scope_nodes(scope);
-                let mut found_in_ancestor = false;
                 for &scope_node in &scope_nodes {
                     if let Some(ancestors) = self.graph.ancestors(scope_node) {
                         for &ancestor in ancestors {
@@ -1340,15 +1340,8 @@ impl<'a> ResolveCtx<'a> {
                                     },
                                     &mut result,
                                 );
-                                if !result.is_empty() {
-                                    found_in_ancestor = true;
-                                    break;
-                                }
                             }
                         }
-                    }
-                    if found_in_ancestor {
-                        break;
                     }
                 }
                 if !result.is_empty() {
