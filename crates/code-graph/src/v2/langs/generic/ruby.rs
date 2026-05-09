@@ -146,7 +146,7 @@ impl DslLanguage for RubyDsl {
 
     fn chain_config() -> Option<ChainConfig> {
         Some(ChainConfig {
-            ident_kinds: &["identifier", "constant"],
+            ident_kinds: &["identifier", "constant", "scope_resolution"],
             this_kinds: &["self"],
             super_kinds: &["super"],
             field_access: vec![FieldAccessEntry {
@@ -412,6 +412,22 @@ const RUBY_DSL_METHODS: &[&str] = &[
     "has_and_belongs_to_many",
 ];
 
+/// Resolve a constant identifier as a class/module FQN for chain
+/// resolution. `Model.new.save!` needs `Model` to resolve to the
+/// `Model` class so the chain can look up `Model::save!`.
+fn ruby_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
+    let nodes = graph.resolve_scope_nodes(name);
+    for &node in &nodes {
+        if let Some(did) = graph.graph[node].def_id() {
+            let gdef = &graph.defs[did.0 as usize];
+            if gdef.kind.is_type_container() {
+                return Some(graph.str(gdef.fqn).to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Rewrite `obj.send(:foo, ...)` / `obj.public_send(:foo, ...)` to resolve
 /// as `obj.foo(...)`. Only rewrites when the first argument is a literal
 /// symbol or string.
@@ -636,6 +652,7 @@ impl HasRules for RubyRules {
         .with_hooks(ResolverHooks {
             constructor_methods: CONSTRUCTOR_METHODS,
             imported_symbol_candidates: Some(ruby_imported_symbol_candidates),
+            resolve_ident_type: Some(ruby_resolve_ident_type),
             ..Default::default()
         })
     }
@@ -674,6 +691,41 @@ mod tests {
                 && import.name.is_none()
                 && import.alias.is_none()
         }));
+    }
+
+    #[test]
+    fn constructor_chain_produces_refs() {
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                b"class Foo\n  def bar; end\nend\nclass Worker\n  def run\n    Foo.new.bar\n  end\nend\n",
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        let ref_chains: Vec<_> = result
+            .refs
+            .iter()
+            .filter(|r| r.chain.is_some())
+            .map(|r| {
+                (
+                    r.name.as_str(),
+                    r.chain
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .map(|s| format!("{s:?}"))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        eprintln!("refs: {ref_names:?}");
+        eprintln!("chains: {ref_chains:?}");
+        assert!(
+            ref_chains.iter().any(|(name, _)| *name == "bar"),
+            "should have a chain ref for 'bar', got: {ref_chains:?}"
+        );
     }
 
     #[test]

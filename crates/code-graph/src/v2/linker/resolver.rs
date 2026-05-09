@@ -948,10 +948,12 @@ impl<'a> ResolveCtx<'a> {
                 }
             }
 
-            // Constructor method hook: when Call("new") (or similar) finds no
-            // nested member, the call returns an instance of the receiver type.
+            // Constructor method hook: when Call("new") or Field("new")
+            // (or similar) finds no nested member, the call returns an
+            // instance of the receiver type. Field variant covers chains
+            // like `Foo.new.bar` where `.new` is an intermediate step.
             if found_nodes.is_empty()
-                && matches!(step, ExpressionStep::Call(_))
+                && matches!(step, ExpressionStep::Call(_) | ExpressionStep::Field(_))
                 && self.rules.hooks.constructor_methods.contains(&member_name)
             {
                 next_types.extend(current_types.iter().cloned());
@@ -1191,6 +1193,16 @@ impl<'a> ResolveCtx<'a> {
                 if types.is_empty()
                     && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
                 {
+                    // Language hook: resolve identifier as a type directly.
+                    // Ruby uses this for constants like `Model` that are class names.
+                    if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type {
+                        if let Some(fqn) = resolve_fn(self.graph, name) {
+                            types.push(fqn);
+                        }
+                    }
+                    if !types.is_empty() {
+                        return Ok(types);
+                    }
                     let fallback = RefData {
                         name,
                         chain: None,

@@ -95,6 +95,15 @@ fixtures:
         end
       end
 
+  - path: app/workers/update_worker.rb
+    content: |
+      class UpdateWorker
+        def perform(project_id)
+          project = Project.new(project_id)
+          Model.new(project).update(name: "test")
+        end
+      end
+
   - path: lib/dispatcher.rb
     content: |
       class Dispatcher
@@ -268,6 +277,44 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "Dispatcher::dispatch", callee: "Dispatcher::alert", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CALLS TO GENERATED METHODS
+  # ══════════════════════════════════════════════════════════════
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-CLASS CHAIN RESOLUTION (Controller -> Service -> Model)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "PostsController.index calls Post.published (qualified receiver chain)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'PostsController::index'
+        AND callee.fqn = 'Post::published'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PostsController::index", callee: "Post::published", kind: Calls } }
+
+  - name: "UpdateWorker.perform calls Model.update via constructor chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'UpdateWorker::perform'
+        AND callee.fqn = 'Model::update'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "UpdateWorker::perform", callee: "Model::update", kind: Calls } }
+
+  - name: "PostsController.index calls Post.recent (qualified receiver chain)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'PostsController::index'
+        AND callee.fqn = 'Post::recent'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PostsController::index", callee: "Post::recent", kind: Calls } }
 
   # ══════════════════════════════════════════════════════════════
   # CALLS TO GENERATED METHODS
