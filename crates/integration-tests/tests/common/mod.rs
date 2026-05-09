@@ -3,7 +3,7 @@
 use gkg_server::redaction::QueryResult;
 use ontology::Ontology;
 pub use query_engine::compiler::compile;
-use query_engine::compiler::{CompiledQueryContext, SecurityContext};
+use query_engine::compiler::{AccessLevel, CompiledQueryContext, SecurityContext, TraversalPath};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
@@ -13,7 +13,9 @@ pub fn test_security_context() -> SecurityContext {
 }
 
 pub fn admin_security_context() -> SecurityContext {
-    test_security_context().with_role(true, None)
+    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", AccessLevel::Owner as u32)])
+        .expect("valid admin security context")
+        .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub async fn compile_and_execute(
@@ -44,10 +46,10 @@ impl DummyClaims for gkg_server::auth::Claims {
             username: "test".into(),
             admin: true,
             organization_id: Some(1),
-            min_access_level: Some(20),
+            min_access_level: Some(AccessLevel::Owner as u32),
             group_traversal_ids: vec![gkg_server::auth::TraversalPathClaim {
                 path: "1/".into(),
-                access_levels: vec![20],
+                access_levels: vec![AccessLevel::Owner as u32],
             }],
             source_type: "rest".into(),
             ai_session_id: None,

@@ -2329,6 +2329,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_traversal_path_filter_on_global_entity() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1],
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("not filterable"),
+            "expected global entity traversal_path rejection, got: {err}"
+        );
+    }
+
+    #[test]
     fn rejects_unsupported_traversal_path_filter_operator() {
         let ont = ontology_with_unfilterable_field();
         let validator = Validator::new(&ont);

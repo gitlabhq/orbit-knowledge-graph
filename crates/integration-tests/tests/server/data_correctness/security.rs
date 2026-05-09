@@ -1,5 +1,5 @@
 use super::helpers::*;
-use query_engine::compiler::TraversalPath;
+use query_engine::compiler::{AccessLevel, TraversalPath};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search: traversal path scoping
@@ -323,9 +323,9 @@ fn non_admin_ctx() -> SecurityContext {
 }
 
 fn admin_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()])
+    SecurityContext::new_with_roles(1, vec![owner_path("1/")])
         .unwrap()
-        .with_role(true, None)
+        .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestContext) {
@@ -992,6 +992,10 @@ fn security_manager_path(path: &str) -> TraversalPath {
 
 fn developer_path(path: &str) -> TraversalPath {
     TraversalPath::new(path, 30)
+}
+
+fn owner_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, AccessLevel::Owner as u32)
 }
 
 /// Reporter on 1/100/ but no Security Manager access anywhere. Counting

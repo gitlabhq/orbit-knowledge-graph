@@ -270,6 +270,7 @@ mod tests {
         AggFunction, FilterOp, InputAggregation, InputFilter, InputNode, InputOrderBy,
         OrderDirection, QueryType,
     };
+    use crate::types::{AccessLevel, TraversalPath};
     use ontology::{DataType, RequiredRole};
     use serde_json::Value;
     use std::collections::HashMap;
@@ -319,9 +320,12 @@ mod tests {
     }
 
     fn admin_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_role(true, None)
+        SecurityContext::new_with_roles(
+            1,
+            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .unwrap()
+        .with_role(true, Some(AccessLevel::Owner as u32))
     }
 
     fn input_with_columns(cols: Vec<&str>) -> Input {
