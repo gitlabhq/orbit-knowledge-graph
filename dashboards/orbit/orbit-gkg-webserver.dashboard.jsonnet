@@ -248,23 +248,13 @@ local reliability = [
   o.row('Reliability'),
   o.timeseries(
     'Server: pipeline failures by reason (1h windows)',
-    'Pipeline failure counts in rolling 1h windows, broken down by failure_reason from `gkg.query.pipeline.failed`. Falls back to `queries{status}` (which is already deployed) so the panel shows volume even before the new metric reaches prod. Renders a flat zero baseline when no failures occur in the window.',
+    'Pipeline failure counts in rolling 1h windows, broken down by failure_reason from `gkg.query.pipeline.failed`. Renders a flat zero baseline when no failures occur in the window.',
     [
       o.target(
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [pipelineFailed, SEL],
         '{{failure_reason}}', DS, 'A',
       ),
-      // Fallback while gkg.query.pipeline.failed is rolling out. Maps the
-      // existing queries{status="<reason>_error"} label into failure_reason
-      // so the panel shows volume immediately. Restricted to status names
-      // that match (.+)_error so any non-conformant status (e.g. timeout)
-      // does not drop into an empty failure_reason. Delete this target once
-      // every pod emits the new metric.
-      o.target(
-        'sum by (failure_reason) (label_replace(increase(%s{%s, status=~".+_error", status!="compile_error"}[1h]), "failure_reason", "$1 (status fallback)", "status", "(.+)_error"))' % [pipelineQueries.prom_name, SEL],
-        '{{failure_reason}}', DS, 'B',
-      ),
-      o.target('vector(0)', 'no failures', DS, 'C'),
+      o.target('vector(0)', 'no failures', DS, 'B'),
     ],
     'short', 12, 8,
   ),
@@ -279,20 +269,13 @@ local reliability = [
   ),
   o.timeseries(
     'Server: compiler rejections by reason (1h windows)',
-    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`. Falls back to `queries{status="compile_error"}` (which is already deployed) so the panel shows compile-error volume even before the new metric reaches prod. Once the new metric deploys, the per-reason fan-out (parse/schema/reference/pagination/ontology/depth/limit/security/lowering/enforcement/codegen/pipeline) layers on top.',
+    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`: parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline. Renders a flat zero baseline when no rejections occur in the window.',
     [
       o.target(
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
         '{{failure_reason}}', DS, 'A',
       ),
-      // Fallback while gkg.query.engine.compiler.rejected is rolling out.
-      // Once every pod emits the new metric, delete this target so the
-      // legend shows only the per-reason fan-out (parse/schema/...).
-      o.target(
-        'label_replace(sum(increase(%s{%s, status="compile_error"}[1h])), "failure_reason", "compile_error (status fallback)", "__name__", ".+")' % [pipelineQueries.prom_name, SEL],
-        '{{failure_reason}}', DS, 'B',
-      ),
-      o.target('vector(0)', 'no rejections', DS, 'C'),
+      o.target('vector(0)', 'no rejections', DS, 'B'),
     ],
     'short', 12, 8,
   ),
