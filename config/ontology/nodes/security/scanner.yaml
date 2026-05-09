@@ -22,50 +22,50 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the scanner."
+    description: "Unique ID."
 
   external_id:
     type: string
     source: external_id
     nullable: false
-    description: "External identifier for the scanner (e.g., gemnasium, bandit)."
+    description: "External ID (e.g. gemnasium, bandit)."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Human-readable name of the scanner."
+    description: "Display name."
 
   vendor:
     type: string
     source: vendor
     nullable: false
-    description: "Vendor that provides the scanner (default: GitLab)."
+    description: "Scanner vendor (default: GitLab)."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: false
-    description: "Timestamp when the scanner was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: false
-    description: "Timestamp when the scanner was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this scanner belongs to."
+    description: "Owning project ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

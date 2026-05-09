@@ -22,13 +22,13 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the security scan."
+    description: "Unique ID."
 
   scan_type:
     type: enum
     source: scan_type
     nullable: false
-    description: "Type of security scan performed."
+    description: "Scan type."
     values:
       1: sast
       2: dependency_scanning
@@ -44,7 +44,7 @@ properties:
     type: enum
     source: status
     nullable: false
-    description: "Current status of the security scan."
+    description: "Current status."
     values:
       0: created
       1: succeeded
@@ -58,44 +58,44 @@ properties:
     type: boolean
     source: latest
     nullable: false
-    description: "Whether this is the latest scan for the project."
+    description: "Whether this is the latest scan of its type for the project."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: false
-    description: "Timestamp when the security scan was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: false
-    description: "Timestamp when the security scan was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this security scan belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   pipeline_id:
     type: int64
     source: pipeline_id
     nullable: true
-    description: "Pipeline that ran this security scan."
+    description: "Pipeline ID that ran this scan."
 
   build_id:
     type: int64
     source: build_id
     nullable: false
-    description: "Job (build) that executed this security scan."
+    description: "Job (build) ID that executed this scan."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

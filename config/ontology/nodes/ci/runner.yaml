@@ -22,13 +22,13 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the runner."
+    description: "Unique ID."
 
   runner_type:
     type: enum
     source: runner_type
     nullable: false
-    description: "Scope of the runner (instance, group, or project)."
+    description: "Scope: instance, group, or project."
     values:
       1: instance_type
       2: group_type
@@ -50,25 +50,25 @@ properties:
     type: boolean
     source: active
     nullable: false
-    description: "Whether the runner is currently accepting jobs."
+    description: "Whether currently accepting jobs."
 
   locked:
     type: boolean
     source: locked
     nullable: false
-    description: "Whether the runner is locked to its assignment."
+    description: "Whether locked to its assignment."
 
   run_untagged:
     type: boolean
     source: run_untagged
     nullable: false
-    description: "Whether the runner picks up jobs that have no tags."
+    description: "Whether it picks up untagged jobs."
 
   access_level:
     type: enum
     source: access_level
     nullable: false
-    description: "Whether the runner is restricted to protected refs."
+    description: "Whether restricted to protected refs."
     values:
       0: not_protected
       1: ref_protected
@@ -77,25 +77,25 @@ properties:
     type: int64
     source: maximum_timeout
     nullable: true
-    description: "Maximum job timeout (seconds) enforced by this runner."
+    description: "Max job timeout in seconds."
 
   organization_id:
     type: int64
     source: organization_id
     nullable: true
-    description: "Cell organization the runner belongs to."
+    description: "Cell organization ID."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the runner was registered."
+    description: "Registration timestamp."
 
   contacted_at:
     type: timestamp
     source: contacted_at
     nullable: true
-    description: "Last time the runner contacted the GitLab instance."
+    description: "Last contact timestamp."
 
 etl:
   type: table

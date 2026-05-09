@@ -21,19 +21,19 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the note."
+    description: "Unique ID."
 
   note:
     type: string
     source: note
     nullable: false
-    description: "The text content of the note (markdown)."
+    description: "Text content (markdown)."
 
   noteable_type:
     type: enum
     source: noteable_type
     nullable: false
-    description: "Type of object this note is attached to."
+    description: "Type of object the note is attached to."
     enum_type: string
     values:
       0: Issue
@@ -51,80 +51,80 @@ properties:
     type: int64
     source: noteable_id
     nullable: true
-    description: "ID of the object this note is attached to (null for commits)."
+    description: "ID of the attached object. Null for commits."
 
   line_code:
     type: string
     source: line_code
     nullable: true
-    description: "Code identifying the line position for diff notes."
+    description: "Line position identifier for diff notes."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the note was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the note was last updated."
+    description: "Last update timestamp."
 
   discussion_id:
     type: string
     source: discussion_id
     nullable: true
-    description: "ID grouping notes into a discussion thread."
+    description: "Discussion thread ID."
 
   resolved_at:
     type: timestamp
     source: resolved_at
     nullable: true
-    description: "Timestamp when the note/discussion was resolved."
+    description: "Resolution timestamp."
 
   internal:
     type: boolean
     source: internal
     nullable: false
-    description: "Whether this note is only visible to project members."
+    description: "Only visible to users with Reporter+ access on the parent resource."
 
   confidential:
     type: boolean
     source: confidential
     nullable: true
-    description: "Whether this note is confidential."
+    description: "Legacy alias for internal; synced on create. Being renamed per gitlab#367923."
 
   commit_id:
     type: string
     source: commit_id
     nullable: true
-    description: "SHA of the commit this note is on (for commit notes)."
+    description: "Commit SHA for commit notes."
 
   st_diff:
     type: string
     source: st_diff
     nullable: true
-    description: "Serialized diff snippet captured at note creation, populated for diff notes."
+    description: "Serialized diff snippet for diff notes."
 
   project_id:
     type: int64
     source: project_id
     nullable: true
-    description: "Project this note belongs to, if project-scoped. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
-    description: "User who wrote the note."
+    description: "Author user ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: query

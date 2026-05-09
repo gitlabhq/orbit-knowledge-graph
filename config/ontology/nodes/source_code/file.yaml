@@ -22,56 +22,56 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Unique identifier for the file node."
+    description: "Unique ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "ID of the project this file belongs to."
+    description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
-    description: "Git branch where this file exists."
+    description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
-    description: "Commit SHA at which this file was indexed."
+    description: "Indexed commit SHA."
 
   path:
     type: string
     source: path
     nullable: false
-    description: "Relative path of the file within the repository."
+    description: "Relative path within the repository."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the file including extension."
+    description: "File name including extension."
 
   extension:
     type: string
     source: extension
     nullable: false
-    description: "File extension (e.g., rb, py, java)."
+    description: "Extension (e.g., rb, py, java)."
 
   language:
     type: string
     source: language
     nullable: false
-    description: "Programming language of the file (e.g., ruby, python, java)."
+    description: "Programming language (e.g., ruby, python, java)."
 
   content:
     type: string
@@ -80,7 +80,7 @@ properties:
       lookup: blob_content
       depends_on: [project_id, commit_sha, branch, path]
     nullable: true
-    description: "Raw source text of the file. Resolved from Gitaly at query time."
+    description: "Raw source text, resolved from Gitaly at query time."
 
 storage:
   settings:

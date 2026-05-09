@@ -21,74 +21,74 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the milestone."
+    description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: true
-    description: "Project or group-scoped milestone number."
+    description: "Scoped milestone number."
 
   title:
     type: string
     source: title
     nullable: false
-    description: "Title of the milestone."
+    description: "Title."
 
   description:
     type: string
     source: description
     nullable: false
-    description: "Description of the milestone."
+    description: "Description text."
 
   state:
     type: string
     source: state
     nullable: false
-    description: "Current state of the milestone (active, closed)."
+    description: "State (active, closed)."
 
   due_date:
     type: date
     source: due_date
     nullable: true
-    description: "Due date for the milestone."
+    description: "Due date."
 
   start_date:
     type: date
     source: start_date
     nullable: true
-    description: "Start date for the milestone."
+    description: "Start date."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the milestone was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the milestone was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: true
-    description: "Project this milestone belongs to, if project-scoped. Null for group milestones. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID. Null for group-scoped."
 
   group_id:
     type: int64
     source: group_id
     nullable: true
-    description: "Group this milestone belongs to, if group-scoped. Null for project milestones."
+    description: "Owning group ID. Null for project-scoped."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table
