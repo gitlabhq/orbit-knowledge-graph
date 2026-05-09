@@ -1,3 +1,9 @@
+## [0.54.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.53.0...v0.54.0) (2026-05-09)
+
+### Features
+
+* **observability:** split compiler rejects from pipeline failures ([aaee90b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aaee90ba9e66b7b17eac72323ac5f7ad54d2e771)) by Michael Angelo Rivera
+
 ## [0.53.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.52.0...v0.53.0) (2026-05-08)
 
 ### Features
