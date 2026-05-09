@@ -145,21 +145,27 @@ local-cli-build-windows-mingw:
     PLATFORM: windows
     ARCH: x86_64
     WINDOWS_METHOD: mingw
+    # llvm-mingw is a static, UCRT-based mingw toolchain (libc++ static by
+    # default, no libstdc++-6.dll runtime dep). Debian's mingw-w64 ships
+    # libstdc++ only as a DLL, which is why -static-libstdc++ couldn't fully
+    # detach the runtime.
+    LLVM_MINGW_VERSION: "20260505"
     CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
     CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
     AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-    # Use g++ as the linker driver so -static-libstdc++ actually applies; with
-    # gcc, libstdc++ ends up dynamic. The trailing -Wl,-Bdynamic puts system
-    # DLLs (kernel32 etc.) back to their default dynamic linkage.
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-g++
-    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++ -C link-arg=-Wl,-Bstatic -C link-arg=-lpthread -C link-arg=-Wl,-Bdynamic"
+    # llvm-mingw's libc++ is already static; we still pin libwinpthread static
+    # for safety.
+    RUSTFLAGS: "-C link-arg=-static -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends
-        file gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools zip
-    # DuckDB's C++17 needs posix threads, not win32.
-    - update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix || true
-    - update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix || true
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip
+    - curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_VERSION}/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64.tar.xz"
+        | tar -xJ -C /opt
+    - mv "/opt/llvm-mingw-${LLVM_MINGW_VERSION}-ucrt-ubuntu-22.04-x86_64" /opt/llvm-mingw
+    - export PATH="/opt/llvm-mingw/bin:$PATH"
+    - echo "/opt/llvm-mingw/bin" >> "$CI_PROJECT_DIR/.path"
+    - x86_64-w64-mingw32-gcc --version | head -1
   script:
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true

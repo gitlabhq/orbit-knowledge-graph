@@ -100,8 +100,10 @@ if [ "$PLATFORM" = "windows" ]; then
     fi
     echo "DLL imports:"
     "$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" || true
-    bad=$("$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" \
-        | grep -iEv "(api-ms-win|msvcrt|ucrtbase|kernel32|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|combase|ktmw32|ncrypt|rstrtmgr|secur32|crypt32|ntdll|userenv|shell32|ole32|oleaut32|gdi32|rpcrt4|psapi|powrprof|version|cfgmgr32|opengl32|imm32|imagehlp|msimg32|winspool|synchronization|dbghelp|wininet|winhttp|setupapi|iphlpapi)\.dll" || true)
+    bad=$("$OBJDUMP" -p "$BIN_DIR/$BIN" \
+        | awk '/DLL Name:/ { print tolower($NF) }' | sort -u \
+        | grep -Ev '^(api-ms-win-[a-z0-9.-]+|msvcrt|ucrtbase|kernel32|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|combase|ktmw32|ncrypt|rstrtmgr|secur32|crypt32|ntdll|userenv|shell32|ole32|oleaut32|gdi32|rpcrt4|psapi|powrprof|version|cfgmgr32|opengl32|imm32|imagehlp|msimg32|winspool|synchronization|dbghelp|wininet|winhttp|setupapi|iphlpapi)\.dll$' \
+        || true)
     if [ -n "$bad" ]; then
         echo "smoke check failed: binary depends on non-system DLLs:" >&2
         echo "$bad" >&2
