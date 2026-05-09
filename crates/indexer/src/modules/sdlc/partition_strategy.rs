@@ -30,14 +30,14 @@ pub(in crate::modules::sdlc) trait PartitionStrategy: Send + Sync {
         &self,
         request: &EntityIndexingRequest,
     ) -> Result<Option<Vec<PartitionSpec>>, HandlerError> {
-        let boundaries = self.compute_quantiles(request).await?;
+        let quantiles = self.compute_quantiles(request).await?;
 
-        if boundaries.len() < (self.partition_count() - 1) as usize {
+        if quantiles.len() < (self.partition_count() - 1) as usize {
             return Ok(None);
         }
 
         let partitions = (0..self.partition_count())
-            .map(|i| build_partition_spec(i, self.partition_count(), &boundaries))
+            .map(|i| build_partition_spec(i, self.partition_count(), &quantiles))
             .collect();
 
         Ok(Some(partitions))
@@ -45,7 +45,7 @@ pub(in crate::modules::sdlc) trait PartitionStrategy: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// DatalakePartitionStrategy — splits by quantile boundaries from ClickHouse
+// DatalakePartitionStrategy — splits by quantiles from ClickHouse
 // ---------------------------------------------------------------------------
 
 pub(in crate::modules::sdlc) struct DatalakePartitionStrategy {
@@ -70,7 +70,7 @@ impl DatalakePartitionStrategy {
         }
     }
 
-    async fn query_quantile_boundaries(
+    async fn query_quantiles(
         &self,
         scope: &IndexingScope,
         watermark: &DateTime<Utc>,
@@ -102,7 +102,7 @@ impl DatalakePartitionStrategy {
             .datalake
             .query_batches(&sql, serde_json::json!({}), None)
             .await
-            .map_err(|err| HandlerError::Processing(format!("boundary query failed: {err}")))?;
+            .map_err(|err| HandlerError::Processing(format!("quantile query failed: {err}")))?;
 
         let batch = match batches.into_iter().next() {
             Some(batch) if batch.num_rows() > 0 => batch,
@@ -147,7 +147,7 @@ impl PartitionStrategy for DatalakePartitionStrategy {
         &self,
         request: &EntityIndexingRequest,
     ) -> Result<Vec<String>, HandlerError> {
-        self.query_quantile_boundaries(&request.scope, &request.watermark)
+        self.query_quantiles(&request.scope, &request.watermark)
             .await
     }
 }
@@ -159,18 +159,18 @@ impl PartitionStrategy for DatalakePartitionStrategy {
 fn build_partition_spec(
     partition_index: u32,
     total_partitions: u32,
-    boundaries: &[String],
+    quantiles: &[String],
 ) -> PartitionSpec {
     let lower_bound = if partition_index == 0 {
         String::new()
     } else {
-        boundaries[(partition_index - 1) as usize].clone()
+        quantiles[(partition_index - 1) as usize].clone()
     };
 
     let upper_bound = if partition_index == total_partitions - 1 {
         MAX_PARTITION_UPPER_BOUND.to_string()
     } else {
-        boundaries[partition_index as usize].clone()
+        quantiles[partition_index as usize].clone()
     };
 
     PartitionSpec {

@@ -174,7 +174,7 @@ impl SimpleEntityPipeline {
             None => {
                 info!(
                     partition_count = strategy.partition_count(),
-                    "insufficient boundaries, falling back to single pipeline"
+                    "insufficient quantiles, falling back to single pipeline"
                 );
                 Ok(ExecutionPlan {
                     runs: vec![self.plan_single_run(request)],
@@ -213,7 +213,7 @@ impl SimpleEntityPipeline {
             None => {
                 info!(
                     partition_count = strategy.partition_count(),
-                    "insufficient boundaries on resume, falling back to single pipeline"
+                    "insufficient quantiles on resume, falling back to single pipeline"
                 );
                 Ok(ExecutionPlan {
                     runs: vec![self.plan_single_run(request)],
