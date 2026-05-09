@@ -140,6 +140,12 @@ fn validate_traversal_path_filter_scope(
     Ok(())
 }
 
+fn invalid_traversal_path_filter_invariant(label: &str) -> QueryError {
+    QueryError::PipelineInvariant(format!(
+        "{label}: invalid traversal_path filter reached RestrictPass"
+    ))
+}
+
 fn traversal_path_values<'a>(
     label: &str,
     traversal_path_filter: &'a InputFilter,
@@ -150,33 +156,22 @@ fn traversal_path_values<'a>(
             .as_ref()
             .and_then(|v| v.as_str())
             .map(|path| vec![path])
-            .ok_or_else(|| {
-                QueryError::Validation(format!("{label}: value must be a traversal_path string"))
-            }),
+            .ok_or_else(|| invalid_traversal_path_filter_invariant(label)),
         FilterOp::In => {
             let paths = traversal_path_filter
                 .value
                 .as_ref()
                 .and_then(|v| v.as_array())
-                .ok_or_else(|| {
-                    QueryError::Validation(format!(
-                        "{label}: \"in\" requires an array of traversal_path strings"
-                    ))
-                })?;
+                .ok_or_else(|| invalid_traversal_path_filter_invariant(label))?;
             paths
                 .iter()
                 .map(|v| {
-                    v.as_str().ok_or_else(|| {
-                        QueryError::Validation(format!(
-                            "{label}: \"in\" values must be traversal_path strings"
-                        ))
-                    })
+                    v.as_str()
+                        .ok_or_else(|| invalid_traversal_path_filter_invariant(label))
                 })
                 .collect()
         }
-        _ => Err(QueryError::Validation(format!(
-            "{label}: only eq, in, and starts_with are supported"
-        ))),
+        _ => Err(invalid_traversal_path_filter_invariant(label)),
     }
 }
 
@@ -192,7 +187,7 @@ fn validate_traversal_path_within_scope(
         return Ok(());
     }
 
-    Err(QueryError::Validation(format!(
+    Err(QueryError::Authorization(format!(
         "{label}: path is not within an authorized traversal_path scope for this entity"
     )))
 }
@@ -433,6 +428,10 @@ mod tests {
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "scope rejection should be an authorization error, got: {err:?}"
+        );
+        assert!(
             err.is_client_safe(),
             "traversal_path scope errors should be safe for clients, got: {err:?}"
         );
@@ -463,6 +462,10 @@ mod tests {
         );
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "role-scope rejection should be an authorization error, got: {err:?}"
+        );
         assert!(
             err.is_client_safe(),
             "traversal_path role-scope errors should be safe for clients, got: {err:?}"
@@ -499,37 +502,16 @@ mod tests {
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "relationship scope rejection should be an authorization error, got: {err:?}"
+        );
+        assert!(
             err.is_client_safe(),
             "relationship traversal_path scope errors should be safe for clients, got: {err:?}"
         );
         assert!(
             err.to_string().contains("authorized traversal_path scope"),
             "relationship traversal_path filters should be scoped too, got: {err}"
-        );
-    }
-
-    #[test]
-    fn traversal_path_shape_errors_are_client_safe_validation_errors() {
-        let ont = ontology();
-        let ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
-        let mut input = input_with_traversal_path_filter(
-            "Group",
-            traversal_path_filter(FilterOp::StartsWith, Value::Number(1.into())),
-        );
-
-        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            err.is_client_safe(),
-            "traversal_path shape errors should be safe for clients, got: {err:?}"
-        );
-        assert!(
-            msg.contains("value must be a traversal_path string"),
-            "error should explain the invalid traversal_path shape, got: {msg}"
-        );
-        assert!(
-            !msg.contains("ValidatePass"),
-            "client-facing errors must not mention internal pass invariants, got: {msg}"
         );
     }
 

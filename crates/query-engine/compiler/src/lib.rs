@@ -253,6 +253,67 @@ mod tests {
     }
 
     #[test]
+    fn traversal_path_scope_rejection_is_observable() {
+        use std::sync::atomic::Ordering;
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 1
+        }"#;
+        let ctx =
+            SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+        let err = compile(query, &ontology, &ctx).expect_err("must reject");
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
+
+        assert!(
+            matches!(err, crate::error::QueryError::Authorization(_)),
+            "expected Authorization, got: {err:?}"
+        );
+        assert!(
+            err.is_client_safe(),
+            "traversal_path scope rejection should be client safe: {err:?}"
+        );
+        assert_eq!(crate::metrics::failure_reason(&err), "authorization");
+        assert!(
+            after > before,
+            "count_err must run on traversal_path authorization rejections (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn traversal_path_shape_rejection_is_validate_pass_error() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": 1}}},
+            "limit": 1
+        }"#;
+        let err = compile(query, &ontology, &security_ctx()).expect_err("must reject");
+        let msg = err.to_string();
+
+        assert!(
+            matches!(err, crate::error::QueryError::Validation(_)),
+            "expected Validation, got: {err:?}"
+        );
+        assert!(
+            err.is_client_safe(),
+            "traversal_path shape rejection should be client safe: {err:?}"
+        );
+        assert!(
+            msg.contains("schema violation"),
+            "error should come from ValidatePass schema validation, got: {msg}"
+        );
+        assert!(
+            !msg.contains("RestrictPass"),
+            "client-facing shape errors should come from validation, got: {msg}"
+        );
+    }
+
+    #[test]
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let prefixed = ontology.with_schema_version_prefix("v1_");
