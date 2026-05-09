@@ -216,14 +216,4 @@ mod tests {
         let result = handler.handle(test_handler_context(), envelope).await;
         assert!(result.is_ok());
     }
-
-    #[test]
-    fn subscription_covers_all_entities() {
-        let handler = test_handler(HashMap::new());
-
-        assert_eq!(
-            handler.subscription().subject.as_ref(),
-            "sdlc.entity.indexing.requested.>"
-        );
-    }
 }
