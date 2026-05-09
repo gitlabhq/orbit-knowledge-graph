@@ -170,7 +170,7 @@ impl GraphStatusService {
             }
         };
 
-        Ok(Some(progress_to_status(progress)))
+        Ok(Some(IndexingStatus::from(progress)))
     }
 
     async fn execute_count_query(
@@ -258,20 +258,22 @@ impl GraphStatusService {
     }
 }
 
-fn progress_to_status(progress: Option<IndexingProgress>) -> IndexingStatus {
-    match progress {
-        None => IndexingStatus {
-            state: IndexingState::NotIndexed.into(),
-            ..Default::default()
-        },
-        Some(p) => {
-            let state = derive_indexing_state(&p);
-            IndexingStatus {
-                state: state.into(),
-                last_started_at: Some(p.last_started_at.to_rfc3339()),
-                last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
-                last_duration_ms: p.last_duration_ms,
-                last_error: p.last_error,
+impl From<Option<IndexingProgress>> for IndexingStatus {
+    fn from(progress: Option<IndexingProgress>) -> Self {
+        match progress {
+            None => IndexingStatus {
+                state: IndexingState::NotIndexed.into(),
+                ..Default::default()
+            },
+            Some(p) => {
+                let state = derive_indexing_state(&p);
+                IndexingStatus {
+                    state: state.into(),
+                    last_started_at: Some(p.last_started_at.to_rfc3339()),
+                    last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
+                    last_duration_ms: p.last_duration_ms,
+                    last_error: p.last_error,
+                }
             }
         }
     }
@@ -703,7 +705,7 @@ mod tests {
 
     #[test]
     fn progress_to_status_maps_none_to_not_indexed() {
-        let status = progress_to_status(None);
+        let status = IndexingStatus::from(None);
         assert_eq!(status.state, IndexingState::NotIndexed as i32);
         assert!(status.last_started_at.is_none());
     }
@@ -712,7 +714,7 @@ mod tests {
     fn progress_to_status_maps_completed_to_indexed() {
         let started = Utc::now();
         let completed = started + Duration::seconds(5);
-        let status = progress_to_status(Some(IndexingProgress {
+        let status = IndexingStatus::from(Some(IndexingProgress {
             last_started_at: started,
             last_completed_at: Some(completed),
             last_duration_ms: Some(5_000),
