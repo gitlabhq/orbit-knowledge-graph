@@ -17,7 +17,7 @@ use anyhow::Result;
 use ontology::Ontology;
 
 use duckdb_client::DuckDbClient;
-use query_engine::compiler::{HydrationPlan, compile_local, compile_local_input};
+use query_engine::compiler::{HydrationPlan, QueryType, compile_local, compile_local_input};
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
@@ -173,6 +173,10 @@ impl PipelineStage for LocalHydration {
 
         let compiled = ctx.compiled()?;
         let db_path = get_db_path(ctx)?;
+        let is_dynamic = matches!(
+            compiled.input.query_type,
+            QueryType::Neighbors | QueryType::PathFinding
+        );
 
         let mut query_result = input.query_result.clone();
         let result_context = input.query_result.ctx().clone();
@@ -186,7 +190,7 @@ impl PipelineStage for LocalHydration {
                 let (nodes, total_ids) =
                     hydration_helpers::build_static_nodes(templates, &query_result);
                 let (mut props, debug) =
-                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids, false)?;
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids, is_dynamic)?;
                 hydration_queries.extend(debug);
 
                 let entity_virtuals: Vec<EntityVirtualColumns<'_>> = templates
@@ -213,7 +217,7 @@ impl PipelineStage for LocalHydration {
                 let (nodes, total_ids) =
                     hydration_helpers::build_dynamic_nodes(entity_specs, &refs);
                 let (mut props, debug) =
-                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids, true)?;
+                    execute_local_hydration(&db_path, &ctx.ontology, nodes, total_ids, is_dynamic)?;
                 hydration_queries.extend(debug);
 
                 let entity_virtuals: Vec<EntityVirtualColumns<'_>> = entity_specs
@@ -342,7 +346,8 @@ fn execute_local_hydration(
         }
     }
 
-    let input = hydration_helpers::build_hydration_input(nodes, total_ids, is_dynamic);
+    let mut input = hydration_helpers::build_hydration_input(nodes, total_ids);
+    input.hydration_dynamic = is_dynamic;
 
     let compiled = compile_local_input(input, ontology).map_err(|e| PipelineError::Compile {
         client_safe: e.is_client_safe(),

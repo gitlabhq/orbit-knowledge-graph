@@ -17,8 +17,8 @@ use crate::passes::shared::dedup_subquery;
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
-    let mut arms = nodes.iter().map(emit_arm);
+pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32, is_dynamic: bool) -> Result<Node> {
+    let mut arms = nodes.iter().map(|n| emit_arm(n, is_dynamic));
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
@@ -29,7 +29,7 @@ pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
     Ok(Node::Query(Box::new(first)))
 }
 
-fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
+fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
     let alias = &node.alias;
     let pk = &node.id_property;
 
@@ -52,7 +52,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
     let mut scan_where = Vec::new();
 
     // Narrow scan via traversal_path when base query provided TPs.
-    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, node.is_dynamic) {
+    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, is_dynamic) {
         scan_where.push(tp_filter);
     }
 
@@ -217,7 +217,6 @@ mod tests {
         columns: Vec<&str>,
         node_ids: Vec<i64>,
         traversal_paths: Vec<&str>,
-        is_dynamic: bool,
     ) -> HydrationNodePlan {
         HydrationNodePlan {
             alias: "hydrate".into(),
@@ -227,33 +226,20 @@ mod tests {
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
             traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
-            is_dynamic,
         }
     }
 
-    fn dynamic_plan(
-        columns: Vec<&str>,
-        node_ids: Vec<i64>,
-        traversal_paths: Vec<&str>,
-    ) -> HydrationNodePlan {
-        plan(columns, node_ids, traversal_paths, true)
+    fn emit_dynamic(plans: &[HydrationNodePlan], limit: u32) -> Node {
+        emit_hydration(plans, limit, true).unwrap()
     }
 
-    fn static_plan(
-        columns: Vec<&str>,
-        node_ids: Vec<i64>,
-        traversal_paths: Vec<&str>,
-    ) -> HydrationNodePlan {
-        plan(columns, node_ids, traversal_paths, false)
+    fn emit_static(plans: &[HydrationNodePlan], limit: u32) -> Node {
+        emit_hydration(plans, limit, false).unwrap()
     }
 
     #[test]
     fn dynamic_single_tp_emits_array_exists_starts_with() {
-        let node = emit_hydration(
-            &[dynamic_plan(vec!["title"], vec![1, 2], vec!["1/9970/"])],
-            10,
-        )
-        .unwrap();
+        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
         let sql = render(&node);
         assert!(
             sql.contains("arrayExists"),
@@ -271,15 +257,14 @@ mod tests {
 
     #[test]
     fn dynamic_multiple_tps_emit_single_array_exists() {
-        let node = emit_hydration(
-            &[dynamic_plan(
+        let node = emit_dynamic(
+            &[plan(
                 vec!["title"],
                 vec![1],
                 vec!["1/9970/100/", "1/9970/200/"],
             )],
             10,
-        )
-        .unwrap();
+        );
         let sql = render(&node);
         let starts_with_count = sql.matches("startsWith").count();
         assert_eq!(
@@ -299,11 +284,7 @@ mod tests {
 
     #[test]
     fn static_single_tp_emits_starts_with() {
-        let node = emit_hydration(
-            &[static_plan(vec!["title"], vec![1, 2], vec!["1/9970/"])],
-            10,
-        )
-        .unwrap();
+        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10);
         let sql = render(&node);
         assert!(
             sql.contains("startsWith"),
@@ -321,15 +302,14 @@ mod tests {
 
     #[test]
     fn static_multiple_tps_emit_or_chain() {
-        let node = emit_hydration(
-            &[static_plan(
+        let node = emit_static(
+            &[plan(
                 vec!["title"],
                 vec![1],
                 vec!["1/9970/100/", "1/9970/200/", "1/9970/300/"],
             )],
             10,
-        )
-        .unwrap();
+        );
         let sql = render(&node);
         let starts_with_count = sql.matches("startsWith").count();
         assert_eq!(
@@ -348,7 +328,7 @@ mod tests {
 
     #[test]
     fn dynamic_no_tp_omits_path_filter() {
-        let node = emit_hydration(&[dynamic_plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
+        let node = emit_dynamic(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
         let sql = render(&node);
         assert!(
             !sql.contains("startsWith"),
@@ -362,7 +342,7 @@ mod tests {
 
     #[test]
     fn static_no_tp_omits_path_filter() {
-        let node = emit_hydration(&[static_plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
+        let node = emit_static(&[plan(vec!["title"], vec![1, 2], vec![])], 10);
         let sql = render(&node);
         assert!(
             !sql.contains("startsWith"),
@@ -372,8 +352,7 @@ mod tests {
 
     #[test]
     fn dynamic_tp_filter_precedes_id_filter() {
-        let node =
-            emit_hydration(&[dynamic_plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
+        let node = emit_dynamic(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10);
         let sql = render(&node);
         let tp_pos = sql.find("arrayExists").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
@@ -385,8 +364,7 @@ mod tests {
 
     #[test]
     fn static_tp_filter_precedes_id_filter() {
-        let node =
-            emit_hydration(&[static_plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
+        let node = emit_static(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10);
         let sql = render(&node);
         let tp_pos = sql.find("startsWith").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
@@ -398,16 +376,11 @@ mod tests {
 
     #[test]
     fn dynamic_leaf_pruning_drops_broad_prefix() {
-        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped from the array
-        let node = emit_hydration(
-            &[dynamic_plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/", "1/9970/100/"],
-            )],
+        // 1/9970/ is a prefix of 1/9970/100/, should be dropped from the array
+        let node = emit_dynamic(
+            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
             10,
-        )
-        .unwrap();
+        );
         let (sql, params) = render_with_params(&node);
         assert!(
             sql.contains("arrayExists"),
@@ -436,16 +409,11 @@ mod tests {
 
     #[test]
     fn static_leaf_pruning_drops_broad_prefix() {
-        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped from the OR
-        let node = emit_hydration(
-            &[static_plan(
-                vec!["title"],
-                vec![1],
-                vec!["1/9970/", "1/9970/100/"],
-            )],
+        // 1/9970/ is a prefix of 1/9970/100/, should be dropped from the OR
+        let node = emit_static(
+            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
             10,
-        )
-        .unwrap();
+        );
         let sql = render(&node);
         let starts_with_count = sql.matches("startsWith").count();
         assert_eq!(

@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
-use query_engine::compiler::{HydrationPlan, InputNode, compile_input};
+use query_engine::compiler::{HydrationPlan, InputNode, QueryType, compile_input};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -62,14 +62,14 @@ impl HydrationStage {
     /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
     /// query against ClickHouse. Shared by both static and dynamic hydration.
     ///
-    /// `is_dynamic` selects the `traversal_path` filter shape: dynamic
-    /// (Neighbors/PathFinding) emits `arrayExists`, static (Traversal/
-    /// Aggregation) emits OR-of-`startsWith`.
+    /// The `traversal_path` filter shape (`arrayExists` vs OR-of-`startsWith`)
+    /// is selected by the compiler from the originating query type, read off
+    /// the pipeline ctx (`ctx.compiled.input.query_type`) here and stamped on
+    /// `Input.hydration_dynamic` before compile.
     async fn execute_hydration(
         ctx: &QueryPipelineContext,
         nodes: Vec<InputNode>,
         total_ids: usize,
-        is_dynamic: bool,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         if nodes.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
@@ -82,8 +82,11 @@ impl HydrationStage {
             .cloned()
             .unwrap_or_default();
 
-        let hydration_input =
-            hydration_helpers::build_hydration_input(nodes, total_ids, is_dynamic);
+        let mut hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
+        hydration_input.hydration_dynamic = matches!(
+            ctx.compiled()?.input.query_type,
+            QueryType::Neighbors | QueryType::PathFinding
+        );
 
         let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile {
@@ -184,7 +187,7 @@ impl PipelineStage for HydrationStage {
                 let (nodes, ids_count) =
                     hydration_helpers::hydrate_static(templates, &query_result)?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count, false)
+                    Self::execute_hydration(ctx, nodes, ids_count)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
@@ -245,7 +248,7 @@ impl PipelineStage for HydrationStage {
                     let (nodes, ids_count) =
                         hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)?;
                     let (property_map, debug, executions) =
-                        Self::execute_hydration(ctx, nodes, ids_count, true)
+                        Self::execute_hydration(ctx, nodes, ids_count)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;

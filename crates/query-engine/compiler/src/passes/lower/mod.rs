@@ -56,7 +56,7 @@ impl EmitOutput {
     }
 }
 
-pub fn emit(plan: &Plan) -> Result<Node> {
+pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
     match &plan.body {
         PlanBody::Traversal => traversal::emit_traversal(plan),
         PlanBody::Aggregation {
@@ -70,11 +70,13 @@ pub fn emit(plan: &Plan) -> Result<Node> {
             has_non_denorm,
         } => neighbors::emit_neighbors(plan, center, *direction, edge, *has_non_denorm),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, pf),
-        PlanBody::Hydration(nodes) => hydration::emit_hydration(nodes, plan.limit),
+        PlanBody::Hydration(nodes) => {
+            hydration::emit_hydration(nodes, plan.limit, input.hydration_dynamic)
+        }
     }
 }
 
 pub fn lower(input: &mut Input) -> Result<Node> {
     let plan = plan::plan(input)?;
-    emit(&plan)
+    emit(&plan, input)
 }
