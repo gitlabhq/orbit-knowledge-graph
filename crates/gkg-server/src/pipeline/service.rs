@@ -80,6 +80,7 @@ impl QueryPipelineService {
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
+        timeout: std::time::Duration,
     ) -> Result<PipelineOutput, PipelineError> {
         let mut obs = MultiObserver::new(vec![
             Box::new(OTelPipelineObserver::start()),
@@ -118,25 +119,41 @@ impl QueryPipelineService {
             phases: TypeMap::default(),
         };
 
-        let output = PipelineRunner::start(&mut ctx, &mut obs)
-            .then(&SecurityStage)
-            .await?
-            .then(&CompilationStage)
-            .await?
-            .then(&ClickHouseExecutor)
-            .await?
-            .then(&ExtractionStage)
-            .await?
-            .then(&AuthorizationStage)
-            .await?
-            .then(&RedactionStage)
-            .await?
-            .then(&HydrationStage)
-            .await?
-            .then(&OutputStage)
-            .await?
-            .finish()
-            .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))?;
+        // The timeout lives inside run_query so the observer is still alive
+        // when it fires. Dropping the future from outside (the prior shape)
+        // tore down the observer before record_error could run, leaving
+        // timed-out queries invisible to every metric.
+        let pipeline = async {
+            PipelineRunner::start(&mut ctx, &mut obs)
+                .then(&SecurityStage)
+                .await?
+                .then(&CompilationStage)
+                .await?
+                .then(&ClickHouseExecutor)
+                .await?
+                .then(&ExtractionStage)
+                .await?
+                .then(&AuthorizationStage)
+                .await?
+                .then(&RedactionStage)
+                .await?
+                .then(&HydrationStage)
+                .await?
+                .then(&OutputStage)
+                .await?
+                .finish()
+                .ok_or_else(|| PipelineError::custom("OutputStage did not produce PipelineOutput"))
+        };
+
+        let output = match tokio::time::timeout(timeout, pipeline).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                let e = PipelineError::Timeout;
+                obs.record_error(&e);
+                return Err(e);
+            }
+        };
 
         obs.finish(output.row_count, output.redacted_count);
         Ok(output)

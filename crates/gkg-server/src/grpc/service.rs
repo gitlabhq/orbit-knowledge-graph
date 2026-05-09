@@ -5,6 +5,7 @@ use std::sync::Arc;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use ontology::Ontology;
+use query_engine::pipeline::PipelineError;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -286,81 +287,68 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         tokio::spawn(
             async move {
-                let handler = async {
-                    let req = match receive_query_request(&mut stream, &tx).await {
-                        Some(r) => r,
-                        None => return,
-                    };
-
-                    info!(query_len = req.query.len(), "Executing query");
-
-                    let use_llm_format = req.format == ResponseFormat::Llm as i32;
-
-                    let result = pipeline
-                        .run_query(claims, &req.query, tx.clone(), stream)
-                        .await;
-
-                    match result {
-                        Ok(output) => {
-                            info!("Sending final query result");
-
-                            use crate::proto::execute_query_result::Content;
-
-                            // Static dispatch: monomorphize per formatter type
-                            // instead of going through a vtable.
-                            let (formatted, format_version, format_name) = if use_llm_format {
-                                GoonFormatter.format_stamped(&output)
-                            } else {
-                                GraphFormatter.format_stamped(&output)
-                            };
-
-                            let content = if use_llm_format {
-                                Some(Content::FormattedText(formatted.to_string()))
-                            } else {
-                                Some(Content::ResultJson(formatted.to_string()))
-                            };
-
-                            let metadata = Some(QueryMetadata {
-                                query_type: output.query_type,
-                                raw_query_strings: output.raw_query_strings,
-                                row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
-                                format_version,
-                                format_name: proto_format_name(format_name).into(),
-                            });
-
-                            let _ = tx
-                                .send(Ok(ExecuteQueryMessage {
-                                    content: Some(execute_query_message::Content::Result(
-                                        ExecuteQueryResult { content, metadata },
-                                    )),
-                                }))
-                                .await;
-                        }
-                        Err(e) => {
-                            send_query_error(&tx, e).await;
-                        }
-                    }
+                let req = match receive_query_request(&mut stream, &tx).await {
+                    Some(r) => r,
+                    None => return,
                 };
 
-                if tokio::time::timeout(std::time::Duration::from_secs(stream_timeout), handler)
-                    .await
-                    .is_err()
-                {
-                    // Stream timeout drops the handler future before any
-                    // observer can fire, so bump the terminal-state counters
-                    // here. Mirrors the structured-field shape of
-                    // `send_query_error` so log readers can filter timeouts
-                    // alongside other failure modes.
-                    crate::pipeline::metrics::record_query_timeout();
-                    tracing::warn!(
-                        code = "deadline_exceeded",
-                        failure_reason = "timeout",
-                        timeout_secs = stream_timeout,
-                        "Query stream timed out",
-                    );
-                    let _ = tx
-                        .send(Err(Status::deadline_exceeded("Query stream timed out")))
-                        .await;
+                info!(query_len = req.query.len(), "Executing query");
+
+                let use_llm_format = req.format == ResponseFormat::Llm as i32;
+
+                let timeout = std::time::Duration::from_secs(stream_timeout);
+                let result = pipeline
+                    .run_query(claims, &req.query, tx.clone(), stream, timeout)
+                    .await;
+
+                match result {
+                    Ok(output) => {
+                        info!("Sending final query result");
+
+                        use crate::proto::execute_query_result::Content;
+
+                        // Static dispatch: monomorphize per formatter type
+                        // instead of going through a vtable.
+                        let (formatted, format_version, format_name) = if use_llm_format {
+                            GoonFormatter.format_stamped(&output)
+                        } else {
+                            GraphFormatter.format_stamped(&output)
+                        };
+
+                        let content = if use_llm_format {
+                            Some(Content::FormattedText(formatted.to_string()))
+                        } else {
+                            Some(Content::ResultJson(formatted.to_string()))
+                        };
+
+                        let metadata = Some(QueryMetadata {
+                            query_type: output.query_type,
+                            raw_query_strings: output.raw_query_strings,
+                            row_count: i32::try_from(output.row_count).unwrap_or(i32::MAX),
+                            format_version,
+                            format_name: proto_format_name(format_name).into(),
+                        });
+
+                        let _ = tx
+                            .send(Ok(ExecuteQueryMessage {
+                                content: Some(execute_query_message::Content::Result(
+                                    ExecuteQueryResult { content, metadata },
+                                )),
+                            }))
+                            .await;
+                    }
+                    Err(e @ PipelineError::Timeout) => {
+                        // run_query already logged via send_query_error and
+                        // recorded the metric through the observer chain.
+                        // Translate to deadline_exceeded for the gRPC client.
+                        send_query_error(&tx, e).await;
+                        let _ = tx
+                            .send(Err(Status::deadline_exceeded("Query stream timed out")))
+                            .await;
+                    }
+                    Err(e) => {
+                        send_query_error(&tx, e).await;
+                    }
                 }
             }
             .instrument(span),

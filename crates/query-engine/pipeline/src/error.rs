@@ -26,6 +26,9 @@ pub enum PipelineError {
     #[error("Streaming channel not available: {0}")]
     Streaming(String),
 
+    #[error("Query exceeded the configured stream timeout")]
+    Timeout,
+
     #[error("{0}")]
     Custom(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -39,6 +42,7 @@ impl PipelineError {
             Self::Authorization(_) => "authorization_error",
             Self::ContentResolution(_) => "content_resolution_error",
             Self::Streaming(_) => "streaming_error",
+            Self::Timeout => "timeout",
             Self::Custom(_) => "custom_error",
         }
     }
