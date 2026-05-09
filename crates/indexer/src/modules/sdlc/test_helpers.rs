@@ -4,6 +4,8 @@ use futures::stream;
 
 use super::datalake::{DatalakeError, DatalakeQuery, RecordBatchStream};
 use super::metrics::SdlcMetrics;
+use std::collections::HashMap;
+
 use crate::checkpoint::{Checkpoint, CheckpointError, CheckpointStore};
 
 pub(crate) fn test_metrics() -> SdlcMetrics {
@@ -62,6 +64,13 @@ pub(crate) struct MockCheckpointStore;
 impl CheckpointStore for MockCheckpointStore {
     async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
         Ok(None)
+    }
+
+    async fn load_by_prefix(
+        &self,
+        _prefix: &str,
+    ) -> Result<HashMap<String, Checkpoint>, CheckpointError> {
+        Ok(HashMap::new())
     }
 
     async fn save_progress(

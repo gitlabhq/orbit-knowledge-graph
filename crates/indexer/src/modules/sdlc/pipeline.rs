@@ -635,6 +635,13 @@ mod tests {
             Ok(self.state.lock().unwrap().clone())
         }
 
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<std::collections::HashMap<String, Checkpoint>, CheckpointError> {
+            Ok(std::collections::HashMap::new())
+        }
+
         async fn save_progress(
             &self,
             _key: &str,

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use tracing::info;
 
 use crate::checkpoint::{CheckpointStore, entity_checkpoint_key};
@@ -119,8 +119,17 @@ impl SimpleEntityPipeline {
         &self,
         request: &EntityIndexingRequest,
     ) -> Result<CheckpointState, HandlerError> {
-        let unified_key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, None);
-        if let Some(cp) = self.load_checkpoint(&unified_key).await?
+        let base_prefix = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(&base_prefix)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to load checkpoints: {err}"))
+            })?;
+
+        let unified_key = format!("{base_prefix}.{}", self.plan.name);
+        if let Some(cp) = checkpoints.get(&unified_key)
             && cp.watermark.timestamp_micros() > 0
         {
             return Ok(CheckpointState::Completed);
@@ -131,13 +140,15 @@ impl SimpleEntityPipeline {
             None => return Ok(CheckpointState::Completed),
         };
 
-        let pending = self
-            .find_pending_partitions(
-                &request.scope,
-                &request.entity_kind,
-                strategy.partition_count(),
-            )
-            .await?;
+        let mut pending = Vec::new();
+        for i in 0..strategy.partition_count() {
+            let spec = stub_partition_spec(i, strategy.partition_count());
+            let key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, Some(&spec));
+            match checkpoints.get(&key) {
+                Some(cp) if cp.cursor_values.is_none() => {}
+                _ => pending.push(i),
+            }
+        }
 
         if pending.len() == strategy.partition_count() as usize {
             Ok(CheckpointState::NoCheckpoint)
@@ -291,54 +302,28 @@ impl SimpleEntityPipeline {
         }
     }
 
-    async fn find_pending_partitions(
-        &self,
-        scope: &IndexingScope,
-        entity_kind: &str,
-        partition_count: u32,
-    ) -> Result<Vec<u32>, HandlerError> {
-        let mut pending = Vec::new();
-
-        for i in 0..partition_count {
-            let spec = stub_partition_spec(i, partition_count);
-            let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
-            match self.load_checkpoint(&key).await? {
-                Some(cp) if cp.cursor_values.is_none() => {}
-                _ => pending.push(i),
-            }
-        }
-
-        Ok(pending)
-    }
-
     async fn consolidate_checkpoint(
         &self,
         scope: &IndexingScope,
         entity_kind: &str,
     ) -> Result<(), HandlerError> {
-        let partition_count = self
-            .partition_strategy
-            .as_ref()
-            .map(|s| s.partition_count())
-            .unwrap_or(1);
+        let base_prefix = entity_checkpoint_key(scope, entity_kind, None);
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(&base_prefix)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to load checkpoints: {err}"))
+            })?;
 
-        let mut min_watermark: Option<DateTime<Utc>> = None;
-
-        for i in 0..partition_count {
-            let spec = stub_partition_spec(i, partition_count);
-            let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
-            if let Some(cp) = self.load_checkpoint(&key).await? {
-                let wm = cp.watermark;
-                min_watermark = Some(match min_watermark {
-                    Some(current) if wm < current => wm,
-                    Some(current) => current,
-                    None => wm,
-                });
-            }
-        }
+        let unified_key = format!("{base_prefix}.{}", self.plan.name);
+        let min_watermark = checkpoints
+            .iter()
+            .filter(|(key, _)| *key != &unified_key)
+            .map(|(_, cp)| cp.watermark)
+            .min();
 
         let watermark = min_watermark.unwrap_or_else(Utc::now);
-        let unified_key = self.plan_checkpoint_key(scope, entity_kind, None);
         self.checkpoint_store
             .save_completed(&unified_key, &watermark)
             .await
@@ -349,21 +334,11 @@ impl SimpleEntityPipeline {
             })?;
 
         info!(
-            partitions = partition_count,
             consolidated_watermark = %watermark,
             "consolidated partition checkpoints"
         );
 
         Ok(())
-    }
-
-    async fn load_checkpoint(
-        &self,
-        key: &str,
-    ) -> Result<Option<crate::checkpoint::Checkpoint>, HandlerError> {
-        self.checkpoint_store.load(key).await.map_err(|err| {
-            HandlerError::Processing(format!("failed to load checkpoint for {key}: {err}"))
-        })
     }
 
     fn plan_checkpoint_key(
