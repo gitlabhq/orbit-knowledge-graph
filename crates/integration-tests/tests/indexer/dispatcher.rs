@@ -17,7 +17,7 @@ use indexer::modules::sdlc::dispatch::{
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::topic::{
     ENTITY_INDEXING_SUBJECT_PATTERN, EntityIndexingRequest, GLOBAL_INDEXING_SUBJECT,
-    INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN,
+    INDEXER_STREAM, IndexingScope, NAMESPACE_INDEXING_SUBJECT_PATTERN,
 };
 use ontology::EtlScope;
 use serde::Deserialize;
@@ -291,9 +291,7 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
 
     let global_user: Vec<_> = requests
         .iter()
-        .filter(|r| {
-            r.entity_kind == "User" && matches!(r.scope, indexer::topic::IndexingScope::Global)
-        })
+        .filter(|r| r.entity_kind == "User" && matches!(r.scope, IndexingScope::Global))
         .collect();
     assert_eq!(
         global_user.len(),
@@ -305,8 +303,7 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
     let namespaced_project: Vec<_> = requests
         .iter()
         .filter(|r| {
-            r.entity_kind == "Project"
-                && matches!(r.scope, indexer::topic::IndexingScope::Namespace { .. })
+            r.entity_kind == "Project" && matches!(r.scope, IndexingScope::Namespace { .. })
         })
         .collect();
     assert_eq!(
@@ -318,7 +315,7 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
     let namespace_ids: HashSet<i64> = namespaced_project
         .iter()
         .filter_map(|r| match &r.scope {
-            indexer::topic::IndexingScope::Namespace { namespace_id, .. } => Some(*namespace_id),
+            IndexingScope::Namespace { namespace_id, .. } => Some(*namespace_id),
             _ => None,
         })
         .collect();

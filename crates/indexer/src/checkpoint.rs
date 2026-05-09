@@ -21,23 +21,19 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("ns.{namespace_id}")
 }
 
-pub fn entity_position_key(scope: &IndexingScope) -> String {
-    match scope {
-        IndexingScope::Global => "global".to_string(),
-        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
-    }
-}
-
 pub fn entity_checkpoint_key(
     scope: &IndexingScope,
     entity_kind: &str,
     partition: Option<&PartitionSpec>,
 ) -> String {
-    let base = entity_position_key(scope);
+    let prefix = match scope {
+        IndexingScope::Global => "global".to_string(),
+        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
+    };
     match partition {
-        None => format!("{base}.{entity_kind}"),
+        None => format!("{prefix}.{entity_kind}"),
         Some(p) => format!(
-            "{base}.{entity_kind}.p{}of{}",
+            "{prefix}.{entity_kind}.p{}of{}",
             p.partition_index, p.total_partitions
         ),
     }
@@ -257,14 +253,5 @@ mod tests {
         };
         let key = entity_checkpoint_key(&scope, "MergeRequest", Some(&spec));
         assert_eq!(key, "ns.100.MergeRequest.p2of4");
-    }
-
-    #[test]
-    fn entity_position_key_matches_namespace_position_key() {
-        let scope = IndexingScope::Namespace {
-            namespace_id: 100,
-            traversal_path: "42/100/".to_string(),
-        };
-        assert_eq!(entity_position_key(&scope), namespace_position_key(100));
     }
 }

@@ -12,14 +12,8 @@ use super::pipeline::{Pipeline, PipelineContext};
 use super::plan::PipelinePlan;
 use crate::checkpoint::entity_checkpoint_key;
 
-#[allow(
-    dead_code,
-    reason = "used by EntityIndexingHandler in a follow-up commit"
-)]
 #[async_trait]
 pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
-    fn entity_kind(&self) -> &str;
-
     async fn execute(
         &self,
         request: &EntityIndexingRequest,
@@ -28,10 +22,6 @@ pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
     ) -> Result<(), HandlerError>;
 }
 
-#[allow(
-    dead_code,
-    reason = "used by EntityIndexingHandler in a follow-up commit"
-)]
 pub(in crate::modules::sdlc) struct BasePipeline {
     plan: PipelinePlan,
     partition_column: Option<String>,
@@ -39,10 +29,6 @@ pub(in crate::modules::sdlc) struct BasePipeline {
 }
 
 impl BasePipeline {
-    #[allow(
-        dead_code,
-        reason = "used at handler registration in a follow-up commit"
-    )]
     pub fn new(
         plan: PipelinePlan,
         partition_column: Option<String>,
@@ -58,10 +44,6 @@ impl BasePipeline {
 
 #[async_trait]
 impl EntityPipeline for BasePipeline {
-    fn entity_kind(&self) -> &str {
-        &self.plan.name
-    }
-
     async fn execute(
         &self,
         request: &EntityIndexingRequest,
@@ -101,10 +83,6 @@ impl EntityPipeline for BasePipeline {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "used by BasePipeline::execute above — flagged in non-test builds"
-)]
 fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
     match &spec.strategy {
         PartitionStrategy::Range {
@@ -114,10 +92,6 @@ fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "used at handler registration in a follow-up commit"
-)]
 pub(in crate::modules::sdlc) fn partition_column(
     order_by: &[String],
     scope: ontology::EtlScope,

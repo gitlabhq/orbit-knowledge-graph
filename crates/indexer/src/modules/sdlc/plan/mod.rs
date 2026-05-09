@@ -109,7 +109,6 @@ impl ExtractQuery {
         self.batch_size
     }
 
-    #[allow(dead_code, reason = "used by EntityPipeline in a follow-up commit")]
     pub fn with_additional_filter(mut self, filter_sql: &str) -> Self {
         if let Some(template) = &mut self.raw_template {
             *template = template.replace("{CURSOR}", &format!(" AND {filter_sql}{{CURSOR}}"));
@@ -222,10 +221,6 @@ pub(in crate::modules::sdlc) fn build_plans(
     )
 }
 
-#[allow(
-    dead_code,
-    reason = "used at handler registration in a follow-up commit"
-)]
 pub(in crate::modules::sdlc) fn build_entity_plans(
     ontology: &ontology::Ontology,
     default_batch_size: u64,

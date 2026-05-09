@@ -59,7 +59,6 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
-#[allow(dead_code, reason = "used by build_entity_plans in a follow-up commit")]
 pub(in crate::modules::sdlc) fn lower_flat(
     inputs: PlanInput,
     ontology: &Ontology,

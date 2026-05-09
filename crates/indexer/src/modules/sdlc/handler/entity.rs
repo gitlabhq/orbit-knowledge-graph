@@ -11,12 +11,8 @@ use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::topic::EntityIndexingRequest;
 use crate::types::{Envelope, SerializationError, Subscription};
 
-#[allow(
-    dead_code,
-    reason = "used at handler registration in a follow-up commit"
-)]
 pub struct EntityIndexingHandler {
-    entity_kind: &'static str,
+    entity_kind: String,
     subscription: Subscription,
     pipeline: Arc<dyn EntityPipeline>,
     metrics: SdlcMetrics,
@@ -24,10 +20,6 @@ pub struct EntityIndexingHandler {
 }
 
 impl EntityIndexingHandler {
-    #[allow(
-        dead_code,
-        reason = "used at handler registration in a follow-up commit"
-    )]
     pub fn new(
         entity_kind: String,
         pipeline: Arc<dyn EntityPipeline>,
@@ -35,7 +27,6 @@ impl EntityIndexingHandler {
         config: HandlerConfiguration,
     ) -> Self {
         let subscription = EntityIndexingRequest::entity_subscription(&entity_kind);
-        let entity_kind: &'static str = Box::leak(entity_kind.into_boxed_str());
         Self {
             entity_kind,
             subscription,
@@ -49,7 +40,7 @@ impl EntityIndexingHandler {
 #[async_trait]
 impl Handler for EntityIndexingHandler {
     fn name(&self) -> &str {
-        self.entity_kind
+        &self.entity_kind
     }
 
     fn subscription(&self) -> Subscription {
@@ -83,7 +74,7 @@ impl Handler for EntityIndexingHandler {
             .to_std()
             .unwrap_or_default();
         self.metrics
-            .record_handler_duration(self.entity_kind, elapsed.as_secs_f64());
+            .record_handler_duration(&self.entity_kind, elapsed.as_secs_f64());
 
         if result.is_ok() {
             info!(
@@ -100,6 +91,7 @@ impl Handler for EntityIndexingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::destination::Destination;
     use crate::modules::sdlc::entity_pipeline::BasePipeline;
     use crate::modules::sdlc::pipeline::Pipeline;
     use crate::modules::sdlc::plan::build_plans;
@@ -107,6 +99,18 @@ mod tests {
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::Ontology;
+
+    fn test_handler_context() -> HandlerContext {
+        let destination = Arc::new(MockDestination::new());
+        let mock_nats = Arc::new(MockNatsServices::new());
+        HandlerContext::new(
+            destination,
+            mock_nats.clone(),
+            Arc::new(MockLockService::new()),
+            ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
+        )
+    }
 
     #[tokio::test]
     async fn handle_processes_global_entity() {
@@ -146,17 +150,7 @@ mod tests {
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
 
-        let destination = Arc::new(MockDestination::new());
-        let mock_nats = Arc::new(MockNatsServices::new());
-        let context = HandlerContext::new(
-            destination,
-            mock_nats.clone(),
-            Arc::new(MockLockService::new()),
-            ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
-        );
-
-        let result = handler.handle(context, envelope).await;
+        let result = handler.handle(test_handler_context(), envelope).await;
         assert!(result.is_ok());
     }
 
@@ -194,17 +188,7 @@ mod tests {
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
 
-        let destination = Arc::new(MockDestination::new());
-        let mock_nats = Arc::new(MockNatsServices::new());
-        let context = HandlerContext::new(
-            destination,
-            mock_nats.clone(),
-            Arc::new(MockLockService::new()),
-            ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
-        );
-
-        let result = handler.handle(context, envelope).await;
+        let result = handler.handle(test_handler_context(), envelope).await;
         assert!(result.is_ok());
     }
 
@@ -227,10 +211,6 @@ mod tests {
 
     #[async_trait]
     impl EntityPipeline for NoopPipeline {
-        fn entity_kind(&self) -> &str {
-            "Noop"
-        }
-
         async fn execute(
             &self,
             _request: &EntityIndexingRequest,
@@ -240,6 +220,4 @@ mod tests {
             Ok(())
         }
     }
-
-    use crate::destination::Destination;
 }

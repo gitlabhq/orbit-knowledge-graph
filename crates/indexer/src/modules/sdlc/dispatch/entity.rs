@@ -1,8 +1,3 @@
-#![allow(
-    dead_code,
-    reason = "used at dispatcher registration in a follow-up commit"
-)]
-
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -95,35 +90,27 @@ impl EntityDispatcher {
         let mut skipped: u64 = 0;
 
         for entity in &self.entities {
-            match entity.scope {
-                EtlScope::Global => {
-                    let request = EntityIndexingRequest {
-                        entity_kind: entity.entity_kind.clone(),
-                        watermark,
-                        scope: IndexingScope::Global,
-                        partition: None,
-                    };
-                    match self.publish_request(&request).await? {
-                        PublishOutcome::Published => dispatched += 1,
-                        PublishOutcome::Skipped => skipped += 1,
-                    }
-                }
-                EtlScope::Namespaced => {
-                    for ns in &namespaces {
-                        let request = EntityIndexingRequest {
-                            entity_kind: entity.entity_kind.clone(),
-                            watermark,
-                            scope: IndexingScope::Namespace {
-                                namespace_id: ns.namespace_id,
-                                traversal_path: ns.traversal_path.clone(),
-                            },
-                            partition: None,
-                        };
-                        match self.publish_request(&request).await? {
-                            PublishOutcome::Published => dispatched += 1,
-                            PublishOutcome::Skipped => skipped += 1,
-                        }
-                    }
+            let scopes: Vec<IndexingScope> = match entity.scope {
+                EtlScope::Global => vec![IndexingScope::Global],
+                EtlScope::Namespaced => namespaces
+                    .iter()
+                    .map(|ns| IndexingScope::Namespace {
+                        namespace_id: ns.namespace_id,
+                        traversal_path: ns.traversal_path.clone(),
+                    })
+                    .collect(),
+            };
+
+            for scope in scopes {
+                let request = EntityIndexingRequest {
+                    entity_kind: entity.entity_kind.clone(),
+                    watermark,
+                    scope,
+                    partition: None,
+                };
+                match self.publish_request(&request).await? {
+                    PublishOutcome::Published => dispatched += 1,
+                    PublishOutcome::Skipped => skipped += 1,
                 }
             }
         }
