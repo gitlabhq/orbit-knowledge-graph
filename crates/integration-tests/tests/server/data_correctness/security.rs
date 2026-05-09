@@ -1,5 +1,5 @@
 use super::helpers::*;
-use query_engine::compiler::TraversalPath;
+use query_engine::compiler::{AccessLevel, TraversalPath};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search: traversal path scoping
@@ -102,6 +102,112 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
     resp.assert_filter("Project", "visibility_level", |n| {
         n.prop_str("visibility_level") == Some("public")
     });
+}
+
+pub(super) async fn search_traversal_path_filter_returns_matching_descendants(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["name", "traversal_path"],
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/200/"}}},
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Project", &[1010]);
+    resp.assert_filter("Project", "traversal_path", |n| {
+        n.prop_str("traversal_path")
+            .is_some_and(|path| path.starts_with("1/100/200/"))
+    });
+}
+
+pub(super) async fn search_traversal_path_filter_outside_scope_rejects_at_compile(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 10
+        }"#,
+        &ontology,
+        &SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    );
+
+    let err = result.expect_err("traversal_path filter above JWT scope must reject");
+    assert!(
+        err.to_string().contains("authorized traversal_path scope"),
+        "error should mention authorized traversal_path scope, got: {err}"
+    );
+}
+
+pub(super) async fn relationship_traversal_path_filter_returns_matching_edges(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name", "traversal_path"]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "g",
+                "filters": {"traversal_path": "1/102/"}
+            }],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Group", &[102]);
+    resp.assert_edge_set("MEMBER_OF", &[(1, 102)]);
+}
+
+pub(super) async fn relationship_traversal_path_filter_outside_scope_rejects_at_compile(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "g",
+                "filters": {"traversal_path": "1/102/"}
+            }],
+            "limit": 10
+        }"#,
+        &ontology,
+        &SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    );
+
+    let err = result.expect_err("relationship traversal_path outside scope must reject");
+    assert!(
+        err.to_string().contains("authorized traversal_path scope"),
+        "error should mention authorized traversal_path scope, got: {err}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,9 +323,9 @@ fn non_admin_ctx() -> SecurityContext {
 }
 
 fn admin_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()])
+    SecurityContext::new_with_roles(1, vec![owner_path("1/")])
         .unwrap()
-        .with_role(true, None)
+        .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestContext) {
@@ -888,6 +994,10 @@ fn developer_path(path: &str) -> TraversalPath {
     TraversalPath::new(path, 30)
 }
 
+fn owner_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, AccessLevel::Owner as u32)
+}
+
 /// Reporter on 1/100/ but no Security Manager access anywhere. Counting
 /// vulnerabilities per project must return no rows for Project 1000 — the
 /// Vulnerability scan is filtered to zero traversal paths and produces
@@ -1141,6 +1251,67 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
     // result set entirely.
     resp.assert_empty_aggregation();
     resp.assert_node_absent("Project", 1000);
+}
+
+pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability",
+                 "filters": {"traversal_path": "1/100/1000/"}}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    );
+
+    let err = result.expect_err(
+        "Reporter traversal_path filter on SecurityManager entity must reject at compile time",
+    );
+    assert!(
+        err.to_string().contains("authorized traversal_path scope"),
+        "error should mention authorized traversal_path scope, got: {err}"
+    );
+}
+
+pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_manager_counts(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project",
+                 "id_range": {"start": 1, "end": 10000},
+                 "columns": ["name", "traversal_path"]},
+                {"id": "v", "entity": "Vulnerability",
+                 "filters": {"traversal_path": "1/100/1000/"}}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_node("Project", 1000, |n| n.prop_i64("c") == Some(1));
+    resp.assert_filter("Project", "traversal_path", |n| {
+        n.prop_str("traversal_path") == Some("1/100/1000/")
+    });
+    resp.assert_node_absent("Project", 1001);
+    resp.assert_node_absent("Project", 1004);
 }
 
 /// Compiled SQL must bind `Bool(false)` (no paths) for the Vulnerability

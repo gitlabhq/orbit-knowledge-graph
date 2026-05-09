@@ -24,6 +24,9 @@ pub enum QueryError {
     #[error("allowlist rejected: {0}")]
     AllowlistRejected(String),
 
+    #[error("authorization error: {0}")]
+    Authorization(String),
+
     #[error("depth exceeded: {0}")]
     DepthExceeded(String),
 
@@ -60,6 +63,7 @@ impl QueryError {
                 | Self::ReferenceError(_)
                 | Self::PaginationError(_)
                 | Self::AllowlistRejected(_)
+                | Self::Authorization(_)
                 | Self::DepthExceeded(_)
                 | Self::LimitExceeded(_)
         )
@@ -88,6 +92,7 @@ mod tests {
             (QueryError::DepthExceeded("bad".into()), true),
             (QueryError::LimitExceeded("bad".into()), true),
             (QueryError::AllowlistRejected("bad".into()), true),
+            (QueryError::Authorization("bad".into()), true),
             (QueryError::Lowering("bad".into()), false),
             (QueryError::Enforcement("bad".into()), false),
             (QueryError::Codegen("bad".into()), false),

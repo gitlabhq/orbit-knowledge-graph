@@ -288,6 +288,7 @@ fn split_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{AccessLevel, TraversalPath};
     use ontology::{Field, FieldSource, VirtualSource};
 
     fn db_field(name: &str) -> Field {
@@ -499,9 +500,12 @@ mod tests {
     }
 
     fn admin_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_role(true, None)
+        SecurityContext::new_with_roles(
+            1,
+            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .unwrap()
+        .with_role(true, Some(AccessLevel::Owner as u32))
     }
 
     fn neighbors_input(mode: DynamicColumnMode) -> Input {

@@ -157,7 +157,7 @@ The query engine fires a single counter during compilation, with a closed-enum `
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline) | Total queries the compiler rejected before execution. Filter on `failure_reason` to recover per-class breakdowns previously held in the per-variant threat counters. |
+| `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/authorization/depth/limit/security/lowering/enforcement/codegen/pipeline) | Total queries the compiler rejected before execution. Filter on `failure_reason` to recover per-class breakdowns previously held in the per-variant threat counters. |
 
 *Circuit breaker metrics (resilience):*
 

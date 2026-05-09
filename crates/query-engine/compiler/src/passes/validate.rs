@@ -10,7 +10,8 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType};
-use ontology::{DataType, Ontology};
+use crate::types::SecurityContext;
+use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
@@ -394,9 +395,15 @@ impl<'a> Validator<'a> {
                 continue;
             };
             for (prop, filter) in &node.filters {
-                if !self
-                    .ontology
-                    .check_field_flag(entity, prop, |f| f.filterable)
+                let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
+                    && self
+                        .ontology
+                        .get_node(entity)
+                        .is_some_and(|n| n.has_traversal_path);
+                if !is_traversal_path_filter
+                    && !self
+                        .ontology
+                        .check_field_flag(entity, prop, |f| f.filterable)
                 {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
@@ -405,6 +412,12 @@ impl<'a> Validator<'a> {
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;
                 };
+                if is_traversal_path_filter {
+                    Self::check_traversal_path_filter(
+                        &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                        filter,
+                    )?;
+                }
                 self.check_one_filter(entity, prop, filter, data_type)?;
             }
         }
@@ -416,6 +429,12 @@ impl<'a> Validator<'a> {
                         "relationship[{i}] filter on unknown edge column \"{prop}\""
                     )));
                 };
+                if prop == TRAVERSAL_PATH_COLUMN {
+                    Self::check_traversal_path_filter(
+                        &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+                        filter,
+                    )?;
+                }
                 self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
             }
         }
@@ -444,6 +463,45 @@ impl<'a> Validator<'a> {
 
     /// Minimum number of characters required in a LIKE filter value.
     const MIN_LIKE_PATTERN_LEN: usize = 3;
+
+    fn check_traversal_path_filter(label: &str, filter: &InputFilter) -> Result<()> {
+        match filter.op.unwrap_or(FilterOp::Eq) {
+            FilterOp::Eq | FilterOp::StartsWith => {
+                let Some(path) = filter.value.as_ref().and_then(|v| v.as_str()) else {
+                    return Err(QueryError::Validation(format!(
+                        "{label}: value must be a traversal_path string"
+                    )));
+                };
+                Self::check_traversal_path_value(label, path)
+            }
+            FilterOp::In => {
+                let Some(paths) = filter.value.as_ref().and_then(|v| v.as_array()) else {
+                    return Err(QueryError::Validation(format!(
+                        "{label}: \"in\" requires an array of traversal_path strings"
+                    )));
+                };
+                for path in paths {
+                    let Some(path) = path.as_str() else {
+                        return Err(QueryError::Validation(format!(
+                            "{label}: \"in\" values must be traversal_path strings"
+                        )));
+                    };
+                    Self::check_traversal_path_value(label, path)?;
+                }
+                Ok(())
+            }
+            _ => Err(QueryError::Validation(format!(
+                "{label}: only eq, in, and starts_with are supported"
+            ))),
+        }
+    }
+
+    fn check_traversal_path_value(label: &str, path: &str) -> Result<()> {
+        SecurityContext::validate_traversal_path(path).map_err(|err| match err {
+            QueryError::Security(msg) => QueryError::Validation(format!("{label}: {msg}")),
+            other => other,
+        })
+    }
 
     fn check_one_filter(
         &self,
@@ -493,8 +551,10 @@ impl<'a> Validator<'a> {
             return Ok(());
         };
 
-        // Enforce minimum pattern length for LIKE and token filters.
-        if is_like_op || is_token_op {
+        // Free-text LIKE and token filters need a minimum length.
+        // traversal_path is a hierarchical scope where short paths like "1/"
+        // are valid and no broader than SecurityPass's required predicate.
+        if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
                 return Err(QueryError::Validation(format!(
@@ -2156,9 +2216,12 @@ mod tests {
                 "Group",
                 [
                     ("name", DataType::String),
+                    ("private_note", DataType::String),
                     ("traversal_path", DataType::String),
                 ],
             )
+            .modify_field("Group", "private_note", |f| f.filterable = false)
+            .unwrap()
             .modify_field("Group", "traversal_path", |f| f.filterable = false)
             .unwrap()
     }
@@ -2234,7 +2297,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "node": {"id": "g", "entity": "Group",
-                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+                     "filters": {"private_note": "secret"}},
             "limit": 10
         }"#,
         )
@@ -2244,6 +2307,118 @@ mod tests {
         assert!(
             err.to_string().contains("not filterable"),
             "expected filterable rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_filter_on_traversal_path_even_when_field_is_unfilterable() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "traversal_path scope is guarded by RestrictPass, not the ontology filterable flag"
+        );
+    }
+
+    #[test]
+    fn rejects_traversal_path_filter_on_global_entity() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1],
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("not filterable"),
+            "expected global entity traversal_path rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_traversal_path_filter_operator() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("only eq, in, and starts_with"),
+            "expected traversal_path operator rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_traversal_path_filter_format() {
+        let ont = ontology_with_unfilterable_field();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid traversal_path format"),
+            "expected traversal_path format rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_relationship_traversal_path_filter_operator() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "a", "entity": "Project", "node_ids": [1]},
+                {"id": "b", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "CONTAINS",
+                "from": "a",
+                "to": "b",
+                "filters": {"traversal_path": {"op": "ends_with", "value": "100/"}}
+            }],
+            "limit": 10
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("only eq, in, and starts_with"),
+            "expected relationship traversal_path operator rejection, got: {err}"
         );
     }
 

@@ -2,7 +2,7 @@
 
 use compiler::passes::lower::lower;
 use compiler::passes::validate::Validator;
-use compiler::{Node, SecurityContext, normalize};
+use compiler::{AccessLevel, Node, SecurityContext, TraversalPath, normalize};
 use ontology::{DataType, Ontology};
 
 pub fn test_ctx() -> SecurityContext {
@@ -10,9 +10,9 @@ pub fn test_ctx() -> SecurityContext {
 }
 
 pub fn admin_ctx() -> SecurityContext {
-    SecurityContext::new(1, vec!["1/".into()])
+    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", AccessLevel::Owner as u32)])
         .unwrap()
-        .with_role(true, None)
+        .with_role(true, Some(AccessLevel::Owner as u32))
 }
 
 pub fn test_ontology() -> Ontology {

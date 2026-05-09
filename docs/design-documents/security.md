@@ -67,12 +67,14 @@ This layer is primarily intended for .com customers to ensure that they can only
 
 - **At the ClickHouse Storage Layer**: The indexer writes each row with a `traversal_path` column encoding the full namespace hierarchy, starting with the organization ID as the first path segment.
 - **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary — access control comes from the traversal paths themselves.
+- **User-Supplied Traversal Path Filters**: Queries may filter `traversal_path` with exact, `in`, or prefix predicates. Before SQL generation, `RestrictPass` verifies each requested path is a descendant of a JWT traversal path that meets the target entity's `required_role` floor. Relationship `traversal_path` filters use the Reporter floor. Unsupported substring/suffix/comparison predicates are rejected, so user input can only narrow the Rails-granted scope.
 - **Cross-Org Queries Supported**: A user may hold traversal paths spanning multiple organizations (e.g., personal groups under a different org). `SecurityContext` accepts all paths that Rails authorizes, regardless of the user's home `organization_id`. Each query is scoped to exactly the set of paths granted by Rails.
 - **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
 
 **Code Review Requirements**:
 
 - The compiler's `SecurityPass` runs on all query types (search, traversal, aggregation, path-finding, neighbors). The `CheckPass` rejects any query where a `gl_*` table alias lacks a valid `startsWith` filter.
+- Tests that add `traversal_path` as a user-facing filter must cover node filters, relationship filters, out-of-scope paths, invalid path formats, and role floors above Reporter.
 - Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
@@ -384,6 +386,7 @@ Controls:
 
 - **Per-entity role floor**: `redaction.required_role` defaults to `reporter`. Security-domain entities (Vulnerability, Finding, VulnerabilityScanner, VulnerabilityIdentifier, VulnerabilityOccurrence, SecurityScan) declare `security_manager`, matching the minimum GitLab role designed for security team members.
 - **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause so the security pass has an alias to filter. Without this the compiler would elide the scan and defeat the gate.
+- **Traversal path filters cannot raise aggregation access**: when an aggregation query supplies a `traversal_path` filter on a gated entity, `RestrictPass` checks that path against the same role-filtered JWT path set used by `SecurityPass`. A Reporter path cannot satisfy a SecurityManager entity filter, even if the filter names a namespace under the Reporter path.
 - **Pre-filtering stays in place**: Layers 1 and 2 (`organization_id` and `traversal_id` filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
 - **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere, so misconfigured callers surface instead of silently returning empty results.
 

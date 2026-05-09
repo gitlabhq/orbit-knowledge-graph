@@ -8,9 +8,10 @@
 //! aggregation bypasses the Rails redaction layer that protects other query
 //! types. Runs after normalization (columns are expanded) and before lowering.
 
+use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Input, QueryType};
-use crate::types::SecurityContext;
+use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
+use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
 use ontology::Ontology;
 use std::collections::HashSet;
 
@@ -83,11 +84,121 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
     Ok(())
 }
 
+fn enforce_traversal_path_filters(
+    input: &Input,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Result<()> {
+    for node in &input.nodes {
+        let (Some(entity), Some(traversal_path_filter)) = (
+            node.entity.as_deref(),
+            node.filters.get(TRAVERSAL_PATH_COLUMN),
+        ) else {
+            continue;
+        };
+        let Some(ont_node) = ontology.get_node(entity) else {
+            continue;
+        };
+        // Entities without a redaction role use the normal traversal-path floor:
+        // Rails only sends Reporter+ paths, and stricter entities override this.
+        let min_role = ont_node
+            .redaction
+            .as_ref()
+            .map(|r| r.required_role.as_access_level())
+            .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
+        let eligible_paths = security_ctx.paths_at_least(min_role);
+        validate_traversal_path_filter_scope(
+            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+            traversal_path_filter,
+            &eligible_paths,
+        )?;
+    }
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        let Some(traversal_path_filter) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
+            continue;
+        };
+        let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
+        validate_traversal_path_filter_scope(
+            &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+            traversal_path_filter,
+            &eligible_paths,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_traversal_path_filter_scope(
+    label: &str,
+    traversal_path_filter: &InputFilter,
+    eligible_paths: &[&str],
+) -> Result<()> {
+    for path in traversal_path_values(label, traversal_path_filter)? {
+        validate_traversal_path_within_scope(label, path, eligible_paths)?;
+    }
+    Ok(())
+}
+
+fn invalid_traversal_path_filter_invariant(label: &str) -> QueryError {
+    QueryError::PipelineInvariant(format!(
+        "{label}: invalid traversal_path filter reached RestrictPass"
+    ))
+}
+
+fn traversal_path_values<'a>(
+    label: &str,
+    traversal_path_filter: &'a InputFilter,
+) -> Result<Vec<&'a str>> {
+    match traversal_path_filter.op.unwrap_or(FilterOp::Eq) {
+        FilterOp::Eq | FilterOp::StartsWith => traversal_path_filter
+            .value
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .map(|path| vec![path])
+            .ok_or_else(|| invalid_traversal_path_filter_invariant(label)),
+        FilterOp::In => {
+            let paths = traversal_path_filter
+                .value
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| invalid_traversal_path_filter_invariant(label))?;
+            paths
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .ok_or_else(|| invalid_traversal_path_filter_invariant(label))
+                })
+                .collect()
+        }
+        _ => Err(invalid_traversal_path_filter_invariant(label)),
+    }
+}
+
+fn validate_traversal_path_within_scope(
+    label: &str,
+    path: &str,
+    eligible_paths: &[&str],
+) -> Result<()> {
+    if eligible_paths
+        .iter()
+        .any(|authorized| path.starts_with(authorized))
+    {
+        return Ok(());
+    }
+
+    Err(QueryError::Authorization(format!(
+        "{label}: path is not within an authorized traversal_path scope for this entity"
+    )))
+}
+
 pub fn restrict(
     input: &mut Input,
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
+    enforce_traversal_path_filters(input, ontology, security_ctx)?;
+
     if security_ctx.admin {
         return Ok(());
     }
@@ -154,7 +265,8 @@ mod tests {
         AggFunction, FilterOp, InputAggregation, InputFilter, InputNode, InputOrderBy,
         OrderDirection, QueryType,
     };
-    use ontology::DataType;
+    use crate::types::{AccessLevel, TraversalPath};
+    use ontology::{DataType, RequiredRole};
     use serde_json::Value;
     use std::collections::HashMap;
 
@@ -203,9 +315,12 @@ mod tests {
     }
 
     fn admin_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_role(true, None)
+        SecurityContext::new_with_roles(
+            1,
+            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .unwrap()
+        .with_role(true, Some(AccessLevel::Owner as u32))
     }
 
     fn input_with_columns(cols: Vec<&str>) -> Input {
@@ -246,6 +361,29 @@ mod tests {
         }
     }
 
+    fn input_with_traversal_path_filter(entity: &str, filter: InputFilter) -> Input {
+        let mut filters = HashMap::new();
+        filters.insert(TRAVERSAL_PATH_COLUMN.to_string(), filter);
+        Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_n".into(),
+                entity: Some(entity.into()),
+                filters,
+                ..Default::default()
+            }],
+            ..Input::default()
+        }
+    }
+
+    fn traversal_path_filter(op: FilterOp, value: Value) -> InputFilter {
+        InputFilter {
+            op: Some(op),
+            value: Some(value),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn admin_bypasses_all_restrictions() {
         let ont = ontology();
@@ -265,6 +403,116 @@ mod tests {
         let ctx = admin_ctx();
         let mut input = input_with_filter("is_admin", Value::Bool(true));
         assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_accepts_traversal_path_filter_inside_scope() {
+        let ont = ontology();
+        let ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let mut input = input_with_traversal_path_filter(
+            "Group",
+            traversal_path_filter(FilterOp::StartsWith, Value::String("1/100/200/".into())),
+        );
+
+        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_rejects_traversal_path_filter_above_scope() {
+        let ont = ontology();
+        let ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let mut input = input_with_traversal_path_filter(
+            "Group",
+            traversal_path_filter(FilterOp::StartsWith, Value::String("1/".into())),
+        );
+
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "scope rejection should be an authorization error, got: {err:?}"
+        );
+        assert!(
+            err.is_client_safe(),
+            "traversal_path scope errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("authorized traversal_path scope"),
+            "error should reject paths outside the JWT scope, got: {err}"
+        );
+    }
+
+    #[test]
+    fn non_admin_rejects_traversal_path_filter_below_entity_role() {
+        let ont = Ontology::new()
+            .with_nodes(["Vulnerability"])
+            .with_fields("Vulnerability", [("traversal_path", DataType::String)])
+            .with_redaction("Vulnerability", "vulnerabilities", "id")
+            .with_redaction_role("Vulnerability", RequiredRole::SecurityManager);
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![crate::TraversalPath::new(
+                "1/100/",
+                DEFAULT_PATH_ACCESS_LEVEL,
+            )],
+        )
+        .unwrap();
+        let mut input = input_with_traversal_path_filter(
+            "Vulnerability",
+            traversal_path_filter(FilterOp::Eq, Value::String("1/100/".into())),
+        );
+
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "role-scope rejection should be an authorization error, got: {err:?}"
+        );
+        assert!(
+            err.is_client_safe(),
+            "traversal_path role-scope errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("authorized traversal_path scope"),
+            "Reporter paths must not satisfy SecurityManager traversal_path filters, got: {err}"
+        );
+    }
+
+    #[test]
+    fn non_admin_rejects_relationship_traversal_path_filter_outside_scope() {
+        let ont = ontology();
+        let ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                scoped_node(),
+                InputNode {
+                    id: "_h".into(),
+                    entity: Some("Group".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![crate::input::InputRelationship {
+                filters: HashMap::from([(
+                    TRAVERSAL_PATH_COLUMN.to_string(),
+                    traversal_path_filter(FilterOp::Eq, Value::String("2/".into())),
+                )]),
+                ..rel("_g", "_h")
+            }],
+            ..Input::default()
+        };
+
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Authorization(_)),
+            "relationship scope rejection should be an authorization error, got: {err:?}"
+        );
+        assert!(
+            err.is_client_safe(),
+            "relationship traversal_path scope errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("authorized traversal_path scope"),
+            "relationship traversal_path filters should be scoped too, got: {err}"
+        );
     }
 
     #[test]

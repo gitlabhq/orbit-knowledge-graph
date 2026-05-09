@@ -5,7 +5,8 @@ use std::sync::Arc;
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
-    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile, compile_input,
+    ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
+    compile_input,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1111,11 +1112,95 @@ fn equality_on_email_rejected_for_non_admin() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// filterable: false — traversal_path blocked at compile time
+// filterable: false — traversal_path is the one system field users may filter,
+// but RestrictPass scopes requested paths to the JWT traversal paths.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn filterable_rejects_traversal_path_starts_with() {
+fn filterable_allows_traversal_path_starts_with_inside_scope() {
+    compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/100/"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .expect("traversal_path starts_with inside JWT scope should compile");
+}
+
+#[test]
+fn filterable_allows_traversal_path_root_starts_with_inside_scope() {
+    compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "g", "entity": "Group",
+                     "filters": {"traversal_path": {"op": "starts_with", "value": "1/"}}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .expect("traversal_path root starts_with inside JWT scope should compile");
+}
+
+#[test]
+fn filterable_allows_traversal_path_equality_inside_scope() {
+    compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": "1/100/1000/"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .expect("traversal_path equality inside JWT scope should compile");
+}
+
+#[test]
+fn filterable_rejects_traversal_path_outside_scope() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "filters": {"traversal_path": "2/"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("authorized traversal_path scope"),
+        "expected traversal_path scope rejection, got: {err}"
+    );
+}
+
+#[test]
+fn filterable_rejects_traversal_path_above_scope() {
+    let err = compile(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project",
+                     "filters": {"traversal_path": "1/"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &compiler::SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("authorized traversal_path scope"),
+        "expected traversal_path scope rejection, got: {err}"
+    );
+}
+
+#[test]
+fn filterable_rejects_traversal_path_without_trailing_slash() {
     let err = compile(
         r#"{
             "query_type": "traversal",
@@ -1128,20 +1213,18 @@ fn filterable_rejects_traversal_path_starts_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("not an allowed value")
-            || err.to_string().contains("is not one of")
-            || err.to_string().contains("not filterable"),
-        "expected traversal_path rejection, got: {err}"
+        err.to_string().contains("invalid traversal_path format"),
+        "expected traversal_path format rejection, got: {err}"
     );
 }
 
 #[test]
-fn filterable_rejects_traversal_path_equality() {
+fn filterable_rejects_traversal_path_contains_operator() {
     let err = compile(
         r#"{
             "query_type": "traversal",
             "node": {"id": "p", "entity": "Project",
-                     "filters": {"traversal_path": "1/100/1000/"}},
+                     "filters": {"traversal_path": {"op": "contains", "value": "100"}}},
             "limit": 10
         }"#,
         &embedded_ontology(),
@@ -1149,31 +1232,28 @@ fn filterable_rejects_traversal_path_equality() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("not an allowed value")
-            || err.to_string().contains("is not one of")
-            || err.to_string().contains("not filterable"),
-        "expected traversal_path rejection, got: {err}"
+        err.to_string().contains("only eq, in, and starts_with"),
+        "expected traversal_path operator rejection, got: {err}"
     );
 }
 
 #[test]
-fn filterable_rejects_traversal_path_on_mr() {
+fn filterable_rejects_traversal_path_below_entity_role_floor() {
     let err = compile(
         r#"{
             "query_type": "traversal",
-            "node": {"id": "mr", "entity": "MergeRequest",
-                     "filters": {"traversal_path": "1/100/"}},
+            "node": {"id": "v", "entity": "Vulnerability",
+                     "filters": {"traversal_path": "1/100/1000/"}},
             "limit": 10
         }"#,
         &embedded_ontology(),
-        &test_ctx(),
+        &compiler::SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/100/", 20)])
+            .unwrap(),
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("not an allowed value")
-            || err.to_string().contains("is not one of")
-            || err.to_string().contains("not filterable"),
-        "expected traversal_path rejection on MR, got: {err}"
+        err.to_string().contains("authorized traversal_path scope"),
+        "expected traversal_path role-scope rejection, got: {err}"
     );
 }
 
