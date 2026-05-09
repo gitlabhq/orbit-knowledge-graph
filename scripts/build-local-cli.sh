@@ -45,7 +45,9 @@ case "$PLATFORM" in
                 CARGO_BUILD=(cargo xwin build)
                 ;;
             zigbuild)
-                TARGET="x86_64-pc-windows-gnu"
+                # gnullvm uses the LLVM toolchain conventions zig/clang expect;
+                # the plain gnu target hits aws-lc-sys -Wp,... GCC-isms.
+                TARGET="x86_64-pc-windows-gnullvm"
                 CARGO_BUILD=(cargo zigbuild)
                 ;;
             mingw)

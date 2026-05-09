@@ -103,8 +103,8 @@ local-cli-build-windows-zigbuild:
     ARCH: x86_64
     WINDOWS_METHOD: zigbuild
     # Zig's clang treats -Wdate-time as an error; mimalloc/duckdb use __DATE__/__TIME__.
-    CFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
-    CXXFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
+    CFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
+    CXXFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
