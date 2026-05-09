@@ -15,11 +15,17 @@ local items = [
   o.stat('Queries / min', 'Query pipeline calls per minute.',
     o.target('sum(rate(%s{%s}[5m]) * 60)' % [pipelineQueries, o.GKG_WEB_SEL], 'qpm', 'ORBIT_DS'),
     'short', 6),
-  o.stat('Success rate', 'Share of query pipeline calls that returned status="ok".',
+  o.stat('Compiler success', 'Share of queries that passed compilation. 1 minus (compile_error share). Drops here mean clients are sending queries the compiler refuses.',
     o.target(
-      'sum(rate(%s{%s, status="ok"}[5m])) / clamp_min(sum(rate(%s{%s}[5m])), 1)' %
+      '1 - sum(rate(%s{%s, status="compile_error"}[5m])) / clamp_min(sum(rate(%s{%s}[5m])), 1)' %
         [pipelineQueries, o.GKG_WEB_SEL, pipelineQueries, o.GKG_WEB_SEL],
-      'ok', 'ORBIT_DS'),
+      'compiler_ok', 'ORBIT_DS'),
+    'percentunit', 6),
+  o.stat('Pipeline success (post-compile)', 'Share of post-compile pipeline runs that returned status="ok". Compile rejects are excluded so this isolates server-side reliability.',
+    o.target(
+      'sum(rate(%s{%s, status="ok"}[5m])) / clamp_min(sum(rate(%s{%s, status!="compile_error"}[5m])), 1)' %
+        [pipelineQueries, o.GKG_WEB_SEL, pipelineQueries, o.GKG_WEB_SEL],
+      'pipeline_ok', 'ORBIT_DS'),
     'percentunit', 6),
   o.stat('Pipeline p95 (s)', '95th percentile of overall query pipeline latency.',
     o.target(o.histogramQuantileExpr(pipelineDuration, 0.95, o.GKG_WEB_SEL, '5m', []), 'p95', 'ORBIT_DS'),

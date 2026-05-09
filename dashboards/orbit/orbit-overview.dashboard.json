@@ -84,7 +84,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Share of query pipeline calls that returned status=\"ok\".",
+         "description": "Share of queries that passed compilation. 1 minus (compile_error share). Drops here mean clients are sending queries the compiler refuses.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -117,12 +117,58 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m])), 1)",
-               "legendFormat": "ok",
+               "expr": "1 - sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m])), 1)",
+               "legendFormat": "compiler_ok",
                "refId": "A"
             }
          ],
-         "title": "Success rate",
+         "title": "Compiler success",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Share of post-compile pipeline runs that returned status=\"ok\". Compile rejects are excluded so this isolates server-side reliability.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 1
+         },
+         "id": 4,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=\"ok\"}[5m])) / clamp_min(sum(rate(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status!=\"compile_error\"}[5m])), 1)",
+               "legendFormat": "pipeline_ok",
+               "refId": "A"
+            }
+         ],
+         "title": "Pipeline success (post-compile)",
          "type": "stat"
       },
       {
@@ -140,10 +186,10 @@
          "gridPos": {
             "h": 4,
             "w": 6,
-            "x": 12,
+            "x": 18,
             "y": 1
          },
-         "id": 4,
+         "id": 5,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -186,10 +232,10 @@
          "gridPos": {
             "h": 4,
             "w": 6,
-            "x": 18,
-            "y": 1
+            "x": 0,
+            "y": 5
          },
-         "id": 5,
+         "id": 6,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -223,9 +269,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 5
+            "y": 9
          },
-         "id": 6,
+         "id": 7,
          "panels": [ ],
          "title": "GKG indexer",
          "type": "row"
@@ -246,9 +292,9 @@
             "h": 4,
             "w": 6,
             "x": 0,
-            "y": 6
+            "y": 10
          },
-         "id": 7,
+         "id": 8,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -292,9 +338,9 @@
             "h": 4,
             "w": 6,
             "x": 6,
-            "y": 6
+            "y": 10
          },
-         "id": 8,
+         "id": 9,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -338,9 +384,9 @@
             "h": 4,
             "w": 6,
             "x": 12,
-            "y": 6
+            "y": 10
          },
-         "id": 9,
+         "id": 10,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -384,9 +430,9 @@
             "h": 4,
             "w": 6,
             "x": 18,
-            "y": 6
+            "y": 10
          },
-         "id": 10,
+         "id": 11,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -420,9 +466,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 10
+            "y": 14
          },
-         "id": 11,
+         "id": 12,
          "panels": [ ],
          "title": "Siphon",
          "type": "row"
@@ -443,9 +489,9 @@
             "h": 4,
             "w": 8,
             "x": 0,
-            "y": 11
+            "y": 15
          },
-         "id": 12,
+         "id": 13,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -489,9 +535,9 @@
             "h": 4,
             "w": 8,
             "x": 8,
-            "y": 11
+            "y": 15
          },
-         "id": 13,
+         "id": 14,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -535,9 +581,9 @@
             "h": 4,
             "w": 8,
             "x": 16,
-            "y": 11
+            "y": 15
          },
-         "id": 14,
+         "id": 15,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -571,9 +617,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 15
+            "y": 19
          },
-         "id": 15,
+         "id": 16,
          "panels": [ ],
          "title": "Rails → KG",
          "type": "row"
@@ -594,9 +640,9 @@
             "h": 4,
             "w": 8,
             "x": 0,
-            "y": 16
+            "y": 20
          },
-         "id": 16,
+         "id": 17,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -640,9 +686,9 @@
             "h": 4,
             "w": 8,
             "x": 8,
-            "y": 16
+            "y": 20
          },
-         "id": 17,
+         "id": 18,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
@@ -686,9 +732,9 @@
             "h": 4,
             "w": 8,
             "x": 16,
-            "y": 16
+            "y": 20
          },
-         "id": 18,
+         "id": 19,
          "options": {
             "colorMode": "value",
             "graphMode": "area",
