@@ -21,19 +21,19 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the stage."
+    description: "Unique ID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the stage (e.g., build, test, deploy)."
+    description: "Stage name (e.g. build, test, deploy)."
 
   status:
     type: enum
     source: status
     nullable: false
-    description: "Current execution status of the stage."
+    description: "Execution status."
     values:
       0: created
       1: pending
@@ -53,38 +53,38 @@ properties:
     type: int64
     source: position
     nullable: true
-    description: "Order of the stage within the pipeline (0-indexed)."
+    description: "Order within the pipeline (0-indexed)."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the stage was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the stage was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this stage belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   pipeline_id:
     type: int64
     source: pipeline_id
     nullable: true
-    description: "Pipeline this stage belongs to."
+    description: "Containing pipeline ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

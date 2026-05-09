@@ -21,19 +21,19 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the work item."
+    description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: false
-    description: "Project or group-scoped work item number."
+    description: "Scoped work item number."
 
   title:
     type: string
     source: title
     nullable: false
-    description: "Title of the work item."
+    description: "Title."
 
   description:
     type: string
@@ -45,7 +45,7 @@ properties:
     type: enum
     source: state_id
     nullable: false
-    description: "Current state of the work item."
+    description: "Current state."
     values:
       1: opened
       2: closed
@@ -56,7 +56,7 @@ properties:
     type: enum
     source: work_item_type_id
     nullable: false
-    description: "Type of work item."
+    description: "Work item type."
     values:
       1: issue
       2: incident
@@ -72,80 +72,80 @@ properties:
     type: boolean
     source: confidential
     nullable: false
-    description: "Whether the work item is confidential."
+    description: "Confidential flag."
 
   due_date:
     type: date
     source: due_date
     nullable: true
-    description: "Due date for the work item."
+    description: "Due date."
 
   start_date:
     type: date
     source: start_date
     nullable: true
-    description: "Start date for the work item."
+    description: "Start date."
 
   weight:
     type: int64
     source: weight
     nullable: true
-    description: "Weight/points assigned to the work item."
+    description: "Weight/points assigned."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the work item was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the work item was last updated."
+    description: "Last update timestamp."
 
   closed_at:
     type: timestamp
     source: closed_at
     nullable: true
-    description: "Timestamp when the work item was closed."
+    description: "Closed timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: true
-    description: "Project this work item belongs to, if project-scoped. Null for group-level work items. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID. Null for group-scoped."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
-    description: "User who created the work item."
+    description: "Author user ID."
 
   milestone_id:
     type: int64
     source: milestone_id
     nullable: true
-    description: "Milestone this work item is associated with."
+    description: "Associated milestone ID."
 
   namespace_id:
     type: int64
     source: namespace_id
     nullable: false
-    description: "Namespace (group) this work item belongs to."
+    description: "Owning namespace (group) ID."
 
   closed_by_id:
     type: int64
     source: closed_by_id
     nullable: true
-    description: "User who closed the work item."
+    description: "User ID who closed this."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

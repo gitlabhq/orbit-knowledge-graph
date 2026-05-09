@@ -22,32 +22,32 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Derived identifier for the branch (hash of project_id + branch name)."
+    description: "Derived ID (hash of project_id + branch name)."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "ID of the project this branch belongs to."
+    description: "Owning project ID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the branch (e.g., main, feature/new-login)."
+    description: "Branch name (e.g., main, feature/new-login)."
 
   is_default:
     type: boolean
     source: is_default
     nullable: false
-    description: "Whether this is the default branch of the project."
+    description: "Whether this is the project's default branch."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 storage:
   settings:

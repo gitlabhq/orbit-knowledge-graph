@@ -169,6 +169,9 @@ pub struct SchemaProperty {
     /// allowed values for enum-typed properties
     #[prost(string, repeated, tag = "4")]
     pub enum_values: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// human-readable description from the ontology
+    #[prost(string, tag = "5")]
+    pub description: ::prost::alloc::string::String,
 }
 /// A named relationship type with its valid source/target combinations.
 #[derive(Clone, PartialEq, ::prost::Message)]

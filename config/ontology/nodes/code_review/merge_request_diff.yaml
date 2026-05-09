@@ -21,61 +21,61 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the merge request diff."
+    description: "Unique ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: false
-    description: "ID of the parent merge request."
+    description: "Parent merge request ID."
 
   state:
     type: string
     source: state
     nullable: false
-    description: "State of the diff (empty, without_files, collected, overflow, etc.)."
+    description: "Diff state (empty, without_files, collected, overflow, etc.)."
 
   base_commit_sha:
     type: string
     source: base_commit_sha
     nullable: false
-    description: "SHA of the base commit (common ancestor)."
+    description: "Base commit SHA (common ancestor)."
 
   head_commit_sha:
     type: string
     source: head_commit_sha
     nullable: false
-    description: "SHA of the head commit (latest on source branch)."
+    description: "Head commit SHA (latest on source branch)."
 
   start_commit_sha:
     type: string
     source: start_commit_sha
     nullable: false
-    description: "SHA of the start commit (target branch tip at diff creation)."
+    description: "Start commit SHA (target branch tip at diff creation)."
 
   commits_count:
     type: int64
     source: commits_count
     nullable: true
-    description: "Number of commits in this diff."
+    description: "Number of commits."
 
   files_count:
     type: int64
     source: files_count
     nullable: true
-    description: "Number of files changed in this diff."
+    description: "Number of files changed."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project that owns the merge request this diff belongs to."
+    description: "Owning project ID."
 
   diff_type:
     type: enum
     source: diff_type
     nullable: false
-    description: "Whether this diff represents the source branch (regular) or the merge-head state."
+    description: "Source branch (regular) or merge-head state."
     values:
       1: regular
       2: merge_head
@@ -84,32 +84,32 @@ properties:
     type: string
     source: real_size
     nullable: false
-    description: "Actual (non-truncated) diff size reported by Gitaly, as a stringified integer."
+    description: "Non-truncated diff size from Gitaly, as a stringified integer."
 
   stored_externally:
     type: boolean
     source: stored_externally
     nullable: false
-    description: "Whether the diff content is offloaded to external object storage."
+    description: "Whether diff content is in external object storage."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the diff was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the diff was last updated."
+    description: "Last update timestamp."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
   patch:
     type: string
@@ -118,7 +118,7 @@ properties:
       service: gitaly
       lookup: raw_patch
       depends_on: [project_id, id]
-    description: "Full unified patch for this MR snapshot. Resolved from GitLab at query time."
+    description: "Full unified patch. Resolved from GitLab at query time."
 
 etl:
   type: table

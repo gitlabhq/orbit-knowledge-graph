@@ -173,6 +173,7 @@ message SchemaProperty {
   string data_type = 2;           // e.g. "int64", "string", "datetime"
   bool nullable = 3;
   repeated string enum_values = 4; // allowed values for enum-typed properties
+  string description = 5;         // human-readable description from the ontology
 }
 
 // A named relationship type with its valid source/target combinations.

@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the deployment."
+    description: "Unique ID."
 
   iid:
     type: int64
@@ -33,31 +33,31 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    description: "Project that owns this deployment. Retained on the node row so redaction can resolve project-level permissions without an edge lookup."
+    description: "Owning project ID."
 
   ref:
     type: string
     source: ref
     nullable: false
-    description: "Git ref (branch or tag name) that was deployed."
+    description: "Git ref (branch or tag) deployed."
 
   tag:
     type: boolean
     source: tag
     nullable: false
-    description: "Whether the deployed ref is a tag."
+    description: "Whether the ref is a tag."
 
   sha:
     type: string
     source: sha
     nullable: false
-    description: "Git commit SHA that was deployed."
+    description: "Deployed commit SHA."
 
   status:
     type: enum
     source: status
     nullable: false
-    description: "Current execution status of the deployment."
+    description: "Execution status."
     values:
       0: created
       1: running
@@ -71,62 +71,62 @@ properties:
     type: string
     source: deployable_type
     nullable: false
-    description: "Type of the deployable that produced this deployment (typically CommitStatus/Ci::Build)."
+    description: "Deployable type (typically Ci::Build)."
 
   deployable_id:
     type: int64
     source: deployable_id
     nullable: true
-    description: "ID of the deployable that produced this deployment."
+    description: "Deployable ID."
 
   on_stop:
     type: string
     source: on_stop
     nullable: false
-    description: "Name of the job that stops this deployment, if defined."
+    description: "Job name that stops this deployment."
 
   archived:
     type: boolean
     source: archived
     nullable: false
-    description: "Whether this deployment has been archived."
+    description: "Whether archived."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the deployment record was created."
+    description: "Creation timestamp."
 
   finished_at:
     type: timestamp
     source: finished_at
     nullable: true
-    description: "Timestamp when the deployment finished executing."
+    description: "Execution finish timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the deployment was last updated."
+    description: "Last update timestamp."
 
   environment_id:
     type: int64
     source: environment_id
     nullable: false
-    description: "Environment this deployment targets."
+    description: "Target environment ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
-    description: "User who created the deployment."
+    description: "Deploying user ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

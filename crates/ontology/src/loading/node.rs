@@ -135,6 +135,8 @@ struct PropertyYaml {
     filterable: bool,
     #[serde(default)]
     admin_only: bool,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 impl PropertyYaml {
@@ -265,6 +267,7 @@ impl NodeYaml {
                     like_allowed: prop_def.like_allowed,
                     filterable: prop_def.filterable,
                     admin_only: prop_def.admin_only,
+                    description: prop_def.description,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

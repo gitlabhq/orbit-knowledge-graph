@@ -21,13 +21,13 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the group."
+    description: "Unique ID."
 
   full_path:
     type: string
     source: full_path
     nullable: true
-    description: "Full path for the group (e.g. gitlab-org/quality)."
+    description: "Full path (e.g. gitlab-org/quality)."
 
   name:
     type: string
@@ -39,25 +39,25 @@ properties:
     type: string
     source: description
     nullable: false
-    description: "Group description."
+    description: "Description text."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the group was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the group was last updated."
+    description: "Last update timestamp."
 
   visibility_level:
     type: enum
     source: visibility_level
     nullable: false
-    description: "Visibility of the group."
+    description: "Visibility level."
     values:
       0: private
       10: internal
@@ -68,7 +68,7 @@ properties:
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: query

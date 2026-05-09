@@ -22,98 +22,98 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Unique identifier for the imported symbol node."
+    description: "Unique ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "ID of the project this import belongs to."
+    description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
-    description: "Git branch where this import exists."
+    description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
-    description: "Commit SHA at which this import was indexed."
+    description: "Indexed commit SHA."
 
   file_path:
     type: string
     source: file_path
     nullable: false
-    description: "Path of the file containing this import."
+    description: "Containing file path."
 
   import_type:
     type: string
     source: import_type
     nullable: false
-    description: "Type of import statement (e.g., module, symbol, wildcard)."
+    description: "Import kind (e.g., module, symbol, wildcard)."
 
   import_path:
     type: string
     source: import_path
     nullable: false
-    description: "Path or module from which the symbol is imported."
+    description: "Source module or path of the import."
 
   identifier_name:
     type: string
     source: identifier_name
     nullable: true
-    description: "Name of the imported symbol."
+    description: "Imported symbol name."
 
   identifier_alias:
     type: string
     source: identifier_alias
     nullable: true
-    description: "Alias used for the import (e.g., 'import numpy as np')."
+    description: "Import alias (e.g., 'import numpy as np')."
 
   start_line:
     type: int64
     source: start_line
     nullable: false
-    description: "Starting line number of the import."
+    description: "Start line."
 
   end_line:
     type: int64
     source: end_line
     nullable: false
-    description: "Ending line number of the import."
+    description: "End line."
 
   start_byte:
     type: int64
     source: start_byte
     nullable: false
-    description: "Starting byte offset of the import in the file."
+    description: "Start byte offset."
 
   end_byte:
     type: int64
     source: end_byte
     nullable: false
-    description: "Ending byte offset of the import in the file."
+    description: "End byte offset."
 
   start_char:
     type: int64
     source: start_char
     nullable: false
-    description: "Starting column (character offset within the line) of the import."
+    description: "Start column."
 
   end_char:
     type: int64
     source: end_char
     nullable: false
-    description: "Ending column (character offset within the line) of the import."
+    description: "End column."
 
 storage:
   settings:

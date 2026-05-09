@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the pipeline."
+    description: "Unique ID."
 
   iid:
     type: int64
@@ -33,19 +33,19 @@ properties:
     type: string
     source: sha
     nullable: false
-    description: "Git commit SHA that the pipeline runs against."
+    description: "Commit SHA the pipeline runs against."
 
   ref:
     type: string
     source: ref
     nullable: false
-    description: "Branch or tag name the pipeline runs for."
+    description: "Branch or tag name."
 
   status:
     type: enum
     source: status
     nullable: false
-    description: "Current execution status of the pipeline."
+    description: "Execution status."
     enum_type: string
     values:
       0: created
@@ -66,7 +66,7 @@ properties:
     type: enum
     source: source
     nullable: false
-    description: "What triggered the pipeline (push, merge request, schedule, etc.)."
+    description: "Trigger source."
     values:
       0: unknown
       1: push
@@ -93,19 +93,19 @@ properties:
     type: boolean
     source: tag
     nullable: false
-    description: "Whether this pipeline runs on a git tag."
+    description: "Whether running on a git tag."
 
   duration:
     type: int64
     source: duration
     nullable: true
-    description: "Total duration of the pipeline in seconds."
+    description: "Total duration in seconds."
 
   failure_reason:
     type: enum
     source: failure_reason
     nullable: true
-    description: "Reason the pipeline failed, if applicable."
+    description: "Failure reason."
     values:
       0: unknown_failure
       1: config_error
@@ -125,80 +125,80 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the pipeline was created."
+    description: "Creation timestamp."
 
   started_at:
     type: timestamp
     source: started_at
     nullable: true
-    description: "Timestamp when the pipeline started executing."
+    description: "Execution start timestamp."
 
   finished_at:
     type: timestamp
     source: finished_at
     nullable: true
-    description: "Timestamp when the pipeline finished executing."
+    description: "Execution finish timestamp."
 
   committed_at:
     type: timestamp
     source: committed_at
     nullable: true
-    description: "Timestamp of the commit the pipeline runs against."
+    description: "Commit timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the pipeline row was last updated."
+    description: "Last update timestamp."
 
   before_sha:
     type: string
     source: before_sha
     nullable: false
-    description: "Previous commit SHA before the push that produced this pipeline."
+    description: "Previous commit SHA before the triggering push."
 
   yaml_errors:
     type: string
     source: yaml_errors
     nullable: false
-    description: "Errors encountered parsing the pipeline configuration, if any."
+    description: "CI config parsing errors."
 
   protected:
     type: boolean
     source: protected
     nullable: true
-    description: "Whether the ref the pipeline runs on is protected."
+    description: "Whether the ref is protected."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this pipeline belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
-    description: "User who triggered the pipeline."
+    description: "Triggering user ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: true
-    description: "Merge request that triggered this pipeline."
+    description: "Triggering MR ID."
 
   auto_canceled_by_id:
     type: int64
     source: auto_canceled_by_id
     nullable: true
-    description: "Pipeline that auto-canceled this one (newer push superseded it)."
+    description: "Pipeline ID that auto-canceled this one."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

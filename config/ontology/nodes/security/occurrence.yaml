@@ -22,55 +22,55 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the occurrence."
+    description: "Unique ID."
 
   uuid:
     type: uuid
     source: uuid
     nullable: false
-    description: "UUID uniquely identifying the occurrence."
+    description: "Unique UUID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the vulnerability occurrence."
+    description: "Occurrence name."
 
   description:
     type: string
     source: description
     nullable: true
-    description: "Detailed description of the occurrence."
+    description: "Detailed description."
 
   solution:
     type: string
     source: solution
     nullable: true
-    description: "Recommended solution or remediation."
+    description: "Recommended remediation."
 
   cve:
     type: string
     source: cve
     nullable: true
-    description: "CVE identifier if applicable."
+    description: "CVE identifier, if applicable."
 
   location:
     type: string
     source: location
     nullable: true
-    description: "Location where the vulnerability was found."
+    description: "Vulnerability location."
 
   location_fingerprint:
     type: string
     source: location_fingerprint
     nullable: false
-    description: "Fingerprint identifying the location."
+    description: "Location fingerprint."
 
   severity:
     type: enum
     source: severity
     nullable: false
-    description: "Severity level of the occurrence."
+    description: "Severity level."
     values:
       1: info
       2: unknown
@@ -83,7 +83,7 @@ properties:
     type: enum
     source: report_type
     nullable: false
-    description: "Type of security report."
+    description: "Security report type."
     values:
       0: sast
       1: dependency_scanning
@@ -101,7 +101,7 @@ properties:
     type: enum
     source: detection_method
     nullable: false
-    description: "Method used to detect the vulnerability."
+    description: "Detection method."
     values:
       0: gitlab_security_report
       1: external_security_report
@@ -113,50 +113,50 @@ properties:
     type: timestamp
     source: created_at
     nullable: false
-    description: "Timestamp when the occurrence was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: false
-    description: "Timestamp when the occurrence was last updated."
+    description: "Last update timestamp."
 
   detected_at:
     type: timestamp
     source: detected_at
     nullable: true
-    description: "Timestamp when the vulnerability was detected."
+    description: "Detection timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this occurrence belongs to."
+    description: "Owning project ID."
 
   scanner_id:
     type: int64
     source: scanner_id
     nullable: false
-    description: "Scanner that detected this occurrence."
+    description: "Detecting scanner ID."
 
   vulnerability_id:
     type: int64
     source: vulnerability_id
     nullable: true
-    description: "Vulnerability this occurrence is linked to."
+    description: "Linked vulnerability ID."
 
   primary_identifier_id:
     type: int64
     source: primary_identifier_id
     nullable: false
-    description: "Primary identifier (CVE/CWE) for this occurrence."
+    description: "Primary identifier (CVE/CWE) ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table
