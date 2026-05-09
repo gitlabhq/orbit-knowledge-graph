@@ -154,6 +154,10 @@ local-cli-build-windows-mingw:
     CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
     AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
     CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: x86_64-w64-mingw32-clang++
+    # llvm-mingw ships libc++ and libunwind as both shared (libc++.dll,
+    # libunwind.dll) and static; default is shared. -static-libstdc++ +
+    # -static-libgcc tell clang++ to use the static archives.
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip
