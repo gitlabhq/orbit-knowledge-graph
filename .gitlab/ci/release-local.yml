@@ -105,7 +105,7 @@ local-cli-publish:
   extends:
     - .local-cli-release-rules
   stage: publish
-  image: ${DEP_PROXY}alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   needs:
