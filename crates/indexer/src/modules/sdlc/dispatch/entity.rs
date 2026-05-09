@@ -253,16 +253,7 @@ impl EntityDispatcher {
     ) -> Result<(u64, u64), TaskError> {
         match strategy {
             DispatchStrategy::Incremental => {
-                let request = EntityIndexingRequest {
-                    entity_kind: entity.entity_kind.clone(),
-                    watermark,
-                    scope: scope.clone(),
-                    partition: None,
-                };
-                match self.publish_request(&request).await? {
-                    PublishOutcome::Published => Ok((1, 0)),
-                    PublishOutcome::Skipped => Ok((0, 1)),
-                }
+                self.publish_unpartitioned(entity, scope, watermark).await
             }
             DispatchStrategy::InitialPartitioned { partition_count } => {
                 let (source_table, partition_column) = match (
@@ -275,16 +266,7 @@ impl EntityDispatcher {
                             entity_kind = %entity.entity_kind,
                             "partition override set but entity lacks source_table or partition_column, falling back to incremental"
                         );
-                        let request = EntityIndexingRequest {
-                            entity_kind: entity.entity_kind.clone(),
-                            watermark,
-                            scope: scope.clone(),
-                            partition: None,
-                        };
-                        return match self.publish_request(&request).await? {
-                            PublishOutcome::Published => Ok((1, 0)),
-                            PublishOutcome::Skipped => Ok((0, 1)),
-                        };
+                        return self.publish_unpartitioned(entity, scope, watermark).await;
                     }
                 };
 
@@ -308,16 +290,7 @@ impl EntityDispatcher {
                     &boundary_values,
                     *partition_count,
                 );
-
-                let mut published = 0u64;
-                let mut skipped = 0u64;
-                for request in &requests {
-                    match self.publish_request(request).await? {
-                        PublishOutcome::Published => published += 1,
-                        PublishOutcome::Skipped => skipped += 1,
-                    }
-                }
-                Ok((published, skipped))
+                self.publish_all(&requests).await
             }
             DispatchStrategy::ResumePartitions {
                 incomplete_indices,
@@ -333,41 +306,24 @@ impl EntityDispatcher {
                         scope = ?scope,
                         "partition boundaries not found in KV, falling back to incremental"
                     );
-                    let request = EntityIndexingRequest {
-                        entity_kind: entity.entity_kind.clone(),
-                        watermark,
-                        scope: scope.clone(),
-                        partition: None,
-                    };
-                    return match self.publish_request(&request).await? {
-                        PublishOutcome::Published => Ok((1, 0)),
-                        PublishOutcome::Skipped => Ok((0, 1)),
-                    };
+                    return self.publish_unpartitioned(entity, scope, watermark).await;
                 };
 
-                let all_requests = build_partition_requests(
+                let requests: Vec<_> = build_partition_requests(
                     &entity.entity_kind,
                     watermark,
                     scope,
                     &boundary_values,
                     *total,
-                );
-
-                let mut published = 0u64;
-                let mut skipped = 0u64;
-                for request in &all_requests {
-                    let Some(spec) = &request.partition else {
-                        continue;
-                    };
-                    if !incomplete_indices.contains(&spec.partition_index) {
-                        continue;
-                    }
-                    match self.publish_request(request).await? {
-                        PublishOutcome::Published => published += 1,
-                        PublishOutcome::Skipped => skipped += 1,
-                    }
-                }
-                Ok((published, skipped))
+                )
+                .into_iter()
+                .filter(|r| {
+                    r.partition
+                        .as_ref()
+                        .is_some_and(|s| incomplete_indices.contains(&s.partition_index))
+                })
+                .collect();
+                self.publish_all(&requests).await
             }
             DispatchStrategy::Consolidate { watermark, total } => {
                 self.checkpoint_store
@@ -389,18 +345,42 @@ impl EntityDispatcher {
                     "consolidated partitioned checkpoints into incremental"
                 );
 
-                let request = EntityIndexingRequest {
-                    entity_kind: entity.entity_kind.clone(),
-                    watermark: *watermark,
-                    scope: scope.clone(),
-                    partition: None,
-                };
-                match self.publish_request(&request).await? {
-                    PublishOutcome::Published => Ok((1, 0)),
-                    PublishOutcome::Skipped => Ok((0, 1)),
-                }
+                self.publish_unpartitioned(entity, scope, *watermark).await
             }
         }
+    }
+
+    async fn publish_unpartitioned(
+        &self,
+        entity: &EntityDescriptor,
+        scope: &IndexingScope,
+        watermark: DateTime<Utc>,
+    ) -> Result<(u64, u64), TaskError> {
+        let request = EntityIndexingRequest {
+            entity_kind: entity.entity_kind.clone(),
+            watermark,
+            scope: scope.clone(),
+            partition: None,
+        };
+        match self.publish_request(&request).await? {
+            PublishOutcome::Published => Ok((1, 0)),
+            PublishOutcome::Skipped => Ok((0, 1)),
+        }
+    }
+
+    async fn publish_all(
+        &self,
+        requests: &[EntityIndexingRequest],
+    ) -> Result<(u64, u64), TaskError> {
+        let mut published = 0u64;
+        let mut skipped = 0u64;
+        for request in requests {
+            match self.publish_request(request).await? {
+                PublishOutcome::Published => published += 1,
+                PublishOutcome::Skipped => skipped += 1,
+            }
+        }
+        Ok((published, skipped))
     }
 
     async fn load_enabled_namespaces(&self) -> Result<Vec<EnabledNamespace>, TaskError> {
