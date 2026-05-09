@@ -88,7 +88,7 @@ local-cli-build-windows-xwin:
       - .xwin-cache/
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file lld zip
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file lld llvm zip
     - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${CARGO_XWIN_VERSION}/cargo-xwin-v${CARGO_XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
         | tar -xz -C /opt/cargo/bin cargo-xwin
     - chmod +x /opt/cargo/bin/cargo-xwin
