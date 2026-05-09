@@ -57,7 +57,7 @@ properties:
     type: string
     source: old_path
     nullable: false
-    description: "File path before the change."
+    description: "File path before the change. Always fetch this column."
 
   new_file:
     type: boolean
