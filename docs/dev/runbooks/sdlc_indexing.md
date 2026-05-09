@@ -30,6 +30,7 @@ GitLab PostgreSQL
 |---------|---------|
 | `sdlc.global.indexing.requested` | Trigger global entity indexing (User) |
 | `sdlc.namespace.indexing.requested.<org>.<ns>` | Trigger namespace entity indexing |
+| `sdlc.entity.indexing.requested.{entity_kind}.>` | Trigger entity-level indexing ([ADR 012](../../design-documents/decisions/012_entity_level_indexing.md)) |
 
 ### NATS consumers
 
@@ -40,6 +41,7 @@ Consumer names are derived from the configured `consumer_name` (default in produ
 | `gkg-indexer-sdlc-global-indexing-requested` | `GKG_INDEXER` | Global handler |
 | `gkg-indexer-sdlc-namespace-indexing-requested-wildcard-wildcard` | `GKG_INDEXER` | Namespace handler |
 | `gkg-indexer-sdlc-namespace-deletion-requested-wildcard` | `GKG_INDEXER` | Namespace deletion handler |
+| `gkg-indexer-sdlc-entity-indexing-requested-gt` | `GKG_INDEXER` | Entity handler ([ADR 012](../../design-documents/decisions/012_entity_level_indexing.md)) |
 
 With ephemeral consumers (`consumer_name: None`, the local dev default), NATS assigns random names that don't survive restarts.
 
@@ -49,8 +51,11 @@ With ephemeral consumers (`consumer_name: None`, the local dev default), NATS as
 |---------|---------|---------------------|-----|
 | GlobalHandler | `sdlc.global.indexing.requested` | 1 | No (re-dispatched next cycle) |
 | NamespaceHandler | `sdlc.namespace.indexing.requested.*.*` | 1 | No (re-dispatched next cycle) |
+| EntityIndexingHandler | `sdlc.entity.indexing.requested.>` | 1 | No (re-dispatched next cycle) |
 
-Both handlers rely on the dispatcher to re-create requests on the next cycle rather than retrying via NATS. This is the eventual consistency model.
+All handlers rely on the dispatcher to re-create requests on the next cycle rather than retrying via NATS. This is the eventual consistency model.
+
+The `EntityIndexingHandler` processes one entity kind per message and routes internally by `entity_kind`. It coexists with GlobalHandler and NamespaceHandler during rollout. See [ADR 012](../../design-documents/decisions/012_entity_level_indexing.md) for design details.
 
 ## Dispatcher
 
@@ -62,8 +67,9 @@ The dispatcher runs as `gkg-server --mode DispatchIndexing` and publishes indexi
 |------|-------------|
 | GlobalDispatcher | Publishes a single `GlobalIndexingRequest` with watermark = now |
 | NamespaceDispatcher | Queries `siphon_knowledge_graph_enabled_namespaces`, publishes one request per enabled namespace |
+| EntityDispatcher | Publishes one `EntityIndexingRequest` per (entity kind, scope) pair for all global and namespaced entities |
 
-Both run on every scheduler cycle. The NATS `max_messages_per_subject: 1` constraint ensures at-most-one in-flight request per subject. Duplicate publishes are silently rejected.
+All run on every scheduler cycle. The NATS `max_messages_per_subject: 1` constraint ensures at-most-one in-flight request per subject. Duplicate publishes are silently rejected.
 
 ## Checkpoint system
 
@@ -120,9 +126,13 @@ ORDER BY key;
    ```shell
    # Option A: wait for the next scheduled dispatch cycle
    # Option B: trigger manually (see "Trigger dispatcher manually" above)
-   # Option C: publish directly to NATS
+   # Option C: publish directly to NATS (legacy format)
    nats pub sdlc.namespace.indexing.requested.<org_id>.<namespace_id> \
      '{"organization":<org_id>,"namespace":<namespace_id>,"watermark":"2026-03-24T00:00:00Z"}'
+
+   # Option D: publish an entity-level request (ADR 012)
+   nats pub sdlc.entity.indexing.requested.Project.<org_id>.<namespace_id> \
+     '{"entity_kind":"Project","watermark":"2026-03-24T00:00:00Z","scope":{"Namespace":{"namespace_id":<namespace_id>,"traversal_path":"<org_id>/<namespace_id>/"}},"partition":null}'
    ```
 
 ### Reindex a single entity type within a namespace
@@ -200,6 +210,7 @@ nats stream purge GKG_INDEXER --subject='sdlc.namespace.indexing.requested.<org>
 ```shell
 nats stream purge GKG_INDEXER --subject='sdlc.global.indexing.requested'
 nats stream purge GKG_INDEXER --subject='sdlc.namespace.indexing.requested.*.*'
+nats stream purge GKG_INDEXER --subject='sdlc.entity.indexing.requested.>'
 ```
 
 ### Full NATS reset

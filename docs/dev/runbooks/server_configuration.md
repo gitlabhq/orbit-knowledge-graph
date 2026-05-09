@@ -188,6 +188,15 @@ engine:
 |-------------|---------|-------------|
 | `engine.handlers.namespace-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
 
+#### SDLC entity handler
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `engine.handlers.entity-handler.datalake_batch_size` | `500,000` | Rows per datalake extraction query |
+| `engine.handlers.entity-handler.batch_size_overrides` | `{}` | Per-entity batch size overrides (e.g., `MergeRequest: 100000`) |
+
+See [ADR 012](../../design-documents/decisions/012_entity_level_indexing.md) for the entity-level indexing design.
+
 #### Code indexing task handler
 
 | Config path | Default | Description |
@@ -203,6 +212,7 @@ engine:
 |---------|-------------|-----|-----------|
 | Global (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
 | Namespace (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
+| Entity (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
 | Code indexing task | 5 | Yes | Event-driven. Won't be re-dispatched. Must retry and DLQ. |
 | Namespace deletion | 1 | No | Re-dispatched on next scheduler cycle. |
 
@@ -216,6 +226,7 @@ Distributed locking via NATS KV ensures only one dispatcher instance runs each t
 |------|-------------|-------------|-------------|
 | Global dispatch | `schedule.tasks.global.cron` | `0 */1 * * * *` (every minute) | Publishes `GlobalIndexingRequest` |
 | Namespace dispatch | `schedule.tasks.namespace.cron` | `0 */1 * * * *` (every minute) | Publishes per-namespace requests |
+| Entity dispatch | `schedule.tasks.entity.cron` | `0 */1 * * * *` (every minute) | Publishes per-entity `EntityIndexingRequest` messages |
 | Code task dispatch | `schedule.tasks.code-indexing-task.cron` | `0 */1 * * * *` (every minute) | Consumes Siphon CDC push events |
 | Code backfill | `schedule.tasks.namespace-code-backfill.cron` | `0 */1 * * * *` (every minute) | Backfills newly enabled namespaces |
 | Table cleanup | `schedule.tasks.table-cleanup.cron` | `0 0 3 * * *` (daily 03:00 UTC) | Runs `OPTIMIZE TABLE ... FINAL CLEANUP` |

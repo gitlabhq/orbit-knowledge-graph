@@ -46,6 +46,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Security / AuthZ design | `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
 | SDLC indexing pipeline | `docs/design-documents/indexing/sdlc_indexing.md` |
+| Entity-level SDLC indexing (ADR 012) | `docs/design-documents/decisions/012_entity_level_indexing.md` |
 | Code indexing pipeline | `docs/design-documents/indexing/code_indexing.md` |
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |

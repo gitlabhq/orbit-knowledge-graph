@@ -87,10 +87,12 @@ sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}           # namesp
 sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}.p{id}    # namespaced, partitioned
 ```
 
-Each entity kind subscribes via `sdlc.entity.indexing.requested.{kind}.>`,
-so each gets its own NATS consumer. The `GKG_INDEXER` stream adds a single
-wildcard subject `sdlc.entity.indexing.requested.>` to accept all entity
-messages.
+A single `EntityIndexingHandler` subscribes to
+`sdlc.entity.indexing.requested.>` and routes internally by
+`entity_kind`. The `GKG_INDEXER` stream adds this wildcard subject to
+accept all entity messages. Multiple engine workers pull from the same
+NATS consumer concurrently, so cross-entity parallelism comes from the
+worker pool rather than per-entity consumers.
 
 The stream's `max_messages_per_subject: 1` with
 `discard_new_per_subject: true` deduplicates at the (entity, scope,
@@ -99,10 +101,13 @@ exact subject, the dispatcher's publish is silently rejected.
 
 ### Handler and pipeline
 
-One `EntityIndexingHandler` per entity kind (38 for the current ontology),
-each with its own NATS consumer. Each handler holds an
-`Arc<dyn EntityPipeline>`. All current entities use `BasePipeline`, which
-translates the request into a `PipelineContext` and calls `Pipeline::run`:
+A single `EntityIndexingHandler` holds a
+`HashMap<String, Arc<dyn EntityPipeline>>`, keyed by entity kind. On
+each message it deserializes the `EntityIndexingRequest`, looks up the
+pipeline by `entity_kind`, and delegates. Unknown entity kinds log a
+warning and return `Ok(())`. All current entities use `BasePipeline`,
+which translates the request into a `PipelineContext` and calls
+`Pipeline::run`:
 
 ```rust
 pub struct BasePipeline {
@@ -389,13 +394,6 @@ Multiple workers cannot help with a single namespace's entities. Worse, one
 slow entity delays the NATS ack for the entire message, triggering
 redelivery of all entities.
 
-### One NATS consumer with internal routing
-
-A single handler subscribing to `sdlc.entity.indexing.requested.>` could
-route internally by entity kind. Simpler, but with one consumer one
-entity's message backlog delays all others. Per-entity consumers give
-physical isolation at the NATS level.
-
 ### Hash partitioning from day 1
 
 `cityHash64(column) % N = i` needs no boundary computation and is
@@ -424,14 +422,12 @@ until empirical data shows a specific entity needs throttling.
 - Entity kinds process independently. Slow MergeRequest does not delay
   Issue or Job.
 - Large entities can be partitioned: 4-partition MergeRequest = 4 workers.
-- Per-entity NATS consumers prevent noisy neighbors.
 - `EntityPipeline` trait is an extension point for custom logic
   (e.g., SystemNotes).
 - Backward-compatible checkpoint keys. No re-processing on deploy.
 
 **What gets harder:**
 
-- 38 NATS consumers instead of 2 (operators monitor per entity kind).
 - Range partitioning requires quantile boundary computation on first
   dispatch and NATS KV storage for boundary stability.
 - Breaking config change: `global-handler`/`namespace-handler` →

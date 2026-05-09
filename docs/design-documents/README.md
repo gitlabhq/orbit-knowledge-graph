@@ -245,6 +245,7 @@ Please see the following design documents for more details on the Knowledge Grap
 - [ADR: API Design — Unified REST + GraphQL](decisions/003_api_design.md)
 - [ADR: Unified Response Schema](decisions/004_unified_response_schema.md)
 - [ADR: PostgreSQL Task Table for Code Indexing Triggers](decisions/005_code_indexing_task_table.md)
+- [ADR: Entity-Level SDLC Indexing](decisions/012_entity_level_indexing.md)
 
 ## Binary Breakdown
 

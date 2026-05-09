@@ -184,6 +184,7 @@ Example NATS JetStream subjects:
 
 - `sdlc.global.indexing.requested`
 - `sdlc.namespace.indexing.requested.<org>.<ns>`
+- `sdlc.entity.indexing.requested.{entity_kind}.>` (entity-level, see [ADR 012](../decisions/012_entity_level_indexing.md))
 
 **Dispatch deduplication**
 
@@ -266,7 +267,9 @@ ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/on
 
 **Pipeline: extract, transform, write**
 
-Each handler invocation runs its plans through a shared `Pipeline` struct. The loop for a single plan works like this:
+Each handler invocation runs its plans through a shared `Pipeline` struct. The `EntityIndexingHandler` ([ADR 012](../decisions/012_entity_level_indexing.md)) processes one entity kind per message, routing internally by `entity_kind` to an `EntityPipeline`. It coexists with the global and namespace handlers during rollout.
+
+The loop for a single plan works like this:
 
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
