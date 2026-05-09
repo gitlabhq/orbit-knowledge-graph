@@ -42,6 +42,12 @@ pre-commit:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/lib.rs"
         - "config/schemas/query_response.json"
+    - name: goon-format-version-check
+      run: bash ./scripts/check-goon-format-version.sh
+      glob:
+        - "crates/query-engine/formatters/src/goon/**/*.rs"
+        - "crates/query-engine/formatters/src/graph.rs"
+        - "crates/query-engine/formatters/src/lib.rs"
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:
