@@ -126,6 +126,12 @@ pub enum PartitionStrategy {
     },
 }
 
+impl Event for EntityIndexingRequest {
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, ENTITY_INDEXING_SUBJECT_PATTERN)
+    }
+}
+
 impl EntityIndexingRequest {
     pub fn entity_subscription(entity_kind: &str) -> Subscription {
         Subscription::new(
