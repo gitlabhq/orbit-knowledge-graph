@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tracing::info;
 
-use crate::checkpoint::{CheckpointStore, entity_checkpoint_key};
+use crate::checkpoint::{CheckpointStore, Partition, entity_checkpoint_key};
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
@@ -142,8 +142,12 @@ impl SimpleEntityPipeline {
 
         let mut pending = Vec::new();
         for i in 0..strategy.partition_count() {
-            let spec = stub_partition_spec(i, strategy.partition_count());
-            let key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, Some(&spec));
+            let partition = Partition::Range {
+                index: i,
+                total: strategy.partition_count(),
+            };
+            let key =
+                self.plan_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition));
             match checkpoints.get(&key) {
                 Some(cp) if cp.cursor_values.is_none() => {}
                 _ => pending.push(i),
@@ -258,7 +262,12 @@ impl SimpleEntityPipeline {
                 .with_additional_filter(&partition_filter_sql(column, spec));
         }
 
-        let position_key = entity_checkpoint_key(&request.scope, &request.entity_kind, Some(spec));
+        let partition = Partition::Range {
+            index: spec.partition_index,
+            total: spec.total_partitions,
+        };
+        let position_key =
+            entity_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition));
         let context = PipelineContext {
             watermark: request.watermark,
             position_key,
@@ -345,7 +354,7 @@ impl SimpleEntityPipeline {
         &self,
         scope: &IndexingScope,
         entity_kind: &str,
-        partition: Option<&PartitionSpec>,
+        partition: Option<&Partition>,
     ) -> String {
         let base = entity_checkpoint_key(scope, entity_kind, partition);
         format!("{}.{}", base, self.plan.name)
@@ -362,17 +371,6 @@ fn scope_conditions(scope: &IndexingScope) -> BTreeMap<String, String> {
         IndexingScope::Namespace { traversal_path, .. } => {
             BTreeMap::from([("traversal_path".to_string(), traversal_path.clone())])
         }
-    }
-}
-
-fn stub_partition_spec(partition_index: u32, total_partitions: u32) -> PartitionSpec {
-    PartitionSpec {
-        partition_index,
-        total_partitions,
-        bounds: PartitionBounds::Range {
-            lower_bound: String::new(),
-            upper_bound: String::new(),
-        },
     }
 }
 

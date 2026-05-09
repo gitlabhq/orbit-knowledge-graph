@@ -11,9 +11,13 @@ use gkg_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::topic::{IndexingScope, PartitionSpec};
+use crate::topic::IndexingScope;
 
 const CHECKPOINT_TABLE: &str = "checkpoint";
+
+pub enum Partition {
+    Range { index: u32, total: u32 },
+}
 
 /// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
 ///
@@ -26,7 +30,7 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
 pub fn entity_checkpoint_key(
     scope: &IndexingScope,
     entity_kind: &str,
-    partition: Option<&PartitionSpec>,
+    partition: Option<&Partition>,
 ) -> String {
     let prefix = match scope {
         IndexingScope::Global => "global".to_string(),
@@ -34,10 +38,9 @@ pub fn entity_checkpoint_key(
     };
     match partition {
         None => format!("{prefix}.{entity_kind}"),
-        Some(p) => format!(
-            "{prefix}.{entity_kind}.p{}of{}",
-            p.partition_index, p.total_partitions
-        ),
+        Some(Partition::Range { index, total }) => {
+            format!("{prefix}.{entity_kind}.p{index}of{total}")
+        }
     }
 }
 
@@ -310,20 +313,15 @@ mod tests {
 
     #[test]
     fn entity_checkpoint_key_namespaced_with_partition() {
-        use crate::topic::PartitionBounds;
         let scope = IndexingScope::Namespace {
             namespace_id: 100,
             traversal_path: "42/100/".to_string(),
         };
-        let spec = PartitionSpec {
-            partition_index: 2,
-            total_partitions: 4,
-            bounds: PartitionBounds::Range {
-                lower_bound: "50000000".to_string(),
-                upper_bound: "75000000".to_string(),
-            },
-        };
-        let key = entity_checkpoint_key(&scope, "MergeRequest", Some(&spec));
+        let key = entity_checkpoint_key(
+            &scope,
+            "MergeRequest",
+            Some(&Partition::Range { index: 2, total: 4 }),
+        );
         assert_eq!(key, "ns.100.MergeRequest.p2of4");
     }
 }
