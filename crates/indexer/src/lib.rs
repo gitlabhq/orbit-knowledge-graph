@@ -229,19 +229,6 @@ pub async fn run_dispatcher(
     );
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
-    let kv_broker = Arc::new(
-        NatsBroker::connect(&config.nats)
-            .await
-            .map_err(scheduler::SchedulerError::from)?,
-    );
-    kv_broker
-        .ensure_kv_bucket_exists(
-            modules::sdlc::dispatch::boundaries::PARTITION_BOUNDARIES_BUCKET,
-            KvBucketConfig::default(),
-        )
-        .await
-        .map_err(scheduler::SchedulerError::from)?;
-
     let health_state = HealthState {
         nats_client: services.nats_client.clone(),
         graph_client: config.graph.build_client(),

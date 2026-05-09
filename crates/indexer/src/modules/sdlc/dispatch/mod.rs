@@ -1,4 +1,3 @@
-pub(crate) mod boundaries;
 mod entity;
 mod global;
 mod namespace;

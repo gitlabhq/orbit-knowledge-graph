@@ -13,10 +13,9 @@ use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionSpec, PartitionStrategy};
 use crate::types::Envelope;
+use arrow::array::Array;
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{EntityDispatcherConfig, ScheduleConfiguration};
-
-use super::boundaries;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, traversal_path
@@ -255,72 +254,36 @@ impl EntityDispatcher {
             DispatchStrategy::Incremental => {
                 self.publish_unpartitioned(entity, scope, watermark).await
             }
-            DispatchStrategy::InitialPartitioned { partition_count } => {
-                let (source_table, partition_column) = match (
-                    &entity.source_table,
-                    &entity.partition_column,
-                ) {
-                    (Some(table), Some(column)) => (table.as_str(), column.as_str()),
-                    _ => {
-                        debug!(
-                            entity_kind = %entity.entity_kind,
-                            "partition override set but entity lacks source_table or partition_column, falling back to incremental"
-                        );
-                        return self.publish_unpartitioned(entity, scope, watermark).await;
-                    }
-                };
-
-                let boundary_key = boundaries::boundaries_key(&entity.entity_kind, scope);
-                let boundary_values = boundaries::compute_boundaries(
-                    &self.datalake,
-                    source_table,
-                    partition_column,
-                    *partition_count,
-                    scope,
-                )
-                .await?;
-
-                boundaries::save_boundaries(self.nats.as_ref(), &boundary_key, &boundary_values)
-                    .await?;
-
-                let requests = build_partition_requests(
-                    &entity.entity_kind,
-                    watermark,
-                    scope,
-                    &boundary_values,
-                    *partition_count,
-                );
-                self.publish_all(&requests).await
-            }
-            DispatchStrategy::ResumePartitions {
-                incomplete_indices,
-                total,
+            DispatchStrategy::InitialPartitioned { partition_count }
+            | DispatchStrategy::ResumePartitions {
+                total: partition_count,
+                ..
             } => {
-                let boundary_key = boundaries::boundaries_key(&entity.entity_kind, scope);
-                let boundary_values =
-                    boundaries::load_boundaries(self.nats.as_ref(), &boundary_key).await?;
-
-                let Some(boundary_values) = boundary_values else {
-                    warn!(
-                        entity_kind = %entity.entity_kind,
-                        scope = ?scope,
-                        "partition boundaries not found in KV, falling back to incremental"
-                    );
-                    return self.publish_unpartitioned(entity, scope, watermark).await;
+                let incomplete_indices = match strategy {
+                    DispatchStrategy::ResumePartitions {
+                        incomplete_indices, ..
+                    } => Some(incomplete_indices),
+                    _ => None,
                 };
+
+                let boundary_values = self
+                    .compute_boundaries(entity, scope, *partition_count)
+                    .await?;
 
                 let requests: Vec<_> = build_partition_requests(
                     &entity.entity_kind,
                     watermark,
                     scope,
                     &boundary_values,
-                    *total,
+                    *partition_count,
                 )
                 .into_iter()
-                .filter(|r| {
-                    r.partition
+                .filter(|r| match incomplete_indices {
+                    None => true,
+                    Some(indices) => r
+                        .partition
                         .as_ref()
-                        .is_some_and(|s| incomplete_indices.contains(&s.partition_index))
+                        .is_some_and(|s| indices.contains(&s.partition_index)),
                 })
                 .collect();
                 self.publish_all(&requests).await
@@ -333,9 +296,6 @@ impl EntityDispatcher {
                     )
                     .await
                     .map_err(TaskError::new)?;
-
-                let boundary_key = boundaries::boundaries_key(&entity.entity_kind, scope);
-                boundaries::delete_boundaries(self.nats.as_ref(), &boundary_key).await?;
 
                 info!(
                     entity_kind = %entity.entity_kind,
@@ -381,6 +341,76 @@ impl EntityDispatcher {
             }
         }
         Ok((published, skipped))
+    }
+
+    async fn compute_boundaries(
+        &self,
+        entity: &EntityDescriptor,
+        scope: &IndexingScope,
+        partition_count: u32,
+    ) -> Result<Vec<String>, TaskError> {
+        let (source_table, partition_column) =
+            match (&entity.source_table, &entity.partition_column) {
+                (Some(table), Some(column)) => (table.as_str(), column.as_str()),
+                _ => {
+                    debug!(
+                        entity_kind = %entity.entity_kind,
+                        "entity lacks source_table or partition_column, using even split"
+                    );
+                    return Ok(vec![]);
+                }
+            };
+
+        let quantile_positions: Vec<String> = (1..partition_count)
+            .map(|i| format!("{}", i as f64 / partition_count as f64))
+            .collect();
+        let quantile_list = quantile_positions.join(", ");
+
+        let scope_filter = match scope {
+            IndexingScope::Global => "1=1".to_string(),
+            IndexingScope::Namespace { traversal_path, .. } => {
+                format!("startsWith(traversal_path, '{traversal_path}')")
+            }
+        };
+
+        let sql = format!(
+            "SELECT quantilesTDigest({quantile_list})({partition_column}) \
+             FROM {source_table} \
+             WHERE {scope_filter}"
+        );
+
+        let batches = self
+            .datalake
+            .query(&sql)
+            .fetch_arrow()
+            .await
+            .map_err(TaskError::new)?;
+
+        let batch = match batches.into_iter().next() {
+            Some(batch) if batch.num_rows() > 0 => batch,
+            _ => return Ok(vec![]),
+        };
+
+        let column = batch.column(0);
+        let list_array = column
+            .as_any()
+            .downcast_ref::<arrow::array::ListArray>()
+            .ok_or_else(|| TaskError::new("expected ListArray from quantile query"))?;
+
+        if list_array.is_empty() || list_array.is_null(0) {
+            return Ok(vec![]);
+        }
+
+        let values = list_array.value(0);
+        let float_array = values
+            .as_any()
+            .downcast_ref::<arrow::array::Float64Array>()
+            .ok_or_else(|| TaskError::new("expected Float64Array inside quantile result"))?;
+
+        Ok(float_array
+            .iter()
+            .filter_map(|v| v.map(|f| format!("{}", f.floor() as i64)))
+            .collect())
     }
 
     async fn load_enabled_namespaces(&self) -> Result<Vec<EnabledNamespace>, TaskError> {
