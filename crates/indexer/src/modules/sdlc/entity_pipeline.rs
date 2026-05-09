@@ -34,6 +34,11 @@ pub(in crate::modules::sdlc) struct BasePipeline {
     pipeline: Arc<Pipeline>,
 }
 
+struct ExecutionPlan {
+    runs: Vec<(PipelinePlan, PipelineContext)>,
+    consolidate: bool,
+}
+
 impl BasePipeline {
     pub fn new(
         plan: PipelinePlan,
@@ -61,76 +66,38 @@ impl BasePipeline {
         format!("{}.{}", base, self.plan.name)
     }
 
-    async fn run_single(
-        &self,
-        request: &EntityIndexingRequest,
-        destination: &dyn Destination,
-        progress: &ProgressNotifier,
-    ) -> Result<(), HandlerError> {
+    fn single_run(&self, request: &EntityIndexingRequest) -> (PipelinePlan, PipelineContext) {
         let position_key = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
         let context = PipelineContext {
             watermark: request.watermark,
             position_key,
             base_conditions: scope_conditions(&request.scope),
         };
-        self.pipeline
-            .run(
-                std::slice::from_ref(&self.plan),
-                &context,
-                destination,
-                progress,
-                1,
-            )
-            .await
+        (self.plan.clone(), context)
     }
 
-    async fn scan_partition_checkpoints(
-        &self,
-        scope: &IndexingScope,
-        entity_kind: &str,
-    ) -> Result<PartitionState, HandlerError> {
-        let mut incomplete_indices = Vec::new();
-        let mut any_exist = false;
-        let mut all_completed = true;
-
-        for i in 0..self.partition_count {
-            let spec = stub_partition_spec(i, self.partition_count);
-            let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
-            let checkpoint = self.pipeline.load_checkpoint_option(&key).await?;
-
-            match checkpoint {
-                Some(cp) => {
-                    any_exist = true;
-                    if cp.cursor_values.is_some() {
-                        all_completed = false;
-                        incomplete_indices.push(i);
-                    }
-                }
-                None => {
-                    all_completed = false;
-                    incomplete_indices.push(i);
-                }
-            }
-        }
-
-        if !any_exist {
-            return Ok(PartitionState::NoneExist);
-        }
-
-        if all_completed {
-            return Ok(PartitionState::AllCompleted);
-        }
-
-        Ok(PartitionState::SomeIncomplete { incomplete_indices })
-    }
-
-    async fn run_partitioned(
+    async fn build_runs(
         &self,
         request: &EntityIndexingRequest,
-        destination: &dyn Destination,
-        progress: &ProgressNotifier,
-        partition_indices: &[u32],
-    ) -> Result<(), HandlerError> {
+    ) -> Result<ExecutionPlan, HandlerError> {
+        if self.partition_count <= 1 || self.is_bootstrapped(request).await? {
+            return Ok(ExecutionPlan {
+                runs: vec![self.single_run(request)],
+                consolidate: false,
+            });
+        }
+
+        let incomplete = self
+            .incomplete_partitions(&request.scope, &request.entity_kind)
+            .await?;
+
+        if incomplete.is_empty() {
+            return Ok(ExecutionPlan {
+                runs: vec![],
+                consolidate: true,
+            });
+        }
+
         let boundaries = match (&self.source_table, &self.partition_column) {
             (Some(table), Some(col)) => {
                 self.pipeline
@@ -152,12 +119,15 @@ impl BasePipeline {
                 boundaries = boundaries.len(),
                 "insufficient boundaries, falling back to single pipeline"
             );
-            return self.run_single(request, destination, progress).await;
+            return Ok(ExecutionPlan {
+                runs: vec![self.single_run(request)],
+                consolidate: false,
+            });
         }
 
         let base_conditions = scope_conditions(&request.scope);
 
-        let partition_runs: Vec<(PipelinePlan, PipelineContext)> = partition_indices
+        let runs: Vec<(PipelinePlan, PipelineContext)> = incomplete
             .iter()
             .map(|&i| {
                 let spec = build_partition_spec(i, self.partition_count, &boundaries);
@@ -180,12 +150,51 @@ impl BasePipeline {
 
         info!(
             entity_kind = %request.entity_kind,
-            partitions = partition_indices.len(),
+            partitions = runs.len(),
             total = self.partition_count,
             "running partitioned pipeline"
         );
 
-        let futures: Vec<_> = partition_runs
+        Ok(ExecutionPlan {
+            runs,
+            consolidate: true,
+        })
+    }
+
+    async fn is_bootstrapped(&self, request: &EntityIndexingRequest) -> Result<bool, HandlerError> {
+        let unified_key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, None);
+        match self.pipeline.load_checkpoint_option(&unified_key).await? {
+            Some(cp) if cp.watermark.timestamp_micros() > 0 => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    async fn incomplete_partitions(
+        &self,
+        scope: &IndexingScope,
+        entity_kind: &str,
+    ) -> Result<Vec<u32>, HandlerError> {
+        let mut incomplete = Vec::new();
+
+        for i in 0..self.partition_count {
+            let spec = stub_partition_spec(i, self.partition_count);
+            let key = self.plan_checkpoint_key(scope, entity_kind, Some(&spec));
+            match self.pipeline.load_checkpoint_option(&key).await? {
+                Some(cp) if cp.cursor_values.is_none() => {}
+                _ => incomplete.push(i),
+            }
+        }
+
+        Ok(incomplete)
+    }
+
+    async fn run_plans(
+        &self,
+        runs: &[(PipelinePlan, PipelineContext)],
+        destination: &dyn Destination,
+        progress: &ProgressNotifier,
+    ) -> Result<(), HandlerError> {
+        let futures: Vec<_> = runs
             .iter()
             .map(|(plan, context)| {
                 self.pipeline.run(
@@ -208,7 +217,7 @@ impl BasePipeline {
             Ok(())
         } else {
             Err(HandlerError::Processing(format!(
-                "partitioned run failed: {}",
+                "pipeline run failed: {}",
                 errors.join("; ")
             )))
         }
@@ -218,7 +227,7 @@ impl BasePipeline {
         &self,
         scope: &IndexingScope,
         entity_kind: &str,
-    ) -> Result<DateTime<Utc>, HandlerError> {
+    ) -> Result<(), HandlerError> {
         let mut min_watermark: Option<DateTime<Utc>> = None;
 
         for i in 0..self.partition_count {
@@ -241,20 +250,13 @@ impl BasePipeline {
             .await?;
 
         info!(
-            entity_kind,
             partitions = self.partition_count,
             consolidated_watermark = %watermark,
             "consolidated partition checkpoints"
         );
 
-        Ok(watermark)
+        Ok(())
     }
-}
-
-enum PartitionState {
-    NoneExist,
-    AllCompleted,
-    SomeIncomplete { incomplete_indices: Vec<u32> },
 }
 
 #[async_trait]
@@ -265,40 +267,16 @@ impl EntityPipeline for BasePipeline {
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
-        if self.partition_count <= 1 {
-            return self.run_single(request, destination, progress).await;
+        let execution = self.build_runs(request).await?;
+
+        if !execution.runs.is_empty() {
+            self.run_plans(&execution.runs, destination, progress)
+                .await?;
         }
 
-        let unified_key = self.plan_checkpoint_key(&request.scope, &request.entity_kind, None);
-        if let Some(cp) = self.pipeline.load_checkpoint_option(&unified_key).await?
-            && cp.watermark.timestamp_micros() > 0
-        {
-            return self.run_single(request, destination, progress).await;
-        }
-
-        let state = self
-            .scan_partition_checkpoints(&request.scope, &request.entity_kind)
-            .await?;
-
-        match state {
-            PartitionState::NoneExist => {
-                let all_indices: Vec<u32> = (0..self.partition_count).collect();
-                self.run_partitioned(request, destination, progress, &all_indices)
-                    .await?;
-                self.consolidate_checkpoint(&request.scope, &request.entity_kind)
-                    .await?;
-            }
-            PartitionState::AllCompleted => {
-                self.consolidate_checkpoint(&request.scope, &request.entity_kind)
-                    .await?;
-                return self.run_single(request, destination, progress).await;
-            }
-            PartitionState::SomeIncomplete { incomplete_indices } => {
-                self.run_partitioned(request, destination, progress, &incomplete_indices)
-                    .await?;
-                self.consolidate_checkpoint(&request.scope, &request.entity_kind)
-                    .await?;
-            }
+        if execution.consolidate {
+            self.consolidate_checkpoint(&request.scope, &request.entity_kind)
+                .await?;
         }
 
         Ok(())
