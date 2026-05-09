@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
+use arrow::array::{Array, Float64Array, ListArray};
 use async_trait::async_trait;
+use chrono::DateTime;
+use chrono::Utc;
 
 use crate::handler::HandlerError;
-use crate::topic::{EntityIndexingRequest, PartitionBounds, PartitionSpec};
+use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionBounds, PartitionSpec};
 
-use super::pipeline::Pipeline;
+use super::datalake::DatalakeQuery;
 
 const MAX_PARTITION_UPPER_BOUND: &str = "99999999999999999999";
 
@@ -17,10 +20,28 @@ const MAX_PARTITION_UPPER_BOUND: &str = "99999999999999999999";
 pub(in crate::modules::sdlc) trait PartitionStrategy: Send + Sync {
     fn partition_count(&self) -> u32;
     fn partition_column(&self) -> &str;
+
+    async fn compute_quantiles(
+        &self,
+        request: &EntityIndexingRequest,
+    ) -> Result<Vec<String>, HandlerError>;
+
     async fn compute_partitions(
         &self,
         request: &EntityIndexingRequest,
-    ) -> Result<Option<Vec<PartitionSpec>>, HandlerError>;
+    ) -> Result<Option<Vec<PartitionSpec>>, HandlerError> {
+        let boundaries = self.compute_quantiles(request).await?;
+
+        if boundaries.len() < (self.partition_count() - 1) as usize {
+            return Ok(None);
+        }
+
+        let partitions = (0..self.partition_count())
+            .map(|i| build_partition_spec(i, self.partition_count(), &boundaries))
+            .collect();
+
+        Ok(Some(partitions))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -31,7 +52,7 @@ pub(in crate::modules::sdlc) struct DatalakePartitionStrategy {
     source_table: String,
     partition_column: String,
     partition_count: u32,
-    pipeline: Arc<Pipeline>,
+    datalake: Arc<dyn DatalakeQuery>,
 }
 
 impl DatalakePartitionStrategy {
@@ -39,14 +60,76 @@ impl DatalakePartitionStrategy {
         source_table: String,
         partition_column: String,
         partition_count: u32,
-        pipeline: Arc<Pipeline>,
+        datalake: Arc<dyn DatalakeQuery>,
     ) -> Self {
         Self {
             source_table,
             partition_column,
             partition_count,
-            pipeline,
+            datalake,
         }
+    }
+
+    async fn query_quantile_boundaries(
+        &self,
+        scope: &IndexingScope,
+        watermark: &DateTime<Utc>,
+    ) -> Result<Vec<String>, HandlerError> {
+        let quantile_positions: Vec<String> = (1..self.partition_count)
+            .map(|i| format!("{}", i as f64 / self.partition_count as f64))
+            .collect();
+        let quantile_list = quantile_positions.join(", ");
+
+        let scope_filter = match scope {
+            IndexingScope::Global => "1=1".to_string(),
+            IndexingScope::Namespace { traversal_path, .. } => {
+                format!("startsWith(traversal_path, '{traversal_path}')")
+            }
+        };
+
+        let watermark_str = watermark.format(crate::clickhouse::TIMESTAMP_FORMAT);
+
+        let sql = format!(
+            "SELECT quantilesTDigest({quantile_list})({partition_column}) \
+             FROM {source_table} \
+             WHERE {scope_filter} \
+             AND _siphon_replicated_at <= '{watermark_str}'",
+            partition_column = self.partition_column,
+            source_table = self.source_table,
+        );
+
+        let batches = self
+            .datalake
+            .query_batches(&sql, serde_json::json!({}), None)
+            .await
+            .map_err(|err| HandlerError::Processing(format!("boundary query failed: {err}")))?;
+
+        let batch = match batches.into_iter().next() {
+            Some(batch) if batch.num_rows() > 0 => batch,
+            _ => return Ok(vec![]),
+        };
+
+        let column = batch.column(0);
+        let list_array = column.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
+            HandlerError::Processing("expected ListArray from quantile query".into())
+        })?;
+
+        if list_array.is_empty() || list_array.is_null(0) {
+            return Ok(vec![]);
+        }
+
+        let values = list_array.value(0);
+        let float_array = values
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .ok_or_else(|| {
+                HandlerError::Processing("expected Float64Array inside quantile result".into())
+            })?;
+
+        Ok(float_array
+            .iter()
+            .filter_map(|v| v.map(|f| format!("{}", f.floor() as i64)))
+            .collect())
     }
 }
 
@@ -60,30 +143,12 @@ impl PartitionStrategy for DatalakePartitionStrategy {
         &self.partition_column
     }
 
-    async fn compute_partitions(
+    async fn compute_quantiles(
         &self,
         request: &EntityIndexingRequest,
-    ) -> Result<Option<Vec<PartitionSpec>>, HandlerError> {
-        let boundaries = self
-            .pipeline
-            .compute_boundaries(
-                &self.source_table,
-                &self.partition_column,
-                &request.scope,
-                self.partition_count,
-                &request.watermark,
-            )
-            .await?;
-
-        if boundaries.len() < (self.partition_count - 1) as usize {
-            return Ok(None);
-        }
-
-        let partitions = (0..self.partition_count)
-            .map(|i| build_partition_spec(i, self.partition_count, &boundaries))
-            .collect();
-
-        Ok(Some(partitions))
+    ) -> Result<Vec<String>, HandlerError> {
+        self.query_quantile_boundaries(&request.scope, &request.watermark)
+            .await
     }
 }
 

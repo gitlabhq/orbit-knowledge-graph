@@ -108,7 +108,7 @@ pub async fn register_entity_handlers(
     let metrics = SdlcMetrics::new();
 
     let pipeline = Arc::new(Pipeline::new(
-        datalake,
+        Arc::clone(&datalake),
         checkpoint_store,
         metrics.clone(),
         config.engine.datalake_retry.clone(),
@@ -133,7 +133,7 @@ pub async fn register_entity_handlers(
         let entity_kind = plan.name.clone();
 
         let partition_strategy =
-            build_partition_strategy(&entity_kind, scope, ontology, entity_config, &pipeline);
+            build_partition_strategy(&entity_kind, scope, ontology, entity_config, &datalake);
 
         let entity_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(
             SimpleEntityPipeline::new(plan, partition_strategy, Arc::clone(&pipeline)),
@@ -156,7 +156,7 @@ fn build_partition_strategy(
     scope: ontology::EtlScope,
     ontology: &ontology::Ontology,
     config: &gkg_server_config::EntityHandlerConfig,
-    pipeline: &Arc<Pipeline>,
+    datalake: &Arc<dyn DatalakeQuery>,
 ) -> Option<Arc<dyn PartitionStrategy>> {
     let partition_count = config
         .partition_overrides
@@ -193,7 +193,7 @@ fn build_partition_strategy(
         source_table,
         partition_col.to_string(),
         partition_count,
-        Arc::clone(pipeline),
+        Arc::clone(datalake),
     )))
 }
 

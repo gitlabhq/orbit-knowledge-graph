@@ -23,7 +23,6 @@ use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
 use super::plan::{ExtractQuery, PipelinePlan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
-use crate::topic::IndexingScope;
 use gkg_server_config::DatalakeRetryConfig;
 
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
@@ -80,71 +79,6 @@ impl Pipeline {
                     "failed to save completed checkpoint for {key}: {err}"
                 ))
             })
-    }
-
-    pub(in crate::modules::sdlc) async fn compute_boundaries(
-        &self,
-        source_table: &str,
-        partition_column: &str,
-        scope: &IndexingScope,
-        partition_count: u32,
-        watermark: &DateTime<Utc>,
-    ) -> Result<Vec<String>, HandlerError> {
-        use arrow::array::{Array, Float64Array, ListArray};
-
-        let quantile_positions: Vec<String> = (1..partition_count)
-            .map(|i| format!("{}", i as f64 / partition_count as f64))
-            .collect();
-        let quantile_list = quantile_positions.join(", ");
-
-        let scope_filter = match scope {
-            IndexingScope::Global => "1=1".to_string(),
-            IndexingScope::Namespace { traversal_path, .. } => {
-                format!("startsWith(traversal_path, '{traversal_path}')")
-            }
-        };
-
-        let watermark_str = watermark.format(crate::clickhouse::TIMESTAMP_FORMAT);
-
-        let sql = format!(
-            "SELECT quantilesTDigest({quantile_list})({partition_column}) \
-             FROM {source_table} \
-             WHERE {scope_filter} \
-             AND _siphon_replicated_at <= '{watermark_str}'"
-        );
-
-        let batches = self
-            .datalake
-            .query_batches(&sql, serde_json::json!({}), None)
-            .await
-            .map_err(|err| HandlerError::Processing(format!("boundary query failed: {err}")))?;
-
-        let batch = match batches.into_iter().next() {
-            Some(batch) if batch.num_rows() > 0 => batch,
-            _ => return Ok(vec![]),
-        };
-
-        let column = batch.column(0);
-        let list_array = column.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
-            HandlerError::Processing("expected ListArray from quantile query".into())
-        })?;
-
-        if list_array.is_empty() || list_array.is_null(0) {
-            return Ok(vec![]);
-        }
-
-        let values = list_array.value(0);
-        let float_array = values
-            .as_any()
-            .downcast_ref::<Float64Array>()
-            .ok_or_else(|| {
-                HandlerError::Processing("expected Float64Array inside quantile result".into())
-            })?;
-
-        Ok(float_array
-            .iter()
-            .filter_map(|v| v.map(|f| format!("{}", f.floor() as i64)))
-            .collect())
     }
 
     pub async fn run(
