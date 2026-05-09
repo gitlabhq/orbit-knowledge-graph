@@ -151,9 +151,7 @@ fn traversal_path_values<'a>(
             .and_then(|v| v.as_str())
             .map(|path| vec![path])
             .ok_or_else(|| {
-                QueryError::PipelineInvariant(format!(
-                    "{label}: ValidatePass must reject non-string traversal_path filters"
-                ))
+                QueryError::Validation(format!("{label}: value must be a traversal_path string"))
             }),
         FilterOp::In => {
             let paths = traversal_path_filter
@@ -161,23 +159,23 @@ fn traversal_path_values<'a>(
                 .as_ref()
                 .and_then(|v| v.as_array())
                 .ok_or_else(|| {
-                    QueryError::PipelineInvariant(format!(
-                        "{label}: ValidatePass must reject non-array traversal_path in filters"
+                    QueryError::Validation(format!(
+                        "{label}: \"in\" requires an array of traversal_path strings"
                     ))
                 })?;
             paths
                 .iter()
                 .map(|v| {
                     v.as_str().ok_or_else(|| {
-                        QueryError::PipelineInvariant(format!(
-                            "{label}: ValidatePass must reject non-string traversal_path values"
+                        QueryError::Validation(format!(
+                            "{label}: \"in\" values must be traversal_path strings"
                         ))
                     })
                 })
                 .collect()
         }
-        _ => Err(QueryError::PipelineInvariant(format!(
-            "{label}: ValidatePass must reject unsupported traversal_path operators"
+        _ => Err(QueryError::Validation(format!(
+            "{label}: only eq, in, and starts_with are supported"
         ))),
     }
 }
@@ -194,7 +192,7 @@ fn validate_traversal_path_within_scope(
         return Ok(());
     }
 
-    Err(QueryError::Security(format!(
+    Err(QueryError::Validation(format!(
         "{label}: path is not within an authorized traversal_path scope for this entity"
     )))
 }
@@ -435,6 +433,10 @@ mod tests {
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
+            err.is_client_safe(),
+            "traversal_path scope errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
             err.to_string().contains("authorized traversal_path scope"),
             "error should reject paths outside the JWT scope, got: {err}"
         );
@@ -461,6 +463,10 @@ mod tests {
         );
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            err.is_client_safe(),
+            "traversal_path role-scope errors should be safe for clients, got: {err:?}"
+        );
         assert!(
             err.to_string().contains("authorized traversal_path scope"),
             "Reporter paths must not satisfy SecurityManager traversal_path filters, got: {err}"
@@ -493,8 +499,37 @@ mod tests {
 
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
+            err.is_client_safe(),
+            "relationship traversal_path scope errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
             err.to_string().contains("authorized traversal_path scope"),
             "relationship traversal_path filters should be scoped too, got: {err}"
+        );
+    }
+
+    #[test]
+    fn traversal_path_shape_errors_are_client_safe_validation_errors() {
+        let ont = ontology();
+        let ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+        let mut input = input_with_traversal_path_filter(
+            "Group",
+            traversal_path_filter(FilterOp::StartsWith, Value::Number(1.into())),
+        );
+
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            err.is_client_safe(),
+            "traversal_path shape errors should be safe for clients, got: {err:?}"
+        );
+        assert!(
+            msg.contains("value must be a traversal_path string"),
+            "error should explain the invalid traversal_path shape, got: {msg}"
+        );
+        assert!(
+            !msg.contains("ValidatePass"),
+            "client-facing errors must not mention internal pass invariants, got: {msg}"
         );
     }
 
