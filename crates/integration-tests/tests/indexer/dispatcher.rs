@@ -8,10 +8,18 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use gkg_server_config::{
+    EntityDispatcherConfig, GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration,
+};
+use indexer::modules::sdlc::dispatch::{
+    EntityDescriptor, EntityDispatcher, GlobalDispatcher, NamespaceDispatcher,
+};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
-use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
+use indexer::topic::{
+    ENTITY_INDEXING_SUBJECT_PATTERN, EntityIndexingRequest, GLOBAL_INDEXING_SUBJECT,
+    INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN,
+};
+use ontology::EtlScope;
 use serde::Deserialize;
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -87,6 +95,10 @@ impl TestContext {
             .await
     }
 
+    async fn consume_entity_requests(&self) -> Vec<EntityIndexingRequest> {
+        self.consume_messages(ENTITY_INDEXING_SUBJECT_PATTERN).await
+    }
+
     async fn consume_messages<T: for<'de> Deserialize<'de>>(&self, subject: &str) -> Vec<T> {
         let client = async_nats::connect(format!("nats://{}", self.nats_url))
             .await
@@ -141,6 +153,7 @@ impl TestContext {
                 subjects: vec![
                     GLOBAL_INDEXING_SUBJECT.into(),
                     NAMESPACE_INDEXING_SUBJECT_PATTERN.into(),
+                    ENTITY_INDEXING_SUBJECT_PATTERN.into(),
                 ],
                 retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                 max_messages_per_subject: 1,
@@ -223,4 +236,91 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             .iter()
             .all(|r| r.watermark >= before && r.watermark <= after)
     );
+}
+
+#[tokio::test]
+async fn entity_dispatcher_publishes_per_entity_requests() {
+    let context = TestContext::new().await;
+
+    context
+        .given_enabled_namespaces([
+            Namespace {
+                id: 100,
+                traversal_path: "1/100/".to_string(),
+            },
+            Namespace {
+                id: 200,
+                traversal_path: "2/200/".to_string(),
+            },
+        ])
+        .await;
+
+    let services = indexer::scheduler::connect(&context.nats_config())
+        .await
+        .unwrap();
+    let datalake = context.clickhouse.config.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let lock_service = services.lock_service.clone();
+
+    let entities = vec![
+        EntityDescriptor {
+            entity_kind: "User".to_string(),
+            scope: EtlScope::Global,
+        },
+        EntityDescriptor {
+            entity_kind: "Project".to_string(),
+            scope: EtlScope::Namespaced,
+        },
+    ];
+
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(EntityDispatcher::new(
+        services.nats.clone(),
+        datalake,
+        metrics,
+        EntityDispatcherConfig::default(),
+        entities,
+    ))];
+
+    let before = Utc::now();
+    indexer::scheduler::run_once(&tasks, &*lock_service)
+        .await
+        .unwrap();
+    let after = Utc::now();
+
+    let requests = context.consume_entity_requests().await;
+
+    let global_user: Vec<_> = requests
+        .iter()
+        .filter(|r| {
+            r.entity_kind == "User" && matches!(r.scope, indexer::topic::IndexingScope::Global)
+        })
+        .collect();
+    assert_eq!(
+        global_user.len(),
+        1,
+        "should publish one global User request"
+    );
+    assert!(global_user[0].watermark >= before && global_user[0].watermark <= after);
+
+    let namespaced_project: Vec<_> = requests
+        .iter()
+        .filter(|r| {
+            r.entity_kind == "Project"
+                && matches!(r.scope, indexer::topic::IndexingScope::Namespace { .. })
+        })
+        .collect();
+    assert_eq!(
+        namespaced_project.len(),
+        2,
+        "should publish one Project request per enabled namespace"
+    );
+
+    let namespace_ids: HashSet<i64> = namespaced_project
+        .iter()
+        .filter_map(|r| match &r.scope {
+            indexer::topic::IndexingScope::Namespace { namespace_id, .. } => Some(*namespace_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(namespace_ids, HashSet::from([100, 200]));
 }

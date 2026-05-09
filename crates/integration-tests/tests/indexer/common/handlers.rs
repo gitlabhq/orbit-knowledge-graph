@@ -8,6 +8,7 @@ use indexer::nats::ProgressNotifier;
 use indexer::testkit::{
     MockLockService, MockNatsServices, TestEnvelopeFactory, create_test_indexer_config,
 };
+use indexer::topic::IndexingScope;
 use indexer::types::Envelope;
 use integration_testkit::TestContext;
 
@@ -72,6 +73,30 @@ pub fn global_envelope() -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
             "watermark": default_test_watermark().to_rfc3339()
+        })
+        .to_string(),
+    )
+}
+
+pub async fn entity_handler(ctx: &TestContext, entity_kind: &str) -> Arc<dyn Handler> {
+    let config = create_test_indexer_config(&ctx.config);
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let registry = HandlerRegistry::default();
+    indexer::modules::sdlc::register_entity_handlers(&registry, &config, &ontology)
+        .await
+        .expect("failed to register entity handlers");
+    registry
+        .find_by_name(entity_kind)
+        .unwrap_or_else(|| panic!("entity handler '{entity_kind}' not found"))
+}
+
+pub fn entity_envelope(entity_kind: &str, scope: IndexingScope) -> Envelope {
+    TestEnvelopeFactory::simple(
+        &serde_json::json!({
+            "entity_kind": entity_kind,
+            "watermark": default_test_watermark().to_rfc3339(),
+            "scope": scope,
+            "partition": null
         })
         .to_string(),
     )
