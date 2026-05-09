@@ -4,7 +4,7 @@ expression: run(r)
 ---
 @header
 query_type:traversal
-format_version:1.0.0
+goon_version:1.0.0
 nodes:3
 edges:2
 @nodes

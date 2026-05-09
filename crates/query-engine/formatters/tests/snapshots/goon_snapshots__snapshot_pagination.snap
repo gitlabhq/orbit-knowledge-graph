@@ -4,7 +4,7 @@ expression: run(r)
 ---
 @header
 query_type:traversal
-format_version:1.0.0
+goon_version:1.0.0
 nodes:1
 edges:0
 has_more:true
@@ -12,3 +12,4 @@ total_rows:100
 @nodes
 MR(1):
 1 iid=42
+@edges

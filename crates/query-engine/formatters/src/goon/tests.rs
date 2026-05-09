@@ -22,20 +22,27 @@ fn header_emits_query_type_and_counts() {
     let out = enc(&r);
     assert!(out.starts_with("@header\n"));
     assert!(out.contains("query_type:traversal"));
-    assert!(out.contains("format_version:1.0.0"));
+    assert!(out.contains("goon_version:1.0.0"));
+    assert!(
+        !out.contains("format_version:"),
+        "field is named goon_version to disambiguate from the source format_version"
+    );
     assert!(out.contains("nodes:3"));
     assert!(out.contains("edges:2"));
 }
 
 #[test]
-fn empty_response_emits_only_header() {
+fn empty_response_emits_section_markers() {
     let r = response("traversal", vec![], vec![]);
     let out = enc(&r);
     assert!(out.contains("@header\n"));
     assert!(out.contains("nodes:0"));
     assert!(out.contains("edges:0"));
-    assert!(!out.contains("@nodes"));
-    assert!(!out.contains("@edges"));
+    assert!(
+        out.contains("@nodes\n"),
+        "section markers always present so parsers stay uniform"
+    );
+    assert!(out.contains("@edges\n"));
 }
 
 #[test]
@@ -168,6 +175,80 @@ fn cr_and_tab_are_escape_sequences() {
     let out = enc(&r);
     assert!(out.contains("\\r"));
     assert!(out.contains("\\t"));
+}
+
+#[test]
+fn newline_does_not_double_escape_backslash() {
+    // Production regression (MR description with markdown). A literal newline
+    // byte must serialize as `\n`, not `\\n` — the latter is "literal
+    // backslash followed by n" and breaks any inverse decoder.
+    let r = response(
+        "traversal",
+        vec![node(
+            "MR",
+            1,
+            &[("description", json!("line one\nline two"))],
+        )],
+        vec![],
+    );
+    let out = enc(&r);
+    assert!(
+        out.contains(r#"description="line one\nline two""#),
+        "newline must be \\n, not \\\\n: {out}"
+    );
+    assert!(
+        !out.contains("\\\\n"),
+        "backslash must not be doubled when newline is escaped: {out}"
+    );
+}
+
+#[test]
+fn literal_backslash_with_control_does_not_collide() {
+    // Different sources must not collapse to the same output: a real
+    // newline encodes as `\n`, a literal backslash-n encodes as `\\n`.
+    let r1 = response(
+        "traversal",
+        vec![node("MR", 1, &[("title", json!("a\nb"))])],
+        vec![],
+    );
+    let r2 = response(
+        "traversal",
+        vec![node("MR", 1, &[("title", json!(r"a\nb"))])],
+        vec![],
+    );
+    assert_ne!(
+        enc(&r1),
+        enc(&r2),
+        "real newline and literal `\\n` must encode differently"
+    );
+}
+
+#[test]
+fn string_that_looks_like_native_token_is_quoted() {
+    // A JSON string `"true"` must not render as the bare token `true`,
+    // which would be indistinguishable from a real boolean.
+    let r = response(
+        "traversal",
+        vec![node(
+            "X",
+            1,
+            &[
+                ("a", json!("true")),
+                ("b", json!("false")),
+                ("c", json!("null")),
+                ("d", json!(true)),
+            ],
+        )],
+        vec![],
+    );
+    let out = enc(&r);
+    assert!(
+        out.contains(r#"a="true""#),
+        "string \"true\" must be quoted: {out}"
+    );
+    assert!(out.contains(r#"b="false""#));
+    assert!(out.contains(r#"c="null""#));
+    assert!(out.contains("d=true"), "real bool stays bare: {out}");
 }
 
 #[test]

@@ -4,8 +4,10 @@ expression: run(r)
 ---
 @header
 query_type:aggregation
-format_version:1.0.0
+goon_version:1.0.0
 nodes:0
 edges:0
 aggregations:total(count)
 values:total=2347
+@nodes
+@edges

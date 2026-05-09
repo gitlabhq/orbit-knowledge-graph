@@ -45,7 +45,7 @@ fn estimate_capacity(response: &GraphResponse) -> usize {
 fn write_header(out: &mut String, response: &GraphResponse, format_version: &Version) {
     out.push_str("@header\n");
     let _ = writeln!(out, "query_type:{}", response.query_type);
-    let _ = writeln!(out, "format_version:{format_version}");
+    let _ = writeln!(out, "goon_version:{format_version}");
     let _ = writeln!(out, "nodes:{}", response.nodes.len());
     let _ = writeln!(out, "edges:{}", response.edges.len());
     if let Some(p) = &response.pagination {
@@ -79,10 +79,10 @@ fn write_header(out: &mut String, response: &GraphResponse, format_version: &Ver
 }
 
 fn write_nodes(out: &mut String, response: &GraphResponse) {
+    out.push_str("@nodes\n");
     if response.nodes.is_empty() {
         return;
     }
-    out.push_str("@nodes\n");
     let preserve_order = response.query_type == "aggregation";
     let groups = group_nodes(response, preserve_order);
     for (entity_type, indices) in groups {
@@ -110,11 +110,11 @@ fn write_node_row(out: &mut String, node: &GraphNode) {
 }
 
 fn write_edges(out: &mut String, response: &GraphResponse) {
+    out.push_str("@edges\n");
     let edges = dedup_and_sort_edges(&response.edges);
     if edges.is_empty() {
         return;
     }
-    out.push_str("@edges\n");
     let mut last_type: Option<&str> = None;
     let groups = group_edges_by_type(&edges);
     for (edge_type, slice) in groups {
@@ -267,16 +267,12 @@ fn format_string(raw: &str, key: &str) -> String {
         return String::new();
     }
     let truncated = truncate(raw, key);
-    let needs_escape = truncated
-        .chars()
-        .any(|c| (c as u32) < 0x20 || c == '\u{7f}');
-    if needs_escape {
-        return quote_escaped(&escape_controls(&truncated));
-    }
     if let Some(normalized) = normalize_iso_datetime(&truncated) {
         return normalized;
     }
-    if is_bare_token(&truncated) {
+    // Strings that look like native scalars must be quoted so a reader can
+    // tell `state="true"` (string) from a real boolean.
+    if !matches!(truncated.as_ref(), "true" | "false" | "null") && is_bare_token(&truncated) {
         return truncated.into_owned();
     }
     quote_escaped(&truncated)
@@ -307,21 +303,6 @@ fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
     (count > limit).then_some(count)
 }
 
-fn escape_controls(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    for c in raw.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {}
-            c => out.push(c),
-        }
-    }
-    out
-}
-
 fn quote_escaped(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -329,6 +310,10 @@ fn quote_escaped(s: &str) -> String {
         match c {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c == '\u{7f}' => {}
             c => out.push(c),
         }
     }
