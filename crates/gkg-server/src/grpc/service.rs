@@ -346,7 +346,18 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                     .await
                     .is_err()
                 {
-                    tracing::warn!("Query stream timed out after 60s");
+                    // Stream timeout drops the handler future before any
+                    // observer can fire, so bump the terminal-state counters
+                    // here. Mirrors the structured-field shape of
+                    // `send_query_error` so log readers can filter timeouts
+                    // alongside other failure modes.
+                    crate::pipeline::metrics::record_query_timeout();
+                    tracing::warn!(
+                        code = "deadline_exceeded",
+                        failure_reason = "timeout",
+                        timeout_secs = stream_timeout,
+                        "Query stream timed out",
+                    );
                     let _ = tx
                         .send(Err(Status::deadline_exceeded("Query stream timed out")))
                         .await;

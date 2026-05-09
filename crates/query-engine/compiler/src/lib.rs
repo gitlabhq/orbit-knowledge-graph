@@ -213,27 +213,42 @@ mod tests {
 
     /// Regression: pipeline-execution errors must reach `count_err`. Before
     /// this fix the body was `pipeline.execute(...)?.into_output().count_err()`,
-    /// which propagated `QueryError` via `?` and skipped the counter
-    /// increment. The test asserts the error is surfaced (which only happens
-    /// when the unified entry point chains correctly through count_err).
+    /// where the `?` propagated `QueryError` past `count_err`, so the counter
+    /// was never incremented. Asserting the test-only `COUNT_ERR_HITS` side
+    /// channel ensures the regression cannot return undetected; asserting on
+    /// the error variant alone would have passed against the buggy code.
     #[test]
-    fn malformed_query_returns_parse_error() {
+    fn malformed_query_increments_compiler_rejected() {
+        use std::sync::atomic::Ordering;
         let ontology = Ontology::load_embedded().expect("ontology must load");
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err = compile("not json", &ontology, &security_ctx()).expect_err("must reject");
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             matches!(err, crate::error::QueryError::Parse(_)),
             "expected Parse, got: {err:?}"
         );
+        assert!(
+            after > before,
+            "count_err must run on parse errors (before={before}, after={after})"
+        );
     }
 
     #[test]
-    fn allowlist_rejected_query_returns_error() {
+    fn allowlist_rejected_query_increments_compiler_rejected() {
+        use std::sync::atomic::Ordering;
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{"query_type":"traversal","node":{"id":"x","entity":"NotARealEntity","columns":["id"]},"limit":1}"#;
+        let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         let err = compile(query, &ontology, &security_ctx()).expect_err("must reject");
+        let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
             "compile errors from internal passes must surface as their own variant, not PipelineInvariant; got: {err:?}"
+        );
+        assert!(
+            after > before,
+            "count_err must run on allowlist rejections (before={before}, after={after})"
         );
     }
 

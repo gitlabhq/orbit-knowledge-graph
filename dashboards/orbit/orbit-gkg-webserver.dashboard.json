@@ -1519,8 +1519,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (failure_reason) (label_replace(increase(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status!~\"ok|compile_error\"}[1h]), \"failure_reason\", \"$1\", \"status\", \"(.+)_error\"))",
-               "legendFormat": "{{failure_reason}} (status fallback)",
+               "expr": "sum by (failure_reason) (label_replace(increase(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=~\".+_error\", status!=\"compile_error\"}[1h]), \"failure_reason\", \"$1 (status fallback)\", \"status\", \"(.+)_error\"))",
+               "legendFormat": "{{failure_reason}}",
                "refId": "B"
             },
             {
@@ -1639,7 +1639,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "label_replace(sum(increase(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[1h])), \"failure_reason\", \"compile_error (status fallback)\", \"\", \"\")",
+               "expr": "label_replace(sum(increase(gkg_query_pipeline_queries_total{container=\"gkg-webserver\", cluster=~\"$cluster\", status=\"compile_error\"}[1h])), \"failure_reason\", \"compile_error (status fallback)\", \"__name__\", \".+\")",
                "legendFormat": "{{failure_reason}}",
                "refId": "B"
             },

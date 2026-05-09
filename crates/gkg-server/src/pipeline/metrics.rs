@@ -46,6 +46,22 @@ impl QueryPipelineMetrics {
     }
 }
 
+/// Increment the terminal-state counters for a request that did not finish
+/// inside the gRPC handler's stream-timeout window. The pipeline observer
+/// has already been dropped by the time the timeout fires, so this
+/// function bypasses the observer chain and bumps the OTel counters
+/// directly.
+pub(crate) fn record_query_timeout() {
+    let queries_attrs = [
+        KeyValue::new(spec::labels::QUERY_TYPE, "unknown"),
+        KeyValue::new(spec::labels::STATUS, "timeout"),
+    ];
+    METRICS.queries.add(1, &queries_attrs);
+    METRICS
+        .failed
+        .add(1, &[KeyValue::new(spec::labels::FAILURE_REASON, "timeout")]);
+}
+
 /// Closed-enum mapping for `gkg.query.pipeline.failed{failure_reason}`.
 /// Returns `None` for `Compile` because compile-time rejections are
 /// counted on `gkg.query.engine.compiler.rejected` instead.

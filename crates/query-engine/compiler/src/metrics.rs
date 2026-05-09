@@ -12,6 +12,13 @@ use gkg_observability::query::engine as spec;
 
 use crate::error::QueryError;
 
+/// Test-only side-channel that lets unit tests verify `count_err` was
+/// actually invoked. The OpenTelemetry counter has no readable handle, so
+/// this is the cheapest way to keep the regression tests honest.
+#[cfg(test)]
+pub(crate) static COUNT_ERR_HITS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 pub static METRICS: LazyLock<QueryEngineMetrics> = LazyLock::new(QueryEngineMetrics::new);
 
 #[derive(Clone)]
@@ -71,6 +78,8 @@ impl<T, E: Into<QueryError>> CountErr<T, E> for std::result::Result<T, E> {
                     failure_reason(&qe),
                 )],
             );
+            #[cfg(test)]
+            COUNT_ERR_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             qe
         })
     }

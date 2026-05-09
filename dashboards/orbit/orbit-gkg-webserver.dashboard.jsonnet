@@ -254,9 +254,15 @@ local reliability = [
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [pipelineFailed, SEL],
         '{{failure_reason}}', DS, 'A',
       ),
+      // Fallback while gkg.query.pipeline.failed is rolling out. Maps the
+      // existing queries{status="<reason>_error"} label into failure_reason
+      // so the panel shows volume immediately. Restricted to status names
+      // that match (.+)_error so any non-conformant status (e.g. timeout)
+      // does not drop into an empty failure_reason. Delete this target once
+      // every pod emits the new metric.
       o.target(
-        'sum by (failure_reason) (label_replace(increase(%s{%s, status!~"ok|compile_error"}[1h]), "failure_reason", "$1", "status", "(.+)_error"))' % [pipelineQueries.prom_name, SEL],
-        '{{failure_reason}} (status fallback)', DS, 'B',
+        'sum by (failure_reason) (label_replace(increase(%s{%s, status=~".+_error", status!="compile_error"}[1h]), "failure_reason", "$1 (status fallback)", "status", "(.+)_error"))' % [pipelineQueries.prom_name, SEL],
+        '{{failure_reason}}', DS, 'B',
       ),
       o.target('vector(0)', 'no failures', DS, 'C'),
     ],
@@ -279,8 +285,11 @@ local reliability = [
         'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
         '{{failure_reason}}', DS, 'A',
       ),
+      // Fallback while gkg.query.engine.compiler.rejected is rolling out.
+      // Once every pod emits the new metric, delete this target so the
+      // legend shows only the per-reason fan-out (parse/schema/...).
       o.target(
-        'label_replace(sum(increase(%s{%s, status="compile_error"}[1h])), "failure_reason", "compile_error (status fallback)", "", "")' % [pipelineQueries.prom_name, SEL],
+        'label_replace(sum(increase(%s{%s, status="compile_error"}[1h])), "failure_reason", "compile_error (status fallback)", "__name__", ".+")' % [pipelineQueries.prom_name, SEL],
         '{{failure_reason}}', DS, 'B',
       ),
       o.target('vector(0)', 'no rejections', DS, 'C'),
