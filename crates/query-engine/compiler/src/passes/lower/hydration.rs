@@ -92,21 +92,21 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
     })
 }
 
-/// Build a `startsWith` predicate from collected traversal paths.
+/// Build a traversal-path predicate from collected paths.
 ///
 /// 1. **Leaf pruning:** drop any path that is a strict prefix of another
 ///    in the set. Keeps the most specific (deepest) paths for maximum
 ///    granule selectivity. Safe because `id IN (...)` is the correctness
 ///    guarantee — TP is purely a scan optimizer.
-/// 2. **Single path:** `startsWith(alias.traversal_path, 'tp')`
-/// 3. **Multiple paths:** OR disjunction of `startsWith` calls.
+/// 2. **Shape:** `arrayExists(p -> startsWith(alias.traversal_path, p), [paths])`.
 ///
-/// Unlike the security pass which uses `arrayExists` for potentially
-/// hundreds of authorization paths, hydration has a small number of
-/// project-level paths. OR disjunction is faster because ClickHouse
-/// pushes each `startsWith` into the key condition independently,
-/// whereas `arrayExists` with a lambda evaluates post-scan on all
-/// LCP-matched rows.
+/// Constant AST depth regardless of path count, so the SQL parser cannot
+/// hit its recursion limit (the `Group` neighbors 502 was caused by an
+/// OR-disjunction that fanned out to hundreds of paths during hydration).
+/// Empirically faster than OR-of-startsWith at every path count we
+/// measured against production: at ~500 paths the OR shape also loses
+/// PK pushdown and falls back to a full id-based scan, while the
+/// `arrayExists` shape keeps a single PK condition.
 fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
     if paths.is_empty() {
         return None;
@@ -115,13 +115,34 @@ fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
     if leaves.is_empty() {
         return None;
     }
-    Expr::or_all(leaves.iter().map(|tp| Some(starts_with(alias, tp))))
+    Some(array_exists_starts_with(alias, &leaves))
 }
 
-fn starts_with(alias: &str, path: &str) -> Expr {
+fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
+    let lambda_param = "_gkg_path";
     Expr::func(
-        "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+        "arrayExists",
+        vec![
+            Expr::lambda(
+                lambda_param,
+                Expr::func(
+                    "startsWith",
+                    vec![
+                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::ident(lambda_param),
+                    ],
+                ),
+            ),
+            Expr::param(
+                ChType::String.to_array(),
+                serde_json::Value::Array(
+                    paths
+                        .iter()
+                        .map(|p| serde_json::Value::String(p.clone()))
+                        .collect(),
+                ),
+            ),
+        ],
     )
 }
 
@@ -161,6 +182,16 @@ mod tests {
             .sql
     }
 
+    fn render_with_params(
+        node: &Node,
+    ) -> (
+        String,
+        std::collections::HashMap<String, crate::passes::codegen::ParamValue>,
+    ) {
+        let q = codegen(node, ResultContext::new(), QueryConfig::empty()).unwrap();
+        (q.sql, q.params)
+    }
+
     fn plan(
         columns: Vec<&str>,
         node_ids: Vec<i64>,
@@ -178,12 +209,16 @@ mod tests {
     }
 
     #[test]
-    fn single_tp_emits_starts_with() {
+    fn single_tp_emits_array_exists_starts_with() {
         let node = emit_hydration(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10).unwrap();
         let sql = render(&node);
         assert!(
+            sql.contains("arrayExists"),
+            "single TP should emit arrayExists: {sql}"
+        );
+        assert!(
             sql.contains("startsWith"),
-            "single TP should emit startsWith: {sql}"
+            "lambda body should call startsWith: {sql}"
         );
         assert!(
             sql.contains("traversal_path"),
@@ -192,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_tps_emit_or_disjunction() {
+    fn multiple_tps_emit_single_array_exists() {
         let node = emit_hydration(
             &[plan(
                 vec!["title"],
@@ -203,25 +238,33 @@ mod tests {
         )
         .unwrap();
         let sql = render(&node);
-        let count = sql.matches("startsWith").count();
+        let starts_with_count = sql.matches("startsWith").count();
         assert_eq!(
-            count, 2,
-            "two leaf TPs should produce two startsWith calls: {sql}"
+            starts_with_count, 1,
+            "constant AST depth: one startsWith inside the lambda regardless of path count: {sql}"
         );
-        assert!(sql.contains("OR"), "two TPs should use OR: {sql}");
+        let array_exists_count = sql.matches("arrayExists").count();
+        assert_eq!(
+            array_exists_count, 1,
+            "should emit a single arrayExists wrapping the path array: {sql}"
+        );
         assert!(
-            !sql.contains("arrayExists"),
-            "should use OR not arrayExists for key pushdown: {sql}"
+            !sql.contains(" OR "),
+            "should not emit an OR disjunction over startsWith calls: {sql}"
         );
     }
 
     #[test]
-    fn no_tp_omits_starts_with() {
+    fn no_tp_omits_path_filter() {
         let node = emit_hydration(&[plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
         let sql = render(&node);
         assert!(
             !sql.contains("startsWith"),
             "empty TPs should not emit startsWith: {sql}"
+        );
+        assert!(
+            !sql.contains("arrayExists"),
+            "empty TPs should not emit arrayExists: {sql}"
         );
     }
 
@@ -229,30 +272,46 @@ mod tests {
     fn tp_filter_precedes_id_filter() {
         let node = emit_hydration(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
         let sql = render(&node);
-        let starts_pos = sql.find("startsWith").unwrap();
+        let tp_pos = sql.find("arrayExists").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
         assert!(
-            starts_pos < in_pos,
+            tp_pos < in_pos,
             "TP filter should precede ID filter for primary key pruning: {sql}"
         );
     }
 
     #[test]
     fn leaf_pruning_drops_broad_prefix() {
-        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped
+        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped from the array
         let node = emit_hydration(
             &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
             10,
         )
         .unwrap();
-        let sql = render(&node);
-        // Only the leaf path should survive — single startsWith, no arrayExists
+        let (sql, params) = render_with_params(&node);
         assert!(
-            !sql.contains("arrayExists"),
-            "ancestor should be pruned, leaving single TP: {sql}"
+            sql.contains("arrayExists"),
+            "leaf set should still emit arrayExists: {sql}"
         );
-        let count = sql.matches("startsWith").count();
-        assert_eq!(count, 1, "only leaf path should remain: {sql}");
+        // Verify the array parameter contains only the leaf path.
+        let array_params: Vec<_> = params
+            .values()
+            .filter_map(|p| match &p.value {
+                serde_json::Value::Array(items) => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            array_params.len(),
+            1,
+            "expected exactly one Array param for traversal paths: {params:?}"
+        );
+        let paths: Vec<&str> = array_params[0].iter().filter_map(|v| v.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["1/9970/100/"],
+            "ancestor pruned, only leaf survives in array param"
+        );
     }
 
     #[test]
