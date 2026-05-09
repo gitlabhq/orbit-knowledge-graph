@@ -1,0 +1,12 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:traversal
+format_version:1.0.0
+nodes:1
+edges:0
+@nodes
+MergeRequest(1):
+482821625 iid=247 state=opened created_at=2026-05-08T14:47:05.123456 title="Add per-activity reduction policy overrides"

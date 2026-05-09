@@ -1,0 +1,15 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:aggregation
+format_version:1.0.0
+nodes:3
+edges:0
+aggregations:merged_count(count)
+@nodes
+User(3):
+1243277 username=ghost1 merged_count=65555
+35702613 username=bot_a merged_count=21277
+26832240 username=bot_b merged_count=20289

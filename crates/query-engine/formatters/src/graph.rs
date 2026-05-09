@@ -91,7 +91,7 @@ pub struct PaginationResponse {
     pub total_rows: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphNode {
     #[serde(rename = "type")]
@@ -102,7 +102,7 @@ pub struct GraphNode {
     pub properties: serde_json::Map<String, Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
 pub struct GraphEdge {
     pub from: String,

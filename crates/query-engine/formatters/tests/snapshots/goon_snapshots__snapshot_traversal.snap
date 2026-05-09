@@ -1,0 +1,21 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:traversal
+format_version:1.0.0
+nodes:3
+edges:2
+@nodes
+MergeRequest(1):
+482927048 iid=18 state=merged title="chore: move skill to project scope"
+Project(1):
+80212187 full_path=gitlab-com/cx-engineering/webapp-scaffold name=webapp-scaffold
+User(1):
+5252563 name="Jordan NG" username=jordan_ng
+@edges
+AUTHORED(1):
+User:5252563 --> MergeRequest:482927048
+IN_PROJECT(1):
+MergeRequest:482927048 --> Project:80212187

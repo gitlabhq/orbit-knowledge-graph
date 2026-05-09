@@ -21,6 +21,9 @@ strum = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
+insta = { version = "1.40", features = ["yaml"] }
+proptest = "1.5"
+rand = "0.8"
 
 [lints]
 workspace = true
