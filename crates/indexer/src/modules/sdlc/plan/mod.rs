@@ -109,6 +109,19 @@ impl ExtractQuery {
         self.batch_size
     }
 
+    #[allow(dead_code, reason = "used by EntityPipeline in a follow-up commit")]
+    pub fn with_additional_filter(mut self, filter_sql: &str) -> Self {
+        if let Some(template) = &mut self.raw_template {
+            *template = template.replace("{CURSOR}", &format!(" AND {filter_sql}{{CURSOR}}"));
+        } else {
+            self.base_query.where_clause = Expr::and_all([
+                self.base_query.where_clause,
+                Some(Expr::raw(filter_sql.to_string())),
+            ]);
+        }
+        self
+    }
+
     /// Builds a DNF (disjunctive normal form) greater-than expression for
     /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
     /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
@@ -431,5 +444,27 @@ mod tests {
     fn order_by_columns_appear_in_sql() {
         let query = simple_query(vec!["traversal_path", "id"], 1000);
         assert!(query.to_sql().contains("ORDER BY traversal_path, id"));
+    }
+
+    #[test]
+    fn with_additional_filter_adds_to_where_clause() {
+        let query = simple_query(vec!["id"], 1000);
+        let filtered = query.with_additional_filter("id >= '0' AND id < '25000000'");
+        let sql = filtered.to_sql();
+
+        assert!(sql.contains("id >= '0' AND id < '25000000'"), "sql: {sql}");
+        assert!(sql.contains("_siphon_replicated_at >"), "sql: {sql}");
+    }
+
+    #[test]
+    fn with_additional_filter_composes_with_cursor() {
+        let query = simple_query(vec!["id"], 1000);
+        let filtered = query
+            .with_additional_filter("id >= '0' AND id < '25000000'")
+            .resume_from(&position_with_cursor(vec!["42"]));
+        let sql = filtered.to_sql();
+
+        assert!(sql.contains("id >= '0' AND id < '25000000'"), "sql: {sql}");
+        assert!(sql.contains("(id > '42')"), "sql: {sql}");
     }
 }
