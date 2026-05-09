@@ -3,6 +3,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod content;
 mod local_pipeline;
+mod sql;
+mod sql_format;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -160,6 +162,24 @@ enum Commands {
         #[arg(long)]
         raw: bool,
     },
+    /// Run a raw read-only SQL query against the local DuckDB graph.
+    Sql {
+        /// SQL query, or `-` to read from stdin.
+        #[arg(value_name = "QUERY", conflicts_with = "file")]
+        query: Option<String>,
+
+        /// Read SQL from a file.
+        #[arg(long, short, value_name = "PATH")]
+        file: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, short = 'F', default_value = "table")]
+        format: sql::Format,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
+    },
     /// Compile a query to SQL without executing it
     Compile {
         /// JSON query payload
@@ -288,6 +308,12 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Commands::Sql {
+            query,
+            file,
+            format,
+            db,
+        } => sql::run(query, file, format, db),
         Commands::Compile {
             json,
             traversal_paths,
