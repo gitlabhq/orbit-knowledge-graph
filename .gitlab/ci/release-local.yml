@@ -44,6 +44,92 @@ local-cli-build-linux-arm64:
   variables:
     ARCH: aarch64
 
+# Windows cross-compile spike
+#
+# Runs three independent jobs in parallel on MR pipelines, each using a
+# different Linux->Windows cross-compile toolchain. After we pick a winner
+# the other two jobs are removed and the survivor inherits
+# `.local-cli-release-rules` so it ships on tag pipelines.
+
+.local-cli-build-windows:
+  extends:
+    - .job-template
+    - .sccache-template
+  stage: build
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+  tags:
+    - saas-linux-large-amd64
+  timeout: 90m
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+  artifacts:
+    paths:
+      - orbit-local-windows-x86_64-*.zip
+    expire_in: 7 days
+
+local-cli-build-windows-xwin:
+  extends: .local-cli-build-windows
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+    WINDOWS_METHOD: xwin
+    XWIN_VERSION: "0.22.0"
+    XWIN_ARCH: x86_64
+    XWIN_ACCEPT_LICENSE: "1"
+    XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.xwin-cache
+  cache:
+    key: "xwin-sdk-0.22.0"
+    paths:
+      - .xwin-cache/
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends lld zip
+    - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${XWIN_VERSION}/cargo-xwin-v${XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
+        | tar -xz -C /opt/cargo/bin cargo-xwin
+    - chmod +x /opt/cargo/bin/cargo-xwin
+  script:
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+
+local-cli-build-windows-zigbuild:
+  extends: .local-cli-build-windows
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+    WINDOWS_METHOD: zigbuild
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
+  script:
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+
+local-cli-build-windows-mingw:
+  extends: .local-cli-build-windows
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+    WINDOWS_METHOD: mingw
+    CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+    CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+    AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+    # Bundle libgcc/libstdc++ so the .exe has no external DLL deps.
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends
+        gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools zip
+    # DuckDB's C++17 needs posix threads, not win32.
+    - update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix || true
+    - update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix || true
+  script:
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+
 .local-cli-build-darwin:
   extends:
     - .local-cli-release-rules
