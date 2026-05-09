@@ -99,7 +99,6 @@ impl Handler for EntityIndexingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::destination::Destination;
     use crate::modules::sdlc::entity_pipeline::BasePipeline;
     use crate::modules::sdlc::pipeline::Pipeline;
     use crate::modules::sdlc::plan::build_plans;
@@ -228,17 +227,4 @@ mod tests {
         );
     }
 
-    struct NoopPipeline;
-
-    #[async_trait]
-    impl EntityPipeline for NoopPipeline {
-        async fn execute(
-            &self,
-            _request: &EntityIndexingRequest,
-            _destination: &dyn Destination,
-            _progress: &ProgressNotifier,
-        ) -> Result<(), HandlerError> {
-            Ok(())
-        }
-    }
 }
