@@ -134,7 +134,13 @@ impl BasePipeline {
         let boundaries = match (&self.source_table, &self.partition_column) {
             (Some(table), Some(col)) => {
                 self.pipeline
-                    .compute_boundaries(table, col, &request.scope, self.partition_count)
+                    .compute_boundaries(
+                        table,
+                        col,
+                        &request.scope,
+                        self.partition_count,
+                        &request.watermark,
+                    )
                     .await?
             }
             _ => vec![],

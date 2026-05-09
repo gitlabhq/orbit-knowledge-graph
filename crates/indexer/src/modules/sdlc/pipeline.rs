@@ -88,6 +88,7 @@ impl Pipeline {
         partition_column: &str,
         scope: &IndexingScope,
         partition_count: u32,
+        watermark: &DateTime<Utc>,
     ) -> Result<Vec<String>, HandlerError> {
         use arrow::array::{Array, Float64Array, ListArray};
 
@@ -103,10 +104,13 @@ impl Pipeline {
             }
         };
 
+        let watermark_str = watermark.format(crate::clickhouse::TIMESTAMP_FORMAT);
+
         let sql = format!(
             "SELECT quantilesTDigest({quantile_list})({partition_column}) \
              FROM {source_table} \
-             WHERE {scope_filter}"
+             WHERE {scope_filter} \
+             AND _siphon_replicated_at <= '{watermark_str}'"
         );
 
         let batches = self
