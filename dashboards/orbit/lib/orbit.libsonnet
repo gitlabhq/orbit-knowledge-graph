@@ -531,11 +531,15 @@ local tileSpark(prom_name, ds_var, selector, filter='', unit='short', w=PANEL_W,
 // big-number cards with chart strips immediately below.
 local volumeTiles(specs, ds_var, selector, w=PANEL_W) = (
   std.map(function(s) tileHeader(
-    s.prom, s.title, s.desc, ds_var, selector,
+    s.prom, s.title, s.desc,
+    std.get(s, 'ds_var', ds_var),
+    std.get(s, 'selector', selector),
     std.get(s, 'filter', ''), std.get(s, 'unit', 'short'), w,
   ), specs)
   + std.map(function(s) tileSpark(
-    s.prom, ds_var, selector,
+    s.prom,
+    std.get(s, 'ds_var', ds_var),
+    std.get(s, 'selector', selector),
     std.get(s, 'filter', ''), std.get(s, 'unit', 'short'), w,
   ), specs)
 );

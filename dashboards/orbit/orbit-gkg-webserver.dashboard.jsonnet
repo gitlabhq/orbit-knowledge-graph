@@ -70,37 +70,25 @@ local health = [
     'Rails: gRPC p95 (5m)',
     'p95 of the user-facing Rails-side gRPC call to GKG over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
-    RDS, 's', 4,
+    RDS, 's', 6,
   ),
   o.gaugeStat(
     'Pipeline: p95 (5m)',
     'p95 of overall pipeline duration on the GKG webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [pipelineDuration.prom_name, SEL],
-    DS, 's', 4,
+    DS, 's', 6,
   ),
   o.gaugeStat(
-    'Compiler rejects / min (5m)',
-    'Queries the compiler rejected before execution, in calls/min over the last 5 minutes. Use the Reliability row below for the per-reason breakdown.',
-    'sum(rate(%s{%s}[5m])) * 60' % [compilerRejected, SEL],
-    DS, 'short', 4,
+    'Compiler error rate (1h)',
+    'Share of queries the compiler rejected before execution. compile_error / total. Drives the "client sent a bad query" signal and is independent of server-side reliability.',
+    '(sum(rate(%s{%s, status="compile_error"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
+    DS, 'percentunit', 6,
   ),
   o.gaugeStat(
-    'Overall success rate (1h)',
-    'Share of query pipeline calls with status="ok" over the last hour. Includes everything: compile rejects, post-compile failures, and successes. Renders 0 when no calls happened in the window.',
-    '(sum(rate(%s{%s, status="ok"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 4,
-  ),
-  o.gaugeStat(
-    'Compiler success rate (1h)',
-    'Share of queries that passed compilation. Equivalent to 1 minus (compile rejects / total). Drops mean clients are sending queries the compiler refuses.',
-    '1 - (sum(rate(%s{%s, status="compile_error"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 4,
-  ),
-  o.gaugeStat(
-    'Pipeline success rate (1h), post-compile',
-    'Share of post-compile pipeline runs that returned status="ok". Excludes compile rejects from both the numerator and the denominator, so it isolates server-side reliability from client-input quality.',
-    '(sum(rate(%s{%s, status="ok"}[1h]))) / (sum(rate(%s{%s, status!="compile_error"}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 4,
+    'Pipeline failure rate (1h)',
+    'Share of post-compile pipeline runs that did not return status="ok". Excludes compile rejects from both the numerator and the denominator. This is the server-reliability SLI.',
+    '(sum(rate(%s{%s, status!~"ok|compile_error"}[1h]))) / (sum(rate(%s{%s, status!="compile_error"}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
+    DS, 'percentunit', 6,
   ),
 ];
 
@@ -117,14 +105,18 @@ local volume = [
     prom: railsGrpcDur + '_count',
     title: 'gRPC calls (Rails)',
     desc: 'Rails-side gRPC calls into GKG in the dashboard window. Should track closely with server-side queries; a divergence flags either a Rails-side retry storm or server-side rejected requests not counted on Rails.',
+    ds_var: RDS,
+    selector: RAIL,
   },
   {
     prom: railsRedactDur + '_count',
     title: 'Redactions (Rails)',
     desc: 'Rails-side redaction passes in the dashboard window. Roughly one per successful query.',
+    ds_var: RDS,
+    selector: RAIL,
   },
   {
-    prom: pipelineChRows.prom_name + '_count',
+    prom: pipelineChRows.prom_name,
     title: 'CH row reads',
     desc: 'ClickHouse row-read events in the dashboard window. Bytes read tile sits next to it.',
   },
@@ -256,11 +248,18 @@ local reliability = [
   o.row('Reliability'),
   o.timeseries(
     'Server: pipeline failures by reason (1h windows)',
-    'GKG-side pipeline failure counts in rolling 1h windows, broken down by failure_reason. Reasons are security, execution, authorization, content_resolution, streaming, and custom.',
-    [o.target(
-      'sum by (failure_reason) (increase(%s{%s}[1h]))' % [pipelineFailed, SEL],
-      '{{failure_reason}}', DS, 'A',
-    )],
+    'Pipeline failure counts in rolling 1h windows, broken down by failure_reason from `gkg.query.pipeline.failed`. Falls back to `queries{status}` (which is already deployed) so the panel shows volume even before the new metric reaches prod. Renders a flat zero baseline when no failures occur in the window.',
+    [
+      o.target(
+        'sum by (failure_reason) (increase(%s{%s}[1h]))' % [pipelineFailed, SEL],
+        '{{failure_reason}}', DS, 'A',
+      ),
+      o.target(
+        'sum by (failure_reason) (label_replace(increase(%s{%s, status!~"ok|compile_error"}[1h]), "failure_reason", "$1", "status", "(.+)_error"))' % [pipelineQueries.prom_name, SEL],
+        '{{failure_reason}} (status fallback)', DS, 'B',
+      ),
+      o.target('vector(0)', 'no failures', DS, 'C'),
+    ],
     'short', 12, 8,
   ),
   o.timeseries(
@@ -274,11 +273,18 @@ local reliability = [
   ),
   o.timeseries(
     'Server: compiler rejections by reason (1h windows)',
-    'Compiler rejections grouped by failure_reason. These are intentional rejections by the query compiler before execution: parse, schema, reference, pagination, ontology, ontology_internal, depth, limit, security, lowering, enforcement, codegen, pipeline.',
-    [o.target(
-      'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
-      '{{failure_reason}}', DS, 'A',
-    )],
+    'Compiler rejections grouped by failure_reason from `gkg.query.engine.compiler.rejected`. Falls back to `queries{status="compile_error"}` (which is already deployed) so the panel shows compile-error volume even before the new metric reaches prod. Once the new metric deploys, the per-reason fan-out (parse/schema/reference/pagination/ontology/depth/limit/security/lowering/enforcement/codegen/pipeline) layers on top.',
+    [
+      o.target(
+        'sum by (failure_reason) (increase(%s{%s}[1h]))' % [compilerRejected, SEL],
+        '{{failure_reason}}', DS, 'A',
+      ),
+      o.target(
+        'label_replace(sum(increase(%s{%s, status="compile_error"}[1h])), "failure_reason", "compile_error (status fallback)", "", "")' % [pipelineQueries.prom_name, SEL],
+        '{{failure_reason}}', DS, 'B',
+      ),
+      o.target('vector(0)', 'no rejections', DS, 'C'),
+    ],
     'short', 12, 8,
   ),
   o.gaugeStat(
