@@ -133,6 +133,16 @@ mod tests {
     }
 
     #[test]
+    fn condensed_schema_mentions_multi_node_aggregation_grouping() {
+        let toon = condensed_query_schema().expect("Should condense");
+
+        assert!(
+            toon.contains("Required for multi-node aggregation"),
+            "Should tell agents when group_by is required"
+        );
+    }
+
+    #[test]
     fn condensed_schema_removes_trivial_descriptions() {
         let toon = condensed_query_schema().expect("Should condense");
 
@@ -196,6 +206,82 @@ mod tests {
             id_major, QUERY_DSL_VERSION.major,
             "graph_query.schema.json $id '{id}' does not match QUERY_DSL_VERSION major ({})",
             QUERY_DSL_VERSION.major,
+        );
+    }
+
+    fn validate_query_schema(value: Value) -> Vec<String> {
+        let schema: Value =
+            serde_json::from_str(BASE_SCHEMA).expect("query DSL schema must be valid JSON");
+        let validator = jsonschema::validator_for(&schema).expect("query DSL schema must compile");
+
+        validator
+            .iter_errors(&value)
+            .map(|e| e.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn query_schema_rejects_multi_node_aggregation_without_group_by() {
+        let errors = validate_query_schema(serde_json::json!({
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "node_ids": [9970]},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [
+                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+            ],
+            "limit": 1
+        }));
+
+        assert!(
+            errors.iter().any(|error| error.contains("group_by")),
+            "expected group_by schema error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn query_schema_accepts_single_node_scalar_aggregation() {
+        let errors = validate_query_schema(serde_json::json!({
+            "query_type": "aggregation",
+            "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+            "aggregations": [
+                {"function": "count", "target": "mr", "alias": "open_mr_count"}
+            ],
+            "limit": 1
+        }));
+
+        assert!(
+            errors.is_empty(),
+            "expected schema success, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn query_schema_accepts_multi_node_aggregation_with_group_by() {
+        let errors = validate_query_schema(serde_json::json!({
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [
+                {"function": "count", "target": "mr", "group_by": "p", "alias": "open_mr_count"}
+            ],
+            "limit": 1
+        }));
+
+        assert!(
+            errors.is_empty(),
+            "expected schema success, got: {errors:?}"
         );
     }
 }

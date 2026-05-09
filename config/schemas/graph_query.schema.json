@@ -152,7 +152,28 @@
               }
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["nodes"],
+              "properties": {
+                "nodes": {
+                  "minItems": 2
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "aggregations": {
+                  "items": {
+                    "required": ["group_by"]
+                  }
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -533,7 +554,7 @@
         },
         "group_by": {
           "$ref": "#/$defs/Identifier",
-          "description": "Node variable to group by. If omitted, no grouping is applied."
+          "description": "Node variable to group by. Required for multi-node aggregation; optional for single-node scalar aggregation."
         },
         "property": {
           "$ref": "#/$defs/Identifier",
