@@ -167,6 +167,13 @@ local-cli-build-windows-mingw:
     - export PATH="/opt/llvm-mingw/bin:$PATH"
     - echo "/opt/llvm-mingw/bin" >> "$CI_PROJECT_DIR/.path"
     - x86_64-w64-mingw32-gcc --version | head -1
+    # Drop the libc++/libunwind DLL import libs; rustc's gnullvm target spec
+    # pulls -lc++/-lunwind which would resolve to libc++.dll.a alongside the
+    # .a from -static-libstdc++, producing duplicate-symbol link errors.
+    - rm -f /opt/llvm-mingw/x86_64-w64-mingw32/lib/libc++.dll.a
+        /opt/llvm-mingw/x86_64-w64-mingw32/lib/libunwind.dll.a
+        /opt/llvm-mingw/x86_64-w64-mingw32/bin/libc++.dll
+        /opt/llvm-mingw/x86_64-w64-mingw32/bin/libunwind.dll
   script:
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true
