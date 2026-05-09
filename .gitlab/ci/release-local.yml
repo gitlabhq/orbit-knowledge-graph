@@ -60,7 +60,7 @@ local-cli-build-linux-arm64:
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
   tags:
-    - saas-linux-large-amd64
+    - saas-linux-xlarge-amd64
   timeout: 90m
   variables:
     PLATFORM: windows
@@ -88,7 +88,7 @@ local-cli-build-windows-xwin:
       - .xwin-cache/
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends lld zip
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file lld zip
     - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${CARGO_XWIN_VERSION}/cargo-xwin-v${CARGO_XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
         | tar -xz -C /opt/cargo/bin cargo-xwin
     - chmod +x /opt/cargo/bin/cargo-xwin
@@ -102,12 +102,19 @@ local-cli-build-windows-zigbuild:
     PLATFORM: windows
     ARCH: x86_64
     WINDOWS_METHOD: zigbuild
-    # Zig's clang treats -Wdate-time as an error; mimalloc/duckdb use __DATE__/__TIME__.
-    CFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
-    CXXFLAGS_x86_64_pc_windows_gnullvm: "-Wno-error=date-time"
+    # Drive cc-rs to our wrappers so aws-lc-sys's hard-coded -Wp,* flags get
+    # stripped before zig clang sees them. zig's bundled libc has -Werror
+    # niceties enabled by default; clear -Wdate-time too so __DATE__/__TIME__
+    # in mimalloc/duckdb stay warnings.
+    CC_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
+    CXX_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cxx.sh
+    AR_x86_64_pc_windows_gnu: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-ar.sh
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: ${CI_PROJECT_DIR}/scripts/ci/zig-windows-cc.sh
+    CFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
+    CXXFLAGS_x86_64_pc_windows_gnu: "-Wno-error=date-time"
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file zip
   script:
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true
@@ -127,7 +134,7 @@ local-cli-build-windows-mingw:
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends
-        gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools zip
+        file gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 mingw-w64-tools zip
     # DuckDB's C++17 needs posix threads, not win32.
     - update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix || true
     - update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix || true
