@@ -49,7 +49,7 @@ impl QueryPipelineMetrics {
 /// Closed-enum mapping for `gkg.query.pipeline.failed{failure_reason}`.
 /// Returns `None` for `Compile` because compile-time rejections are
 /// counted on `gkg.query.engine.compiler.rejected` instead.
-fn failure_reason(err: &PipelineError) -> Option<&'static str> {
+pub(crate) fn failure_reason(err: &PipelineError) -> Option<&'static str> {
     match err {
         PipelineError::Security(_) => Some("security"),
         PipelineError::Compile { .. } => None,
