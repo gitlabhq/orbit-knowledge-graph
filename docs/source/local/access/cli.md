@@ -116,6 +116,25 @@ orbit compile --local '{
 
 Useful for debugging query DSL or seeing the generated DuckDB SQL.
 
+## Run raw SQL against the local graph
+
+```shell
+orbit sql 'SELECT count(*) FROM gl_definition'
+orbit sql -F json 'SELECT name FROM gl_definition LIMIT 3'
+echo 'SELECT 1+1' | orbit sql -
+orbit sql --file query.sql
+```
+
+A maintainer-oriented escape hatch for inspecting the DuckDB graph directly.
+Read-only: write statements are rejected by DuckDB. Prefer `orbit query` for
+anything you would commit, since the JSON DSL also targets the remote service.
+
+| Flag | Purpose |
+|------|---------|
+| `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
+| `-f`, `--file` | Read the SQL from a file. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+
 ## Storage
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
