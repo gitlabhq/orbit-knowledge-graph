@@ -34,20 +34,15 @@ Problems:
 
 Replace `GlobalHandler` and `NamespaceHandler` with a single handler type,
 `EntityIndexingHandler`, where one NATS message = one entity kind, optionally
-scoped to a namespace. For initial indexing of large entities, the dispatcher
-can split work across multiple workers via partitioning. Incremental indexing
-(where a completed checkpoint already exists) always runs as a single
-message — it processes only the delta since the last watermark and is already
-fast.
+scoped to a namespace. The dispatcher is stateless — it publishes one
+message per (entity, scope) pair with no partition awareness. The
+pipeline (`BasePipeline`) owns all partition orchestration internally:
+it reads checkpoint state, computes quantile boundaries, runs partitions
+concurrently, and consolidates to a unified checkpoint on completion.
 
-The dispatcher computes range boundaries per partition and includes them
-in the message. The pipeline applies a range filter on the **first
-non-scope sort key column** (derived from the ontology at startup). The
-partition column is `id` for most entities today. `PartitionStrategy` is
-a tagged enum (`#[serde(tag = "type")]`) — adding a new strategy (e.g.,
-hash for low-cardinality columns) is one variant and one match arm in
-`partition_filter_sql`, with no changes to NATS subjects, checkpoint
-keys, or message routing.
+Incremental indexing (where a completed checkpoint already exists) always
+runs as a single pipeline — it processes only the delta since the last
+watermark and is already fast.
 
 ### Message type
 
@@ -56,35 +51,23 @@ pub struct EntityIndexingRequest {
     pub entity_kind: String,
     pub watermark: DateTime<Utc>,
     pub scope: IndexingScope,
-    pub partition: Option<PartitionSpec>,
 }
 
 pub enum IndexingScope {
     Global,
     Namespace { namespace_id: i64, traversal_path: String },
 }
-
-pub struct PartitionSpec {
-    pub partition_index: u32,
-    pub total_partitions: u32,
-    pub strategy: PartitionStrategy,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum PartitionStrategy {
-    Range { lower_bound: String, upper_bound: String },
-    // Future: Hash (no additional fields needed — index + total is sufficient)
-}
 ```
+
+`PartitionSpec` and `PartitionStrategy` exist as internal types used by
+the pipeline for checkpoint keys and SQL range filters, but they are not
+part of the NATS message.
 
 ### NATS subject hierarchy
 
 ```plaintext
-sdlc.entity.indexing.requested.{entity_kind}.global                      # global, no partition
-sdlc.entity.indexing.requested.{entity_kind}.global.p{id}               # global, partitioned
-sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}           # namespaced, no partition
-sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}.p{id}    # namespaced, partitioned
+sdlc.entity.indexing.requested.{entity_kind}.global             # global
+sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}  # namespaced
 ```
 
 A single `EntityIndexingHandler` subscribes to
@@ -95,9 +78,9 @@ NATS consumer concurrently, so cross-entity parallelism comes from the
 worker pool rather than per-entity consumers.
 
 The stream's `max_messages_per_subject: 1` with
-`discard_new_per_subject: true` deduplicates at the (entity, scope,
-partition) level: if a handler has not acked the previous message for that
-exact subject, the dispatcher's publish is silently rejected.
+`discard_new_per_subject: true` deduplicates at the (entity, scope)
+level: if a handler has not acked the previous message for that exact
+subject, the dispatcher's publish is silently rejected.
 
 ### Handler and pipeline
 
@@ -106,48 +89,45 @@ A single `EntityIndexingHandler` holds a
 each message it deserializes the `EntityIndexingRequest`, looks up the
 pipeline by `entity_kind`, and delegates. Unknown entity kinds log a
 warning and return `Ok(())`. All current entities use `BasePipeline`,
-which translates the request into a `PipelineContext` and calls
-`Pipeline::run`:
+which owns partition orchestration and delegates to `Pipeline::run`:
 
 ```rust
 pub struct BasePipeline {
     plan: PipelinePlan,
-    partition_column: Option<String>, // from ontology, see Partition column
+    partition_column: Option<String>,
+    source_table: Option<String>,
+    partition_count: u32,
     pipeline: Arc<Pipeline>,
 }
-
-// In EntityPipeline::execute:
-let mut plan = self.plan.clone();
-if let (Some(spec), Some(column)) = (&request.partition, &self.partition_column) {
-    plan.extract_query = plan.extract_query
-        .with_additional_filter(&partition_filter_sql(column, spec));
-}
-let position_key = entity_checkpoint_key(
-    &request.scope, &request.entity_kind, request.partition.as_ref(),
-);
-let base_conditions = match &request.scope {
-    IndexingScope::Global => BTreeMap::new(),
-    IndexingScope::Namespace { traversal_path, .. } => {
-        BTreeMap::from([("traversal_path".to_string(), traversal_path.clone())])
-    }
-};
-self.pipeline.run(
-    &[plan],
-    &PipelineContext { watermark: request.watermark, position_key, base_conditions },
-    context.destination, &context.progress, 1,
-).await
 ```
+
+`BasePipeline::execute` implements the following logic tree:
+
+1. `partition_count <= 1` → run single (unified checkpoint key).
+2. Unified checkpoint exists with `watermark > 0` → already bootstrapped,
+   run single incremental.
+3. No unified checkpoint. Scan partition checkpoints (`p0of4`, `p1of4`, ...):
+   - None exist → first run. Compute boundaries, run all N partitions
+     concurrently, consolidate.
+   - All completed → consolidate (write unified checkpoint with min
+     watermark), then run single incremental.
+   - Some incomplete → recompute boundaries, run only incomplete
+     partitions, consolidate.
+
+Consolidation writes a unified checkpoint with `watermark = min(partition
+watermarks)`. After consolidation, subsequent runs enter step 2
+(incremental).
 
 Future entities (e.g., SystemNotes) can implement `EntityPipeline` with
 custom logic instead of using `BasePipeline`.
 
 ### Partitioning (initial indexing only)
 
-Partitioning applies only during initial indexing (no completed checkpoint
+Partitioning applies only during initial indexing (no unified checkpoint
 for the entity+scope). Incremental indexing processes only the delta since
 the last watermark and completes in seconds; partitioning it would add
-overhead for no gain. The dispatcher checks the checkpoint store to decide
-(see [Dispatcher](#dispatcher)).
+overhead for no gain. The pipeline checks the checkpoint store to decide
+(see [Handler and pipeline](#handler-and-pipeline)).
 
 #### Partition column: first non-scope sort key column
 
@@ -195,7 +175,7 @@ fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
 ```
 
 `partition_column` runs once at registration; `partition_filter_sql` runs
-at execution time when the request has a `PartitionSpec`. The range
+at execution time when the pipeline decides to partition. The range
 filter composes with the existing `WHERE` and keyset cursor as a
 conjunct and does not affect sort order.
 
@@ -223,16 +203,18 @@ and runs **13× faster**.
 See [Hash partitioning from day 1](#hash-partitioning-from-day-1)
 for why hash was considered and rejected.
 
-#### Boundary stability
+#### Boundary computation
 
-The dispatcher computes quantile boundaries once per (entity, scope)
-pair at the start of initial indexing and stores them in NATS KV
-(`partition_boundaries` bucket, key
-`boundaries.{entity_kind}.{scope_key}`). Subsequent dispatch cycles
-load the stored boundaries rather than recomputing. This prevents
-boundary drift from causing gaps between partitions if a partition
-fails and is re-dispatched. The boundary key is deleted during
-consolidation (step 3 of the [Dispatcher](#dispatcher)).
+The pipeline computes quantile boundaries using `quantilesTDigest` each
+time it needs to run partitions. Boundaries are not persisted — they are
+recomputed from the source table. This is acceptable because:
+
+- Boundary drift between runs does not cause data gaps. Each partition
+  has its own cursor-based checkpoint, so rows near a shifted boundary
+  are processed by whichever partition covers them. The cursor prevents
+  re-processing within a partition.
+- The quantile query is cheap (single aggregate over a primary key
+  column) compared to the actual ETL work.
 
 ### Checkpoint key design
 
@@ -281,38 +263,21 @@ and `"global"` constants (e.g., `ns.100.MergeRequest`,
 
 ### Dispatcher
 
-A single `EntityDispatcher` replaces `GlobalDispatcher` and
-`NamespaceDispatcher`. It loads all checkpoints in one bulk query per
-cycle, then for each (entity, scope) pair decides what to publish:
+`EntityDispatcher` is stateless. It loads enabled namespaces from the
+datalake, then publishes one `EntityIndexingRequest` per (entity, scope)
+pair. It has no checkpoint awareness and no partition logic.
 
-1. **Unpartitioned entity, or entity with completed unpartitioned
-   checkpoint** → publish 1 incremental message.
-2. **Partitioned entity, not all partitions completed** → re-publish
-   partition messages for incomplete partitions only. No incremental
-   message is published until every partition has succeeded.
-3. **Partitioned entity, all N partition checkpoints completed** →
-   consolidate: write a completed unpartitioned checkpoint
-   (`ns.100.MergeRequest`) with `watermark = min(partition watermarks)`,
-   then publish 1 incremental message. The partition checkpoints can be
-   cleaned up in a future cycle.
-4. **No checkpoint at all (first run)** → if `partition-overrides` > 1,
-   compute quantile boundaries for the partition column, store them in
-   NATS KV, and publish N partition messages with range bounds. Otherwise
-   publish 1 unpartitioned message.
-
-`PublishDuplicate` is handled silently (NATS dedup).
-
-The consolidation in step 3 is the transition from partitioned initial
-indexing to unpartitioned incremental indexing. Until all partitions
-succeed, the entity stays in initial mode — a single slow or failed
-partition does not cause the others to re-process, but incremental
-indexing cannot begin until the full dataset has been covered.
+`PublishDuplicate` is handled silently (NATS dedup). The pipeline owns
+all partition orchestration (see [Handler and pipeline](#handler-and-pipeline)).
 
 ### Configuration
 
 All entity handlers share a single concurrency group (`"sdlc"`). The
 engine's worker pool caps total concurrent SDLC handlers via the group
 semaphore. Per-entity groups can be added later without code changes.
+
+`partition-overrides` lives on the handler config, not the dispatcher.
+The pipeline reads it at startup to set the partition count per entity.
 
 ```yaml
 handlers:
@@ -404,8 +369,9 @@ benefit from ClickHouse's primary key index — `EXPLAIN indexes = 1`
 confirms only `traversal_path` is used, not `id`. For entities with
 deeper sort keys (Note, MergeRequestDiffFile) neither approach provides
 index benefits, but those entities are poor partitioning candidates
-anyway (low-cardinality first columns). The boundary stability concern
-is addressed by persisting boundaries in NATS KV on first computation.
+anyway (low-cardinality first columns). Boundary drift between runs is
+not a concern because each partition resumes from its own cursor
+checkpoint.
 
 ### Per-entity concurrency groups from day 1
 
@@ -428,15 +394,13 @@ until empirical data shows a specific entity needs throttling.
 
 **What gets harder:**
 
-- Range partitioning requires quantile boundary computation on first
-  dispatch and NATS KV storage for boundary stability.
 - Breaking config change: `global-handler`/`namespace-handler` →
   `entity-handler`.
 - Indexing status: one key per (entity, namespace) instead of per
   namespace. `GraphStatusService` aggregates with worst-state-wins.
   Old and new key formats coexist during rollout.
-- Dispatcher needs one bulk checkpoint query per dispatch cycle to
-  distinguish initial from incremental indexing.
+- Pipeline complexity: `BasePipeline` owns a partition state machine
+  (scan checkpoints, compute boundaries, run concurrently, consolidate).
 
 ## References
 

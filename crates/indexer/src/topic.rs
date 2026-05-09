@@ -96,7 +96,6 @@ pub struct EntityIndexingRequest {
     pub entity_kind: String,
     pub watermark: DateTime<Utc>,
     pub scope: IndexingScope,
-    pub partition: Option<PartitionSpec>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,15 +138,10 @@ impl EntityIndexingRequest {
             }
         };
 
-        let base = format!(
+        format!(
             "{}.{}.{}",
             ENTITY_INDEXING_SUBJECT_PREFIX, self.entity_kind, scope_suffix
-        );
-
-        match &self.partition {
-            Some(spec) => format!("{base}.p{}", spec.partition_index),
-            None => base,
-        }
+        )
     }
 
     pub fn publish_subscription(&self) -> Subscription {
@@ -188,10 +182,7 @@ impl Event for NamespaceDeletionRequest {
 mod tests {
     use super::*;
 
-    fn namespace_request(
-        entity_kind: &str,
-        partition: Option<PartitionSpec>,
-    ) -> EntityIndexingRequest {
+    fn namespace_request(entity_kind: &str) -> EntityIndexingRequest {
         EntityIndexingRequest {
             entity_kind: entity_kind.to_string(),
             watermark: "2024-01-01T00:00:00Z".parse().unwrap(),
@@ -199,7 +190,6 @@ mod tests {
                 namespace_id: 9970,
                 traversal_path: "42/9970/".to_string(),
             },
-            partition,
         }
     }
 
@@ -208,36 +198,15 @@ mod tests {
             entity_kind: entity_kind.to_string(),
             watermark: "2024-01-01T00:00:00Z".parse().unwrap(),
             scope: IndexingScope::Global,
-            partition: None,
-        }
-    }
-
-    fn range_partition(index: u32, total: u32) -> PartitionSpec {
-        PartitionSpec {
-            partition_index: index,
-            total_partitions: total,
-            strategy: PartitionStrategy::Range {
-                lower_bound: "0".to_string(),
-                upper_bound: "25000000".to_string(),
-            },
         }
     }
 
     #[test]
-    fn publish_subject_namespaced_no_partition() {
-        let request = namespace_request("MergeRequest", None);
+    fn publish_subject_namespaced() {
+        let request = namespace_request("MergeRequest");
         assert_eq!(
             request.publish_subject(),
             "sdlc.entity.indexing.requested.MergeRequest.42.9970"
-        );
-    }
-
-    #[test]
-    fn publish_subject_namespaced_with_partition() {
-        let request = namespace_request("MergeRequest", Some(range_partition(2, 4)));
-        assert_eq!(
-            request.publish_subject(),
-            "sdlc.entity.indexing.requested.MergeRequest.42.9970.p2"
         );
     }
 
@@ -252,30 +221,13 @@ mod tests {
 
     #[test]
     fn serialization_roundtrip() {
-        let request = namespace_request("MergeRequest", Some(range_partition(0, 4)));
+        let request = namespace_request("MergeRequest");
         let json = serde_json::to_string(&request).unwrap();
         let deserialized: EntityIndexingRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.entity_kind, "MergeRequest");
-        assert!(deserialized.partition.is_some());
-        let spec = deserialized.partition.unwrap();
-        assert_eq!(spec.partition_index, 0);
-        assert_eq!(spec.total_partitions, 4);
-        match &spec.strategy {
-            PartitionStrategy::Range {
-                lower_bound,
-                upper_bound,
-            } => {
-                assert_eq!(lower_bound, "0");
-                assert_eq!(upper_bound, "25000000");
-            }
-        }
-    }
-
-    #[test]
-    fn serialization_without_partition() {
-        let request = global_request("User");
-        let json = serde_json::to_string(&request).unwrap();
-        let deserialized: EntityIndexingRequest = serde_json::from_str(&json).unwrap();
-        assert!(deserialized.partition.is_none());
+        assert_eq!(
+            deserialized.publish_subject(),
+            "sdlc.entity.indexing.requested.MergeRequest.42.9970"
+        );
     }
 }

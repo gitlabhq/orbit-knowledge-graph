@@ -223,10 +223,6 @@ pub async fn run_dispatcher(
             Arc::clone(&deletion_graph),
             ontology,
         ));
-    let entity_checkpoint_graph = Arc::new(config.graph.build_client());
-    let entity_checkpoint_store: Arc<dyn checkpoint::CheckpointStore> = Arc::new(
-        checkpoint::ClickHouseCheckpointStore::new(entity_checkpoint_graph),
-    );
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
     let health_state = HealthState {
@@ -254,7 +250,6 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.entity.clone(),
             build_entity_descriptors(ontology),
-            entity_checkpoint_store,
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),
@@ -307,38 +302,20 @@ pub async fn run_dispatcher(
 }
 
 fn build_entity_descriptors(ontology: &ontology::Ontology) -> Vec<EntityDescriptor> {
-    use modules::sdlc::entity_pipeline::partition_column;
-    use ontology::etl::EtlConfig;
-
     let mut descriptors = Vec::new();
 
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
-        let scope = etl.scope();
-        let (source_table, part_col) = match etl {
-            EtlConfig::Table {
-                source, order_by, ..
-            } => (
-                Some(source.clone()),
-                partition_column(order_by, scope).map(String::from),
-            ),
-            EtlConfig::Query { .. } => (None, None),
-        };
         descriptors.push(EntityDescriptor {
             entity_kind: node.name.clone(),
-            scope,
-            source_table,
-            partition_column: part_col,
+            scope: etl.scope(),
         });
     }
 
     for (relationship_kind, config) in ontology.edge_etl_configs() {
-        let part_col = partition_column(&config.order_by, config.scope).map(String::from);
         descriptors.push(EntityDescriptor {
             entity_kind: relationship_kind.to_string(),
             scope: config.scope,
-            source_table: Some(config.source.clone()),
-            partition_column: part_col,
         });
     }
 

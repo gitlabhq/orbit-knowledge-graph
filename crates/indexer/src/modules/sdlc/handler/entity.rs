@@ -69,7 +69,6 @@ impl Handler for EntityIndexingHandler {
         info!(
             entity_kind = %request.entity_kind,
             scope = ?request.scope,
-            partition = ?request.partition,
             "starting entity indexing"
         );
 
@@ -173,6 +172,8 @@ mod tests {
             Arc::new(BasePipeline::new(
                 user_plan,
                 Some("id".to_string()),
+                None,
+                1,
                 pipeline,
             )) as Arc<dyn EntityPipeline>,
         )]));
@@ -180,8 +181,7 @@ mod tests {
         let payload = serde_json::json!({
             "entity_kind": "User",
             "watermark": "2024-01-21T00:00:00Z",
-            "scope": "Global",
-            "partition": null
+            "scope": "Global"
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
@@ -210,15 +210,19 @@ mod tests {
 
         let handler = test_handler(HashMap::from([(
             "MergeRequest".to_string(),
-            Arc::new(BasePipeline::new(mr_plan, Some("id".to_string()), pipeline))
-                as Arc<dyn EntityPipeline>,
+            Arc::new(BasePipeline::new(
+                mr_plan,
+                Some("id".to_string()),
+                None,
+                1,
+                pipeline,
+            )) as Arc<dyn EntityPipeline>,
         )]));
 
         let payload = serde_json::json!({
             "entity_kind": "MergeRequest",
             "watermark": "2024-01-21T00:00:00Z",
-            "scope": { "Namespace": { "namespace_id": 100, "traversal_path": "42/100/" } },
-            "partition": null
+            "scope": { "Namespace": { "namespace_id": 100, "traversal_path": "42/100/" } }
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
@@ -234,8 +238,7 @@ mod tests {
         let payload = serde_json::json!({
             "entity_kind": "Unknown",
             "watermark": "2024-01-21T00:00:00Z",
-            "scope": "Global",
-            "partition": null
+            "scope": "Global"
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);

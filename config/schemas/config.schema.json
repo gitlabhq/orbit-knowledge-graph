@@ -231,8 +231,7 @@
             "events_stream_name": "siphon_stream_main_db"
           },
           "entity": {
-            "cron": null,
-            "partition_overrides": {}
+            "cron": null
           },
           "global": {
             "cron": null
@@ -586,15 +585,6 @@
             "null"
           ],
           "default": null
-        },
-        "partition_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "default": {}
         }
       }
     },
@@ -1462,8 +1452,7 @@
               "events_stream_name": "siphon_stream_main_db"
             },
             "entity": {
-              "cron": null,
-              "partition_overrides": {}
+              "cron": null
             },
             "global": {
               "cron": null
@@ -1505,8 +1494,7 @@
         "entity": {
           "$ref": "#/$defs/EntityDispatcherConfig",
           "default": {
-            "cron": null,
-            "partition_overrides": {}
+            "cron": null
           }
         },
         "global": {

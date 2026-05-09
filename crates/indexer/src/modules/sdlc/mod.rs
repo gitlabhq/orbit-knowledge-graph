@@ -130,16 +130,36 @@ pub async fn register_entity_handlers(
     for (plan, scope) in entity_plans {
         let entity_kind = plan.name.clone();
 
-        let order_by: Vec<String> = ontology
-            .get_node(&entity_kind)
-            .and_then(|n| n.etl.as_ref())
-            .map(|etl| etl.order_by().to_vec())
-            .unwrap_or_default();
+        let (order_by, source_table) = if let Some(node) = ontology.get_node(&entity_kind) {
+            let etl = node.etl.as_ref();
+            let order = etl.map(|e| e.order_by().to_vec()).unwrap_or_default();
+            let source = etl.and_then(|e| match e {
+                ontology::etl::EtlConfig::Table { source, .. } => Some(source.clone()),
+                ontology::etl::EtlConfig::Query { .. } => None,
+            });
+            (order, source)
+        } else {
+            let edge = ontology
+                .edge_etl_configs()
+                .find(|(kind, _)| *kind == entity_kind);
+            match edge {
+                Some((_, config)) => (config.order_by.clone(), Some(config.source.clone())),
+                None => (vec![], None),
+            }
+        };
+
         let partition_col = partition_column(&order_by, scope).map(String::from);
+        let partition_count = entity_config
+            .partition_overrides
+            .get(&entity_kind)
+            .copied()
+            .unwrap_or(1);
 
         let base_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(BasePipeline::new(
             plan,
             partition_col,
+            source_table,
+            partition_count,
             Arc::clone(&pipeline),
         ));
 

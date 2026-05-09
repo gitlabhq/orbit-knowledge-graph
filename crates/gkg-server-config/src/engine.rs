@@ -315,8 +315,6 @@ pub struct NamespaceDispatcherConfig {
 pub struct EntityDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-    #[serde(default)]
-    pub partition_overrides: HashMap<String, u32>,
 }
 
 fn default_events_stream_name() -> String {
