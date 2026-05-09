@@ -9,6 +9,8 @@ use gkg_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::topic::{IndexingScope, PartitionSpec};
+
 const CHECKPOINT_TABLE: &str = "checkpoint";
 
 /// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
@@ -17,6 +19,28 @@ const CHECKPOINT_TABLE: &str = "checkpoint";
 /// checkpoints for a namespace share this prefix followed by a dot.
 pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("ns.{namespace_id}")
+}
+
+pub fn entity_position_key(scope: &IndexingScope) -> String {
+    match scope {
+        IndexingScope::Global => "global".to_string(),
+        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
+    }
+}
+
+pub fn entity_checkpoint_key(
+    scope: &IndexingScope,
+    entity_kind: &str,
+    partition: Option<&PartitionSpec>,
+) -> String {
+    let base = entity_position_key(scope);
+    match partition {
+        None => format!("{base}.{entity_kind}"),
+        Some(p) => format!(
+            "{base}.{entity_kind}.p{}of{}",
+            p.partition_index, p.total_partitions
+        ),
+    }
 }
 
 #[derive(Debug, Error)]
@@ -198,5 +222,49 @@ mod tests {
 
         assert_eq!(deserialized, checkpoint);
         assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
+    }
+
+    #[test]
+    fn entity_checkpoint_key_global_no_partition() {
+        let key = entity_checkpoint_key(&IndexingScope::Global, "User", None);
+        assert_eq!(key, "global.User");
+    }
+
+    #[test]
+    fn entity_checkpoint_key_namespaced_no_partition() {
+        let scope = IndexingScope::Namespace {
+            namespace_id: 100,
+            traversal_path: "42/100/".to_string(),
+        };
+        let key = entity_checkpoint_key(&scope, "MergeRequest", None);
+        assert_eq!(key, "ns.100.MergeRequest");
+    }
+
+    #[test]
+    fn entity_checkpoint_key_namespaced_with_partition() {
+        use crate::topic::PartitionStrategy;
+        let scope = IndexingScope::Namespace {
+            namespace_id: 100,
+            traversal_path: "42/100/".to_string(),
+        };
+        let spec = PartitionSpec {
+            partition_index: 2,
+            total_partitions: 4,
+            strategy: PartitionStrategy::Range {
+                lower_bound: "50000000".to_string(),
+                upper_bound: "75000000".to_string(),
+            },
+        };
+        let key = entity_checkpoint_key(&scope, "MergeRequest", Some(&spec));
+        assert_eq!(key, "ns.100.MergeRequest.p2of4");
+    }
+
+    #[test]
+    fn entity_position_key_matches_namespace_position_key() {
+        let scope = IndexingScope::Namespace {
+            namespace_id: 100,
+            traversal_path: "42/100/".to_string(),
+        };
+        assert_eq!(entity_position_key(&scope), namespace_position_key(100));
     }
 }
