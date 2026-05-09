@@ -88,8 +88,6 @@ impl Event for CodeIndexingTaskRequest {
     }
 }
 
-// --- Entity-level indexing (ADR 012) ---
-
 pub const ENTITY_INDEXING_SUBJECT_PREFIX: &str = "sdlc.entity.indexing.requested";
 pub const ENTITY_INDEXING_SUBJECT_PATTERN: &str = "sdlc.entity.indexing.requested.>";
 

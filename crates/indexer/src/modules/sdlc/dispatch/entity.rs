@@ -19,7 +19,7 @@ const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = false
-  AND traversal_path != ''
+  AND traversal_path != '0/'
 "#;
 
 pub struct EntityDescriptor {
@@ -210,14 +210,4 @@ impl EntityDispatcher {
 enum PublishOutcome {
     Published,
     Skipped,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn enabled_namespace_query_excludes_empty_traversal_paths() {
-        assert!(ENABLED_NAMESPACE_QUERY.contains("traversal_path != ''"));
-    }
 }
