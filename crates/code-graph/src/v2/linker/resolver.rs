@@ -1195,10 +1195,10 @@ impl<'a> ResolveCtx<'a> {
                 {
                     // Language hook: resolve identifier as a type directly.
                     // Ruby uses this for constants like `Model` that are class names.
-                    if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type {
-                        if let Some(fqn) = resolve_fn(self.graph, name) {
-                            types.push(fqn);
-                        }
+                    if let Some(resolve_fn) = self.rules.hooks.resolve_ident_type
+                        && let Some(fqn) = resolve_fn(self.graph, name)
+                    {
+                        types.push(fqn);
                     }
                     if !types.is_empty() {
                         return Ok(types);
