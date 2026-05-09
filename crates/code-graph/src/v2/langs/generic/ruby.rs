@@ -207,64 +207,67 @@ fn ruby_extract_attr_methods(
         .unwrap_or_default();
 
     let Some(args) = node.field("arguments") else {
-        return method == "attr_accessor"
-            || method == "attr_reader"
-            || method == "attr_writer"
-            || method == "delegate"
-            || method == "define_method";
+        return RUBY_DSL_METHODS.contains(&method.as_str());
+    };
+
+    // Helper: push a synthetic def for each symbol arg
+    let push_symbol_defs = |args: &N<'_>,
+                            defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+                            def_type: &'static str,
+                            kind: DefKind,
+                            skip: &[&str]| {
+        for arg in args.children() {
+            if arg.kind().as_ref() != "simple_symbol" {
+                continue;
+            }
+            let name = arg.text().trim_start_matches(':').to_string();
+            if name.is_empty() || skip.contains(&name.as_str()) {
+                continue;
+            }
+            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+            defs.push(crate::v2::types::CanonicalDefinition {
+                definition_type: def_type,
+                kind,
+                name,
+                fqn,
+                range: crate::v2::types::Range::empty(),
+                is_top_level: false,
+                metadata: None,
+            });
+        }
     };
 
     match method.as_str() {
         // attr_accessor :foo, :bar → synthetic getter/setter defs
         "attr_accessor" | "attr_reader" | "attr_writer" => {
-            for arg in args.children() {
-                if arg.kind().as_ref() != "simple_symbol" {
-                    continue;
-                }
-                let name = arg.text().trim_start_matches(':').to_string();
-                if name.is_empty() {
-                    continue;
-                }
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Attribute",
-                    kind: DefKind::Property,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-            }
+            push_symbol_defs(&args, defs, "Attribute", DefKind::Property, &[]);
+            true
+        }
+        // class_attribute :foo / mattr_accessor :foo / cattr_accessor :foo
+        "class_attribute" | "mattr_accessor" | "cattr_accessor" | "mattr_reader"
+        | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
+            push_symbol_defs(
+                &args,
+                defs,
+                "Attribute",
+                DefKind::Property,
+                &[
+                    "instance_writer",
+                    "instance_reader",
+                    "instance_accessor",
+                    "default",
+                ],
+            );
             true
         }
         // delegate :foo, :bar, to: :baz → synthetic method defs
         "delegate" => {
-            for arg in args.children() {
-                if arg.kind().as_ref() != "simple_symbol" {
-                    continue;
-                }
-                let name = arg.text().trim_start_matches(':').to_string();
-                if name.is_empty() || name == "to" {
-                    continue;
-                }
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-            }
+            push_symbol_defs(&args, defs, "Method", DefKind::Method, &["to", "prefix"]);
             true
         }
-        // def_delegators :@target, :foo, :bar → synthetic method defs
-        // def_delegator :@target, :foo → synthetic method def
+        // def_delegators :@target, :foo, :bar → skip first arg (target)
         "def_delegators" | "def_delegator" => {
-            let mut skip_first = true; // first arg is the target, not a method name
+            let mut skip_first = true;
             for arg in args.children() {
                 if arg.kind().as_ref() != "simple_symbol" {
                     continue;
@@ -290,7 +293,7 @@ fn ruby_extract_attr_methods(
             }
             true
         }
-        // define_method(:foo) { ... } → synthetic method def
+        // define_method(:foo) { ... } → first symbol arg is the method name
         "define_method" => {
             for arg in args.children() {
                 let kind = arg.kind();
@@ -317,13 +320,96 @@ fn ruby_extract_attr_methods(
                     is_top_level: false,
                     metadata: None,
                 });
-                break; // only first arg is the method name
+                break;
             }
             true
+        }
+        // scope :active, -> { ... } → synthetic class method def
+        "scope" => {
+            for arg in args.children() {
+                if arg.kind().as_ref() != "simple_symbol" {
+                    continue;
+                }
+                let name = arg.text().trim_start_matches(':').to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "StaticMethod",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+                break; // only first arg is the scope name
+            }
+            true
+        }
+        // has_many :comments / belongs_to :user / has_one :profile
+        "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
+            for arg in args.children() {
+                if arg.kind().as_ref() != "simple_symbol" {
+                    continue;
+                }
+                let name = arg.text().trim_start_matches(':').to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+                break; // only first arg is the association name
+            }
+            true
+        }
+        // before_action :method_name / after_action :method_name
+        // These don't generate defs -- they reference existing methods.
+        // Handled by the normal ref extraction (bare identifier rule).
+        "before_action" | "after_action" | "around_action" | "before_filter" | "after_filter"
+        | "around_filter" | "before_validation" | "after_validation" | "after_create"
+        | "after_save" | "before_save" | "before_create" | "after_update" | "before_update"
+        | "after_destroy" | "before_destroy" | "after_commit" | "after_rollback" => {
+            // Not handled here -- the symbol args are refs, not defs.
+            // The bare identifier ref rule already picks these up.
+            false
         }
         _ => false,
     }
 }
+
+/// DSL methods recognized by the on_scope hook. Used for early-return
+/// when the call has no arguments.
+const RUBY_DSL_METHODS: &[&str] = &[
+    "attr_accessor",
+    "attr_reader",
+    "attr_writer",
+    "class_attribute",
+    "mattr_accessor",
+    "cattr_accessor",
+    "mattr_reader",
+    "mattr_writer",
+    "cattr_reader",
+    "cattr_writer",
+    "delegate",
+    "def_delegators",
+    "def_delegator",
+    "define_method",
+    "scope",
+    "has_many",
+    "belongs_to",
+    "has_one",
+    "has_and_belongs_to_many",
+];
 
 /// Extract super types: superclass + include/extend calls in the class body.
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {

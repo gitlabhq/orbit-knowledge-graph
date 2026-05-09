@@ -54,6 +54,47 @@ fixtures:
         end
       end
 
+  - path: app/models/post.rb
+    content: |
+      class Post < Base
+        has_many :comments
+        belongs_to :author
+        has_one :featured_image
+
+        scope :published, -> { where(published: true) }
+        scope :recent, -> { order(created_at: :desc) }
+
+        class_attribute :max_length, default: 5000
+
+        def summarize
+          published
+          recent
+          comments
+          author
+          max_length
+        end
+      end
+
+  - path: app/controllers/posts_controller.rb
+    content: |
+      class PostsController
+        before_action :authenticate_user!
+        after_action :log_request
+
+        def authenticate_user!
+          true
+        end
+
+        def log_request
+          true
+        end
+
+        def index
+          Post.published
+          Post.recent
+        end
+      end
+
 tests:
   - name: "attr_accessor generates synthetic defs"
     query: |
@@ -141,3 +182,61 @@ tests:
     assert:
       - { row_count: 3 }
       - { unique: callee }
+
+  # ══════════════════════════════════════════════════════════════
+  # RAILS ASSOCIATIONS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "has_many/belongs_to/has_one generate association methods"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Post::comments', 'Post::author', 'Post::featured_image']
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  # ══════════════════════════════════════════════════════════════
+  # RAILS SCOPES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "scope generates class method defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['Post::published', 'Post::recent']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Post::published", type: StaticMethod } }
+      - { row: { fqn: "Post::recent", type: StaticMethod } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CLASS ATTRIBUTES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "class_attribute generates synthetic def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Post::max_length'
+        AND d.definition_type = 'Attribute'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # CALLS TO GENERATED METHODS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Post.summarize calls association and scope methods"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Post::summarize'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "Post::published" } }
+      - { row: { callee: "Post::recent" } }
+      - { row: { callee: "Post::comments" } }
+      - { row: { callee: "Post::author" } }
+      - { row: { callee: "Post::max_length" } }
