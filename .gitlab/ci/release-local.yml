@@ -76,18 +76,20 @@ local-cli-build-windows-xwin:
     PLATFORM: windows
     ARCH: x86_64
     WINDOWS_METHOD: xwin
-    XWIN_VERSION: "0.22.0"
+    # Tool version (cargo-xwin release). NOT the MSVC SDK version — that env
+    # is `XWIN_VERSION` and is read directly by cargo-xwin, so don't set it.
+    CARGO_XWIN_VERSION: "0.22.0"
     XWIN_ARCH: x86_64
     XWIN_ACCEPT_LICENSE: "1"
     XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.xwin-cache
   cache:
-    key: "xwin-sdk-0.22.0"
+    key: "xwin-sdk-v17"
     paths:
       - .xwin-cache/
   before_script:
     - !reference [.sccache-template, before_script]
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends lld zip
-    - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${XWIN_VERSION}/cargo-xwin-v${XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
+    - curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v${CARGO_XWIN_VERSION}/cargo-xwin-v${CARGO_XWIN_VERSION}.x86_64-unknown-linux-musl.tar.gz"
         | tar -xz -C /opt/cargo/bin cargo-xwin
     - chmod +x /opt/cargo/bin/cargo-xwin
   script:
