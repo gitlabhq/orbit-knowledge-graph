@@ -3,6 +3,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod content;
 mod local_pipeline;
+mod sql_format;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -43,6 +44,15 @@ enum OutputFormat {
     #[default]
     Pretty,
     Json,
+}
+
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+enum SqlFormat {
+    #[default]
+    Table,
+    Json,
+    Ndjson,
+    Csv,
 }
 
 #[derive(Serialize)]
@@ -159,6 +169,24 @@ enum Commands {
         /// Output raw JSON graph (default is LLM-friendly text)
         #[arg(long)]
         raw: bool,
+    },
+    /// Run a raw read-only SQL query against the local DuckDB graph.
+    Sql {
+        /// SQL query, or `-` to read from stdin.
+        #[arg(value_name = "QUERY", conflicts_with = "file")]
+        query: Option<String>,
+
+        /// Read SQL from a file.
+        #[arg(long, short, value_name = "PATH")]
+        file: Option<PathBuf>,
+
+        /// Output format.
+        #[arg(long, short = 'F', default_value = "table")]
+        format: SqlFormat,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
     },
     /// Compile a query to SQL without executing it
     Compile {
@@ -288,6 +316,12 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
+        Commands::Sql {
+            query,
+            file,
+            format,
+            db,
+        } => run_sql(query, file, format, db),
         Commands::Compile {
             json,
             traversal_paths,
@@ -851,6 +885,56 @@ fn parse_query_input(
     }
 
     Ok((value, ontology))
+}
+
+fn run_sql(
+    query: Option<String>,
+    file: Option<PathBuf>,
+    format: SqlFormat,
+    db: Option<PathBuf>,
+) -> Result<()> {
+    use std::io::Read;
+
+    let sql = match (query.as_deref(), file) {
+        (Some("-"), _) | (None, None) => {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .context("failed to read SQL from stdin")?;
+            buf
+        }
+        (Some(q), _) => q.to_string(),
+        (None, Some(path)) => std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?,
+    };
+
+    let sql = sql.trim();
+    if sql.is_empty() {
+        anyhow::bail!("empty SQL query");
+    }
+
+    let db_path = match db {
+        Some(p) => p,
+        None => workspace::Workspace::open_default()?.db_path(),
+    };
+    if !db_path.exists() {
+        anyhow::bail!(
+            "no local graph found at {}. Run `orbit index` first.",
+            db_path.display()
+        );
+    }
+
+    let client = duckdb_client::DuckDbClient::open_read_only(&db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let batches = client.query_arrow(sql).context("query failed")?;
+
+    let stdout = std::io::stdout().lock();
+    match format {
+        SqlFormat::Table => sql_format::write_table(stdout, &batches),
+        SqlFormat::Json => sql_format::write_json(stdout, &batches),
+        SqlFormat::Ndjson => sql_format::write_ndjson(stdout, &batches),
+        SqlFormat::Csv => sql_format::write_csv(stdout, &batches),
+    }
 }
 
 fn run_local_query(
