@@ -78,7 +78,7 @@ pub fn global_envelope() -> Envelope {
     )
 }
 
-pub async fn entity_handler(ctx: &TestContext, entity_kind: &str) -> Arc<dyn Handler> {
+pub async fn entity_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
@@ -86,8 +86,8 @@ pub async fn entity_handler(ctx: &TestContext, entity_kind: &str) -> Arc<dyn Han
         .await
         .expect("failed to register entity handlers");
     registry
-        .find_by_name(entity_kind)
-        .unwrap_or_else(|| panic!("entity handler '{entity_kind}' not found"))
+        .find_by_name("entity_handler")
+        .expect("entity_handler not found")
 }
 
 pub fn entity_envelope(entity_kind: &str, scope: IndexingScope) -> Envelope {

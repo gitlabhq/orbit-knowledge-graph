@@ -122,8 +122,10 @@ pub async fn register_entity_handlers(
     info!(
         entity_count = entity_plans.len(),
         entities = ?entity_names,
-        "registering entity indexing handlers"
+        "registering entity indexing handler"
     );
+
+    let mut pipelines = std::collections::HashMap::with_capacity(entity_plans.len());
 
     for (plan, scope) in entity_plans {
         let entity_kind = plan.name.clone();
@@ -135,19 +137,20 @@ pub async fn register_entity_handlers(
             .unwrap_or_default();
         let partition_col = partition_column(&order_by, scope).map(String::from);
 
-        let base_pipeline = Arc::new(BasePipeline::new(
+        let base_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(BasePipeline::new(
             plan,
             partition_col,
             Arc::clone(&pipeline),
         ));
 
-        registry.register_handler(Box::new(EntityIndexingHandler::new(
-            entity_kind,
-            base_pipeline,
-            metrics.clone(),
-            entity_config.engine.clone(),
-        )));
+        pipelines.insert(entity_kind, base_pipeline);
     }
+
+    registry.register_handler(Box::new(EntityIndexingHandler::new(
+        pipelines,
+        metrics,
+        entity_config.engine.clone(),
+    )));
 
     Ok(())
 }

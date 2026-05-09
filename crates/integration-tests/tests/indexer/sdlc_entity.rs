@@ -38,7 +38,7 @@ async fn processes_users_via_entity_handler(ctx: &TestContext) {
     )
     .await;
 
-    entity_handler(ctx, "User")
+    entity_handler(ctx)
         .await
         .handle(
             handler_context(ctx),
@@ -70,7 +70,7 @@ async fn processes_projects_via_entity_handler(ctx: &TestContext) {
     create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
     create_project(ctx, 1001, 100, 2, 20, "1/100/1001/").await;
 
-    entity_handler(ctx, "Project")
+    entity_handler(ctx)
         .await
         .handle(
             handler_context(ctx),

@@ -131,13 +131,6 @@ impl Event for EntityIndexingRequest {
 }
 
 impl EntityIndexingRequest {
-    pub fn entity_subscription(entity_kind: &str) -> Subscription {
-        Subscription::new(
-            INDEXER_STREAM,
-            format!("{ENTITY_INDEXING_SUBJECT_PREFIX}.{entity_kind}.>"),
-        )
-    }
-
     pub fn publish_subject(&self) -> String {
         let scope_suffix = match &self.scope {
             IndexingScope::Global => "global".to_string(),
@@ -254,15 +247,6 @@ mod tests {
         assert_eq!(
             request.publish_subject(),
             "sdlc.entity.indexing.requested.User.global"
-        );
-    }
-
-    #[test]
-    fn entity_subscription_uses_wildcard() {
-        let sub = EntityIndexingRequest::entity_subscription("MergeRequest");
-        assert_eq!(
-            sub.subject.as_ref(),
-            "sdlc.entity.indexing.requested.MergeRequest.>"
         );
     }
 

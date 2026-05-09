@@ -1,36 +1,34 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
 use gkg_server_config::HandlerConfiguration;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::entity_pipeline::EntityPipeline;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::topic::EntityIndexingRequest;
-use crate::types::{Envelope, SerializationError, Subscription};
+use crate::types::{Envelope, Event, SerializationError, Subscription};
 
 pub struct EntityIndexingHandler {
-    entity_kind: String,
     subscription: Subscription,
-    pipeline: Arc<dyn EntityPipeline>,
+    pipelines: HashMap<String, Arc<dyn EntityPipeline>>,
     metrics: SdlcMetrics,
     config: HandlerConfiguration,
 }
 
 impl EntityIndexingHandler {
     pub fn new(
-        entity_kind: String,
-        pipeline: Arc<dyn EntityPipeline>,
+        pipelines: HashMap<String, Arc<dyn EntityPipeline>>,
         metrics: SdlcMetrics,
         config: HandlerConfiguration,
     ) -> Self {
-        let subscription = EntityIndexingRequest::entity_subscription(&entity_kind);
+        let subscription = EntityIndexingRequest::subscription();
         Self {
-            entity_kind,
             subscription,
-            pipeline,
+            pipelines,
             metrics,
             config,
         }
@@ -40,7 +38,7 @@ impl EntityIndexingHandler {
 #[async_trait]
 impl Handler for EntityIndexingHandler {
     fn name(&self) -> &str {
-        &self.entity_kind
+        "entity_handler"
     }
 
     fn subscription(&self) -> Subscription {
@@ -56,6 +54,17 @@ impl Handler for EntityIndexingHandler {
             SerializationError::Json(err) => HandlerError::Deserialization(err),
         })?;
 
+        let pipeline = match self.pipelines.get(&request.entity_kind) {
+            Some(p) => p,
+            None => {
+                warn!(
+                    entity_kind = %request.entity_kind,
+                    "no pipeline registered for entity kind, skipping"
+                );
+                return Ok(());
+            }
+        };
+
         let started_at = Utc::now();
         info!(
             entity_kind = %request.entity_kind,
@@ -64,8 +73,7 @@ impl Handler for EntityIndexingHandler {
             "starting entity indexing"
         );
 
-        let result = self
-            .pipeline
+        let result = pipeline
             .execute(&request, context.destination.as_ref(), &context.progress)
             .await;
 
@@ -74,7 +82,7 @@ impl Handler for EntityIndexingHandler {
             .to_std()
             .unwrap_or_default();
         self.metrics
-            .record_handler_duration(&self.entity_kind, elapsed.as_secs_f64());
+            .record_handler_duration(&request.entity_kind, elapsed.as_secs_f64());
 
         if result.is_ok() {
             info!(
@@ -112,6 +120,10 @@ mod tests {
         )
     }
 
+    fn test_handler(pipelines: HashMap<String, Arc<dyn EntityPipeline>>) -> EntityIndexingHandler {
+        EntityIndexingHandler::new(pipelines, test_metrics(), HandlerConfiguration::default())
+    }
+
     #[tokio::test]
     async fn handle_processes_global_entity() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
@@ -130,16 +142,14 @@ mod tests {
             Default::default(),
         ));
 
-        let handler = EntityIndexingHandler::new(
+        let handler = test_handler(HashMap::from([(
             "User".to_string(),
             Arc::new(BasePipeline::new(
                 user_plan,
                 Some("id".to_string()),
                 pipeline,
-            )),
-            test_metrics(),
-            HandlerConfiguration::default(),
-        );
+            )) as Arc<dyn EntityPipeline>,
+        )]));
 
         let payload = serde_json::json!({
             "entity_kind": "User",
@@ -172,12 +182,11 @@ mod tests {
             Default::default(),
         ));
 
-        let handler = EntityIndexingHandler::new(
+        let handler = test_handler(HashMap::from([(
             "MergeRequest".to_string(),
-            Arc::new(BasePipeline::new(mr_plan, Some("id".to_string()), pipeline)),
-            test_metrics(),
-            HandlerConfiguration::default(),
-        );
+            Arc::new(BasePipeline::new(mr_plan, Some("id".to_string()), pipeline))
+                as Arc<dyn EntityPipeline>,
+        )]));
 
         let payload = serde_json::json!({
             "entity_kind": "MergeRequest",
@@ -192,18 +201,30 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[tokio::test]
+    async fn handle_unknown_entity_kind_returns_ok() {
+        let handler = test_handler(HashMap::new());
+
+        let payload = serde_json::json!({
+            "entity_kind": "Unknown",
+            "watermark": "2024-01-21T00:00:00Z",
+            "scope": "Global",
+            "partition": null
+        })
+        .to_string();
+        let envelope = TestEnvelopeFactory::simple(&payload);
+
+        let result = handler.handle(test_handler_context(), envelope).await;
+        assert!(result.is_ok());
+    }
+
     #[test]
-    fn subscription_uses_entity_kind_wildcard() {
-        let handler = EntityIndexingHandler::new(
-            "MergeRequest".to_string(),
-            Arc::new(NoopPipeline),
-            test_metrics(),
-            HandlerConfiguration::default(),
-        );
+    fn subscription_covers_all_entities() {
+        let handler = test_handler(HashMap::new());
 
         assert_eq!(
             handler.subscription().subject.as_ref(),
-            "sdlc.entity.indexing.requested.MergeRequest.>"
+            "sdlc.entity.indexing.requested.>"
         );
     }
 
