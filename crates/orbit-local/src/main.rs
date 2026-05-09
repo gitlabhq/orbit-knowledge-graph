@@ -551,8 +551,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         return Ok(());
     }
 
-    let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
-    let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
+    let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
 
     // Ensure schema exists, then drop the connection so we don't hold
     // the write lock during parsing.
@@ -840,9 +839,11 @@ fn parse_query_input(
     json_input: &str,
     ontology_path: Option<PathBuf>,
 ) -> Result<(Value, Ontology)> {
-    let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-    let ontology = Ontology::load_from_dir(&ontology_dir)
-        .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
+    let ontology = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path)
+            .with_context(|| format!("failed to load ontology from {}", path.display()))?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
 
     let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
     if value.get("query_type").is_none() {
