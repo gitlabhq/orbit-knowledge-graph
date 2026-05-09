@@ -13,11 +13,13 @@ use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
+use entity_pipeline::{BasePipeline, partition_column};
+use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
-use plan::build_plans;
+use plan::{build_entity_plans, build_plans};
 use tracing::info;
 
 pub async fn register_handlers(
@@ -79,6 +81,71 @@ pub async fn register_handlers(
             Arc::clone(&pipeline),
             metrics.clone(),
             namespace_handler_config,
+        )));
+    }
+
+    Ok(())
+}
+
+pub async fn register_entity_handlers(
+    registry: &HandlerRegistry,
+    config: &IndexerConfig,
+    ontology: &ontology::Ontology,
+) -> Result<(), HandlerInitError> {
+    let entity_config = &config.engine.handlers.entity_handler;
+
+    let datalake_client = Arc::new(config.datalake.build_client());
+    let graph_client = Arc::new(config.graph.build_client());
+
+    let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
+        datalake_client,
+        entity_config.datalake_batch_size,
+    ));
+    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
+        Arc::new(ClickHouseCheckpointStore::new(graph_client));
+    let metrics = SdlcMetrics::new();
+
+    let pipeline = Arc::new(Pipeline::new(
+        datalake,
+        checkpoint_store,
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+    ));
+
+    let entity_plans = build_entity_plans(
+        ontology,
+        entity_config.datalake_batch_size,
+        &entity_config.batch_size_overrides,
+    );
+
+    let entity_names: Vec<&str> = entity_plans.iter().map(|(p, _)| p.name.as_str()).collect();
+    info!(
+        entity_count = entity_plans.len(),
+        entities = ?entity_names,
+        "registering entity indexing handlers"
+    );
+
+    for (plan, scope) in entity_plans {
+        let entity_kind = plan.name.clone();
+
+        let order_by: Vec<String> = ontology
+            .get_node(&entity_kind)
+            .and_then(|n| n.etl.as_ref())
+            .map(|etl| etl.order_by().to_vec())
+            .unwrap_or_default();
+        let partition_col = partition_column(&order_by, scope).map(String::from);
+
+        let base_pipeline = Arc::new(BasePipeline::new(
+            plan,
+            partition_col,
+            Arc::clone(&pipeline),
+        ));
+
+        registry.register_handler(Box::new(EntityIndexingHandler::new(
+            entity_kind,
+            base_pipeline,
+            metrics.clone(),
+            entity_config.engine.clone(),
         )));
     }
 

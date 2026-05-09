@@ -68,7 +68,9 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::sdlc::dispatch::{
+    EntityDescriptor, EntityDispatcher, GlobalDispatcher, NamespaceDispatcher,
+};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -129,6 +131,7 @@ pub async fn run(
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
         modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        modules::sdlc::register_entity_handlers(&registry, config, &ontology).await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
@@ -237,9 +240,16 @@ pub async fn run_dispatcher(
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
-            datalake,
+            datalake.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
+        )),
+        Box::new(EntityDispatcher::new(
+            services.nats.clone(),
+            datalake,
+            metrics.clone(),
+            config.schedule.tasks.entity.clone(),
+            build_entity_descriptors(ontology),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),
@@ -289,4 +299,25 @@ pub async fn run_dispatcher(
             Err(DispatcherError::Health(error))
         }
     }
+}
+
+fn build_entity_descriptors(ontology: &ontology::Ontology) -> Vec<EntityDescriptor> {
+    let mut descriptors = Vec::new();
+
+    for node in ontology.nodes() {
+        let Some(etl) = &node.etl else { continue };
+        descriptors.push(EntityDescriptor {
+            entity_kind: node.name.clone(),
+            scope: etl.scope(),
+        });
+    }
+
+    for (relationship_kind, config) in ontology.edge_etl_configs() {
+        descriptors.push(EntityDescriptor {
+            entity_kind: relationship_kind.to_string(),
+            scope: config.scope,
+        });
+    }
+
+    descriptors
 }
