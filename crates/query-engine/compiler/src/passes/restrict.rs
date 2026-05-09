@@ -99,6 +99,8 @@ fn enforce_traversal_path_filters(
         let Some(ont_node) = ontology.get_node(entity) else {
             continue;
         };
+        // Entities without a redaction role use the normal traversal-path floor:
+        // Rails only sends Reporter+ paths, and stricter entities override this.
         let min_role = ont_node
             .redaction
             .as_ref()
@@ -133,7 +135,7 @@ fn validate_traversal_path_filter_scope(
     eligible_paths: &[&str],
 ) -> Result<()> {
     for path in traversal_path_values(label, traversal_path_filter)? {
-        validate_requested_traversal_path(label, path, eligible_paths)?;
+        validate_traversal_path_within_scope(label, path, eligible_paths)?;
     }
     Ok(())
 }
@@ -180,7 +182,7 @@ fn traversal_path_values<'a>(
     }
 }
 
-fn validate_requested_traversal_path(
+fn validate_traversal_path_within_scope(
     label: &str,
     path: &str,
     eligible_paths: &[&str],

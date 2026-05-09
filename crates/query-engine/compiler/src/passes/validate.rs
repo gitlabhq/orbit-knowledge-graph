@@ -551,7 +551,9 @@ impl<'a> Validator<'a> {
             return Ok(());
         };
 
-        // Enforce minimum pattern length for LIKE and token filters.
+        // Free-text LIKE and token filters need a minimum length.
+        // traversal_path is a hierarchical scope where short paths like "1/"
+        // are valid and no broader than SecurityPass's required predicate.
         if (is_like_op || is_token_op) && prop != TRAVERSAL_PATH_COLUMN {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
