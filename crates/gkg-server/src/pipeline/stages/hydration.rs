@@ -162,23 +162,32 @@ impl PipelineStage for HydrationStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.get::<RedactionOutput>().ok_or_else(|| {
-            PipelineError::Execution("RedactionOutput not found in phases".into())
-        })?;
+        let input = ctx
+            .phases
+            .get::<RedactionOutput>()
+            .ok_or_else(|| PipelineError::Execution("RedactionOutput not found in phases".into()))
+            .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
         let mut query_result = input.query_result.clone();
         let redacted_count = input.redacted_count;
         let result_context = query_result.ctx().clone();
         let mut hydration_queries = Vec::new();
-        let hydration_plan = ctx.compiled()?.hydration.clone();
+        let hydration_plan = ctx
+            .compiled()
+            .inspect_err(|e| obs.record_error(e))?
+            .hydration
+            .clone();
 
         match &hydration_plan {
             HydrationPlan::None => {}
             HydrationPlan::Static(templates) => {
                 let (nodes, ids_count) =
-                    hydration_helpers::hydrate_static(templates, &query_result)?;
+                    hydration_helpers::hydrate_static(templates, &query_result)
+                        .inspect_err(|e| obs.record_error(e))?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count).await?;
+                    Self::execute_hydration(ctx, nodes, ids_count)
+                        .await
+                        .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
                 for exec in &executions {
                     obs.query_executed(
@@ -197,7 +206,9 @@ impl PipelineStage for HydrationStage {
                     .iter()
                     .map(|t| (t.entity_type.as_str(), t.virtual_columns.as_slice()))
                     .collect();
-                Self::resolve(ctx, &entity_virtuals, &mut property_map).await?;
+                Self::resolve(ctx, &entity_virtuals, &mut property_map)
+                    .await
+                    .inspect_err(|e| obs.record_error(e))?;
 
                 hydration_helpers::strip_injected_columns(
                     &mut property_map,
@@ -235,7 +246,8 @@ impl PipelineStage for HydrationStage {
                             .collect();
                     }
                     let (nodes, ids_count) =
-                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)?;
+                        hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)
+                            .inspect_err(|e| obs.record_error(e))?;
                     let (property_map, debug, executions) =
                         Self::execute_hydration(ctx, nodes, ids_count)
                             .await
@@ -258,7 +270,9 @@ impl PipelineStage for HydrationStage {
                         .iter()
                         .map(|s| (s.entity_type.as_str(), s.virtual_columns.as_slice()))
                         .collect();
-                    Self::resolve(ctx, &entity_virtuals, &mut property_map).await?;
+                    Self::resolve(ctx, &entity_virtuals, &mut property_map)
+                        .await
+                        .inspect_err(|e| obs.record_error(e))?;
 
                     hydration_helpers::strip_injected_columns(
                         &mut property_map,

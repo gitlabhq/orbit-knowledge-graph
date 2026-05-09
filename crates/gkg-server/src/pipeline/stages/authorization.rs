@@ -24,9 +24,13 @@ impl PipelineStage for AuthorizationStage {
         ctx: &mut QueryPipelineContext,
         obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.get::<ExtractionOutput>().ok_or_else(|| {
-            PipelineError::Authorization("ExtractionOutput not found in phases".into())
-        })?;
+        let input = ctx
+            .phases
+            .get::<ExtractionOutput>()
+            .ok_or_else(|| {
+                PipelineError::Authorization("ExtractionOutput not found in phases".into())
+            })
+            .inspect_err(|e| obs.record_error(e))?;
         let t = Instant::now();
 
         let resources_to_check = input.query_result.resource_checks();
@@ -39,17 +43,20 @@ impl PipelineStage for AuthorizationStage {
                 .get::<mpsc::Sender<Result<ExecuteQueryMessage, Status>>>()
                 .ok_or_else(|| {
                     PipelineError::Authorization("tx not available in server_extensions".into())
-                })?
+                })
+                .inspect_err(|e| obs.record_error(e))?
                 .clone();
             let stream = ctx
                 .server_extensions
                 .get_mut::<Streaming<ExecuteQueryMessage>>()
                 .ok_or_else(|| {
                     PipelineError::Authorization("stream not available in server_extensions".into())
-                })?;
+                })
+                .inspect_err(|e| obs.record_error(e))?;
             RedactionService::request_authorization(&resources_to_check, &tx, stream)
                 .await
-                .map_err(|e| PipelineError::Authorization(format!("{e:?}")))?
+                .map_err(|e| PipelineError::Authorization(format!("{e:?}")))
+                .inspect_err(|e| obs.record_error(e))?
                 .authorizations
         };
 

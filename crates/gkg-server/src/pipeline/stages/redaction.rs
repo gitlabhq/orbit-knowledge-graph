@@ -14,11 +14,15 @@ impl PipelineStage for RedactionStage {
     async fn execute(
         &self,
         ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
+        obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.get::<AuthorizationOutput>().ok_or_else(|| {
-            PipelineError::Authorization("AuthorizationOutput not found in phases".into())
-        })?;
+        let input = ctx
+            .phases
+            .get::<AuthorizationOutput>()
+            .ok_or_else(|| {
+                PipelineError::Authorization("AuthorizationOutput not found in phases".into())
+            })
+            .inspect_err(|e| obs.record_error(e))?;
 
         let mut query_result = input.query_result.clone();
         let redacted_count = query_result.apply_authorizations(&input.authorizations);

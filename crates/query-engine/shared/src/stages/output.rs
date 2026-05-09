@@ -20,13 +20,15 @@ impl PipelineStage for OutputStage {
     async fn execute(
         &self,
         ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
+        obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.get::<HydrationOutput>().ok_or_else(|| {
-            PipelineError::Execution("HydrationOutput not found in phases".into())
-        })?;
+        let input = ctx
+            .phases
+            .get::<HydrationOutput>()
+            .ok_or_else(|| PipelineError::Execution("HydrationOutput not found in phases".into()))
+            .inspect_err(|e| obs.record_error(e))?;
 
-        let compiled = ctx.compiled()?;
+        let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
 
         let requested = compiled.input.options.include_debug_sql;
         let raw_query_strings = if requested && can_see_debug_sql(ctx) {

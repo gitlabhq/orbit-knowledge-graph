@@ -13,11 +13,13 @@ impl PipelineStage for ExtractionStage {
     async fn execute(
         &self,
         ctx: &mut QueryPipelineContext,
-        _obs: &mut dyn PipelineObserver,
+        obs: &mut dyn PipelineObserver,
     ) -> Result<Self::Output, PipelineError> {
-        let input = ctx.phases.get::<ExecutionOutput>().ok_or_else(|| {
-            PipelineError::Execution("ExecutionOutput not found in phases".into())
-        })?;
+        let input = ctx
+            .phases
+            .get::<ExecutionOutput>()
+            .ok_or_else(|| PipelineError::Execution("ExecutionOutput not found in phases".into()))
+            .inspect_err(|e| obs.record_error(e))?;
         Ok(ExtractionOutput {
             query_result: QueryResult::from_batches(&input.batches, &input.result_context),
         })

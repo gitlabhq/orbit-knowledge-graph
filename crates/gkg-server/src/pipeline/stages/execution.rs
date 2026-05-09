@@ -38,7 +38,8 @@ impl PipelineStage for ClickHouseExecutor {
         let client = ctx
             .server_extensions
             .get::<Arc<ArrowClickHouseClient>>()
-            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))?;
+            .ok_or_else(|| PipelineError::Execution("ClickHouse client not available".into()))
+            .inspect_err(|e| obs.record_error(e))?;
         let profiling = ctx
             .server_extensions
             .get::<ProfilingConfig>()
@@ -46,13 +47,14 @@ impl PipelineStage for ClickHouseExecutor {
             .unwrap_or_default();
 
         let (prepared, result_context) = {
-            let compiled = ctx.compiled()?;
+            let compiled = ctx.compiled().inspect_err(|e| obs.record_error(e))?;
 
             let mut http_settings: Vec<(String, String)> = compiled
                 .base
                 .query_config
                 .to_clickhouse_settings()
-                .map_err(PipelineError::Execution)?;
+                .map_err(PipelineError::Execution)
+                .inspect_err(|e| obs.record_error(e))?;
 
             // Build log_comment with correlation ID for tracing.
             // When profiling is enabled, append a unique profiling_id so
@@ -82,7 +84,9 @@ impl PipelineStage for ClickHouseExecutor {
             (prepared, compiled.base.result_context.clone())
         };
 
-        let (batches, mut execution) = execute_query(client, &prepared, start).await?;
+        let (batches, mut execution) = execute_query(client, &prepared, start)
+            .await
+            .inspect_err(|e| obs.record_error(e))?;
 
         if let Some(ref profiling_id) = prepared.profiling_id {
             enrich_execution(
