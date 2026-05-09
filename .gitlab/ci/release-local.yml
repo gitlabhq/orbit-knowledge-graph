@@ -82,6 +82,60 @@ local-cli-build-darwin-arm64:
   variables:
     ARCH: aarch64
 
+# Cross-compile a Windows x86_64 build from a Linux runner via cargo-xwin
+# (clang-cl + lld with the MSVC SDK fetched on demand and cached). No
+# Windows runner needed. libduckdb-sys downloads a prebuilt libduckdb for
+# the target so we skip a full C++ cross-build of DuckDB. Runs on tag
+# pipelines plus MR pipelines that touch the build paths so we can keep
+# the toolchain green.
+.local-cli-windows-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - scripts/build-local-cli.sh
+        - .gitlab/ci/release-local.yml
+        - Cargo.lock
+        - crates/orbit-local/**/*
+        - crates/duckdb-client/**/*
+
+local-cli-build-windows-amd64:
+  extends:
+    - .local-cli-windows-rules
+  stage: build
+  image: ${DEP_PROXY}rust:1.95-bookworm
+  tags:
+    - saas-linux-xlarge-amd64
+  needs: []
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+    DUCKDB_DOWNLOAD_LIB: "1"
+    CARGO_INCREMENTAL: "0"
+    XWIN_CACHE_DIR: ${CI_PROJECT_DIR}/.cache/xwin
+    CARGO_HOME: ${CI_PROJECT_DIR}/.cache/cargo
+  cache:
+    key: "windows-xwin-x86_64"
+    paths:
+      - .cache/xwin/
+      - .cache/cargo/registry/
+      - .cache/cargo/git/
+      - .cache/cargo/bin/
+    policy: pull-push
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y --no-install-recommends clang lld llvm cmake zip ca-certificates
+    - export PATH="${CARGO_HOME}/bin:$PATH"
+    - command -v cargo-xwin || cargo install --locked cargo-xwin --version ^0.22
+  script:
+    - ./scripts/build-local-cli.sh
+  artifacts:
+    paths:
+      - orbit-local-windows-*.zip
+    expire_in: 7 days
+
 local-cli-code-sign:
   extends:
     - .local-cli-release-rules
@@ -111,6 +165,7 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
+    - local-cli-build-windows-amd64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils
