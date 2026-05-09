@@ -27,19 +27,19 @@ properties:
     type: int64
     source: merge_request_id
     nullable: false
-    description: "ID of the parent merge request."
+    description: "Parent merge request ID."
 
   merge_request_diff_id:
     type: int64
     source: merge_request_diff_id
     nullable: false
-    description: "ID of the merge request diff this file belongs to."
+    description: "Parent merge request diff ID."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "ID of the project the parent merge request belongs to."
+    description: "Owning project ID."
 
   too_large:
     type: boolean
@@ -51,13 +51,13 @@ properties:
     type: string
     source: new_path
     nullable: false
-    description: "Path to the file after the change."
+    description: "File path after rename or move."
 
   old_path:
     type: string
     source: old_path
     nullable: false
-    description: "Path to the file before the change."
+    description: "File path before the change."
 
   new_file:
     type: boolean
@@ -87,26 +87,26 @@ properties:
     type: boolean
     source: generated
     nullable: true
-    description: "Whether this file is considered auto-generated (e.g. lockfiles, minified bundles)."
+    description: "Whether auto-generated (e.g. lockfiles, minified bundles)."
 
   a_mode:
     type: string
     source: a_mode
     nullable: false
-    description: "File mode before the change (Git mode bits, e.g. 100644)."
+    description: "Git mode bits before the change (e.g. 100644)."
 
   b_mode:
     type: string
     source: b_mode
     nullable: false
-    description: "File mode after the change (Git mode bits, e.g. 100755)."
+    description: "Git mode bits after the change (e.g. 100755)."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
   diff:
     type: string
@@ -120,7 +120,7 @@ properties:
         - old_path
         - new_path
         - too_large
-    description: "Per-file unified diff text. Resolved from GitLab at query time. Null when too_large is true."
+    description: "Per-file unified diff. Resolved from GitLab at query time. Null when too_large is true."
 
 etl:
   type: query

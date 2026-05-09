@@ -529,6 +529,7 @@ impl KnowledgeGraphServiceImpl {
                                 .as_ref()
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
+                            description: f.description.clone().unwrap_or_default(),
                         })
                         .collect()
                 } else {

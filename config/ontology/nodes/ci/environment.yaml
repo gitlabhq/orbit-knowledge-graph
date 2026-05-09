@@ -21,43 +21,43 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the environment."
+    description: "Unique ID."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project that owns this environment. Retained on the node row so redaction can resolve project-level permissions without an edge lookup."
+    description: "Owning project ID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Environment name (e.g. 'production', 'staging', 'review/feature-x')."
+    description: "Name (e.g. 'production', 'staging', 'review/feature-x')."
 
   slug:
     type: string
     source: slug
     nullable: false
-    description: "Slug derived from the environment name, safe for URLs and resource names."
+    description: "URL-safe slug derived from name."
 
   external_url:
     type: string
     source: external_url
     nullable: false
-    description: "External URL where the environment can be reached."
+    description: "External URL of the environment."
 
   environment_type:
     type: string
     source: environment_type
     nullable: false
-    description: "Free-form category derived from the name prefix before the first '/' (e.g. 'review', 'staging'); null for environments without a '/'."
+    description: "Category from name prefix before first '/' (e.g. 'review'); empty when no '/'."
 
   state:
     type: enum
     source: state
     nullable: false
-    description: "Lifecycle state of the environment."
+    description: "Lifecycle state."
     enum_type: string
     values:
       0: available
@@ -68,7 +68,7 @@ properties:
     type: enum
     source: tier
     nullable: false
-    description: "Environment tier within the deployment pipeline."
+    description: "Deployment tier."
     values:
       0: production
       1: staging
@@ -80,19 +80,19 @@ properties:
     type: timestamp
     source: auto_stop_at
     nullable: true
-    description: "Timestamp at which the environment will be auto-stopped."
+    description: "Scheduled auto-stop timestamp."
 
   auto_delete_at:
     type: timestamp
     source: auto_delete_at
     nullable: true
-    description: "Timestamp at which the environment will be auto-deleted."
+    description: "Scheduled auto-delete timestamp."
 
   auto_stop_setting:
     type: enum
     source: auto_stop_setting
     nullable: false
-    description: "How auto-stop is applied to this environment."
+    description: "Auto-stop behavior."
     values:
       0: always
       1: with_action
@@ -101,50 +101,50 @@ properties:
     type: int64
     source: cluster_agent_id
     nullable: true
-    description: "ID of the associated Kubernetes cluster agent, if any."
+    description: "Associated Kubernetes cluster agent ID."
 
   kubernetes_namespace:
     type: string
     source: kubernetes_namespace
     nullable: false
-    description: "Kubernetes namespace this environment is deployed into."
+    description: "Target Kubernetes namespace."
 
   flux_resource_path:
     type: string
     source: flux_resource_path
     nullable: false
-    description: "Flux resource path for GitOps-driven environments."
+    description: "Flux resource path for GitOps."
 
   description:
     type: string
     source: description
     nullable: false
-    description: "Free-form description of the environment."
+    description: "Free-form description."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the environment was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the environment was last updated."
+    description: "Last update timestamp."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: true
-    description: "Merge request that created this review environment."
+    description: "MR that created this review environment."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

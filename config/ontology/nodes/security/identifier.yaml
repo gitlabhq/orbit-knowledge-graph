@@ -22,56 +22,56 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the vulnerability identifier."
+    description: "Unique ID."
 
   external_type:
     type: string
     source: external_type
     nullable: false
-    description: "Type of external identifier (e.g., cve, cwe, gemnasium)."
+    description: "Identifier type (e.g. cve, cwe, gemnasium)."
 
   external_id:
     type: string
     source: external_id
     nullable: false
-    description: "External identifier value (e.g., CVE-2021-44228)."
+    description: "Identifier value (e.g. CVE-2021-44228)."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Human-readable name of the identifier."
+    description: "Human-readable name."
 
   url:
     type: string
     source: url
     nullable: false
-    description: "URL with more information about the identifier."
+    description: "Reference URL. May be empty for some identifier types."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: false
-    description: "Timestamp when the identifier was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: false
-    description: "Timestamp when the identifier was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this vulnerability identifier belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

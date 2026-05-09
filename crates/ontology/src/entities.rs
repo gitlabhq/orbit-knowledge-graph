@@ -426,6 +426,8 @@ pub struct Field {
     /// Defaults to false. When true, non-admin users cannot select or
     /// filter on this field.
     pub admin_only: bool,
+    /// Human-readable description of this field from the ontology YAML.
+    pub description: Option<String>,
 }
 
 impl Default for Field {
@@ -440,6 +442,7 @@ impl Default for Field {
             like_allowed: true,
             filterable: true,
             admin_only: false,
+            description: None,
         }
     }
 }

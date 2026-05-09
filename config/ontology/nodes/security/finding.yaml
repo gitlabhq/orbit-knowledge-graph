@@ -22,37 +22,37 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the finding."
+    description: "Unique ID."
 
   uuid:
     type: uuid
     source: uuid
     nullable: false
-    description: "UUID uniquely identifying the finding."
+    description: "Unique UUID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the finding."
+    description: "Finding name."
 
   description:
     type: string
     source: description
     nullable: true
-    description: "Detailed description of the finding."
+    description: "Detailed description."
 
   solution:
     type: string
     source: solution
     nullable: true
-    description: "Recommended solution or remediation for the finding."
+    description: "Recommended remediation."
 
   severity:
     type: enum
     source: severity
     nullable: false
-    description: "Severity level of the finding."
+    description: "Severity level."
     values:
       1: info
       2: unknown
@@ -65,38 +65,38 @@ properties:
     type: boolean
     source: deduplicated
     nullable: false
-    description: "Whether this finding has been deduplicated."
+    description: "Deduplicated flag."
 
   overridden_uuid:
     type: uuid
     source: overridden_uuid
     nullable: true
-    description: "UUID of the finding this one overrides."
+    description: "UUID of the overridden finding."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this finding belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   scan_id:
     type: int64
     source: scan_id
     nullable: false
-    description: "Security scan that produced this finding."
+    description: "Producing security scan ID."
 
   scanner_id:
     type: int64
     source: scanner_id
     nullable: false
-    description: "Vulnerability scanner that detected this finding."
+    description: "Detecting scanner ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: query

@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the merge request."
+    description: "Unique ID."
 
   iid:
     type: int64
@@ -33,7 +33,7 @@ properties:
     type: string
     source: title
     nullable: false
-    description: "Title of the merge request."
+    description: "Title."
 
   description:
     type: string
@@ -45,19 +45,19 @@ properties:
     type: string
     source: source_branch
     nullable: false
-    description: "Name of the source branch."
+    description: "Source branch name."
 
   target_branch:
     type: string
     source: target_branch
     nullable: false
-    description: "Name of the target branch."
+    description: "Target branch name."
 
   state:
     type: enum
     source: state_id
     nullable: false
-    description: "Current state of the merge request."
+    description: "Current state."
     values:
       1: opened
       2: closed
@@ -68,7 +68,7 @@ properties:
     type: string
     source: merge_status
     nullable: false
-    description: "Mergeability check status (unchecked, preparing, checking, can_be_merged, cannot_be_merged, etc.)."
+    description: "Mergeability status: unchecked, preparing, checking, can_be_merged, cannot_be_merged, cannot_be_merged_recheck, cannot_be_merged_rechecking."
 
   draft:
     type: boolean
@@ -86,19 +86,19 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the merge request was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the merge request was last updated."
+    description: "Last update timestamp."
 
   merge_commit_sha:
     type: string
     source: merge_commit_sha
     nullable: true
-    description: "SHA of the merge commit."
+    description: "Merge commit SHA."
 
   discussion_locked:
     type: boolean
@@ -110,188 +110,188 @@ properties:
     type: timestamp
     source: prepared_at
     nullable: true
-    description: "Timestamp when the merge request was prepared."
+    description: "Preparation timestamp."
 
   project_id:
     type: int64
     source: target_project_id
     nullable: false
-    description: "Project that owns this merge request. Retained on the node row so redaction can resolve project-level permissions without an edge lookup."
+    description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
   merged_commit_sha:
     type: string
     source: merged_commit_sha
     nullable: true
-    description: "SHA of the commit that landed on the target branch (may differ from merge_commit_sha for fast-forward merges)."
+    description: "Commit SHA landed on target branch (may differ from merge_commit_sha for fast-forward merges)."
 
   squash_commit_sha:
     type: string
     source: squash_commit_sha
     nullable: true
-    description: "SHA of the squash commit, if the merge request was squashed."
+    description: "Squash commit SHA, if squashed."
 
   latest_build_started_at:
     type: timestamp
     source: metric_latest_build_started_at
     nullable: true
-    description: "Timestamp when the latest CI build for this MR started."
+    description: "Latest CI build start timestamp."
 
   latest_build_finished_at:
     type: timestamp
     source: metric_latest_build_finished_at
     nullable: true
-    description: "Timestamp when the latest CI build for this MR finished."
+    description: "Latest CI build finish timestamp."
 
   first_deployed_to_production_at:
     type: timestamp
     source: metric_first_deployed_to_production_at
     nullable: true
-    description: "Timestamp when the MR was first deployed to the production environment."
+    description: "First production deployment timestamp."
 
   merged_at:
     type: timestamp
     source: metric_merged_at
     nullable: true
-    description: "Timestamp when the MR was merged."
+    description: "Merge timestamp."
 
   latest_closed_at:
     type: timestamp
     source: metric_latest_closed_at
     nullable: true
-    description: "Timestamp when the MR was most recently closed."
+    description: "Most recent close timestamp."
 
   first_comment_at:
     type: timestamp
     source: metric_first_comment_at
     nullable: true
-    description: "Timestamp of the first comment on the MR."
+    description: "First comment timestamp."
 
   first_commit_at:
     type: timestamp
     source: metric_first_commit_at
     nullable: true
-    description: "Authored timestamp of the first commit in the MR."
+    description: "First commit authored timestamp."
 
   last_commit_at:
     type: timestamp
     source: metric_last_commit_at
     nullable: true
-    description: "Authored timestamp of the last commit in the MR."
+    description: "Last commit authored timestamp."
 
   diff_size:
     type: int64
     source: metric_diff_size
     nullable: true
-    description: "Total size of the MR diff, in bytes."
+    description: "Total diff size in bytes."
 
   modified_paths_size:
     type: int64
     source: metric_modified_paths_size
     nullable: true
-    description: "Number of modified file paths in the MR."
+    description: "Number of modified file paths."
 
   commits_count:
     type: int64
     source: metric_commits_count
     nullable: true
-    description: "Number of commits in the MR."
+    description: "Number of commits."
 
   first_approved_at:
     type: timestamp
     source: metric_first_approved_at
     nullable: true
-    description: "Timestamp of the first approval on the MR."
+    description: "First approval timestamp."
 
   first_reassigned_at:
     type: timestamp
     source: metric_first_reassigned_at
     nullable: true
-    description: "Timestamp of the first reassignment of the MR."
+    description: "First reassignment timestamp."
 
   added_lines:
     type: int64
     source: metric_added_lines
     nullable: true
-    description: "Lines added across all files in the MR diff."
+    description: "Lines added across all files."
 
   removed_lines:
     type: int64
     source: metric_removed_lines
     nullable: true
-    description: "Lines removed across all files in the MR diff."
+    description: "Lines removed across all files."
 
   first_contribution:
     type: boolean
     source: metric_first_contribution
     nullable: false
-    description: "Whether this MR represents the author's first contribution to the project."
+    description: "Whether this is the author's first contribution to the project."
 
   reviewer_first_assigned_at:
     type: timestamp
     source: metric_reviewer_first_assigned_at
     nullable: true
-    description: "Timestamp when the first reviewer was assigned."
+    description: "First reviewer assignment timestamp."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
-    description: "User who created the merge request."
+    description: "Author user ID."
 
   merge_user_id:
     type: int64
     source: merge_user_id
     nullable: true
-    description: "User who merged the merge request."
+    description: "User ID who merged."
 
   updated_by_id:
     type: int64
     source: updated_by_id
     nullable: true
-    description: "User who last updated the merge request."
+    description: "User ID who last updated."
 
   last_edited_by_id:
     type: int64
     source: last_edited_by_id
     nullable: true
-    description: "User who last edited the merge request description."
+    description: "User ID who last edited the description."
 
   closed_by_id:
     type: int64
     source: metric_latest_closed_by_id
     nullable: true
-    description: "User who most recently closed the merge request."
+    description: "User ID who most recently closed."
 
   milestone_id:
     type: int64
     source: milestone_id
     nullable: true
-    description: "Milestone this merge request is associated with."
+    description: "Associated milestone ID."
 
   source_project_id:
     type: int64
     source: source_project_id
     nullable: true
-    description: "Source project for the merge request (may differ from target for cross-project MRs)."
+    description: "Source project ID (may differ from target for cross-project MRs)."
 
   head_pipeline_id:
     type: int64
     source: head_pipeline_id
     nullable: true
-    description: "Pipeline running on the merge request's head commit."
+    description: "Pipeline ID on the head commit."
 
   latest_merge_request_diff_id:
     type: int64
     source: latest_merge_request_diff_id
     nullable: true
-    description: "Most recent diff snapshot for this merge request."
+    description: "Most recent diff snapshot ID."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
   diff:
     type: string
@@ -300,7 +300,7 @@ properties:
       service: gitaly
       lookup: mr_raw_patch
       depends_on: [project_id, iid]
-    description: "Full unified diff for the merge request. Resolved from GitLab at query time."
+    description: "Full unified diff. Resolved from GitLab at query time."
 
 etl:
   # Resolves metric_*, reviewers and approvals from siphon sources at extract

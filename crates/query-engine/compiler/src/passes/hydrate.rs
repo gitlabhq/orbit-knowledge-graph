@@ -294,13 +294,8 @@ mod tests {
         Field {
             name: name.to_string(),
             source: FieldSource::DatabaseColumn(name.to_string()),
-            data_type: ontology::DataType::String,
-            nullable: false,
-            enum_values: None,
-            enum_type: Default::default(),
-            like_allowed: false,
             filterable: true,
-            admin_only: false,
+            ..Default::default()
         }
     }
 
@@ -313,13 +308,8 @@ mod tests {
                 disabled: false,
                 depends_on: deps.iter().map(|s| s.to_string()).collect(),
             }),
-            data_type: ontology::DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: Default::default(),
-            like_allowed: false,
-            filterable: false,
-            admin_only: false,
+            ..Default::default()
         }
     }
 
@@ -462,13 +452,8 @@ mod tests {
                     disabled: true,
                     depends_on: vec![],
                 }),
-                data_type: ontology::DataType::String,
                 nullable: true,
-                enum_values: None,
-                enum_type: Default::default(),
-                like_allowed: false,
-                filterable: false,
-                admin_only: false,
+                ..Default::default()
             },
         ]);
         let requested = vec!["content".to_string()];

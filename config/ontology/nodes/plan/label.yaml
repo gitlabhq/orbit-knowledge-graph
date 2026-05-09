@@ -21,56 +21,56 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the label."
+    description: "Unique ID."
 
   title:
     type: string
     source: title
     nullable: false
-    description: "Title/name of the label."
+    description: "Label title."
 
   description:
     type: string
     source: description
     nullable: false
-    description: "Description of the label."
+    description: "Description text."
 
   color:
     type: string
     source: color
     nullable: false
-    description: "Hex color code for the label."
+    description: "Hex color code."
 
   created_at:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the label was created."
+    description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the label was last updated."
+    description: "Last update timestamp."
 
   project_id:
     type: int64
     source: project_id
     nullable: true
-    description: "Project this label belongs to, if project-scoped. Null for group labels. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID. Null for group-scoped."
 
   group_id:
     type: int64
     source: group_id
     nullable: true
-    description: "Group this label belongs to, if group-scoped. Null for project labels."
+    description: "Owning group ID. Null for project-scoped."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table

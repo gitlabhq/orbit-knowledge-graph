@@ -21,19 +21,19 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "Global identifier for the job."
+    description: "Unique ID."
 
   name:
     type: string
     source: name
     nullable: false
-    description: "Name of the job as defined in .gitlab-ci.yml."
+    description: "Job name from .gitlab-ci.yml."
 
   status:
     type: enum
     source: status
     nullable: false
-    description: "Current execution status of the job."
+    description: "Execution status."
     enum_type: string
     values:
       0: created
@@ -54,37 +54,37 @@ properties:
     type: string
     source: ref
     nullable: false
-    description: "Branch or tag name the job runs for."
+    description: "Branch or tag name."
 
   tag:
     type: boolean
     source: tag
     nullable: true
-    description: "Whether this job runs on a git tag."
+    description: "Whether running on a git tag."
 
   allow_failure:
     type: boolean
     source: allow_failure
     nullable: false
-    description: "Whether job failure is allowed without failing the pipeline."
+    description: "Whether failure is allowed without failing the pipeline."
 
   coverage:
     type: string
     source: coverage
     nullable: false
-    description: "Code coverage percentage reported by the job."
+    description: "Reported code coverage percentage."
 
   environment:
     type: string
     source: environment
     nullable: false
-    description: "Deployment environment name (e.g., production, staging)."
+    description: "Target environment name (e.g. production, staging)."
 
   when:
     type: string
     source: when
     nullable: false
-    description: "Condition that determines when the job runs."
+    description: "Run condition."
     enum_type: string
     values:
       0: on_success
@@ -97,13 +97,13 @@ properties:
     type: boolean
     source: retried
     nullable: true
-    description: "Whether this job was retried (superseded by a newer attempt)."
+    description: "Whether superseded by a retry."
 
   failure_reason:
     type: enum
     source: failure_reason
     nullable: true
-    description: "Reason the job failed, if applicable."
+    description: "Failure reason."
     values:
       1: script_failure
       2: api_failure
@@ -156,49 +156,49 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    description: "Timestamp when the job was created."
+    description: "Creation timestamp."
 
   started_at:
     type: timestamp
     source: started_at
     nullable: true
-    description: "Timestamp when the job started executing."
+    description: "Execution start timestamp."
 
   finished_at:
     type: timestamp
     source: finished_at
     nullable: true
-    description: "Timestamp when the job finished executing."
+    description: "Execution finish timestamp."
 
   queued_at:
     type: timestamp
     source: queued_at
     nullable: true
-    description: "Timestamp when the job was queued for execution."
+    description: "Queue timestamp."
 
   type:
     type: string
     source: type
     nullable: false
-    description: "Job class discriminator: Ci::Build for normal jobs, Ci::Bridge for downstream-pipeline trigger jobs."
+    description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
 
   runner_id:
     type: int64
     source: runner_id
     nullable: true
-    description: "Runner that executed the job."
+    description: "Executing runner ID."
 
   timeout:
     type: int64
     source: timeout
     nullable: true
-    description: "Effective timeout in seconds applied to this job."
+    description: "Effective timeout in seconds."
 
   timeout_source:
     type: enum
     source: timeout_source
     nullable: false
-    description: "Origin of the effective timeout: project, runner, or job."
+    description: "Timeout origin: project, runner, or job."
     values:
       1: unknown_timeout_source
       2: project_timeout_source
@@ -209,13 +209,13 @@ properties:
     type: int64
     source: exit_code
     nullable: true
-    description: "Process exit code reported by the runner, if the job ran to completion."
+    description: "Process exit code from the runner."
 
   scheduling_type:
     type: enum
     source: scheduling_type
     nullable: false
-    description: "Whether the job is stage-scheduled or DAG-scheduled."
+    description: "Scheduling mode: stage or DAG."
     values:
       0: stage
       1: dag
@@ -224,44 +224,44 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    description: "Project this job belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+    description: "Owning project ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
-    description: "User who triggered the job."
+    description: "Triggering user ID."
 
   upstream_pipeline_id:
     type: int64
     source: upstream_pipeline_id
     nullable: true
-    description: "Upstream pipeline that triggered this bridge job."
+    description: "Upstream pipeline ID for bridge jobs."
 
   stage_id:
     type: int64
     source: stage_id
     nullable: true
-    description: "Stage this job belongs to within the pipeline."
+    description: "Containing stage ID."
 
   pipeline_id:
     type: int64
     source: commit_id
     nullable: true
-    description: "Pipeline this job belongs to. Source column is commit_id (legacy Rails naming in ci_builds)."
+    description: "Containing pipeline ID. Source column is commit_id (legacy Rails naming)."
 
   auto_canceled_by_id:
     type: int64
     source: auto_canceled_by_id
     nullable: true
-    description: "Job that auto-canceled this one when its pipeline was superseded."
+    description: "Pipeline ID that auto-canceled this job."
 
   traversal_path:
     type: string
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace traversal path for authentication and authorization."
+    description: "Namespace path for authz."
 
 etl:
   type: table
@@ -293,7 +293,7 @@ etl:
       as: TRIGGERED_BY_PIPELINE
       direction: outgoing
     auto_canceled_by_id:
-      to: Job
+      to: Pipeline
       as: AUTO_CANCELED_BY
       direction: outgoing
 
