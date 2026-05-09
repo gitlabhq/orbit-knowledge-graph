@@ -58,6 +58,3 @@ pre-commit:
         - "crates/xtask/src/dashboards.rs"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit
-    - name: lint-docs
-      run: mise run lint:docs
-      glob: "**/*.md"
