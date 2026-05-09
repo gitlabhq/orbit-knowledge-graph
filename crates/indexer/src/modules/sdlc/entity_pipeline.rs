@@ -64,122 +64,27 @@ impl EntityPipeline for SimpleEntityPipeline {
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
-        let state = self.resolve_checkpoint_state(request).await?;
+        if self.has_consolidated_checkpoint(request).await? {
+            let runs = vec![self.plan_single_run(request)];
+            self.run_plans(&runs, destination, progress).await?;
+            return Ok(());
+        }
 
-        let execution = match &state {
-            CheckpointState::Completed => ExecutionPlan {
-                runs: vec![self.plan_single_run(request)],
-                consolidate: false,
-            },
-            CheckpointState::NoCheckpoint => self.plan_initial_run(request).await?,
-            CheckpointState::Incomplete { pending } if pending.is_empty() => ExecutionPlan {
-                runs: vec![],
-                consolidate: true,
-            },
-            CheckpointState::Incomplete { pending } => {
-                self.plan_resumed_run(request, pending).await?
-            }
+        let Some(strategy) = &self.partition_strategy else {
+            let runs = vec![self.plan_single_run(request)];
+            self.run_plans(&runs, destination, progress).await?;
+            return Ok(());
         };
 
-        if !execution.runs.is_empty() {
-            self.run_plans(&execution.runs, destination, progress)
-                .await?;
-        }
-
-        if execution.consolidate {
-            self.consolidate_checkpoint(&request.scope, &request.entity_kind)
-                .await?;
-        }
-
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Private types
-// ---------------------------------------------------------------------------
-
-enum CheckpointState {
-    NoCheckpoint,
-    Completed,
-    Incomplete { pending: Vec<u32> },
-}
-
-struct ExecutionPlan {
-    runs: Vec<(PipelinePlan, PipelineContext)>,
-    consolidate: bool,
-}
-
-// ---------------------------------------------------------------------------
-// Private methods — checkpoint resolution, run planning, execution
-// ---------------------------------------------------------------------------
-
-impl SimpleEntityPipeline {
-    async fn resolve_checkpoint_state(
-        &self,
-        request: &EntityIndexingRequest,
-    ) -> Result<CheckpointState, HandlerError> {
-        let base_prefix = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
-        let checkpoints = self
-            .checkpoint_store
-            .load_by_prefix(&base_prefix)
-            .await
-            .map_err(|err| {
-                HandlerError::Processing(format!("failed to load checkpoints: {err}"))
-            })?;
-
-        let unified_key = format!("{base_prefix}.{}", self.plan.name);
-        if let Some(cp) = checkpoints.get(&unified_key)
-            && cp.watermark.timestamp_micros() > 0
-        {
-            return Ok(CheckpointState::Completed);
-        }
-
-        let strategy = match &self.partition_strategy {
-            Some(s) => s,
-            None => return Ok(CheckpointState::Completed),
-        };
-
-        let mut pending = Vec::new();
-        for i in 0..strategy.partition_count() {
-            let partition = Partition::Range {
-                index: i,
-                total: strategy.partition_count(),
-            };
-            let key =
-                self.plan_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition));
-            match checkpoints.get(&key) {
-                Some(cp) if cp.cursor_values.is_none() => {}
-                _ => pending.push(i),
-            }
-        }
-
-        if pending.len() == strategy.partition_count() as usize {
-            Ok(CheckpointState::NoCheckpoint)
-        } else {
-            Ok(CheckpointState::Incomplete { pending })
-        }
-    }
-
-    async fn plan_initial_run(
-        &self,
-        request: &EntityIndexingRequest,
-    ) -> Result<ExecutionPlan, HandlerError> {
-        let strategy = self
-            .partition_strategy
-            .as_ref()
-            .expect("plan_initial_run requires a partition strategy");
-
-        match strategy.compute_partitions(request).await? {
+        let runs = match strategy.compute_partitions(request).await? {
             None => {
                 info!(
                     partition_count = strategy.partition_count(),
                     "insufficient quantiles, falling back to single pipeline"
                 );
-                Ok(ExecutionPlan {
-                    runs: vec![self.plan_single_run(request)],
-                    consolidate: false,
-                })
+                let runs = vec![self.plan_single_run(request)];
+                self.run_plans(&runs, destination, progress).await?;
+                return Ok(());
             }
             Some(specs) => {
                 let runs: Vec<_> = specs
@@ -191,52 +96,39 @@ impl SimpleEntityPipeline {
                     partitions = runs.len(),
                     "running partitioned pipeline"
                 );
-                Ok(ExecutionPlan {
-                    runs,
-                    consolidate: true,
-                })
+                runs
             }
-        }
-    }
+        };
 
-    async fn plan_resumed_run(
+        self.run_plans(&runs, destination, progress).await?;
+        self.consolidate_checkpoint(&request.scope, &request.entity_kind)
+            .await?;
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Private methods
+// ---------------------------------------------------------------------------
+
+impl SimpleEntityPipeline {
+    async fn has_consolidated_checkpoint(
         &self,
         request: &EntityIndexingRequest,
-        pending: &[u32],
-    ) -> Result<ExecutionPlan, HandlerError> {
-        let strategy = self
-            .partition_strategy
-            .as_ref()
-            .expect("plan_resumed_run requires a partition strategy");
+    ) -> Result<bool, HandlerError> {
+        let unified_key = format!(
+            "{}.{}",
+            entity_checkpoint_key(&request.scope, &request.entity_kind, None),
+            self.plan.name
+        );
+        let checkpoint = self
+            .checkpoint_store
+            .load(&unified_key)
+            .await
+            .map_err(|err| HandlerError::Processing(format!("failed to load checkpoint: {err}")))?;
 
-        match strategy.compute_partitions(request).await? {
-            None => {
-                info!(
-                    partition_count = strategy.partition_count(),
-                    "insufficient quantiles on resume, falling back to single pipeline"
-                );
-                Ok(ExecutionPlan {
-                    runs: vec![self.plan_single_run(request)],
-                    consolidate: false,
-                })
-            }
-            Some(specs) => {
-                let runs: Vec<_> = pending
-                    .iter()
-                    .map(|&i| self.plan_partition_run(request, &specs[i as usize]))
-                    .collect();
-                info!(
-                    entity_kind = %request.entity_kind,
-                    partitions = runs.len(),
-                    total = strategy.partition_count(),
-                    "resuming partitioned pipeline"
-                );
-                Ok(ExecutionPlan {
-                    runs,
-                    consolidate: true,
-                })
-            }
-        }
+        Ok(checkpoint.is_some_and(|cp| cp.watermark.timestamp_micros() > 0))
     }
 
     fn plan_single_run(&self, request: &EntityIndexingRequest) -> (PipelinePlan, PipelineContext) {
@@ -348,16 +240,6 @@ impl SimpleEntityPipeline {
         );
 
         Ok(())
-    }
-
-    fn plan_checkpoint_key(
-        &self,
-        scope: &IndexingScope,
-        entity_kind: &str,
-        partition: Option<&Partition>,
-    ) -> String {
-        let base = entity_checkpoint_key(scope, entity_kind, partition);
-        format!("{}.{}", base, self.plan.name)
     }
 }
 
