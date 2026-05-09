@@ -330,8 +330,20 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
     // Direct superclass: class Dog < Animal
+    // The "superclass" field is the `superclass` node (includes "<"),
+    // so we grab the inner constant/scope_resolution child.
     if let Some(s) = node.field("superclass") {
-        types.push(s.text().to_string());
+        let type_text = s
+            .children()
+            .find(|c| {
+                let k = c.kind();
+                k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
+            })
+            .map(|c| c.text().to_string())
+            .unwrap_or_else(|| s.text().to_string());
+        if !type_text.is_empty() && !type_text.starts_with('<') {
+            types.push(type_text);
+        }
     }
 
     // include/extend in body: include Foo, extend Bar

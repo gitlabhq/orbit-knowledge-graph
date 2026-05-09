@@ -1291,6 +1291,7 @@ impl<'a> ResolveCtx<'a> {
             let fqn = self.graph.str(gdef.fqn);
             let mut scope = fqn;
             loop {
+                // Look for the member in this scope's nested definitions.
                 self.graph.indexes.nested.lookup_into(
                     scope,
                     name,
@@ -1304,6 +1305,44 @@ impl<'a> ResolveCtx<'a> {
                 if !result.is_empty() {
                     break;
                 }
+
+                // Walk ancestor chain (Extends edges) to find inherited
+                // members. e.g. save! in Model resolves to Base::save!
+                // when Model < Base.
+                let scope_nodes = self.graph.resolve_scope_nodes(scope);
+                let mut found_in_ancestor = false;
+                for &scope_node in &scope_nodes {
+                    if let Some(ancestors) = self.graph.ancestors(scope_node) {
+                        for &ancestor in ancestors {
+                            if let Some(ancestor_did) = self.graph.graph[ancestor].def_id() {
+                                let ancestor_fqn =
+                                    self.graph.str(self.graph.defs[ancestor_did.0 as usize].fqn);
+                                self.graph.indexes.nested.lookup_into(
+                                    ancestor_fqn,
+                                    name,
+                                    |idx| {
+                                        self.graph.graph[idx].def_id().is_some_and(|d| {
+                                            self.graph.str(self.graph.defs[d.0 as usize].name)
+                                                == name
+                                        })
+                                    },
+                                    &mut result,
+                                );
+                                if !result.is_empty() {
+                                    found_in_ancestor = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if found_in_ancestor {
+                        break;
+                    }
+                }
+                if !result.is_empty() {
+                    break;
+                }
+
                 match scope.rfind(sep) {
                     Some(pos) => scope = &scope[..pos],
                     None => break,
