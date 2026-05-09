@@ -9,8 +9,9 @@ use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::indexing_status::IndexingStatusStore;
+use indexer::indexing_status::{IndexingProgress, IndexingStatusStore};
 use ontology::Ontology;
+use ontology::etl::EtlScope;
 use query_engine::compiler::{ResultContext, SecurityContext, codegen};
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -113,6 +114,45 @@ impl GraphStatusService {
             return Ok(None);
         };
 
+        let entity_kinds: Vec<String> = self
+            .ontology
+            .nodes()
+            .filter(|node| {
+                node.etl
+                    .as_ref()
+                    .is_some_and(|etl| etl.scope() == EtlScope::Namespaced)
+            })
+            .map(|node| node.name.clone())
+            .collect();
+
+        let mut entity_progresses: Vec<(IndexingState, IndexingProgress)> = Vec::new();
+        let mut had_read_error = false;
+
+        for entity_kind in &entity_kinds {
+            match store.get_entity(traversal_path, entity_kind).await {
+                Ok(Some(progress)) => {
+                    let state = derive_indexing_state(&progress);
+                    entity_progresses.push((state, progress));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    warn!(%error, traversal_path, entity_kind, "failed to read entity indexing progress");
+                    had_read_error = true;
+                }
+            }
+        }
+
+        if had_read_error && entity_progresses.is_empty() {
+            return Ok(Some(IndexingStatus {
+                state: IndexingState::Unknown.into(),
+                ..Default::default()
+            }));
+        }
+
+        if !entity_progresses.is_empty() {
+            return Ok(Some(aggregate_entity_statuses(&entity_progresses)));
+        }
+
         let progress = match store.get(traversal_path).await {
             Ok(p) => p,
             Err(error) => {
@@ -124,22 +164,7 @@ impl GraphStatusService {
             }
         };
 
-        Ok(Some(match progress {
-            None => IndexingStatus {
-                state: IndexingState::NotIndexed.into(),
-                ..Default::default()
-            },
-            Some(p) => {
-                let state = derive_indexing_state(&p);
-                IndexingStatus {
-                    state: state.into(),
-                    last_started_at: Some(p.last_started_at.to_rfc3339()),
-                    last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
-                    last_duration_ms: p.last_duration_ms,
-                    last_error: p.last_error,
-                }
-            }
-        }))
+        Ok(Some(progress_to_status(progress)))
     }
 
     async fn execute_count_query(
@@ -227,7 +252,72 @@ impl GraphStatusService {
     }
 }
 
-fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) -> IndexingState {
+fn progress_to_status(progress: Option<IndexingProgress>) -> IndexingStatus {
+    match progress {
+        None => IndexingStatus {
+            state: IndexingState::NotIndexed.into(),
+            ..Default::default()
+        },
+        Some(p) => {
+            let state = derive_indexing_state(&p);
+            IndexingStatus {
+                state: state.into(),
+                last_started_at: Some(p.last_started_at.to_rfc3339()),
+                last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
+                last_duration_ms: p.last_duration_ms,
+                last_error: p.last_error,
+            }
+        }
+    }
+}
+
+fn state_severity(state: IndexingState) -> u8 {
+    match state {
+        IndexingState::Indexed => 0,
+        IndexingState::Indexing => 1,
+        IndexingState::Error => 2,
+        IndexingState::Backfilling => 3,
+        IndexingState::NotIndexed => 4,
+        IndexingState::Unknown => 5,
+    }
+}
+
+fn aggregate_entity_statuses(entries: &[(IndexingState, IndexingProgress)]) -> IndexingStatus {
+    let worst_state = entries
+        .iter()
+        .map(|(state, _)| *state)
+        .max_by_key(|state| state_severity(*state))
+        .unwrap_or(IndexingState::NotIndexed);
+
+    let last_started_at = entries.iter().map(|(_, p)| p.last_started_at).max();
+
+    let last_completed_at = entries
+        .iter()
+        .filter_map(|(_, p)| p.last_completed_at)
+        .min();
+
+    let last_error = entries.iter().rev().find_map(|(_, p)| p.last_error.clone());
+
+    let last_duration_ms = match (last_started_at, last_completed_at) {
+        (Some(started), Some(completed)) => Some(
+            completed
+                .signed_duration_since(started)
+                .num_milliseconds()
+                .max(0) as u64,
+        ),
+        _ => None,
+    };
+
+    IndexingStatus {
+        state: worst_state.into(),
+        last_started_at: last_started_at.map(|t| t.to_rfc3339()),
+        last_completed_at: last_completed_at.map(|t| t.to_rfc3339()),
+        last_duration_ms,
+        last_error,
+    }
+}
+
+fn derive_indexing_state(progress: &IndexingProgress) -> IndexingState {
     match progress.last_completed_at {
         None => IndexingState::Backfilling,
         Some(completed) if progress.last_started_at > completed => IndexingState::Indexing,
@@ -460,5 +550,180 @@ mod tests {
             last_error: None,
         };
         assert_eq!(derive_indexing_state(&progress), IndexingState::Indexing);
+    }
+
+    #[test]
+    fn aggregate_all_indexed_returns_indexed() {
+        let started = Utc::now() - Duration::seconds(10);
+        let completed = Utc::now();
+        let entries = vec![
+            (
+                IndexingState::Indexed,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(completed),
+                    last_duration_ms: Some(10_000),
+                    last_error: None,
+                },
+            ),
+            (
+                IndexingState::Indexed,
+                IndexingProgress {
+                    last_started_at: started - Duration::seconds(5),
+                    last_completed_at: Some(completed - Duration::seconds(2)),
+                    last_duration_ms: Some(8_000),
+                    last_error: None,
+                },
+            ),
+        ];
+
+        let status = aggregate_entity_statuses(&entries);
+        assert_eq!(status.state, IndexingState::Indexed as i32);
+        assert_eq!(status.last_started_at, Some(started.to_rfc3339()));
+        assert_eq!(
+            status.last_completed_at,
+            Some((completed - Duration::seconds(2)).to_rfc3339())
+        );
+    }
+
+    #[test]
+    fn aggregate_error_wins_over_indexed() {
+        let started = Utc::now();
+        let completed = started + Duration::seconds(5);
+        let entries = vec![
+            (
+                IndexingState::Indexed,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(completed),
+                    last_duration_ms: Some(5_000),
+                    last_error: None,
+                },
+            ),
+            (
+                IndexingState::Error,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(completed),
+                    last_duration_ms: Some(5_000),
+                    last_error: Some("timeout".to_string()),
+                },
+            ),
+        ];
+
+        let status = aggregate_entity_statuses(&entries);
+        assert_eq!(status.state, IndexingState::Error as i32);
+        assert_eq!(status.last_error, Some("timeout".to_string()));
+    }
+
+    #[test]
+    fn aggregate_backfilling_wins_over_error() {
+        let started = Utc::now();
+        let completed = started + Duration::seconds(5);
+        let entries = vec![
+            (
+                IndexingState::Error,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(completed),
+                    last_duration_ms: Some(5_000),
+                    last_error: Some("failed".to_string()),
+                },
+            ),
+            (
+                IndexingState::Backfilling,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: None,
+                    last_duration_ms: None,
+                    last_error: None,
+                },
+            ),
+        ];
+
+        let status = aggregate_entity_statuses(&entries);
+        assert_eq!(status.state, IndexingState::Backfilling as i32);
+    }
+
+    #[test]
+    fn aggregate_uses_earliest_completed_at() {
+        let started = Utc::now() - Duration::seconds(20);
+        let early_completed = Utc::now() - Duration::seconds(10);
+        let late_completed = Utc::now();
+        let entries = vec![
+            (
+                IndexingState::Indexed,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(late_completed),
+                    last_duration_ms: Some(20_000),
+                    last_error: None,
+                },
+            ),
+            (
+                IndexingState::Indexed,
+                IndexingProgress {
+                    last_started_at: started,
+                    last_completed_at: Some(early_completed),
+                    last_duration_ms: Some(10_000),
+                    last_error: None,
+                },
+            ),
+        ];
+
+        let status = aggregate_entity_statuses(&entries);
+        assert_eq!(status.last_completed_at, Some(early_completed.to_rfc3339()));
+    }
+
+    #[test]
+    fn aggregate_single_entry_passes_through() {
+        let started = Utc::now();
+        let completed = started + Duration::seconds(3);
+        let entries = vec![(
+            IndexingState::Indexed,
+            IndexingProgress {
+                last_started_at: started,
+                last_completed_at: Some(completed),
+                last_duration_ms: Some(3_000),
+                last_error: None,
+            },
+        )];
+
+        let status = aggregate_entity_statuses(&entries);
+        assert_eq!(status.state, IndexingState::Indexed as i32);
+        assert_eq!(status.last_started_at, Some(started.to_rfc3339()));
+        assert_eq!(status.last_completed_at, Some(completed.to_rfc3339()));
+    }
+
+    #[test]
+    fn progress_to_status_maps_none_to_not_indexed() {
+        let status = progress_to_status(None);
+        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+        assert!(status.last_started_at.is_none());
+    }
+
+    #[test]
+    fn progress_to_status_maps_completed_to_indexed() {
+        let started = Utc::now();
+        let completed = started + Duration::seconds(5);
+        let status = progress_to_status(Some(IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(completed),
+            last_duration_ms: Some(5_000),
+            last_error: None,
+        }));
+        assert_eq!(status.state, IndexingState::Indexed as i32);
+        assert_eq!(status.last_started_at, Some(started.to_rfc3339()));
+    }
+
+    #[test]
+    fn state_severity_ordering() {
+        assert!(state_severity(IndexingState::Indexed) < state_severity(IndexingState::Indexing));
+        assert!(state_severity(IndexingState::Indexing) < state_severity(IndexingState::Error));
+        assert!(state_severity(IndexingState::Error) < state_severity(IndexingState::Backfilling));
+        assert!(
+            state_severity(IndexingState::Backfilling) < state_severity(IndexingState::NotIndexed)
+        );
+        assert!(state_severity(IndexingState::NotIndexed) < state_severity(IndexingState::Unknown));
     }
 }

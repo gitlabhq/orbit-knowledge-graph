@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::entity_pipeline::EntityPipeline;
 use crate::modules::sdlc::metrics::SdlcMetrics;
-use crate::topic::EntityIndexingRequest;
+use crate::topic::{EntityIndexingRequest, IndexingScope};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 
 pub struct EntityIndexingHandler {
@@ -73,16 +73,43 @@ impl Handler for EntityIndexingHandler {
             "starting entity indexing"
         );
 
+        if let IndexingScope::Namespace {
+            ref traversal_path, ..
+        } = request.scope
+        {
+            context
+                .indexing_status
+                .record_entity_start(traversal_path, &request.entity_kind, started_at)
+                .await;
+        }
+
         let result = pipeline
             .execute(&request, context.destination.as_ref(), &context.progress)
             .await;
 
-        let elapsed = Utc::now()
+        let completed_at = Utc::now();
+        let elapsed = completed_at
             .signed_duration_since(started_at)
             .to_std()
             .unwrap_or_default();
         self.metrics
             .record_handler_duration(&request.entity_kind, elapsed.as_secs_f64());
+
+        if let IndexingScope::Namespace {
+            ref traversal_path, ..
+        } = request.scope
+        {
+            context
+                .indexing_status
+                .record_entity_completion(
+                    traversal_path,
+                    &request.entity_kind,
+                    started_at,
+                    completed_at,
+                    result.as_ref().err().map(ToString::to_string),
+                )
+                .await;
+        }
 
         if result.is_ok() {
             info!(

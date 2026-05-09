@@ -92,10 +92,7 @@ fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
     }
 }
 
-pub(in crate::modules::sdlc) fn partition_column(
-    order_by: &[String],
-    scope: ontology::EtlScope,
-) -> Option<&str> {
+pub(crate) fn partition_column(order_by: &[String], scope: ontology::EtlScope) -> Option<&str> {
     let skip = match scope {
         ontology::EtlScope::Namespaced => 1,
         ontology::EtlScope::Global => 0,

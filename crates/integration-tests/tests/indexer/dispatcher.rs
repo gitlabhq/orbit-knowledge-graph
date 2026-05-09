@@ -3,6 +3,7 @@
 use super::common;
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -266,12 +267,21 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
         EntityDescriptor {
             entity_kind: "User".to_string(),
             scope: EtlScope::Global,
+            source_table: None,
+            partition_column: None,
         },
         EntityDescriptor {
             entity_kind: "Project".to_string(),
             scope: EtlScope::Namespaced,
+            source_table: None,
+            partition_column: None,
         },
     ];
+
+    let graph_client = Arc::new(context.clickhouse.config.build_client());
+    let checkpoint_store: Arc<dyn indexer::checkpoint::CheckpointStore> = Arc::new(
+        indexer::checkpoint::ClickHouseCheckpointStore::new(graph_client),
+    );
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(EntityDispatcher::new(
         services.nats.clone(),
@@ -279,6 +289,7 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
         metrics,
         EntityDispatcherConfig::default(),
         entities,
+        checkpoint_store,
     ))];
 
     let before = Utc::now();
