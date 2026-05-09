@@ -184,11 +184,18 @@ pub fn build_dynamic_nodes(
 
 /// Build the hydration `Input` from collected nodes.
 /// Caps limit at `u32::MAX` to prevent truncation.
-pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize) -> Input {
+///
+/// `is_dynamic` is `true` for the Neighbors/PathFinding (dynamic) hydration
+/// codepath and `false` for Traversal/Aggregation (static). The compiler
+/// uses this to pick the `traversal_path` filter shape: dynamic gets a single
+/// `arrayExists` (constant AST depth, safe at hundreds of paths) and static
+/// gets the OR-of-`startsWith` shape (better PK pushdown at small N).
+pub fn build_hydration_input(nodes: Vec<InputNode>, total_ids: usize, is_dynamic: bool) -> Input {
     Input {
         query_type: QueryType::Hydration,
         nodes,
         limit: total_ids.min(u32::MAX as usize) as u32,
+        hydration_dynamic: is_dynamic,
         ..Input::default()
     }
 }

@@ -52,7 +52,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
     let mut scan_where = Vec::new();
 
     // Narrow scan via traversal_path when base query provided TPs.
-    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths) {
+    if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths, node.is_dynamic) {
         scan_where.push(tp_filter);
     }
 
@@ -98,16 +98,22 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
 ///    in the set. Keeps the most specific (deepest) paths for maximum
 ///    granule selectivity. Safe because `id IN (...)` is the correctness
 ///    guarantee — TP is purely a scan optimizer.
-/// 2. **Shape:** `arrayExists(p -> startsWith(alias.traversal_path, p), [paths])`.
-///
-/// Constant AST depth regardless of path count, so the SQL parser cannot
-/// hit its recursion limit (the `Group` neighbors 502 was caused by an
-/// OR-disjunction that fanned out to hundreds of paths during hydration).
-/// Empirically faster than OR-of-startsWith at every path count we
-/// measured against production: at ~500 paths the OR shape also loses
-/// PK pushdown and falls back to a full id-based scan, while the
-/// `arrayExists` shape keeps a single PK condition.
-fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
+/// 2. **Shape dispatch:**
+///    - **Dynamic hydration (Neighbors, PathFinding):**
+///      `arrayExists(p -> startsWith(alias.traversal_path, p), [paths])`.
+///      Constant AST depth regardless of path count. The `Group` neighbors
+///      502 was an OR-of-`startsWith` that fanned out to hundreds of paths
+///      and overran ClickHouse `max_parser_depth=1000` (`Code 306
+///      TOO_DEEP_RECURSION`). Dynamic hydration discovers paths at runtime
+///      and routinely sees set sizes that hit this ceiling.
+///    - **Static hydration (Traversal, Aggregation):**
+///      `startsWith(tp, p1) OR startsWith(tp, p2) OR …`. The path set is
+///      bounded to a project's worth of namespaces (a handful), so the
+///      AST stays well under the parser limit and the per-leaf
+///      `startsWith` calls each keep an independent PK pushdown into the
+///      `traversal_path`-prefixed sort key. Empirically the per-leaf shape
+///      wins on this workload.
+fn traversal_path_filter(alias: &str, paths: &[String], is_dynamic: bool) -> Option<Expr> {
     if paths.is_empty() {
         return None;
     }
@@ -115,7 +121,22 @@ fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
     if leaves.is_empty() {
         return None;
     }
-    Some(array_exists_starts_with(alias, &leaves))
+    if is_dynamic {
+        Some(array_exists_starts_with(alias, &leaves))
+    } else {
+        or_starts_with(alias, &leaves)
+    }
+}
+
+fn or_starts_with(alias: &str, paths: &[String]) -> Option<Expr> {
+    Expr::or_all(paths.iter().map(|tp| Some(starts_with_path(alias, tp))))
+}
+
+fn starts_with_path(alias: &str, tp: &str) -> Expr {
+    Expr::func(
+        "startsWith",
+        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(tp)],
+    )
 }
 
 fn array_exists_starts_with(alias: &str, paths: &[String]) -> Expr {
@@ -196,6 +217,7 @@ mod tests {
         columns: Vec<&str>,
         node_ids: Vec<i64>,
         traversal_paths: Vec<&str>,
+        is_dynamic: bool,
     ) -> HydrationNodePlan {
         HydrationNodePlan {
             alias: "hydrate".into(),
@@ -205,16 +227,37 @@ mod tests {
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
             traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
+            is_dynamic,
         }
     }
 
+    fn dynamic_plan(
+        columns: Vec<&str>,
+        node_ids: Vec<i64>,
+        traversal_paths: Vec<&str>,
+    ) -> HydrationNodePlan {
+        plan(columns, node_ids, traversal_paths, true)
+    }
+
+    fn static_plan(
+        columns: Vec<&str>,
+        node_ids: Vec<i64>,
+        traversal_paths: Vec<&str>,
+    ) -> HydrationNodePlan {
+        plan(columns, node_ids, traversal_paths, false)
+    }
+
     #[test]
-    fn single_tp_emits_array_exists_starts_with() {
-        let node = emit_hydration(&[plan(vec!["title"], vec![1, 2], vec!["1/9970/"])], 10).unwrap();
+    fn dynamic_single_tp_emits_array_exists_starts_with() {
+        let node = emit_hydration(
+            &[dynamic_plan(vec!["title"], vec![1, 2], vec!["1/9970/"])],
+            10,
+        )
+        .unwrap();
         let sql = render(&node);
         assert!(
             sql.contains("arrayExists"),
-            "single TP should emit arrayExists: {sql}"
+            "dynamic single TP should emit arrayExists: {sql}"
         );
         assert!(
             sql.contains("startsWith"),
@@ -227,9 +270,9 @@ mod tests {
     }
 
     #[test]
-    fn multiple_tps_emit_single_array_exists() {
+    fn dynamic_multiple_tps_emit_single_array_exists() {
         let node = emit_hydration(
-            &[plan(
+            &[dynamic_plan(
                 vec!["title"],
                 vec![1],
                 vec!["1/9970/100/", "1/9970/200/"],
@@ -241,22 +284,71 @@ mod tests {
         let starts_with_count = sql.matches("startsWith").count();
         assert_eq!(
             starts_with_count, 1,
-            "constant AST depth: one startsWith inside the lambda regardless of path count: {sql}"
+            "dynamic constant AST depth: one startsWith inside the lambda: {sql}"
         );
         let array_exists_count = sql.matches("arrayExists").count();
         assert_eq!(
             array_exists_count, 1,
-            "should emit a single arrayExists wrapping the path array: {sql}"
+            "dynamic should emit a single arrayExists wrapping the path array: {sql}"
         );
         assert!(
             !sql.contains(" OR "),
-            "should not emit an OR disjunction over startsWith calls: {sql}"
+            "dynamic should not emit an OR disjunction: {sql}"
         );
     }
 
     #[test]
-    fn no_tp_omits_path_filter() {
-        let node = emit_hydration(&[plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
+    fn static_single_tp_emits_starts_with() {
+        let node = emit_hydration(
+            &[static_plan(vec!["title"], vec![1, 2], vec!["1/9970/"])],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        assert!(
+            sql.contains("startsWith"),
+            "static single TP should emit startsWith: {sql}"
+        );
+        assert!(
+            !sql.contains("arrayExists"),
+            "static path should not emit arrayExists: {sql}"
+        );
+        assert!(
+            sql.contains("traversal_path"),
+            "should reference traversal_path column: {sql}"
+        );
+    }
+
+    #[test]
+    fn static_multiple_tps_emit_or_chain() {
+        let node = emit_hydration(
+            &[static_plan(
+                vec!["title"],
+                vec![1],
+                vec!["1/9970/100/", "1/9970/200/", "1/9970/300/"],
+            )],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        let starts_with_count = sql.matches("startsWith").count();
+        assert_eq!(
+            starts_with_count, 3,
+            "static should emit one startsWith per leaf path: {sql}"
+        );
+        assert!(
+            !sql.contains("arrayExists"),
+            "static path must not emit arrayExists: {sql}"
+        );
+        assert!(
+            sql.contains(" OR "),
+            "static path should OR multiple startsWith calls: {sql}"
+        );
+    }
+
+    #[test]
+    fn dynamic_no_tp_omits_path_filter() {
+        let node = emit_hydration(&[dynamic_plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
         let sql = render(&node);
         assert!(
             !sql.contains("startsWith"),
@@ -269,8 +361,19 @@ mod tests {
     }
 
     #[test]
-    fn tp_filter_precedes_id_filter() {
-        let node = emit_hydration(&[plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
+    fn static_no_tp_omits_path_filter() {
+        let node = emit_hydration(&[static_plan(vec!["title"], vec![1, 2], vec![])], 10).unwrap();
+        let sql = render(&node);
+        assert!(
+            !sql.contains("startsWith"),
+            "empty TPs should not emit startsWith: {sql}"
+        );
+    }
+
+    #[test]
+    fn dynamic_tp_filter_precedes_id_filter() {
+        let node =
+            emit_hydration(&[dynamic_plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
         let sql = render(&node);
         let tp_pos = sql.find("arrayExists").unwrap();
         let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
@@ -281,10 +384,27 @@ mod tests {
     }
 
     #[test]
-    fn leaf_pruning_drops_broad_prefix() {
+    fn static_tp_filter_precedes_id_filter() {
+        let node =
+            emit_hydration(&[static_plan(vec!["title"], vec![1], vec!["1/9970/"])], 10).unwrap();
+        let sql = render(&node);
+        let tp_pos = sql.find("startsWith").unwrap();
+        let in_pos = sql.find(" IN ").or_else(|| sql.find(" = ")).unwrap();
+        assert!(
+            tp_pos < in_pos,
+            "TP filter should precede ID filter for primary key pruning: {sql}"
+        );
+    }
+
+    #[test]
+    fn dynamic_leaf_pruning_drops_broad_prefix() {
         // 1/9970/ is a prefix of 1/9970/100/ — should be dropped from the array
         let node = emit_hydration(
-            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
+            &[dynamic_plan(
+                vec!["title"],
+                vec![1],
+                vec!["1/9970/", "1/9970/100/"],
+            )],
             10,
         )
         .unwrap();
@@ -311,6 +431,26 @@ mod tests {
             paths,
             vec!["1/9970/100/"],
             "ancestor pruned, only leaf survives in array param"
+        );
+    }
+
+    #[test]
+    fn static_leaf_pruning_drops_broad_prefix() {
+        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped from the OR
+        let node = emit_hydration(
+            &[static_plan(
+                vec!["title"],
+                vec![1],
+                vec!["1/9970/", "1/9970/100/"],
+            )],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        let starts_with_count = sql.matches("startsWith").count();
+        assert_eq!(
+            starts_with_count, 1,
+            "ancestor should be pruned, only one startsWith for the leaf: {sql}"
         );
     }
 

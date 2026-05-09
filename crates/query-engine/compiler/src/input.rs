@@ -138,6 +138,18 @@ pub struct Input {
     /// Metadata accumulated across compiler passes (lowering, optimize, etc.).
     #[serde(skip)]
     pub compiler: CompilerMetadata,
+    /// True when this Input was constructed for the *dynamic* hydration codepath
+    /// (Neighbors and PathFinding origin). Hydration over Traversal/Aggregation
+    /// uses the static path and leaves this `false`.
+    ///
+    /// Selects the SQL shape for the `traversal_path` filter in hydration:
+    /// - dynamic: `arrayExists(p -> startsWith(tp, p), [paths])` (constant AST depth,
+    ///   safe against ClickHouse `max_parser_depth=1000` when the base query
+    ///   surfaced hundreds of namespace paths)
+    /// - static: left-nested OR of `startsWith(tp, p_i)` (per-leaf PK pushdown,
+    ///   only ever a small project-bounded set of paths)
+    #[serde(skip)]
+    pub hydration_dynamic: bool,
 }
 
 /// Text index metadata for a column, used by the optimizer to rewrite
@@ -270,6 +282,7 @@ impl Default for Input {
             options: QueryOptions::default(),
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
+            hydration_dynamic: false,
         }
     }
 }

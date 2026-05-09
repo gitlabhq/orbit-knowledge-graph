@@ -61,10 +61,15 @@ impl HydrationStage {
 
     /// Compile a `QueryType::Hydration` input and execute the single UNION ALL
     /// query against ClickHouse. Shared by both static and dynamic hydration.
+    ///
+    /// `is_dynamic` selects the `traversal_path` filter shape: dynamic
+    /// (Neighbors/PathFinding) emits `arrayExists`, static (Traversal/
+    /// Aggregation) emits OR-of-`startsWith`.
     async fn execute_hydration(
         ctx: &QueryPipelineContext,
         nodes: Vec<InputNode>,
         total_ids: usize,
+        is_dynamic: bool,
     ) -> Result<(PropertyMap, Vec<DebugQuery>, Vec<QueryExecution>), PipelineError> {
         if nodes.is_empty() {
             return Ok((HashMap::new(), Vec::new(), Vec::new()));
@@ -77,7 +82,8 @@ impl HydrationStage {
             .cloned()
             .unwrap_or_default();
 
-        let hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
+        let hydration_input =
+            hydration_helpers::build_hydration_input(nodes, total_ids, is_dynamic);
 
         let compiled = compile_input(hydration_input, &ctx.ontology, ctx.security_context()?)
             .map_err(|e| PipelineError::Compile {
@@ -178,7 +184,7 @@ impl PipelineStage for HydrationStage {
                 let (nodes, ids_count) =
                     hydration_helpers::hydrate_static(templates, &query_result)?;
                 let (property_map, debug, executions) =
-                    Self::execute_hydration(ctx, nodes, ids_count)
+                    Self::execute_hydration(ctx, nodes, ids_count, false)
                         .await
                         .inspect_err(|e| obs.record_error(e))?;
                 hydration_queries = debug;
@@ -239,7 +245,7 @@ impl PipelineStage for HydrationStage {
                     let (nodes, ids_count) =
                         hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)?;
                     let (property_map, debug, executions) =
-                        Self::execute_hydration(ctx, nodes, ids_count)
+                        Self::execute_hydration(ctx, nodes, ids_count, true)
                             .await
                             .inspect_err(|e| obs.record_error(e))?;
                     hydration_queries = debug;

@@ -17,6 +17,11 @@ pub struct HydrationNodePlan {
     /// Traversal paths extracted from the base query, used to narrow hydration
     /// scans via `startsWith(traversal_path, tp)`.
     pub traversal_paths: Vec<String>,
+    /// True when this hydration originated from the dynamic codepath
+    /// (Neighbors/PathFinding). Selects the `traversal_path` filter shape
+    /// in `lower::hydration` — dynamic uses `arrayExists`, static uses
+    /// OR-of-`startsWith`.
+    pub is_dynamic: bool,
 }
 
 pub fn plan_hydration(input: &Input) -> Result<Plan> {
@@ -49,6 +54,7 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
                 node_ids: node.node_ids.clone(),
                 columns,
                 traversal_paths: node.traversal_paths.clone(),
+                is_dynamic: input.hydration_dynamic,
             })
         })
         .collect::<Result<Vec<_>>>()?;
