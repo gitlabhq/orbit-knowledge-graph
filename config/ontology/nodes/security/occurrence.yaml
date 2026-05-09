@@ -52,13 +52,13 @@ properties:
     type: string
     source: cve
     nullable: true
-    description: "CVE identifier, if applicable."
+    description: "Legacy fingerprint for deduplication. Not necessarily a CVE ID despite the column name."
 
   location:
     type: string
     source: location
     nullable: true
-    description: "Vulnerability location."
+    description: "Vulnerability location (serialized JSON: file, dependency, image, or kubernetes_resource)."
 
   location_fingerprint:
     type: string

@@ -58,7 +58,7 @@ properties:
     type: boolean
     source: latest
     nullable: false
-    description: "Latest scan for the project."
+    description: "Whether this is the latest scan of its type for the project."
 
   created_at:
     type: timestamp

@@ -33,7 +33,7 @@ properties:
     type: string
     source: state
     nullable: false
-    description: "Diff state (empty, without_files, collected, overflow, etc.)."
+    description: "Diff state: empty, without_files, collected, overflow. Deprecated values may still appear: timeout, overflow_commits_safe_size, overflow_diff_files_limit, overflow_diff_lines_limit."
 
   base_commit_sha:
     type: string

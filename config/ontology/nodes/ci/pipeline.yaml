@@ -99,7 +99,7 @@ properties:
     type: int64
     source: duration
     nullable: true
-    description: "Total duration in seconds."
+    description: "Wall-clock duration in seconds (first job start to last job finish, excluding queued time)."
 
   failure_reason:
     type: enum

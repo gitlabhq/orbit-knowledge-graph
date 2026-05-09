@@ -71,7 +71,7 @@ properties:
     type: string
     source: deployable_type
     nullable: false
-    description: "Deployable type (typically Ci::Build)."
+    description: "Polymorphic type (typically CommitStatus, the STI base class for Ci::Build)."
 
   deployable_id:
     type: int64

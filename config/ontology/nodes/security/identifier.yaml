@@ -46,7 +46,7 @@ properties:
     type: string
     source: url
     nullable: false
-    description: "Reference URL."
+    description: "Reference URL. May be empty for some identifier types."
 
   created_at:
     type: timestamp

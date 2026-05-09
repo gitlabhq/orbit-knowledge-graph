@@ -45,7 +45,7 @@ properties:
     type: enum
     source: state_id
     nullable: false
-    description: "Current state."
+    description: "Current state. Only opened (1) and closed (2) apply to work items."
     values:
       1: opened
       2: closed

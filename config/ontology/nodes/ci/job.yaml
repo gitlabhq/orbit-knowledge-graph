@@ -180,7 +180,7 @@ properties:
     type: string
     source: type
     nullable: false
-    description: "Class discriminator: Ci::Build (normal) or Ci::Bridge (downstream trigger)."
+    description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
 
   runner_id:
     type: int64
@@ -254,7 +254,7 @@ properties:
     type: int64
     source: auto_canceled_by_id
     nullable: true
-    description: "Job ID that auto-canceled this one."
+    description: "Pipeline ID that auto-canceled this job."
 
   traversal_path:
     type: string
@@ -293,7 +293,7 @@ etl:
       as: TRIGGERED_BY_PIPELINE
       direction: outgoing
     auto_canceled_by_id:
-      to: Job
+      to: Pipeline
       as: AUTO_CANCELED_BY
       direction: outgoing
 

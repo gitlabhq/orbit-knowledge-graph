@@ -87,13 +87,13 @@ properties:
     type: boolean
     source: internal
     nullable: false
-    description: "Only visible to project members."
+    description: "Only visible to users with Reporter+ access on the parent resource."
 
   confidential:
     type: boolean
     source: confidential
     nullable: true
-    description: "Confidential note."
+    description: "Legacy alias for internal; synced on create. Being renamed per gitlab#367923."
 
   commit_id:
     type: string

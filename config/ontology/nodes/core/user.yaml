@@ -89,7 +89,7 @@ properties:
     type: string
     source: avatar
     nullable: true
-    description: "Avatar image URL."
+    description: "Avatar upload filename (not a URL; the full URL is computed at runtime)."
 
   public_email:
     type: string
