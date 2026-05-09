@@ -1,12 +1,12 @@
 # config/ontology/edges/has_finding.yaml
 
-description: Entity has associated scan finding
+description: Entity has associated finding or vulnerability occurrence
 
 variants:
   - from_node: { type: Vulnerability, id: id }
-    to_node: { type: Finding, id: id }
+    to_node: { type: VulnerabilityOccurrence, id: id }
     fk_column: finding_id
-    description: "Vulnerability has finding."
+    description: "Vulnerability has canonical vulnerability occurrence."
 
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Finding, id: id }

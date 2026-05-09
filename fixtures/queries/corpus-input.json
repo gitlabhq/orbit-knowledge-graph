@@ -1117,7 +1117,7 @@
     ],
     "limit": 10
   },
-  "Q33 - Vulnerability Finding chain": {
+  "Q33 - Vulnerability Occurrence chain": {
     "query_type": "traversal",
     "nodes": [
       {
@@ -1134,8 +1134,8 @@
         }
       },
       {
-        "id": "f",
-        "entity": "Finding"
+        "id": "occ",
+        "entity": "VulnerabilityOccurrence"
       },
       {
         "id": "p",
@@ -1149,7 +1149,7 @@
       {
         "type": "HAS_FINDING",
         "from": "v",
-        "to": "f"
+        "to": "occ"
       },
       {
         "type": "IN_PROJECT",
@@ -1728,12 +1728,16 @@
     ],
     "limit": 20
   },
-  "D4 - Vulnerability Finding SecurityScan": {
+  "D4 - Vulnerability Occurrence SecurityScan": {
     "query_type": "traversal",
     "nodes": [
       {
         "id": "v",
         "entity": "Vulnerability"
+      },
+      {
+        "id": "occ",
+        "entity": "VulnerabilityOccurrence"
       },
       {
         "id": "f",
@@ -1755,7 +1759,7 @@
       {
         "type": "HAS_FINDING",
         "from": "v",
-        "to": "f"
+        "to": "occ"
       },
       {
         "type": "IN_PROJECT",
@@ -1763,9 +1767,14 @@
         "to": "p"
       },
       {
-        "type": "RAN_BY",
+        "type": "HAS_FINDING",
         "from": "scan",
         "to": "f"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "scan",
+        "to": "p"
       }
     ],
     "limit": 10

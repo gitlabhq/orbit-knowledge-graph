@@ -85,11 +85,11 @@ curl --header "Authorization: Bearer <your_token>" \
 
 | Node type | Description | Key properties |
 |-----------|-------------|----------------|
-| `Finding` | Security scan finding | `id`, `uuid`, `name`, `description`, `severity`, `deduplicated` |
+| `Finding` | Security scan finding from `security_findings` | `id`, `uuid`, `name`, `description`, `severity`, `deduplicated` |
 | `SecurityScan` | Security scan execution in a pipeline | `id`, `scan_type`, `status`, `latest` |
 | `Vulnerability` | Confirmed or potential security vulnerability | `id`, `title`, `state`, `severity`, `report_type`, `resolved_on_default_branch` |
 | `VulnerabilityIdentifier` | CVE, CWE, or other external reference | `id`, `external_type`, `external_id`, `name`, `url` |
-| `VulnerabilityOccurrence` | Specific occurrence of a vulnerability | `id`, `uuid`, `severity`, `report_type`, `detection_method`, `cve`, `location` |
+| `VulnerabilityOccurrence` | Specific occurrence of a vulnerability (`Vulnerabilities::Finding` in Rails) | `id`, `uuid`, `severity`, `report_type`, `detection_method`, `cve`, `location` |
 | `VulnerabilityScanner` | Security scanner | `id`, `external_id`, `name`, `vendor` |
 
 ## Notes

@@ -551,4 +551,40 @@ mod tests {
             "unknown entity should be AllowlistRejected, got: {err}"
         );
     }
+
+    #[test]
+    fn vulnerability_has_finding_fk_targets_vulnerability_occurrence() {
+        let result = normalize_query(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "v", "entity": "Vulnerability"},
+                    {"id": "occ", "entity": "VulnerabilityOccurrence"}
+                ],
+                "relationships": [
+                    {"type": "HAS_FINDING", "from": "v", "to": "occ"}
+                ]
+            }"#,
+        );
+
+        assert_eq!(
+            result.relationships[0].fk_column.as_deref(),
+            Some("finding_id")
+        );
+
+        let result = normalize_query(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "v", "entity": "Vulnerability"},
+                    {"id": "f", "entity": "Finding"}
+                ],
+                "relationships": [
+                    {"type": "HAS_FINDING", "from": "v", "to": "f"}
+                ]
+            }"#,
+        );
+
+        assert_eq!(result.relationships[0].fk_column, None);
+    }
 }

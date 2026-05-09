@@ -4,8 +4,9 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
+    assert_node_count, create_namespace, create_project, handler_context, namespace_envelope,
+    namespace_handler,
 };
 
 pub async fn processes_vulnerabilities(ctx: &TestContext) {
@@ -283,9 +284,13 @@ pub async fn processes_vulnerability_finding_edge(ctx: &TestContext) {
     create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
 
     ctx.execute(
-        "INSERT INTO siphon_security_findings
-            (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
-        VALUES (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"Test Finding\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+        "INSERT INTO siphon_vulnerability_occurrences
+            (id, uuid, severity, report_type, project_id, scanner_id, primary_identifier_id,
+             location_fingerprint, name, metadata_version, vulnerability_id, detection_method,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES (1, '00000000-0000-0000-0000-000000000f01', 5, 0, 1000, 1, 1,
+                'fingerprint1', 'Test Finding', '15.0.0', 1, 0,
+                '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -305,8 +310,24 @@ pub async fn processes_vulnerability_finding_edge(ctx: &TestContext) {
         .await
         .unwrap();
 
-    assert_edges_have_traversal_path(ctx, "HAS_FINDING", "Vulnerability", "Finding", "1/100/", 1)
-        .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "HAS_FINDING",
+        "Vulnerability",
+        "VulnerabilityOccurrence",
+        "1/100/",
+        1,
+    )
+    .await;
+    assert_edge_count_for_traversal_path(
+        ctx,
+        "HAS_FINDING",
+        "Vulnerability",
+        "Finding",
+        "1/100/",
+        0,
+    )
+    .await;
 }
 
 pub async fn processes_vulnerability_occurrences(ctx: &TestContext) {
