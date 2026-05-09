@@ -125,10 +125,6 @@ echo 'SELECT 1+1' | orbit sql -
 orbit sql --file query.sql
 ```
 
-A maintainer-oriented escape hatch for inspecting the DuckDB graph directly.
-Read-only: write statements are rejected by DuckDB. Prefer `orbit query` for
-anything you would commit, since the JSON DSL also targets the remote service.
-
 | Flag | Purpose |
 |------|---------|
 | `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
