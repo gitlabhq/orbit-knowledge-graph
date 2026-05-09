@@ -3,6 +3,7 @@ pub mod dispatch;
 pub(crate) mod entity_pipeline;
 mod handler;
 mod metrics;
+pub(crate) mod partition_strategy;
 mod pipeline;
 mod plan;
 
@@ -13,11 +14,12 @@ use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
-use entity_pipeline::{BasePipeline, partition_column};
+use entity_pipeline::SimpleEntityPipeline;
 use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
 use metrics::SdlcMetrics;
+use partition_strategy::{DatalakePartitionStrategy, PartitionStrategy, partition_column};
 use pipeline::Pipeline;
 use plan::{build_entity_plans, build_plans};
 use tracing::info;
@@ -130,40 +132,14 @@ pub async fn register_entity_handlers(
     for (plan, scope) in entity_plans {
         let entity_kind = plan.name.clone();
 
-        let (order_by, source_table) = if let Some(node) = ontology.get_node(&entity_kind) {
-            let etl = node.etl.as_ref();
-            let order = etl.map(|e| e.order_by().to_vec()).unwrap_or_default();
-            let source = etl.and_then(|e| match e {
-                ontology::etl::EtlConfig::Table { source, .. } => Some(source.clone()),
-                ontology::etl::EtlConfig::Query { .. } => None,
-            });
-            (order, source)
-        } else {
-            let edge = ontology
-                .edge_etl_configs()
-                .find(|(kind, _)| *kind == entity_kind);
-            match edge {
-                Some((_, config)) => (config.order_by.clone(), Some(config.source.clone())),
-                None => (vec![], None),
-            }
-        };
+        let partition_strategy =
+            build_partition_strategy(&entity_kind, scope, ontology, entity_config, &pipeline);
 
-        let partition_col = partition_column(&order_by, scope).map(String::from);
-        let partition_count = entity_config
-            .partition_overrides
-            .get(&entity_kind)
-            .copied()
-            .unwrap_or(1);
+        let entity_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(
+            SimpleEntityPipeline::new(plan, partition_strategy, Arc::clone(&pipeline)),
+        );
 
-        let base_pipeline: Arc<dyn entity_pipeline::EntityPipeline> = Arc::new(BasePipeline::new(
-            plan,
-            partition_col,
-            source_table,
-            partition_count,
-            Arc::clone(&pipeline),
-        ));
-
-        pipelines.insert(entity_kind, base_pipeline);
+        pipelines.insert(entity_kind, entity_pipeline);
     }
 
     registry.register_handler(Box::new(EntityIndexingHandler::new(
@@ -173,6 +149,52 @@ pub async fn register_entity_handlers(
     )));
 
     Ok(())
+}
+
+fn build_partition_strategy(
+    entity_kind: &str,
+    scope: ontology::EtlScope,
+    ontology: &ontology::Ontology,
+    config: &gkg_server_config::EntityHandlerConfig,
+    pipeline: &Arc<Pipeline>,
+) -> Option<Arc<dyn PartitionStrategy>> {
+    let partition_count = config
+        .partition_overrides
+        .get(entity_kind)
+        .copied()
+        .unwrap_or(1);
+
+    if partition_count <= 1 {
+        return None;
+    }
+
+    let (order_by, source_table) = if let Some(node) = ontology.get_node(entity_kind) {
+        let etl = node.etl.as_ref();
+        let order = etl.map(|e| e.order_by().to_vec()).unwrap_or_default();
+        let source = etl.and_then(|e| match e {
+            ontology::etl::EtlConfig::Table { source, .. } => Some(source.clone()),
+            ontology::etl::EtlConfig::Query { .. } => None,
+        });
+        (order, source)
+    } else {
+        let edge = ontology
+            .edge_etl_configs()
+            .find(|(kind, _)| *kind == entity_kind);
+        match edge {
+            Some((_, etl_config)) => (etl_config.order_by.clone(), Some(etl_config.source.clone())),
+            None => (vec![], None),
+        }
+    };
+
+    let partition_col = partition_column(&order_by, scope)?;
+    let source_table = source_table?;
+
+    Some(Arc::new(DatalakePartitionStrategy::new(
+        source_table,
+        partition_col.to_string(),
+        partition_count,
+        Arc::clone(pipeline),
+    )))
 }
 
 #[cfg(test)]

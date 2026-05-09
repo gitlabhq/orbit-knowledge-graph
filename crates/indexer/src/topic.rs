@@ -111,12 +111,12 @@ pub enum IndexingScope {
 pub struct PartitionSpec {
     pub partition_index: u32,
     pub total_partitions: u32,
-    pub strategy: PartitionStrategy,
+    pub bounds: PartitionBounds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum PartitionStrategy {
+pub enum PartitionBounds {
     Range {
         lower_bound: String,
         upper_bound: String,

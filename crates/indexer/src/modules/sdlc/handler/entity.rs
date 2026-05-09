@@ -125,7 +125,7 @@ impl Handler for EntityIndexingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::sdlc::entity_pipeline::BasePipeline;
+    use crate::modules::sdlc::entity_pipeline::SimpleEntityPipeline;
     use crate::modules::sdlc::pipeline::Pipeline;
     use crate::modules::sdlc::plan::build_plans;
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
@@ -169,13 +169,8 @@ mod tests {
 
         let handler = test_handler(HashMap::from([(
             "User".to_string(),
-            Arc::new(BasePipeline::new(
-                user_plan,
-                Some("id".to_string()),
-                None,
-                1,
-                pipeline,
-            )) as Arc<dyn EntityPipeline>,
+            Arc::new(SimpleEntityPipeline::new(user_plan, None, pipeline))
+                as Arc<dyn EntityPipeline>,
         )]));
 
         let payload = serde_json::json!({
@@ -210,13 +205,7 @@ mod tests {
 
         let handler = test_handler(HashMap::from([(
             "MergeRequest".to_string(),
-            Arc::new(BasePipeline::new(
-                mr_plan,
-                Some("id".to_string()),
-                None,
-                1,
-                pipeline,
-            )) as Arc<dyn EntityPipeline>,
+            Arc::new(SimpleEntityPipeline::new(mr_plan, None, pipeline)) as Arc<dyn EntityPipeline>,
         )]));
 
         let payload = serde_json::json!({

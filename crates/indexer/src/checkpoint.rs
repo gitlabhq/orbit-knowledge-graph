@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn entity_checkpoint_key_namespaced_with_partition() {
-        use crate::topic::PartitionStrategy;
+        use crate::topic::PartitionBounds;
         let scope = IndexingScope::Namespace {
             namespace_id: 100,
             traversal_path: "42/100/".to_string(),
@@ -246,7 +246,7 @@ mod tests {
         let spec = PartitionSpec {
             partition_index: 2,
             total_partitions: 4,
-            strategy: PartitionStrategy::Range {
+            bounds: PartitionBounds::Range {
                 lower_bound: "50000000".to_string(),
                 upper_bound: "75000000".to_string(),
             },
