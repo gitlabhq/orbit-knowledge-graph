@@ -886,6 +886,31 @@ impl<'a> ResolveCtx<'a> {
             return self.chain_fallback(r, chain);
         }
 
+        // When a chain starts with a class and the next step is a
+        // constructor (e.g. MergeRequest.new.execute), emit a Calls
+        // edge to the class itself alongside the terminal target.
+        let mut base_class_nodes: Vec<NodeIndex> = Vec::new();
+        if chain.len() > 1 {
+            let next_is_constructor = match &chain[1] {
+                ExpressionStep::Call(n) | ExpressionStep::Field(n) => {
+                    self.rules.hooks.constructor_methods.contains(&n.as_str())
+                }
+                _ => false,
+            };
+            if next_is_constructor {
+                for type_fqn in &current_types {
+                    for &node in self.graph.resolve_scope_nodes(type_fqn).iter() {
+                        if self.graph.graph[node]
+                            .def_id()
+                            .is_some_and(|d| self.graph.defs[d.0 as usize].kind.is_type_container())
+                        {
+                            base_class_nodes.push(node);
+                        }
+                    }
+                }
+            }
+        }
+
         for (depth, step) in chain[1..].iter().enumerate() {
             if depth >= self.settings.max_chain_depth || current_types.is_empty() {
                 break;
@@ -983,6 +1008,7 @@ impl<'a> ResolveCtx<'a> {
             );
 
             if is_last {
+                found_nodes.extend(base_class_nodes.iter().copied());
                 let mut seen = rustc_hash::FxHashSet::default();
                 found_nodes.retain(|n| seen.insert(*n));
                 return Ok(found_nodes);

@@ -414,18 +414,15 @@ tests:
       - { row: { callee: "MergeRequests::CreateService::create" } }
       - { row: { callee: "MergeRequests::CreateService::after_create" } }
 
-  # KNOWN GAP: MergeRequest.new should emit a Calls edge to the
-  # MergeRequest class. The chain [Ident("MergeRequest"), Call("new")]
-  # resolves the constructor return type but doesn't emit an edge to
-  # the class node itself.
-  - name: "(gap) CreateService#execute references MergeRequest.new"
+  - name: "CreateService#execute calls MergeRequest (class-ref from constructor chain)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MergeRequests::CreateService::execute'
         AND callee.fqn = 'MergeRequest'
       RETURN callee.fqn AS callee, e.edge_kind AS kind
     assert:
-      - { row_count: 0 }
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
 
   # KNOWN GAP: mr.save! where mr is a method parameter. The
   # parameter type is inferrable from context (mr was just created
