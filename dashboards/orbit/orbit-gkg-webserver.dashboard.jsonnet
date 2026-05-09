@@ -70,25 +70,37 @@ local health = [
     'Rails: gRPC p95 (5m)',
     'p95 of the user-facing Rails-side gRPC call to GKG over the last 5 minutes. This is the latency the GitLab.com web request actually experiences.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [railsGrpcDur, RAIL],
-    RDS, 's', 6,
-  ),
-  o.gaugeStat(
-    'Pipeline: success rate (1h)',
-    'Share of query pipeline calls with status="ok" over the last hour. Renders 0 when no calls happened in the window.',
-    '(sum(rate(%s{%s, status="ok"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
-    DS, 'percentunit', 6,
+    RDS, 's', 4,
   ),
   o.gaugeStat(
     'Pipeline: p95 (5m)',
     'p95 of overall pipeline duration on the GKG webserver side. Compared with the Rails p95 above, the difference is network + JWT/auth + redaction.',
     'histogram_quantile(0.95, sum by (le) (rate(%s_bucket{%s}[5m])))' % [pipelineDuration.prom_name, SEL],
-    DS, 's', 6,
+    DS, 's', 4,
   ),
   o.gaugeStat(
     'Compiler rejects / min (5m)',
     'Queries the compiler rejected before execution, in calls/min over the last 5 minutes. Use the Reliability row below for the per-reason breakdown.',
     'sum(rate(%s{%s}[5m])) * 60' % [compilerRejected, SEL],
-    DS, 'short', 6,
+    DS, 'short', 4,
+  ),
+  o.gaugeStat(
+    'Overall success rate (1h)',
+    'Share of query pipeline calls with status="ok" over the last hour. Includes everything: compile rejects, post-compile failures, and successes. Renders 0 when no calls happened in the window.',
+    '(sum(rate(%s{%s, status="ok"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
+    DS, 'percentunit', 4,
+  ),
+  o.gaugeStat(
+    'Compiler success rate (1h)',
+    'Share of queries that passed compilation. Equivalent to 1 minus (compile rejects / total). Drops mean clients are sending queries the compiler refuses.',
+    '1 - (sum(rate(%s{%s, status="compile_error"}[1h]))) / (sum(rate(%s{%s}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
+    DS, 'percentunit', 4,
+  ),
+  o.gaugeStat(
+    'Pipeline success rate (1h), post-compile',
+    'Share of post-compile pipeline runs that returned status="ok". Excludes compile rejects from both the numerator and the denominator, so it isolates server-side reliability from client-input quality.',
+    '(sum(rate(%s{%s, status="ok"}[1h]))) / (sum(rate(%s{%s, status!="compile_error"}[1h])) > 0)' % [pipelineQueries.prom_name, SEL, pipelineQueries.prom_name, SEL],
+    DS, 'percentunit', 4,
   ),
 ];
 

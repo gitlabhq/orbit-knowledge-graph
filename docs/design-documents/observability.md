@@ -195,6 +195,7 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG
 | Alert | Metric | Default Threshold | Severity | `for` | Fires when |
 |---|---|---|---|---|---|
 | `GKGQueryingErrorRateHigh` | `gkg_query_pipeline_queries_total{status!="ok"}` / `gkg_query_pipeline_queries_total` | > 5% | warning | 5m | Aggregate error rate across all failure modes exceeds threshold (the availability SLI) |
+| `GKGPipelinePostCompileErrorRateHigh` | `gkg_query_pipeline_queries_total{status!~"ok\|compile_error"}` / `gkg_query_pipeline_queries_total{status!="compile_error"}` | > 1% | warning | 5m | Post-compile failure rate isolates server-side reliability from client-input quality. Mirrors the "Pipeline success rate (1h), post-compile" gauge. |
 | `GKGValidationFailedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"parse\|schema\|reference\|pagination"}` | > 10/min | warning | 5m | Sustained burst of structural validation failures (broken client or probing) |
 | `GKGAllowlistRejectedBurst` | `gkg_query_engine_compiler_rejected_total{failure_reason=~"ontology\|ontology_internal"}` | > 5/min | warning | 5m | Sustained ontology violations (schema drift or enumeration attempt) |
 | `GKGExecutionFailureRate` | `gkg_query_pipeline_failed_total{failure_reason="execution"}` | > 1/min | warning | 5m | ClickHouse query execution is failing |
