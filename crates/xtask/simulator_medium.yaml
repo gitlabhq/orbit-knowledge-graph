@@ -100,7 +100,7 @@ generation:
       "WorkItem -> Note": 1
 
     HAS_FINDING:
-      "Vulnerability -> Finding": 2
+      "Vulnerability -> VulnerabilityOccurrence": 2
 
     HAS_IDENTIFIER:
       "Finding -> VulnerabilityIdentifier": 1
