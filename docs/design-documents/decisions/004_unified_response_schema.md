@@ -92,7 +92,7 @@ Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids Ja
 
 ### Examples by query type
 
-Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. The content varies, the base shape does not.
+Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. Property-grouped aggregations also include `group_columns` and `rows` because scalar buckets do not have entity IDs to carry computed values. The content varies, the base shape does not.
 
 #### Single-entity Traversal (lookup)
 
@@ -190,6 +190,28 @@ When no `group_by` is specified, the SQL returns only aggregate values with no e
 }
 ```
 
+#### Aggregation (property grouped)
+
+When `group_by_properties` is specified, the SQL returns scalar bucket values plus aggregate values. There are no group-by entity nodes, so `group_columns` describes the bucket keys and `rows` carries the tabular result.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [],
+  "edges": [],
+  "group_columns": [
+    { "name": "severity", "node": "v", "property": "severity" }
+  ],
+  "columns": [
+    { "name": "vulnerability_count", "function": "count", "target": "v" }
+  ],
+  "rows": [
+    { "severity": "critical", "vulnerability_count": 12 },
+    { "severity": "high", "vulnerability_count": 7 }
+  ]
+}
+```
+
 #### Path finding
 
 Edges carry `path_id` and `step`. Nodes are deduplicated across paths.
@@ -267,7 +289,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
+3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values, and property-grouped aggregations include `group_columns` plus `rows`.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
 5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.

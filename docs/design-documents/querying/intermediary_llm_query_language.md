@@ -174,6 +174,9 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
+Use `group_by` inside an aggregation to group by an entity node selector. The
+value must be a node `id`, not a property name.
+
 ```json
 {
   "query_type": "aggregation",
@@ -191,6 +194,29 @@ Group and aggregate results.
   "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
 }
 ```
+
+Use top-level `group_by_properties` to group by scalar properties, such as
+dashboard buckets.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
+  ],
+  "group_by_properties": [
+    {"node": "v", "property": "severity", "alias": "severity"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+  ],
+  "limit": 10,
+  "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
+}
+```
+
+Property-grouped aggregation responses include `group_columns` and `rows`
+instead of attaching aggregate values to graph nodes.
 
 | Aggregation Function | Description | Requires `property` |
 |---------------------|-------------|---------------------|
@@ -415,6 +441,7 @@ All enum-like fields (entity types, relationship types, property names) are vali
 - Relationship types must be one of the known edge types (e.g., `AUTHORED`, `IN_PROJECT`, `CONTAINS`)
 - Properties must exist on their referenced entity
 - Aggregation targets/group_by must reference valid nodes
+- Aggregation `group_by_properties` entries must reference valid nodes and column-backed, filterable properties
 - Filter operators are limited to a small, explicit set (`eq`, `in`, `gte`, `lte`, etc.), represented as enums in the AST
 
 If a value is not in the allow-list, we reject the request with a validation error rather than passing it through to SQL. This means the LLM cannot introduce new table names, join arbitrary system tables, or call random functions.

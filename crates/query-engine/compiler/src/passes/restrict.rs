@@ -255,6 +255,18 @@ pub fn restrict(
         }
     }
 
+    for group in &input.group_by_properties {
+        let Some(entity) = entity_of(input, &group.node) else {
+            continue;
+        };
+        if ontology.is_admin_only(entity, &group.property) {
+            return Err(QueryError::Validation(format!(
+                "group_by_properties on \"{}\" for {entity}: field requires administrator access",
+                group.property
+            )));
+        }
+    }
+
     Ok(())
 }
 
@@ -262,8 +274,8 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggFunction, FilterOp, InputAggregation, InputFilter, InputNode, InputOrderBy,
-        OrderDirection, QueryType,
+        AggFunction, FilterOp, InputAggregation, InputFilter, InputGroupByProperty, InputNode,
+        InputOrderBy, OrderDirection, QueryType,
     };
     use crate::types::{AccessLevel, TraversalPath};
     use ontology::{DataType, RequiredRole};
@@ -625,6 +637,35 @@ mod tests {
         }
     }
 
+    fn input_with_property_group(property: &str) -> Input {
+        Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "_u".into(),
+                    entity: Some("User".into()),
+                    columns: Some(ColumnSelection::List(vec!["username".into()])),
+                    ..Default::default()
+                },
+                scoped_node(),
+            ],
+            relationships: vec![rel("_u", "_g")],
+            group_by_properties: vec![InputGroupByProperty {
+                node: "_u".into(),
+                property: property.into(),
+                alias: None,
+            }],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("_u".into()),
+                group_by: None,
+                property: None,
+                alias: Some("_agg".into()),
+            }],
+            ..Input::default()
+        }
+    }
+
     fn user_only_aggregation(function: AggFunction, property: Option<&str>) -> Input {
         Input {
             query_type: QueryType::Aggregation,
@@ -732,6 +773,27 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
+        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_rejects_group_by_property_on_admin_only_field() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = input_with_property_group("is_admin");
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            err.to_string().contains("group_by_properties")
+                && err.to_string().contains("administrator"),
+            "expected admin_only group_by_properties rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn admin_can_group_by_property_on_admin_only_field() {
+        let ont = ontology();
+        let ctx = admin_ctx();
+        let mut input = input_with_property_group("is_admin");
         assert!(restrict(&mut input, &ont, &ctx).is_ok());
     }
 

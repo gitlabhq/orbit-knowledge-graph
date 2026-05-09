@@ -1490,6 +1490,72 @@ mod tests {
     }
 
     #[test]
+    fn aggregation_group_by_property_emits_scalar_group_key() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "p",
+                "alias": "project_count"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("p.visibility_level AS visibility_level"),
+            "property group key must be selected as a scalar column, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("GROUP BY p.visibility_level"),
+            "property group key must drive GROUP BY, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("_gkg_p_id"),
+            "property grouping should not attach aggregate values to entity nodes, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn aggregation_group_by_property_keeps_role_gated_target_table() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by_properties": [{"node": "v", "property": "severity"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "v",
+                "alias": "vulnerability_count"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("v.severity AS severity") && sql.contains("GROUP BY v.severity"),
+            "security property grouping must use the protected node alias, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn skip_dedup_is_ignored_and_keeps_latest_row_filtering() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{

@@ -1,0 +1,965 @@
+{
+  "security_vulnerability_001_by_severity": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"state": {"op": "in", "value": ["detected", "confirmed", "resolved", "dismissed"]}}}],
+    "group_by_properties": [{"node": "v", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_vulnerability_002_by_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "in", "value": ["critical", "high", "medium", "low", "unknown", "info"]}}}],
+    "group_by_properties": [{"node": "v", "property": "state"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_vulnerability_003_by_report_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}],
+    "group_by_properties": [{"node": "v", "property": "report_type"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_vulnerability_004_by_resolution_flags": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "in", "value": ["critical", "high", "medium"]}}}],
+    "group_by_properties": [
+      {"node": "v", "property": "resolved_on_default_branch"},
+      {"node": "v", "property": "present_on_default_branch"}
+    ],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_vulnerability_005_by_severity_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"report_type": {"op": "in", "value": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}}}],
+    "group_by_properties": [
+      {"node": "v", "property": "severity"},
+      {"node": "v", "property": "state"}
+    ],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 30
+  },
+  "security_vulnerability_006_by_report_type_severity_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"present_on_default_branch": true}}],
+    "group_by_properties": [
+      {"node": "v", "property": "report_type"},
+      {"node": "v", "property": "severity"},
+      {"node": "v", "property": "state"}
+    ],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_vulnerability_007_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}],
+    "group_by_properties": [{"node": "v", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "critical_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_vulnerability_008_latest_detected_by_project": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}],
+    "group_by_properties": [{"node": "v", "property": "project_id"}],
+    "aggregations": [
+      {"function": "count", "target": "v", "alias": "detected_count"},
+      {"function": "max", "target": "v", "property": "updated_at", "alias": "latest_update"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_scan_009_by_scan_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "s", "entity": "SecurityScan", "filters": {"latest": true}}],
+    "group_by_properties": [{"node": "s", "property": "scan_type"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_scan_010_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "s", "entity": "SecurityScan", "filters": {"latest": true}}],
+    "group_by_properties": [{"node": "s", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_scan_011_by_type_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "s", "entity": "SecurityScan", "filters": {"latest": true}}],
+    "group_by_properties": [
+      {"node": "s", "property": "scan_type"},
+      {"node": "s", "property": "status"}
+    ],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_scan_012_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "s", "entity": "SecurityScan", "filters": {"latest": true}}],
+    "group_by_properties": [{"node": "s", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_scan_013_by_pipeline_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "s", "entity": "SecurityScan", "filters": {"status": {"op": "in", "value": ["succeeded", "job_failed", "report_error"]}}}],
+    "group_by_properties": [{"node": "s", "property": "pipeline_id"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_finding_014_by_severity": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "f", "entity": "Finding", "filters": {"deduplicated": true}}],
+    "group_by_properties": [{"node": "f", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_finding_015_by_deduplicated": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "f", "entity": "Finding", "filters": {"severity": {"op": "in", "value": ["critical", "high", "medium", "low"]}}}],
+    "group_by_properties": [{"node": "f", "property": "deduplicated"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_finding_016_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "f", "entity": "Finding", "filters": {"severity": "critical"}}],
+    "group_by_properties": [{"node": "f", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_finding_017_by_scan_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "f", "entity": "Finding", "filters": {"deduplicated": true}}],
+    "group_by_properties": [{"node": "f", "property": "scan_id"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_finding_018_by_scanner_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "f", "entity": "Finding", "filters": {"severity": {"op": "in", "value": ["critical", "high"]}}}],
+    "group_by_properties": [{"node": "f", "property": "scanner_id"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_occurrence_019_by_severity": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"report_type": {"op": "in", "value": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}}}],
+    "group_by_properties": [{"node": "o", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_occurrence_020_by_report_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": {"op": "in", "value": ["critical", "high", "medium"]}}}],
+    "group_by_properties": [{"node": "o", "property": "report_type"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_occurrence_021_by_severity_report_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": {"op": "in", "value": ["critical", "high", "medium", "low"]}}}],
+    "group_by_properties": [
+      {"node": "o", "property": "severity"},
+      {"node": "o", "property": "report_type"}
+    ],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_occurrence_022_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": "critical"}}],
+    "group_by_properties": [{"node": "o", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_occurrence_023_by_scanner_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"report_type": "sast"}}],
+    "group_by_properties": [{"node": "o", "property": "scanner_id"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_identifier_024_by_external_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "i", "entity": "VulnerabilityIdentifier", "filters": {"external_type": {"op": "contains", "value": "cve"}}}],
+    "group_by_properties": [{"node": "i", "property": "external_type"}],
+    "aggregations": [{"function": "count", "target": "i", "alias": "identifier_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_identifier_025_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "i", "entity": "VulnerabilityIdentifier", "filters": {"name": {"op": "contains", "value": "CVE"}}}],
+    "group_by_properties": [{"node": "i", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "i", "alias": "identifier_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "security_scanner_026_by_vendor": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "scanner", "entity": "VulnerabilityScanner", "filters": {"vendor": {"op": "contains", "value": "Git"}}}],
+    "group_by_properties": [{"node": "scanner", "property": "vendor"}],
+    "aggregations": [{"function": "count", "target": "scanner", "alias": "scanner_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "security_scanner_027_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "scanner", "entity": "VulnerabilityScanner", "filters": {"vendor": {"op": "contains", "value": "Git"}}}],
+    "group_by_properties": [{"node": "scanner", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "scanner", "alias": "scanner_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_pipeline_028_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"source": {"op": "in", "value": ["push", "web", "schedule", "merge_request_event", "parent_pipeline"]}}}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_pipeline_029_by_source": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending", "canceled"]}}}],
+    "group_by_properties": [{"node": "pipe", "property": "source"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_pipeline_030_by_status_source": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending", "canceled"]}}}],
+    "group_by_properties": [
+      {"node": "pipe", "property": "status"},
+      {"node": "pipe", "property": "source"}
+    ],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_pipeline_031_by_protected": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}],
+    "group_by_properties": [{"node": "pipe", "property": "protected"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_pipeline_032_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}}],
+    "group_by_properties": [{"node": "pipe", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "failed_pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_pipeline_033_avg_duration_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [
+      {"function": "count", "target": "pipe", "alias": "pipeline_count"},
+      {"function": "avg", "target": "pipe", "property": "duration", "alias": "avg_duration"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_pipeline_034_by_ref": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "pipe", "entity": "Pipeline", "filters": {"status": "success"}}],
+    "group_by_properties": [{"node": "pipe", "property": "ref"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_035_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"when": {"op": "in", "value": ["on_success", "manual", "delayed"]}}}],
+    "group_by_properties": [{"node": "job", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_036_by_when": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}}],
+    "group_by_properties": [{"node": "job", "property": "when"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_037_by_status_when": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}}],
+    "group_by_properties": [
+      {"node": "job", "property": "status"},
+      {"node": "job", "property": "when"}
+    ],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_038_by_allow_failure": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}],
+    "group_by_properties": [{"node": "job", "property": "allow_failure"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_039_by_retried": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}],
+    "group_by_properties": [{"node": "job", "property": "retried"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_040_by_failure_reason": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": "failed"}}],
+    "group_by_properties": [{"node": "job", "property": "failure_reason"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "failed_job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_041_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": "failed"}}],
+    "group_by_properties": [{"node": "job", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "failed_job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_042_by_runner_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": "success"}}],
+    "group_by_properties": [{"node": "job", "property": "runner_id"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_043_by_ref": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "job", "entity": "Job", "filters": {"status": "success"}}],
+    "group_by_properties": [{"node": "job", "property": "ref"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_stage_044_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "stage", "entity": "Stage", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}}],
+    "group_by_properties": [{"node": "stage", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "stage", "alias": "stage_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_stage_045_by_name": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "stage", "entity": "Stage", "filters": {"status": "success"}}],
+    "group_by_properties": [{"node": "stage", "property": "name"}],
+    "aggregations": [{"function": "count", "target": "stage", "alias": "stage_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_stage_046_by_position": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "stage", "entity": "Stage", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}],
+    "group_by_properties": [{"node": "stage", "property": "position"}],
+    "aggregations": [{"function": "count", "target": "stage", "alias": "stage_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_deployment_047_by_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "dep", "entity": "Deployment", "filters": {"archived": false}}],
+    "group_by_properties": [{"node": "dep", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "dep", "alias": "deployment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_deployment_048_by_ref": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "dep", "entity": "Deployment", "filters": {"status": {"op": "in", "value": ["success", "failed", "running"]}}}],
+    "group_by_properties": [{"node": "dep", "property": "ref"}],
+    "aggregations": [{"function": "count", "target": "dep", "alias": "deployment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_deployment_049_by_archived": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "dep", "entity": "Deployment", "filters": {"status": {"op": "in", "value": ["success", "failed", "running"]}}}],
+    "group_by_properties": [{"node": "dep", "property": "archived"}],
+    "aggregations": [{"function": "count", "target": "dep", "alias": "deployment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_environment_050_by_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "env", "entity": "Environment", "filters": {"tier": {"op": "in", "value": ["production", "staging", "testing", "development", "other"]}}}],
+    "group_by_properties": [{"node": "env", "property": "state"}],
+    "aggregations": [{"function": "count", "target": "env", "alias": "environment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_environment_051_by_tier": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "env", "entity": "Environment", "filters": {"state": {"op": "in", "value": ["available", "stopping", "stopped"]}}}],
+    "group_by_properties": [{"node": "env", "property": "tier"}],
+    "aggregations": [{"function": "count", "target": "env", "alias": "environment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_environment_052_by_state_tier": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "env", "entity": "Environment", "filters": {"state": {"op": "in", "value": ["available", "stopping", "stopped"]}}}],
+    "group_by_properties": [
+      {"node": "env", "property": "state"},
+      {"node": "env", "property": "tier"}
+    ],
+    "aggregations": [{"function": "count", "target": "env", "alias": "environment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "ci_job_metadata_053_by_timeout_source": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "meta", "entity": "JobMetadata", "filters": {"debug_trace_enabled": false}}],
+    "group_by_properties": [{"node": "meta", "property": "timeout_source"}],
+    "aggregations": [{"function": "count", "target": "meta", "alias": "metadata_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_metadata_054_by_interruptible": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "meta", "entity": "JobMetadata", "filters": {"debug_trace_enabled": false}}],
+    "group_by_properties": [{"node": "meta", "property": "interruptible"}],
+    "aggregations": [{"function": "count", "target": "meta", "alias": "metadata_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "ci_job_metadata_055_by_exit_code": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "meta", "entity": "JobMetadata", "filters": {"debug_trace_enabled": false}}],
+    "group_by_properties": [{"node": "meta", "property": "exit_code"}],
+    "aggregations": [{"function": "count", "target": "meta", "alias": "metadata_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_056_by_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged", "locked"]}}}],
+    "group_by_properties": [{"node": "mr", "property": "state"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "code_review_mr_057_by_merge_status": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "merged"]}}}],
+    "group_by_properties": [{"node": "mr", "property": "merge_status"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_058_by_draft": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "merged"]}}}],
+    "group_by_properties": [{"node": "mr", "property": "draft"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "code_review_mr_059_by_squash": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "merged"]}}}],
+    "group_by_properties": [{"node": "mr", "property": "squash"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "code_review_mr_060_by_state_draft": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}}],
+    "group_by_properties": [
+      {"node": "mr", "property": "state"},
+      {"node": "mr", "property": "draft"}
+    ],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_061_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
+    "group_by_properties": [{"node": "mr", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_062_by_author_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
+    "group_by_properties": [{"node": "mr", "property": "author_id"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_063_by_target_branch": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}}],
+    "group_by_properties": [{"node": "mr", "property": "target_branch"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "code_review_mr_064_avg_diff_by_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "merged"]}}}],
+    "group_by_properties": [{"node": "mr", "property": "state"}],
+    "aggregations": [
+      {"function": "count", "target": "mr", "alias": "merge_request_count"},
+      {"function": "avg", "target": "mr", "property": "diff_size", "alias": "avg_diff_size"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "planning_work_item_065_by_state": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"work_item_type": {"op": "in", "value": ["issue", "incident", "task", "epic"]}}}],
+    "group_by_properties": [{"node": "wi", "property": "state"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "planning_work_item_066_by_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}}}],
+    "group_by_properties": [{"node": "wi", "property": "work_item_type"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "planning_work_item_067_by_confidential": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}}}],
+    "group_by_properties": [{"node": "wi", "property": "confidential"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "planning_work_item_068_by_state_type": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}}}],
+    "group_by_properties": [
+      {"node": "wi", "property": "state"},
+      {"node": "wi", "property": "work_item_type"}
+    ],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "planning_work_item_069_by_project_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}}],
+    "group_by_properties": [{"node": "wi", "property": "project_id"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "open_work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "planning_work_item_070_by_namespace_id": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}}],
+    "group_by_properties": [{"node": "wi", "property": "namespace_id"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "open_work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "project_071_by_visibility": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "p", "entity": "Project", "filters": {"visibility_level": {"op": "in", "value": ["private", "internal", "public"]}}}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "project_072_by_archived": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "p", "entity": "Project", "filters": {"visibility_level": {"op": "in", "value": ["private", "internal", "public"]}}}],
+    "group_by_properties": [{"node": "p", "property": "archived"}],
+    "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "project_073_by_visibility_archived": {
+    "query_type": "aggregation",
+    "nodes": [{"id": "p", "entity": "Project", "filters": {"visibility_level": {"op": "in", "value": ["private", "internal", "public"]}}}],
+    "group_by_properties": [
+      {"node": "p", "property": "visibility_level"},
+      {"node": "p", "property": "archived"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "p", "alias": "project_count"},
+      {"function": "max", "target": "p", "property": "updated_at", "alias": "latest_update"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_vulnerability_project_074_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_vulnerability_project_075_by_vulnerability_and_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+    "group_by_properties": [
+      {"node": "v", "property": "severity"},
+      {"node": "p", "property": "visibility_level"}
+    ],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "join_security_scan_project_076_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "s", "entity": "SecurityScan", "filters": {"latest": true}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "s", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_security_scan_pipeline_077_by_pipeline_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "s", "entity": "SecurityScan", "filters": {"latest": true}},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [{"type": "IN_PIPELINE", "from": "s", "to": "pipe"}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_security_scan_job_078_by_job_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "s", "entity": "SecurityScan", "filters": {"latest": true}},
+      {"id": "job", "entity": "Job"}
+    ],
+    "relationships": [{"type": "RAN_BY", "from": "s", "to": "job"}],
+    "group_by_properties": [{"node": "job", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "s", "alias": "scan_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_finding_project_079_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "f", "entity": "Finding", "filters": {"deduplicated": true}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_finding_scanner_080_by_scanner_vendor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "f", "entity": "Finding", "filters": {"deduplicated": true}},
+      {"id": "scanner", "entity": "VulnerabilityScanner"}
+    ],
+    "relationships": [{"type": "DETECTED_BY", "from": "f", "to": "scanner"}],
+    "group_by_properties": [{"node": "scanner", "property": "vendor"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_finding_pipeline_081_by_pipeline_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "f", "entity": "Finding", "filters": {"deduplicated": true}},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [{"type": "DETECTED_IN", "from": "f", "to": "pipe"}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_occurrence_project_082_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": {"op": "in", "value": ["critical", "high"]}}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "o", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_occurrence_vulnerability_083_by_vulnerability_state": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": {"op": "in", "value": ["critical", "high"]}}},
+      {"id": "v", "entity": "Vulnerability"}
+    ],
+    "relationships": [{"type": "OCCURRENCE_OF", "from": "o", "to": "v"}],
+    "group_by_properties": [{"node": "v", "property": "state"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_occurrence_identifier_084_by_identifier_type": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "o", "entity": "VulnerabilityOccurrence", "filters": {"severity": {"op": "in", "value": ["critical", "high"]}}},
+      {"id": "i", "entity": "VulnerabilityIdentifier"}
+    ],
+    "relationships": [{"type": "HAS_IDENTIFIER", "from": "o", "to": "i"}],
+    "group_by_properties": [{"node": "i", "property": "external_type"}],
+    "aggregations": [{"function": "count", "target": "o", "alias": "occurrence_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  },
+  "join_pipeline_project_085_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_job_pipeline_086_by_pipeline_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [{"type": "IN_PIPELINE", "from": "job", "to": "pipe"}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_job_project_087_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "job", "entity": "Job", "filters": {"status": "failed"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "job", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "failed_job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_pipeline_job_088_by_job_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "job", "entity": "Job"}
+    ],
+    "relationships": [{"type": "HAS_JOB", "from": "pipe", "to": "job"}],
+    "group_by_properties": [{"node": "job", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_pipeline_stage_089_by_stage_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "stage", "entity": "Stage"}
+    ],
+    "relationships": [{"type": "HAS_STAGE", "from": "pipe", "to": "stage"}],
+    "group_by_properties": [{"node": "stage", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "stage", "alias": "stage_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_stage_job_090_by_job_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "stage", "entity": "Stage", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "job", "entity": "Job"}
+    ],
+    "relationships": [{"type": "HAS_JOB", "from": "stage", "to": "job"}],
+    "group_by_properties": [{"node": "job", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "job", "alias": "job_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_merge_request_project_091_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_merge_request_pipeline_092_by_pipeline_status": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+      {"id": "pipe", "entity": "Pipeline"}
+    ],
+    "relationships": [{"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pipe"}],
+    "group_by_properties": [{"node": "pipe", "property": "status"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merge_request_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_work_item_project_093_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_work_item_group_094_by_group_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+      {"id": "g", "entity": "Group"}
+    ],
+    "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+    "group_by_properties": [{"node": "g", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "wi", "alias": "work_item_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_deployment_environment_095_by_environment_tier": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "dep", "entity": "Deployment", "filters": {"status": {"op": "in", "value": ["success", "failed", "running"]}}},
+      {"id": "env", "entity": "Environment"}
+    ],
+    "relationships": [{"type": "IN_ENVIRONMENT", "from": "dep", "to": "env"}],
+    "group_by_properties": [{"node": "env", "property": "tier"}],
+    "aggregations": [{"function": "count", "target": "dep", "alias": "deployment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_deployment_project_096_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "dep", "entity": "Deployment", "filters": {"status": {"op": "in", "value": ["success", "failed", "running"]}}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "dep", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "dep", "alias": "deployment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_environment_project_097_by_project_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "env", "entity": "Environment", "filters": {"state": "available"}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "env", "to": "p"}],
+    "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+    "aggregations": [{"function": "count", "target": "env", "alias": "environment_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_vulnerability_finding_098_by_finding_severity": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}},
+      {"id": "f", "entity": "Finding"}
+    ],
+    "relationships": [{"type": "HAS_FINDING", "from": "v", "to": "f"}],
+    "group_by_properties": [{"node": "f", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_security_scan_finding_099_by_finding_severity": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "s", "entity": "SecurityScan", "filters": {"latest": true}},
+      {"id": "f", "entity": "Finding"}
+    ],
+    "relationships": [{"type": "HAS_FINDING", "from": "s", "to": "f"}],
+    "group_by_properties": [{"node": "f", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "f", "alias": "finding_count"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "join_pipeline_project_100_by_status_and_visibility": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}},
+      {"id": "p", "entity": "Project"}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+    "group_by_properties": [
+      {"node": "pipe", "property": "status"},
+      {"node": "p", "property": "visibility_level"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "pipe", "alias": "pipeline_count"},
+      {"function": "avg", "target": "pipe", "property": "duration", "alias": "avg_duration"}
+    ],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 50
+  }
+}

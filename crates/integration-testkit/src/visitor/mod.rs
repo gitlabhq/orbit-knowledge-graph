@@ -27,8 +27,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use query_engine::compiler::input::{Input, QueryType};
-use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse};
-use serde_json::Value;
+use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
+use serde_json::{Map, Value};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MustInspect — drop-enforced result wrapper
@@ -179,6 +179,14 @@ impl ResponseView {
 
     pub fn edges(&self) -> &[GraphEdge] {
         &self.response.edges
+    }
+
+    pub fn group_columns(&self) -> &[GroupColumnDescriptor] {
+        self.response.group_columns.as_deref().unwrap_or(&[])
+    }
+
+    pub fn rows(&self) -> &[Map<String, Value>] {
+        self.response.rows.as_deref().unwrap_or(&[])
     }
 
     pub fn node_count(&self) -> usize {
@@ -415,6 +423,71 @@ impl ResponseView {
             "expected empty aggregation, got {} nodes: {:?}",
             self.response.nodes.len(),
             self.response.nodes
+        );
+        assert!(
+            self.rows().is_empty(),
+            "expected empty aggregation, got {} scalar rows: {:?}",
+            self.rows().len(),
+            self.rows()
+        );
+    }
+
+    /// Assert exact scalar row count for property-grouped aggregation responses.
+    pub fn assert_row_count(&self, expected: usize) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::Cursor);
+        assert_eq!(
+            self.rows().len(),
+            expected,
+            "expected {expected} scalar rows, got {}: {:?}",
+            self.rows().len(),
+            self.rows()
+        );
+    }
+
+    pub fn assert_group_column(&self, name: &str, node: &str, property: &str) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        assert!(
+            self.group_columns()
+                .iter()
+                .any(|col| col.name == name && col.node == node && col.property == property),
+            "expected group column {name}={node}.{property}, got {:?}",
+            self.group_columns()
+        );
+    }
+
+    pub fn assert_row_value_i64(&self, row_index: usize, key: &str, expected: i64) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        let actual = row
+            .get(key)
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
+            .unwrap_or_else(|| panic!("row {row_index} column '{key}' is not an integer: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "row {row_index} column '{key}': expected {expected}, got {actual}"
+        );
+    }
+
+    pub fn assert_row_value_str(&self, row_index: usize, key: &str, expected: &str) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        let actual = row
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("row {row_index} column '{key}' is not a string: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "row {row_index} column '{key}': expected {expected}, got {actual}"
         );
     }
 
@@ -847,6 +920,8 @@ pub(crate) mod tests {
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -861,6 +936,8 @@ pub(crate) mod tests {
             ],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -875,6 +952,8 @@ pub(crate) mod tests {
             ],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -893,6 +972,8 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -1046,6 +1127,8 @@ pub(crate) mod tests {
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 2, 1),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1067,6 +1150,8 @@ pub(crate) mod tests {
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 0, 0),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1193,6 +1278,8 @@ pub(crate) mod tests {
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         ResponseView::new(resp).assert_referential_integrity();
@@ -1304,6 +1391,8 @@ pub(crate) mod tests {
             nodes: vec![],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1336,6 +1425,8 @@ mod edge_coverage_tests {
                 make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -1397,6 +1488,8 @@ mod edge_coverage_tests {
             nodes: vec![],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1411,6 +1504,8 @@ mod edge_coverage_tests {
             nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
             edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1435,6 +1530,8 @@ mod edge_coverage_tests {
                 make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);

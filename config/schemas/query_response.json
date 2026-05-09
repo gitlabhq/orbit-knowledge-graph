@@ -32,6 +32,16 @@
       "type": "array",
       "items": { "$ref": "#/$defs/column" }
     },
+    "group_columns": {
+      "description": "Present for property-grouped aggregation queries. Describes each scalar group key column.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/group_column" }
+    },
+    "rows": {
+      "description": "Present for property-grouped aggregation queries. Each row contains group key values and aggregate values keyed by their output aliases.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/row" }
+    },
     "pagination": {
       "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
       "$ref": "#/$defs/pagination"
@@ -124,6 +134,32 @@
           "description": "Computed value for ungrouped (scalar) aggregations. Absent for grouped aggregations where values live on entity nodes.",
           "type": ["string", "integer", "number", "boolean", "null"]
         }
+      }
+    },
+    "group_column": {
+      "type": "object",
+      "required": ["name", "node", "property"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Output column name for the group key."
+        },
+        "node": {
+          "type": "string",
+          "description": "Node alias that owns the grouped property."
+        },
+        "property": {
+          "type": "string",
+          "description": "Ontology property used as the group key."
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "description": "Property-grouped aggregation row keyed by group and aggregate output aliases.",
+      "additionalProperties": {
+        "type": ["string", "integer", "number", "boolean", "null"]
       }
     },
     "pagination": {

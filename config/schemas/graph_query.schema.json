@@ -40,6 +40,15 @@
         "$ref": "#/$defs/Aggregation"
       }
     },
+    "group_by_properties": {
+      "type": "array",
+      "description": "Scalar properties to group aggregation rows by. Use this for buckets such as count vulnerabilities by severity. Cannot be combined with aggregation-level group_by node grouping.",
+      "default": [],
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/GroupByProperty"
+      }
+    },
     "path": {
       "$ref": "#/$defs/PathConfig",
       "description": "Path finding configuration. Required when query_type is 'path_finding'."
@@ -156,12 +165,28 @@
         "allOf": [
           {
             "if": {
-              "required": ["nodes"],
-              "properties": {
-                "nodes": {
-                  "minItems": 2
+              "allOf": [
+                {
+                  "required": ["nodes"],
+                  "properties": {
+                    "nodes": {
+                      "minItems": 2
+                    }
+                  }
+                },
+                {
+                  "anyOf": [
+                    { "not": { "required": ["group_by_properties"] } },
+                    {
+                      "properties": {
+                        "group_by_properties": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ]
                 }
-              }
+              ]
             },
             "then": {
               "properties": {
@@ -174,6 +199,23 @@
             }
           }
         ]
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "properties": {
+            "query_type": { "const": "aggregation" }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "group_by_properties": {
+            "maxItems": 0,
+            "description": "Only aggregation queries may group by scalar properties."
+          }
+        }
       }
     },
     {
@@ -554,7 +596,7 @@
         },
         "group_by": {
           "$ref": "#/$defs/Identifier",
-          "description": "Node variable to group by. Required for multi-node aggregation; optional for single-node scalar aggregation."
+          "description": "Node variable to group by. This must be a node selector id, not a property name. For scalar property buckets, use top-level group_by_properties."
         },
         "property": {
           "$ref": "#/$defs/Identifier",
@@ -574,6 +616,26 @@
       "then": {
         "required": ["property"]
       }
+    },
+    "GroupByProperty": {
+      "type": "object",
+      "description": "A scalar node property to group aggregation rows by.",
+      "required": ["node", "property"],
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Node variable whose property is used as the group key"
+        },
+        "property": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Property name to group by"
+        },
+        "alias": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Output column alias for this group key"
+        }
+      },
+      "additionalProperties": false
     },
     "AggFunction": {
       "type": "string",

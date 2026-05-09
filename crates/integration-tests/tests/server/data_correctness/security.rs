@@ -1253,6 +1253,145 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
     resp.assert_node_absent("Project", 1000);
 }
 
+/// Property grouping exposes scalar buckets instead of graph nodes, so it
+/// must apply the same role-gated Vulnerability scan before grouping. A
+/// Reporter-only user must not learn that Project 1000 has a critical vuln.
+pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_sees_no_rows(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by_properties": [{"node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_empty_aggregation();
+}
+
+/// The original #347 oracle pattern also applies to property grouping: a
+/// filtered scalar bucket must not reveal whether an unauthorized
+/// Vulnerability row matched the guessed severity.
+pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is_neutralized(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1000]},
+                {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by_properties": [{"node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_empty_aggregation();
+}
+
+/// Security Manager is the exact floor for Vulnerability. Property grouping
+/// should return only the authorized severity bucket, with no graph node IDs
+/// needed in the response.
+pub(super) async fn aggregation_vulnerability_property_grouping_security_manager_sees_bucket(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by_properties": [{"node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/101/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_row_count(1);
+    resp.assert_row_value_str(0, "severity", "high");
+    resp.assert_row_value_i64(0, "vuln_count", 1);
+}
+
+/// Compiled property-group SQL must still keep the Vulnerability alias in
+/// the role-scoped predicate path. This catches a future lowering change
+/// that selects `v.severity` but accidentally skips the SecurityPass filter.
+pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_reporter_paths(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by_properties": [{"node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("v.severity AS severity"),
+        "property group key must be selected from Vulnerability alias, got:\n{sql}"
+    );
+    assert!(
+        sql.contains("GROUP BY v.severity"),
+        "property group key must be grouped from Vulnerability alias, got:\n{sql}"
+    );
+
+    let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
+        matches!(
+            (&p.ch_type, &p.value),
+            (
+                gkg_utils::clickhouse::ChType::Bool,
+                serde_json::Value::Bool(false)
+            )
+        )
+    });
+    assert!(
+        has_false_bool,
+        "Vulnerability alias must compile to Bool(false) when no Security Manager paths exist, params: {:?}",
+        compiled.base.params
+    );
+}
+
 pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile(
     ctx: &TestContext,
 ) {

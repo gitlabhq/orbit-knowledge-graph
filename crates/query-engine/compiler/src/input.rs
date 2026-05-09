@@ -117,6 +117,8 @@ pub struct Input {
     pub relationships: Vec<InputRelationship>,
     #[serde(default)]
     pub aggregations: Vec<InputAggregation>,
+    #[serde(default)]
+    pub group_by_properties: Vec<InputGroupByProperty>,
     pub path: Option<InputPath>,
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
@@ -260,6 +262,10 @@ impl Input {
             && self.nodes.len() == 1
             && self.relationships.is_empty()
     }
+
+    pub fn uses_property_grouping(&self) -> bool {
+        !self.group_by_properties.is_empty()
+    }
 }
 
 impl Default for Input {
@@ -269,6 +275,7 @@ impl Default for Input {
             nodes: vec![],
             relationships: vec![],
             aggregations: vec![],
+            group_by_properties: vec![],
             path: None,
             neighbors: None,
             limit: default_limit(),
@@ -637,6 +644,38 @@ pub struct InputAggregation {
     pub property: Option<String>,
     #[serde(default)]
     pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct InputGroupByProperty {
+    pub node: String,
+    pub property: String,
+    #[serde(default)]
+    pub alias: Option<String>,
+}
+
+impl InputGroupByProperty {
+    pub fn output_name(&self, is_unique_property: bool) -> String {
+        self.alias.clone().unwrap_or_else(|| {
+            if is_unique_property {
+                self.property.clone()
+            } else {
+                format!("{}_{}", self.node, self.property)
+            }
+        })
+    }
+}
+
+pub fn group_by_property_output_names(groups: &[InputGroupByProperty]) -> Vec<String> {
+    let mut property_counts: HashMap<&str, usize> = HashMap::new();
+    for group in groups {
+        *property_counts.entry(group.property.as_str()).or_default() += 1;
+    }
+
+    groups
+        .iter()
+        .map(|group| group.output_name(property_counts[group.property.as_str()] == 1))
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]

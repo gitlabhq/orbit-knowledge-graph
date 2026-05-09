@@ -441,6 +441,10 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
         .aggregations
         .iter()
         .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
+    let is_group_by_property = input
+        .group_by_properties
+        .iter()
+        .any(|group| group.node == *alias);
     let is_agg_property_target = input.aggregations.iter().any(|a| {
         a.target.as_deref() == Some(alias.as_str())
             && a.property.is_some()
@@ -448,7 +452,7 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
-    if is_group_by || is_agg_property_target || is_order_by_target {
+    if is_group_by || is_group_by_property || is_agg_property_target || is_order_by_target {
         return HydrationStrategy::Join;
     }
 
