@@ -224,12 +224,21 @@ fn node_relationships(
 
 fn format_property(field: &Field) -> String {
     let nullable = if field.nullable { "?" } else { "" };
-    format!(
-        "{}:{}{}",
-        field.name,
-        field.data_type.to_string().to_lowercase(),
-        nullable
-    )
+    match &field.description {
+        Some(desc) => format!(
+            "{}:{}{} — {}",
+            field.name,
+            field.data_type.to_string().to_lowercase(),
+            nullable,
+            desc
+        ),
+        None => format!(
+            "{}:{}{}",
+            field.name,
+            field.data_type.to_string().to_lowercase(),
+            nullable
+        ),
+    }
 }
 
 #[cfg(test)]
