@@ -42,7 +42,7 @@ pub async fn compute_boundaries(
     };
 
     let sql = format!(
-        "SELECT quantilesExactExclusive({quantile_list})({partition_column}) \
+        "SELECT quantilesTDigest({quantile_list})({partition_column}) \
          FROM {source_table} \
          WHERE {scope_filter}"
     );
