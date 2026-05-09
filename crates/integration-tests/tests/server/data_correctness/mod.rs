@@ -164,6 +164,10 @@ async fn data_correctness() {
         security::search_multi_path_returns_union_of_scopes,
         security::search_scoped_mr_excludes_other_namespaces,
         security::search_with_filter_respects_scope,
+        security::search_traversal_path_filter_returns_matching_descendants,
+        security::search_traversal_path_filter_outside_scope_rejects_at_compile,
+        security::relationship_traversal_path_filter_returns_matching_edges,
+        security::relationship_traversal_path_filter_outside_scope_rejects_at_compile,
         // security: traversal path scoping for path finding
         security::path_finding_scoped_excludes_paths_through_other_namespaces,
         security::path_finding_multi_path_scope_finds_both,
@@ -212,6 +216,8 @@ async fn data_correctness() {
         security::aggregation_vulnerability_developer_everywhere_sees_all_counts,
         security::search_vulnerability_reporter_only_returns_empty,
         security::aggregation_vulnerability_filter_oracle_is_neutralized,
+        security::aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile,
+        security::aggregation_vulnerability_traversal_path_filter_security_manager_counts,
         security::aggregation_vulnerability_sql_drops_reporter_paths,
         // cursor pagination
         pagination::cursor_first_page,

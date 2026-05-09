@@ -5,7 +5,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::constants::NODE_RESERVED_COLUMNS;
+use crate::constants::{NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN};
 use crate::{Ontology, OntologyError};
 
 impl Ontology {
@@ -107,7 +107,7 @@ impl Ontology {
                     .chain(
                         node.fields
                             .iter()
-                            .filter(|f| f.filterable)
+                            .filter(|f| f.filterable || f.name == TRAVERSAL_PATH_COLUMN)
                             .map(|f| Value::String(f.name.clone())),
                     )
                     .collect();

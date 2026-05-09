@@ -142,7 +142,7 @@ impl SecurityContext {
             .collect()
     }
 
-    fn validate_traversal_path(path: &str) -> Result<()> {
+    pub(crate) fn validate_traversal_path(path: &str) -> Result<()> {
         if !TRAVERSAL_PATH_REGEX.is_match(path) {
             return Err(QueryError::Security(format!(
                 "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
