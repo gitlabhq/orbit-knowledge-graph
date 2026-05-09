@@ -893,19 +893,30 @@ fn run_sql(
     format: SqlFormat,
     db: Option<PathBuf>,
 ) -> Result<()> {
-    use std::io::Read;
+    use std::io::{IsTerminal, Read};
+
+    let read_stdin = || -> Result<String> {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("failed to read SQL from stdin")?;
+        Ok(buf)
+    };
 
     let sql = match (query.as_deref(), file) {
-        (Some("-"), _) | (None, None) => {
-            let mut buf = String::new();
-            std::io::stdin()
-                .read_to_string(&mut buf)
-                .context("failed to read SQL from stdin")?;
-            buf
-        }
-        (Some(q), _) => q.to_string(),
+        (Some("-"), _) => read_stdin()?,
+        (Some(q), None) => q.to_string(),
         (None, Some(path)) => std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?,
+        (None, None) => {
+            if std::io::stdin().is_terminal() {
+                anyhow::bail!(
+                    "no SQL provided. Pass a query, --file PATH, or pipe via stdin (`-`)."
+                );
+            }
+            read_stdin()?
+        }
+        (Some(_), Some(_)) => unreachable!("clap conflicts_with"),
     };
 
     let sql = sql.trim();
@@ -926,7 +937,11 @@ fn run_sql(
 
     let client = duckdb_client::DuckDbClient::open_read_only(&db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
-    let batches = client.query_arrow(sql).context("query failed")?;
+    let batches = client.query_arrow(sql).with_context(|| {
+        let preview: String = sql.chars().take(120).collect();
+        let suffix = if sql.chars().count() > 120 { "…" } else { "" };
+        format!("query failed: {preview}{suffix}")
+    })?;
 
     let stdout = std::io::stdout().lock();
     match format {
