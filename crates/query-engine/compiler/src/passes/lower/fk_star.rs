@@ -2,6 +2,7 @@
 //! Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
 
 use ontology::constants::*;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::constants::*;
@@ -9,11 +10,12 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_dedup_subquery, collect_dedup_columns, emit_filter_subquery,
-    emit_node_join_with_narrowing, node_select_columns,
+    NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing,
+    fk_values_from_candidate_scan, latest_node_predicates, node_ids_from_candidate_scan,
+    node_select_columns,
 };
 use crate::passes::plan::*;
-use crate::passes::shared::{deleted_false, id_list_predicate};
+use crate::passes::shared::id_list_predicate;
 
 pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
@@ -23,30 +25,12 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
     })?;
 
-    // Build center dedup columns from pre-computed list + FK columns.
-    let mut center_cols = collect_dedup_columns(center_alias, center_np);
-    // Add FK columns for each hop (not covered by dedup_columns).
-    for hop in &plan.hops {
-        if let Some(ref fk) = hop.fk
-            && !center_cols
-                .iter()
-                .any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str()))
-        {
-            center_cols.push(SelectExpr::col(center_alias, fk.fk_column.as_str()));
-        }
-    }
-
-    let center_dedup = build_dedup_subquery(center_alias, center_table, center_cols, center_np);
-
-    let mut from = TableRef::Subquery {
-        query: Box::new(center_dedup),
-        alias: center_alias.to_string(),
-    };
-
-    // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
-    let mut where_parts = vec![deleted_false(center_alias)];
+    let mut from = TableRef::scan_final(center_table, center_alias);
+    let mut where_parts = latest_node_predicates(center_alias, center_np);
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
+    let mut candidate_ctes = HashMap::new();
+    let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
     // Elevated-access center node: emit a FilterOnly CTE so SecurityPass
     // can inject the stricter role-gated startsWith filter.
@@ -57,6 +41,63 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             DEFAULT_PRIMARY_KEY,
             &mut ctes,
         )?);
+    }
+
+    emit_join_target_candidate_ctes(
+        plan,
+        &mut ctes,
+        &mut candidate_ctes,
+        &candidate_extra_predicates,
+    )?;
+
+    for hop in &plan.hops {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+        let fk_alias = if fk.fk_node == center_alias {
+            center_alias.to_string()
+        } else {
+            fk.fk_node.clone()
+        };
+        if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
+            candidate_extra_predicates
+                .entry(fk_alias)
+                .or_default()
+                .push(Expr::InSubquery {
+                    expr: Box::new(Expr::col(&fk.fk_node, &fk.fk_column)),
+                    cte_name: cte_name.clone(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                });
+        }
+    }
+
+    let joins_latest_node = plan.hops.iter().any(|hop| {
+        hop.fk
+            .as_ref()
+            .and_then(|fk| plan.nodes.get(&fk.target_node))
+            .is_some_and(|np| np.fk_needs_join)
+    });
+    if joins_latest_node && candidate_selective(center_np, &candidate_extra_predicates) {
+        let cte_name = candidate_cte_name(center_alias);
+        ctes.push(Cte::new(
+            &cte_name,
+            node_ids_from_candidate_scan(
+                center_alias,
+                center_table,
+                center_np,
+                candidate_extra_predicates
+                    .get(center_alias)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
+        ));
+        candidate_ctes.insert(center_alias.to_string(), cte_name.clone());
+        where_parts.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(center_alias, DEFAULT_PRIMARY_KEY)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        });
     }
 
     // Each hop: target node connected via FK column.
@@ -86,38 +127,29 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
 
         // Target hydration — use pre-resolved fk_needs_join.
         if target_np.fk_needs_join {
-            // Narrow the target's dedup scan to only IDs the center
+            // Narrow the target's latest-row scan to only IDs the center
             // actually references via its FK column. Without this, the
             // target scans the full org (e.g., all Jobs) just to join
             // on the handful of FK values from the center.
-            let narrow = if target_np.filters.is_empty()
+            let narrow = if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
+                Some(NarrowSource::Cte(cte_name.clone()))
+            } else if target_np.filters.is_empty()
                 && target_np.node_ids.is_empty()
                 && target_np.id_range.is_none()
             {
-                // Build a lightweight CTE that projects the FK column
-                // from a dedup of the center table. This is the same
-                // scan the center does but only selects the FK column.
                 let narrow_name = format!("_narrow_{}", fk.target_node);
-                let narrow_dedup = build_dedup_subquery(
-                    center_alias,
-                    center_table,
-                    vec![
-                        SelectExpr::col(center_alias, &fk.fk_column),
-                        SelectExpr::col(center_alias, DELETED_COLUMN),
-                    ],
-                    center_np,
-                );
                 ctes.push(Cte::new(
                     &narrow_name,
-                    Query {
-                        select: vec![SelectExpr::new(
-                            Expr::col(center_alias, &fk.fk_column),
-                            DEFAULT_PRIMARY_KEY,
-                        )],
-                        from: TableRef::subquery(narrow_dedup, center_alias),
-                        where_clause: Some(deleted_false(center_alias)),
-                        ..Default::default()
-                    },
+                    fk_values_from_candidate_scan(
+                        center_alias,
+                        center_table,
+                        &fk.fk_column,
+                        center_np,
+                        candidate_extra_predicates
+                            .get(center_alias)
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
                 ));
                 Some(NarrowSource::Cte(narrow_name))
             } else {
@@ -219,4 +251,85 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         select: selects,
         ctes,
     })
+}
+
+fn candidate_cte_name(alias: &str) -> String {
+    format!("_candidate_{alias}")
+}
+
+fn candidate_selective(np: &NodePlan, extra_predicates: &HashMap<String, Vec<Expr>>) -> bool {
+    !np.filters.is_empty()
+        || !np.node_ids.is_empty()
+        || np.id_range.is_some()
+        || extra_predicates
+            .get(&np.alias)
+            .is_some_and(|predicates| !predicates.is_empty())
+}
+
+fn fk_candidate_extra_predicates(plan: &Plan) -> Result<HashMap<String, Vec<Expr>>> {
+    let mut predicates: HashMap<String, Vec<Expr>> = HashMap::new();
+    for hop in &plan.hops {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
+            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
+        })?;
+        if target_np.node_ids.is_empty() {
+            continue;
+        }
+        let fk_alias = fk.fk_node.clone();
+        predicates
+            .entry(fk_alias)
+            .or_default()
+            .push(id_list_predicate(
+                &fk.fk_node,
+                &fk.fk_column,
+                &target_np.node_ids,
+            ));
+    }
+    Ok(predicates)
+}
+
+fn emit_join_target_candidate_ctes(
+    plan: &Plan,
+    ctes: &mut Vec<Cte>,
+    candidate_ctes: &mut HashMap<String, String>,
+    candidate_extra_predicates: &HashMap<String, Vec<Expr>>,
+) -> Result<()> {
+    let mut emitted = HashSet::new();
+    for hop in &plan.hops {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
+            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
+        })?;
+        if !target_np.fk_needs_join || !emitted.insert(fk.target_node.clone()) {
+            continue;
+        }
+        if !candidate_selective(target_np, candidate_extra_predicates) {
+            continue;
+        }
+        let table = target_np.table.as_deref().ok_or_else(|| {
+            QueryError::Lowering(format!("FK target '{}' has no table", fk.target_node))
+        })?;
+        let cte_name = candidate_cte_name(&fk.target_node);
+        ctes.push(Cte::new(
+            &cte_name,
+            node_ids_from_candidate_scan(
+                &fk.target_node,
+                table,
+                target_np,
+                candidate_extra_predicates
+                    .get(&fk.target_node)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
+        ));
+        candidate_ctes.insert(fk.target_node.clone(), cte_name);
+    }
+    Ok(())
 }

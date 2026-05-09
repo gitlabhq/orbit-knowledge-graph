@@ -118,8 +118,8 @@ impl DuckDbState {
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Standard ClickHouse compilation pipeline. Edge-chain-first lowering
-/// produces flat edge-chain JOINs with inline dedup. No CTEs for the
-/// common case.
+/// produces flat edge-chain JOINs with node-table `FINAL` reads. No CTEs for
+/// the common case.
 ///
 /// ```text
 /// JSON → Validate → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
@@ -162,7 +162,7 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
-/// Dedup is baked into the lowerer (LIMIT 1 BY + _deleted=false).
+/// Latest-row handling is baked into the lowerer (`FINAL` + `_deleted=false`).
 ///
 /// ```text
 /// Input → Restrict → Plan → Lower → Enforce → Settings → Codegen

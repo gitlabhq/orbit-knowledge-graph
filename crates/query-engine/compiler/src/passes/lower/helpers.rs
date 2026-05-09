@@ -1,4 +1,4 @@
-//! Shared emit helpers: dedup, columns, predicates, node hydration, edge predicates.
+//! Shared emit helpers: latest-row scans, columns, predicates, node hydration, edge predicates.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -12,45 +12,46 @@ use crate::input::*;
 
 use crate::passes::plan::*;
 use crate::passes::shared::{
-    dedup_query, dedup_subquery, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
-    id_range_predicate, rel_kind_filter, rel_kind_filter_values,
+    deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate, id_range_predicate,
+    rel_kind_filter, rel_kind_filter_values,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared primitives: dedup, columns, predicates
+// Shared primitives: latest-row scans, columns, predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build a dedup subquery with user filters pushed inside for prewhere.
-///
-/// Filters, node_ids, and id_range go INTO the scan so ClickHouse can
-/// use them as prewhere predicates to skip granules. The caller applies
-/// `_deleted=false` OUTSIDE (after LIMIT 1 BY) so a deleted latest
-/// version correctly suppresses the entity.
-pub(super) fn build_dedup_subquery(
-    alias: &str,
-    table: &str,
-    select: Vec<SelectExpr>,
-    np: &NodePlan,
-) -> Query {
-    let mut scan_where = Vec::new();
+/// Predicates applied after `FINAL` has resolved each node's latest row.
+pub(super) fn latest_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    let mut predicates = Vec::new();
     for (prop, filter) in &np.filters {
-        scan_where.push(filter_to_expr(alias, prop, filter));
+        predicates.push(filter_to_expr(alias, prop, filter));
     }
     if !np.node_ids.is_empty() {
-        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+        predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
     }
     if let Some(ref range) = np.id_range {
-        scan_where.push(id_range_predicate(alias, range));
+        predicates.push(id_range_predicate(alias, range));
     }
-    dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY)
+    predicates.push(deleted_false(alias));
+    predicates
 }
 
-/// Build SelectExpr list from the pre-computed dedup_columns on NodePlan.
-pub(super) fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
-    np.dedup_columns
-        .iter()
-        .map(|col| SelectExpr::col(alias, col.as_str()))
-        .collect()
+/// Predicates for a candidate-id prefilter. These run before `FINAL`, so they
+/// may over-select stale rows, but the outer latest-row scan re-applies the
+/// same predicates after `FINAL`.
+pub(super) fn candidate_node_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    let mut predicates = Vec::new();
+    for (prop, filter) in &np.filters {
+        predicates.push(filter_to_expr(alias, prop, filter));
+    }
+    if !np.node_ids.is_empty() {
+        predicates.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+    }
+    if let Some(ref range) = np.id_range {
+        predicates.push(id_range_predicate(alias, range));
+    }
+    predicates.push(deleted_false(alias));
+    predicates
 }
 
 /// WHERE predicates for a node: filters + _deleted=false.
@@ -71,8 +72,8 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Narrowing source for a node's dedup scan: a `_narrow_*` CTE referenced
-/// from inside the dedup subquery's WHERE clause.
+/// Narrowing source for a node's latest-row scan: a `_narrow_*` CTE referenced
+/// by the node scan's WHERE clause.
 pub(super) enum NarrowSource {
     Cte(String),
 }
@@ -95,8 +96,7 @@ pub(super) fn emit_node_join_with_narrowing(
     )
 }
 
-/// JOIN a node's dedup subquery into the FROM tree.
-///
+/// JOIN a node's latest-row `FINAL` scan into the FROM tree.
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -111,22 +111,35 @@ fn emit_node_join_inner(
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
-    let dedup_cols = collect_dedup_columns(alias, np);
-    let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols, np);
+    let in_predicate = narrow.map(|NarrowSource::Cte(cte_name)| Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+        cte_name,
+        column: DEFAULT_PRIMARY_KEY.to_string(),
+    });
 
-    // IN-narrowing: restrict the dedup scan to IDs from a _narrow_* CTE.
-    if let Some(NarrowSource::Cte(cte_name)) = narrow {
-        let in_pred = Expr::InSubquery {
-            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-            cte_name,
-            column: DEFAULT_PRIMARY_KEY.to_string(),
-        };
-        dedup_query.where_clause = match dedup_query.where_clause {
-            Some(existing) => Some(Expr::and(existing, in_pred)),
-            None => Some(in_pred),
-        };
+    let joined = TableRef::join(
+        JoinType::Inner,
+        from,
+        TableRef::scan_final(table, alias),
+        node_join_condition(alias, edge_alias, edge_col, use_traversal_path_join, np),
+    );
+
+    let selects = node_select_columns(alias, np);
+    let mut wheres = latest_node_predicates(alias, np);
+    if let Some(in_predicate) = in_predicate {
+        wheres.push(in_predicate);
     }
 
+    Ok((joined, selects, wheres))
+}
+
+fn node_join_condition(
+    alias: &str,
+    edge_alias: &str,
+    edge_col: &str,
+    use_traversal_path_join: bool,
+    np: &NodePlan,
+) -> Expr {
     let mut on = Expr::eq(
         Expr::col(alias, DEFAULT_PRIMARY_KEY),
         Expr::col(edge_alias, edge_col),
@@ -140,23 +153,7 @@ fn emit_node_join_inner(
             ),
         );
     }
-
-    let joined = TableRef::join(
-        JoinType::Inner,
-        from,
-        TableRef::Subquery {
-            query: Box::new(dedup_query),
-            alias: alias.to_string(),
-        },
-        on,
-    );
-
-    let selects = node_select_columns(alias, np);
-    // Only _deleted=false in the outer WHERE; user filters are already
-    // inside the dedup scan.
-    let wheres = vec![deleted_false(alias)];
-
-    Ok((joined, selects, wheres))
+    on
 }
 
 pub(super) fn emit_filter_subquery(
@@ -172,43 +169,68 @@ pub(super) fn emit_filter_subquery(
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    let (from, deleted) = dedup_subquery(
-        alias,
-        table,
-        vec![
-            SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
-            SelectExpr::col(alias, DELETED_COLUMN),
-        ],
-        {
-            let mut sw = Vec::new();
-            for (prop, filter) in &np.filters {
-                sw.push(filter_to_expr(alias, prop, filter));
-            }
-            if !np.node_ids.is_empty() {
-                sw.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-            }
-            if let Some(ref range) = np.id_range {
-                sw.push(id_range_predicate(alias, range));
-            }
-            sw
+    ctes.push(Cte::new(
+        &cte_name,
+        Query {
+            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+            from: TableRef::scan_final(table, alias),
+            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+            ..Default::default()
         },
-        DEFAULT_PRIMARY_KEY,
-    );
-
-    let inner = Query {
-        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        from,
-        where_clause: Some(deleted),
-        ..Default::default()
-    };
-
-    ctes.push(Cte::new(&cte_name, inner));
+    ));
 
     Ok(vec![Expr::InSubquery {
         expr: Box::new(Expr::col(edge_alias, edge_col)),
         cte_name,
         column: DEFAULT_PRIMARY_KEY.to_string(),
     }])
+}
+
+pub(super) fn node_ids_from_final_scan(alias: &str, table: &str, np: &NodePlan) -> Query {
+    Query {
+        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+        from: TableRef::scan_final(table, alias),
+        where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+        ..Default::default()
+    }
+}
+
+pub(super) fn node_ids_from_candidate_scan(
+    alias: &str,
+    table: &str,
+    np: &NodePlan,
+    extra_predicates: Vec<Expr>,
+) -> Query {
+    let mut predicates = candidate_node_predicates(alias, np);
+    predicates.extend(extra_predicates);
+    Query {
+        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+        distinct: true,
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(predicates),
+        ..Default::default()
+    }
+}
+
+pub(super) fn fk_values_from_candidate_scan(
+    alias: &str,
+    table: &str,
+    fk_column: &str,
+    np: &NodePlan,
+    extra_predicates: Vec<Expr>,
+) -> Query {
+    let mut predicates = candidate_node_predicates(alias, np);
+    predicates.extend(extra_predicates);
+    Query {
+        select: vec![SelectExpr::new(
+            Expr::col(alias, fk_column),
+            DEFAULT_PRIMARY_KEY,
+        )],
+        distinct: true,
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(predicates),
+        ..Default::default()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -337,27 +359,12 @@ pub(super) fn emit_filter_narrowing(
         let cte_name = format!("_filter_{node_alias}");
         // Create the CTE once per node for selective Join nodes.
         // FilterOnly CTEs are created by emit_filter_subquery in the
-        // second loop (it uses dedup_subquery which handles the full
-        // filter/node_ids/id_range logic correctly).
+        // second loop (it handles the full filter/node_ids/id_range logic).
         if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
             let table = np.table.as_deref().unwrap_or("");
-            let dedup = build_dedup_subquery(
-                node_alias,
-                table,
-                vec![
-                    SelectExpr::col(node_alias, DEFAULT_PRIMARY_KEY),
-                    SelectExpr::col(node_alias, DELETED_COLUMN),
-                ],
-                np,
-            );
             ctes.push(Cte::new(
                 &cte_name,
-                Query {
-                    select: vec![SelectExpr::col(node_alias, DEFAULT_PRIMARY_KEY)],
-                    from: TableRef::subquery(dedup, node_alias),
-                    where_clause: Some(deleted_false(node_alias)),
-                    ..Default::default()
-                },
+                node_ids_from_final_scan(node_alias, table, np),
             ));
         }
         where_parts.push(Expr::InSubquery {

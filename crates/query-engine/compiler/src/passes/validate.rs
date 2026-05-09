@@ -931,13 +931,7 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
-    fn check_skip_dedup(&self, input: &Input) -> Result<()> {
-        if input.options.skip_dedup && input.query_type == QueryType::Aggregation {
-            return Err(QueryError::ReferenceError(
-                "skip_dedup is not allowed for aggregation queries (would produce incorrect counts)"
-                    .to_string(),
-            ));
-        }
+    fn check_skip_dedup(&self, _input: &Input) -> Result<()> {
         Ok(())
     }
 
@@ -2443,7 +2437,7 @@ mod tests {
     }
 
     #[test]
-    fn skip_dedup_rejected_for_aggregation() {
+    fn skip_dedup_accepted_for_aggregation_compatibility() {
         let ont = test_ontology();
         let validator = Validator::new(&ont);
         let input = parse_input(
@@ -2460,10 +2454,9 @@ mod tests {
         )
         .unwrap();
 
-        let err = validator.check_references(&input).unwrap_err();
         assert!(
-            err.to_string().contains("skip_dedup"),
-            "should reject skip_dedup for aggregation, got: {err}"
+            validator.check_references(&input).is_ok(),
+            "skip_dedup should be accepted and ignored for aggregation"
         );
     }
 
@@ -2487,7 +2480,7 @@ mod tests {
 
         assert!(
             validator.check_references(&input).is_ok(),
-            "skip_dedup should be allowed for traversal"
+            "skip_dedup should be accepted and ignored for traversal"
         );
     }
 }

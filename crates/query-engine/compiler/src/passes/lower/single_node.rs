@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
-use super::helpers::{build_dedup_subquery, node_select_columns};
+use super::helpers::{latest_node_predicates, node_select_columns};
 use crate::passes::plan::*;
 
 pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
@@ -19,18 +19,8 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
-    let from = TableRef::Subquery {
-        query: Box::new(build_dedup_subquery(
-            alias,
-            table,
-            vec![SelectExpr::star()],
-            np,
-        )),
-        alias: alias.to_string(),
-    };
-
-    // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
-    let where_parts = vec![crate::passes::shared::deleted_false(alias)];
+    let from = TableRef::scan_final(table, alias);
+    let where_parts = latest_node_predicates(alias, np);
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {

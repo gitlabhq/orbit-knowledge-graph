@@ -1,7 +1,7 @@
 //! Hydration emit: fetch node properties for a set of IDs.
 //!
-//! Produces a UNION ALL of per-entity dedup scans with inline
-//! `LIMIT 1 BY id` dedup and `_deleted=false` filtering.
+//! Produces a UNION ALL of per-entity latest-row scans with `FINAL` and
+//! `_deleted=false` filtering.
 //!
 //! When the base query provided traversal paths, each arm injects a
 //! `startsWith(traversal_path, tp)` predicate so ClickHouse can prune

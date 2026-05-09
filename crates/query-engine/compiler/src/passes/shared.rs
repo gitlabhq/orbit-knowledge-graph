@@ -266,25 +266,27 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     }
 }
 
-/// Build a dedup scan: SELECT columns FROM table WHERE filters ORDER BY version DESC LIMIT 1 BY pk.
+/// Build a latest-row scan over a ReplacingMergeTree node table.
+///
+/// `FINAL` applies the table engine's merge semantics at read time, so filters
+/// are evaluated against the latest row rather than historical matching
+/// versions.
 pub fn dedup_query(
     alias: &str,
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
-    pk: &str,
+    _pk: &str,
 ) -> Query {
     Query {
         select,
-        from: TableRef::scan(table, alias),
+        from: TableRef::scan_final(table, alias),
         where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr::desc(Expr::col(alias, VERSION_COLUMN))],
-        limit_by: Some((1, vec![Expr::col(alias, pk)])),
         ..Default::default()
     }
 }
 
-/// Dedup scan wrapped as a subquery TableRef + outer `_deleted=false` filter.
+/// Latest-row scan wrapped as a subquery TableRef + outer `_deleted=false` filter.
 pub fn dedup_subquery(
     alias: &str,
     table: &str,

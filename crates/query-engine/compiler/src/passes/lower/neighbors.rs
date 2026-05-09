@@ -158,7 +158,7 @@ pub fn emit_neighbors(
 
         let mut from: TableRef = edge_table_scan(&edge_table, edge_alias);
 
-        // Non-denorm filters: inline dedup JOIN instead of CTE.
+        // Non-denorm filters: inline latest-row JOIN instead of CTE.
         if has_non_denorm {
             let (center_subq, deleted_filter) = build_center_dedup(
                 &center_id,
@@ -188,12 +188,13 @@ pub fn emit_neighbors(
             from = TableRef::join(
                 JoinType::Inner,
                 from,
-                TableRef::scan(&center_table, &center_id),
+                TableRef::scan_final(&center_table, &center_id),
                 Expr::eq(
                     Expr::col(edge_alias, center_edge_col),
                     Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
                 ),
             );
+            where_parts.push(deleted_false(&center_id));
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
                 redaction_id_column(&center_id),

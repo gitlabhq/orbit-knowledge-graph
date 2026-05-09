@@ -67,28 +67,31 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).
+- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions when a latest-row node scan needs a derived table.
+- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`, then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
 These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The compiler's `DeduplicatePass` (`crates/query-engine/compiler/src/passes/deduplicate.rs`) ensures query-time correctness:
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads with `FINAL`:
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
-| Search (single-node) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Preserves LIMIT pushdown; filters verified against latest version in HAVING |
-| `_nf_*` CTEs (node filters) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | ID-only output; hash aggregate cheaper than sort |
-| Hydration (UNION ALL arms) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Excludes deleted rows and stale properties |
-| Main query node scans | `ORDER BY _version DESC LIMIT 1 BY id` subquery | Multi-column output where argMax wrapping is impractical |
+| Search (single-node) | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
+| Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
+| FK candidate CTEs | Non-`FINAL` `SELECT DISTINCT id` or FK values plus outer `FINAL` recheck | Lets ClickHouse use selective filters before the expensive latest-row scan while preserving correctness through the outer recheck |
+| Hydration (UNION ALL arms) | Node table scan with `FINAL` | Excludes deleted rows and stale properties for dynamically hydrated entities |
+| Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and search semantics consistent |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
 
-Filter placement rules for `LIMIT 1 BY` subqueries:
+Filter placement rules for node `FINAL` scans:
 
-- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are pushed inside the subquery for primary key index pruning. These columns are invariant across row versions.
-- **Mutable filters** (`state`, `status`, `draft`) stay outside the subquery and evaluate against the deduplicated latest-version row, preventing stale version matches.
-- **`_deleted = false`** always stays outside (or is encoded in the `argMaxIfOrNull` condition for argMax strategies).
+- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are emitted on the `FINAL` scan so ClickHouse can still use primary-key pruning where supported.
+- **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
+- **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
+- **Candidate CTEs** are allowed to over-select because they are only a performance prefilter. The outer `FINAL` scan always re-applies the filters and `_deleted = false` before rows can affect traversal or aggregation results.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 

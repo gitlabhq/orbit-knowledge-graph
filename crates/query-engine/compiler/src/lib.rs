@@ -970,13 +970,12 @@ mod tests {
             !sql.contains("_cascade_u") && !sql.contains("_nf_u"),
             "User-aliased CTEs must be dropped, got:\n{sql}"
         );
-        // FK elision replaces AUTHORED edge scan with a direct FK join
-        // (mr.author_id). The User node is pruned but the FK column
-        // still participates in the query shape.
+        // Direct FINAL scans do not need to project unused FK columns just to
+        // feed a dedup subquery; the pruned User node should leave no user
+        // table or CTE artifacts behind.
         assert!(
-            sql.contains("mr.author_id") || sql.contains("author_id"),
-            "AUTHORED FK column must survive in the query (FK elision), \
-             got:\n{sql}"
+            !sql.contains("author_id"),
+            "unused AUTHORED FK column should not be projected, got:\n{sql}"
         );
         // Project + MR work products survive.
         assert!(
@@ -1491,14 +1490,14 @@ mod tests {
     }
 
     #[test]
-    fn skip_dedup_removes_limit_by_but_keeps_deleted_filter() {
+    fn skip_dedup_is_ignored_and_keeps_latest_row_filtering() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
+                    "title": {"op": "contains", "value": "fix"}
                 }}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
@@ -1510,12 +1509,217 @@ mod tests {
         let sql = compiled.base.render();
 
         assert!(
+            sql.contains(" FINAL"),
+            "skip_dedup is ignored; node reads should still use FINAL, got:\n{sql}"
+        );
+        assert!(
             !sql.contains("LIMIT 1 BY"),
-            "skip_dedup should eliminate LIMIT 1 BY, got:\n{sql}"
+            "latest-row reads should not use LIMIT 1 BY, got:\n{sql}"
         );
         assert!(
             sql.contains("_deleted"),
-            "skip_dedup should still filter by _deleted, got:\n{sql}"
+            "latest-row reads should still filter by _deleted, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn node_table_reads_use_final_for_latest_rows() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let queries = [
+            (
+                "traversal",
+                r#"{
+                    "query_type": "traversal",
+                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                    "limit": 10
+                }"#,
+            ),
+            (
+                "aggregation",
+                r#"{
+                    "query_type": "aggregation",
+                    "nodes": [
+                        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                        {"id": "p", "entity": "Project"}
+                    ],
+                    "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+                    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mrs"}],
+                    "limit": 10
+                }"#,
+            ),
+            (
+                "path_finding",
+                r#"{
+                    "query_type": "path_finding",
+                    "nodes": [
+                        {"id": "start", "entity": "User", "filters": {"username": "root"}},
+                        {"id": "end", "entity": "Project", "node_ids": [100]}
+                    ],
+                    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
+                             "rel_types": ["MEMBER_OF", "CONTAINS"]},
+                    "limit": 10
+                }"#,
+            ),
+            (
+                "neighbors",
+                r#"{
+                    "query_type": "neighbors",
+                    "node": {"id": "mr", "entity": "MergeRequest", "filters": {"title": {"op": "contains", "value": "fix"}}},
+                    "neighbors": {"node": "mr", "direction": "both"},
+                    "limit": 10
+                }"#,
+            ),
+        ];
+
+        for (name, query) in queries {
+            let compiled = compile(query, &ontology, &security_ctx())
+                .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
+            let sql = compiled.base.render();
+            assert!(
+                sql.contains(" FINAL"),
+                "{name} should use FINAL for node-table reads, got:\n{sql}"
+            );
+            assert!(
+                !sql.contains("LIMIT 1 BY"),
+                "{name} should not use manual LIMIT BY dedup, got:\n{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn fk_star_joined_nodes_use_candidate_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed", "source": "push"}},
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [
+                {"type": "HAS_JOB", "from": "pipe", "to": "j"},
+                {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains(
+                "_candidate_pipe AS (SELECT DISTINCT pipe.id AS id FROM gl_pipeline AS pipe WHERE"
+            ),
+            "joined target should get a non-FINAL candidate CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_candidate_j AS (SELECT DISTINCT j.id AS id FROM gl_job AS j WHERE"),
+            "center should get a non-FINAL candidate CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FROM gl_job AS j FINAL INNER JOIN gl_pipeline AS pipe FINAL"),
+            "outer latest-row reads should still use FINAL, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
+                && sql.contains("pipe.id IN (SELECT id FROM _candidate_pipe)"),
+            "candidate CTE should narrow both center FK values and target ids, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "j", "group_by": "j", "alias": "fail_count"}],
+            "limit": 20
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("_candidate_"),
+            "filter-only FK predicates should keep the direct FINAL scan, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FROM gl_job AS j FINAL"),
+            "latest-row read should still use FINAL, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_star_unfiltered_join_narrow_uses_candidate_scan() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
+                {"id": "j2", "entity": "Job"},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [
+                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
+                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"),
+            "unfiltered joined target should be narrowed by a non-FINAL candidate scan, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"),
+            "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FROM gl_job AS j1 FINAL INNER JOIN gl_job AS j2 FINAL"),
+            "outer source and joined target should still use FINAL, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn hydration_uses_final_for_latest_rows() {
+        use std::sync::Arc;
+
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let input = Input {
+            query_type: QueryType::Hydration,
+            nodes: vec![InputNode {
+                id: "mr".into(),
+                entity: Some("MergeRequest".into()),
+                table: Some("gl_merge_request".into()),
+                columns: Some(ColumnSelection::List(vec!["id".into(), "state".into()])),
+                node_ids: vec![1],
+                has_traversal_path: true,
+                traversal_paths: vec!["1/".into()],
+                ..Default::default()
+            }],
+            limit: 10,
+            ..Default::default()
+        };
+
+        let compiled = compile_input(input, &ontology, &security_ctx())
+            .expect("hydration input should compile");
+        let sql = compiled.base.render();
+        assert!(
+            sql.contains(" FINAL"),
+            "hydration should use FINAL for node-table reads, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("LIMIT 1 BY"),
+            "hydration should not use manual LIMIT BY dedup, got:\n{sql}"
         );
     }
 

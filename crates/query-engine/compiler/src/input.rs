@@ -36,13 +36,9 @@ pub struct QueryOptions {
     /// org members with Reporter+ access).
     #[serde(default)]
     pub include_debug_sql: bool,
-    /// When true, skips the ReplacingMergeTree deduplication pass for node
-    /// tables. Rows are still filtered by `_deleted = false` but stale
-    /// duplicates from un-merged parts may appear in results.
-    ///
-    /// Not allowed for aggregation queries (would produce incorrect counts).
-    /// Useful for traversal/neighbors/path_finding where the caller tolerates
-    /// eventual consistency in exchange for lower latency.
+    /// Legacy option retained for client compatibility. Node table reads now
+    /// use `FINAL` for latest-row correctness, so this option is ignored by
+    /// the ClickHouse compiler.
     #[serde(default)]
     pub skip_dedup: bool,
     /// When true, marks multi-referenced CTEs as `MATERIALIZED` so
