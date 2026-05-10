@@ -596,7 +596,7 @@
         },
         "group_by": {
           "$ref": "#/$defs/Identifier",
-          "description": "Node variable to group by. This must be a node selector id, not a property name. For scalar property buckets, use top-level group_by_properties."
+          "description": "Required for multi-node aggregation unless using top-level group_by_properties. Must be a node selector id, not a property name."
         },
         "property": {
           "$ref": "#/$defs/Identifier",
