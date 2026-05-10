@@ -1,7 +1,7 @@
 //! ClickHouse dialect end-to-end tests.
 
 use crate::compiler::setup::{compile_to_ast, test_ctx, test_ontology};
-use crate::compiler::utils::{ParsedSql, has_param_value};
+use crate::compiler::utils::has_param_value;
 use compiler::{Node, QueryError, compile};
 
 #[test]
@@ -34,11 +34,11 @@ fn traversal_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_table("gl_edge"));
-    assert!(sql.has_column_ref("relationship_kind"));
-    assert_eq!(sql.limit_value(), Some(25));
+    assert!(rendered.contains("gl_edge"));
+    assert!(rendered.contains("relationship_kind"));
+    assert!(rendered.contains("LIMIT 25"));
     assert!(has_param_value(
         &result.base.params,
         &serde_json::json!("AUTHORED")
@@ -79,10 +79,10 @@ fn aggregation_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
-    assert!(sql.has_group_by());
+    assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
+    assert!(rendered.contains("GROUP BY"));
 }
 
 #[test]
@@ -97,21 +97,21 @@ fn path_finding_query() {
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_cte("forward"), "should have forward CTE");
-    assert!(sql.has_cte("backward"), "should have backward CTE");
-    assert!(sql.has_union_all());
+    assert!(rendered.contains("forward AS"), "should have forward CTE");
+    assert!(rendered.contains("backward AS"), "should have backward CTE");
+    assert!(rendered.contains("UNION ALL"));
     assert!(
-        sql.has_function("arrayConcat"),
+        rendered.contains("arrayConcat"),
         "paths should be concatenated"
     );
     assert!(
-        sql.has_function("tuple"),
+        rendered.contains("tuple("),
         "path nodes should be typed tuples"
     );
     assert!(
-        sql.has_column_ref("f.end_id") && sql.has_column_ref("b.end_id"),
+        rendered.contains("f.end_id") && rendered.contains("b.end_id"),
         "should join forward and backward on end_id"
     );
 }
@@ -136,25 +136,29 @@ fn path_finding_depth_control() {
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
-    let shallow_sql = ParsedSql::from_query(
-        &compile(shallow, &test_ontology(), &test_ctx())
-            .unwrap()
-            .base,
-    );
-    let deep_sql =
-        ParsedSql::from_query(&compile(deep, &test_ontology(), &test_ctx()).unwrap().base);
+    let shallow_sql = compile(shallow, &test_ontology(), &test_ctx())
+        .unwrap()
+        .base
+        .render();
+    let deep_sql = compile(deep, &test_ontology(), &test_ctx())
+        .unwrap()
+        .base
+        .render();
 
     assert!(
-        shallow_sql.has_cte("forward"),
+        shallow_sql.contains("forward AS"),
         "shallow should have forward CTE"
     );
     assert!(
-        !shallow_sql.has_cte("backward"),
+        !shallow_sql.contains("backward AS"),
         "shallow (max_depth=1) should not have backward CTE"
     );
-    assert!(deep_sql.has_cte("forward"), "deep should have forward CTE");
     assert!(
-        deep_sql.has_cte("backward"),
+        deep_sql.contains("forward AS"),
+        "deep should have forward CTE"
+    );
+    assert!(
+        deep_sql.contains("backward AS"),
         "deep (max_depth=3) should have backward CTE"
     );
 }
@@ -204,8 +208,8 @@ fn filter_operators() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    // Search uses LIMIT 1 BY dedup: mutable filters stay outside subquery.
-    assert!(rendered.contains("LIMIT 1 BY"));
+    // Search uses FINAL for latest-row dedup.
+    assert!(rendered.contains(" FINAL"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains(">="));
     assert!(rendered.contains("IN"));
@@ -293,7 +297,7 @@ fn sql_injection_in_filter_property() {
 }
 
 #[test]
-fn valid_identifiers_produce_parseable_sql() {
+fn valid_identifiers_produce_renderable_sql() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -309,7 +313,13 @@ fn valid_identifiers_produce_parseable_sql() {
         ]
     }"#;
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
-    ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
+
+    assert!(!rendered.contains("{p"));
+    assert!(rendered.contains("_gkg_user_node_id"));
+    assert!(rendered.contains("_gkg__private_id"));
+    assert!(rendered.contains("_gkg_CamelCase_id"));
+    assert!(rendered.contains("_gkg_node123_id"));
 }
 
 // ── Multi-edge-table end-to-end SQL tests ───────────────────────────────

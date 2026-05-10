@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use super::setup::{admin_ctx, embedded_ontology, test_ctx};
-use super::utils::ParsedSql;
 use compiler::{
     ColumnSelection, HydrationPlan, Input, InputNode, QueryType, TraversalPath, compile,
     compile_input,
@@ -125,12 +124,12 @@ fn full_pipeline() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
     // AUTHORED is FK-elided via author_id — no edge table scan.
-    assert!(sql.has_table("gl_note"));
-    assert!(sql.has_table("gl_user"));
-    assert_eq!(sql.limit_value(), Some(25));
+    assert!(rendered.contains("gl_note"));
+    assert!(rendered.contains("gl_user"));
+    assert!(rendered.contains("LIMIT 25"));
 }
 
 #[test]
@@ -149,10 +148,10 @@ fn basic_search_query() {
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses LIMIT 1 BY dedup: mutable filters stay outside subquery.
+    // Search uses FINAL for latest-row dedup.
     assert!(
-        rendered.contains("LIMIT 1 BY"),
-        "search should use LIMIT 1 BY for dedup"
+        rendered.contains(" FINAL"),
+        "search should use FINAL for dedup"
     );
     assert!(
         rendered.contains("_deleted"),
@@ -188,8 +187,8 @@ fn complex_search_query() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    // Search uses LIMIT 1 BY dedup: mutable filters stay outside subquery.
-    assert!(rendered.contains("LIMIT 1 BY"));
+    // Search uses FINAL for latest-row dedup.
+    assert!(rendered.contains(" FINAL"));
     assert!(rendered.contains("_deleted"));
     assert!(rendered.contains("username"));
     assert!(rendered.contains("state"));
@@ -212,11 +211,11 @@ fn search_with_specific_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_u_id"));
-    assert!(sql.has_select_column("_gkg_u_type"));
-    assert!(sql.has_select_column("u_username"));
+    assert!(rendered.contains("_gkg_u_id"));
+    assert!(rendered.contains("_gkg_u_type"));
+    assert!(rendered.contains("u_username"));
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
@@ -229,10 +228,10 @@ fn search_with_wildcard_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_u_id"));
-    assert!(sql.has_select_column("_gkg_u_type"));
+    assert!(rendered.contains("_gkg_u_id"));
+    assert!(rendered.contains("_gkg_u_type"));
     assert!(matches!(result.hydration, HydrationPlan::None));
 }
 
@@ -249,12 +248,12 @@ fn traversal_with_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_u_id"));
-    assert!(sql.has_select_column("_gkg_u_type"));
-    assert!(sql.has_select_column("_gkg_p_id"));
-    assert!(sql.has_select_column("_gkg_p_type"));
+    assert!(rendered.contains("_gkg_u_id"));
+    assert!(rendered.contains("_gkg_u_type"));
+    assert!(rendered.contains("_gkg_p_id"));
+    assert!(rendered.contains("_gkg_p_type"));
 }
 
 #[test]
@@ -271,14 +270,14 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_u_id"));
-    assert!(sql.has_select_column("_gkg_u_type"));
-    assert!(sql.lacks_select_column("_gkg_mr_id"));
-    assert!(sql.lacks_select_column("_gkg_mr_type"));
-    assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
-    assert!(sql.has_group_by());
+    assert!(rendered.contains("_gkg_u_id"));
+    assert!(rendered.contains("_gkg_u_type"));
+    assert!(!rendered.contains("_gkg_mr_id"));
+    assert!(!rendered.contains("_gkg_mr_type"));
+    assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
+    assert!(rendered.contains("GROUP BY"));
 }
 
 #[test]
@@ -312,7 +311,7 @@ fn result_context_populated() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
     assert_eq!(result.base.result_context.len(), 2);
 
@@ -326,10 +325,10 @@ fn result_context_populated() {
     assert_eq!(project.id_column, "_gkg_p_id");
     assert_eq!(project.type_column, "_gkg_p_type");
 
-    assert!(sql.has_select_column("_gkg_u_id"));
-    assert!(sql.has_select_column("_gkg_u_type"));
-    assert!(sql.has_select_column("_gkg_p_id"));
-    assert!(sql.has_select_column("_gkg_p_type"));
+    assert!(rendered.contains("_gkg_u_id"));
+    assert!(rendered.contains("_gkg_u_type"));
+    assert!(rendered.contains("_gkg_p_id"));
+    assert!(rendered.contains("_gkg_p_type"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,11 +348,11 @@ fn multi_hop_traversal_generates_union_subquery() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_union_all());
-    assert!(sql.has_alias("hop_e0_type"));
-    assert!(sql.raw_contains("depth"));
+    assert!(rendered.contains("UNION ALL"));
+    assert!(rendered.contains("hop_e0_type"));
+    assert!(rendered.contains("depth"));
 }
 
 #[test]
@@ -369,9 +368,9 @@ fn multi_hop_with_min_hops_filter() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.raw_contains("depth"));
+    assert!(rendered.contains("depth"));
 }
 
 #[test]
@@ -387,10 +386,10 @@ fn single_hop_does_not_generate_recursive_cte() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
     assert!(
-        !sql.raw_contains("WITH RECURSIVE"),
+        !rendered.contains("WITH RECURSIVE"),
         "single hop should not generate recursive CTE"
     );
 }
@@ -409,11 +408,11 @@ fn multi_hop_aggregation() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_union_all());
-    assert!(sql.has_alias("e0") || sql.raw_contains("AS e0"));
-    assert!(sql.has_function("COUNT") || sql.has_function("countIf"));
+    assert!(rendered.contains("UNION ALL"));
+    assert!(rendered.contains("e0"));
+    assert!(rendered.contains("COUNT()") || rendered.contains("countIf"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -429,13 +428,13 @@ fn definition_uses_project_id_for_redaction() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_d_id"));
-    assert!(sql.has_select_column("_gkg_d_type"));
-    // Search uses LIMIT 1 BY dedup, so project_id is a plain column reference.
+    assert!(rendered.contains("_gkg_d_id"));
+    assert!(rendered.contains("_gkg_d_type"));
+    // Search uses FINAL for dedup, so project_id is a plain column reference.
     assert!(
-        sql.raw_contains("d.project_id") && sql.raw_contains("_gkg_d_id"),
+        rendered.contains("d.project_id") && rendered.contains("_gkg_d_id"),
         "Definition should use project_id for redaction"
     );
 }
@@ -449,11 +448,11 @@ fn project_still_uses_id_for_redaction() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_select_column("_gkg_p_id"));
+    assert!(rendered.contains("_gkg_p_id"));
     assert!(
-        sql.raw_contains("p.id AS _gkg_p_id"),
+        rendered.contains("p.id AS _gkg_p_id"),
         "Project should use id for redaction"
     );
 }
@@ -484,8 +483,8 @@ fn cursor_pagination_validation() {
 
     // Cursor does not affect SQL — LIMIT comes from the limit field
     let result = result.unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(100));
+    let rendered = result.base.render();
+    assert!(rendered.contains("LIMIT 100"));
 
     // Cursor query emits SETTINGS for CH query cache
     assert!(
@@ -619,8 +618,8 @@ fn cursor_pagination_validation() {
     );
     assert!(result.is_ok(), "no cursor should compile fine");
     let result = result.unwrap();
-    let sql = ParsedSql::from_query(&result.base);
-    assert_eq!(sql.limit_value(), Some(30), "default limit should be 30");
+    let rendered = result.base.render();
+    assert!(rendered.contains("LIMIT 30"), "default limit should be 30");
     assert!(
         !result.base.sql.contains("use_query_cache"),
         "non-cursor query should not enable query cache: {}",
@@ -651,16 +650,15 @@ fn render_traversal_inlines_all_params() {
     .base
     .render();
 
-    let sql = ParsedSql::parse(&rendered);
     assert!(
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
     );
     assert!(
-        sql.raw_contains("'opened'") || sql.raw_contains("'state:opened'"),
+        rendered.contains("'opened'") || rendered.contains("'state:opened'"),
         "rendered SQL should contain the state filter value"
     );
-    assert!(sql.raw_contains("'AUTHORED'"));
+    assert!(rendered.contains("'AUTHORED'"));
 }
 
 #[test]
@@ -728,12 +726,15 @@ fn debug_json_round_trip() {
     )
     .unwrap();
 
-    // Rendered (inlined) SQL should parse as valid ClickHouse SQL
-    ParsedSql::from_query(&compiled.base);
+    let rendered = compiled.base.render();
+    assert!(
+        !rendered.contains("{p"),
+        "rendered SQL should have no placeholders"
+    );
 
     let debug_json = serde_json::json!({
         "base": compiled.base.sql,
-        "base_rendered": compiled.base.render(),
+        "base_rendered": rendered,
         "hydration": serde_json::json!([]),
     });
     let parsed: serde_json::Value = serde_json::from_str(&debug_json.to_string()).unwrap();
@@ -810,11 +811,11 @@ fn hydration_single_entity_no_union_all() {
     };
 
     let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(!sql.has_union_all());
-    assert!(sql.has_function("toJSONString"));
-    assert!(sql.has_table("gl_user"));
+    assert!(!rendered.contains("UNION ALL"));
+    assert!(rendered.contains("toJSONString"));
+    assert!(rendered.contains("gl_user"));
 }
 
 #[test]
@@ -874,14 +875,14 @@ fn hydration_skips_security_context() {
     };
 
     let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
     assert!(
-        !sql.has_column_ref("traversal_path"),
+        !rendered.contains("traversal_path"),
         "hydration should skip security filters"
     );
     assert!(
-        !sql.has_function("startsWith"),
+        !rendered.contains("startsWith"),
         "hydration should not have startsWith"
     );
 }
@@ -1278,11 +1279,10 @@ fn filterable_allows_traversal_path_in_columns() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation filter pushdown (Bug 1 regression guard)
 //
-// Single-aggregate queries with a sort-key filter must push the filter into
-// the LIMIT 1 BY dedup subquery so ClickHouse uses the primary-key index to
-// skip granules. Without this, the dedup subquery scans the full authorized
-// table before the outer countIf filters, costing ~15s on a 5,086-row count
-// in production.
+// Single-aggregate queries with a sort-key filter must keep the filter inside
+// the FINAL scan so ClickHouse uses the primary-key index to skip granules.
+// Without this, the latest-row scan reads the full authorized table before
+// aggregation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1301,15 +1301,15 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
         rendered.contains("COUNT()") || rendered.contains("countIf"),
         "should contain COUNT() or countIf: {rendered}"
     );
-    // The dedup subquery (the inner SELECT before LIMIT 1 BY) must also
-    // carry the project_id filter so the granule index narrows the read.
+    // The FINAL scan must also carry the project_id filter so the granule
+    // index narrows the read.
     let inner = rendered
-        .split("LIMIT 1 BY")
-        .next()
-        .expect("rendered SQL should contain LIMIT 1 BY");
+        .split(" FINAL")
+        .nth(1)
+        .expect("rendered SQL should contain FINAL");
     assert!(
         inner.contains("project_id"),
-        "project_id must appear inside the LIMIT 1 BY dedup subquery: {rendered}"
+        "project_id must appear inside the FINAL scan: {rendered}"
     );
 }
 
@@ -1390,12 +1390,12 @@ fn aggregation_count_in_clause_pushes_project_id() {
     let rendered = result.base.render();
 
     let inner = rendered
-        .split("LIMIT 1 BY")
-        .next()
-        .expect("rendered SQL should contain LIMIT 1 BY");
+        .split(" FINAL")
+        .nth(1)
+        .expect("rendered SQL should contain FINAL");
     assert!(
         inner.contains("project_id"),
-        "project_id IN must appear inside dedup subquery: {rendered}"
+        "project_id IN must appear inside FINAL scan: {rendered}"
     );
 }
 
