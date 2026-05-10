@@ -25,8 +25,8 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
     })?;
 
-    let mut from = TableRef::scan_final(center_table, center_alias);
-    let mut where_parts = latest_node_predicates(center_alias, center_np);
+    let mut center_where_parts = latest_node_predicates(center_alias, center_np);
+    let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
     let mut candidate_ctes = HashMap::new();
@@ -35,7 +35,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
     // Elevated-access center node: emit a FilterOnly CTE so SecurityPass
     // can inject the stricter role-gated startsWith filter.
     if center_np.needs_elevated_filter {
-        where_parts.extend(emit_filter_subquery(
+        center_where_parts.extend(emit_filter_subquery(
             center_np,
             center_alias,
             DEFAULT_PRIMARY_KEY,
@@ -78,7 +78,10 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             .and_then(|fk| plan.nodes.get(&fk.target_node))
             .is_some_and(|np| np.fk_needs_join)
     });
-    if joins_latest_node && candidate_selective(center_np, &candidate_extra_predicates) {
+    let center_has_extra_predicates = candidate_extra_predicates
+        .get(center_alias)
+        .is_some_and(|predicates| !predicates.is_empty());
+    if joins_latest_node && center_has_extra_predicates {
         let cte_name = candidate_cte_name(center_alias);
         ctes.push(Cte::new(
             &cte_name,
@@ -93,12 +96,42 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             ),
         ));
         candidate_ctes.insert(center_alias.to_string(), cte_name.clone());
-        where_parts.push(Expr::InSubquery {
+        center_where_parts.push(Expr::InSubquery {
             expr: Box::new(Expr::col(center_alias, DEFAULT_PRIMARY_KEY)),
             cte_name,
             column: DEFAULT_PRIMARY_KEY.to_string(),
         });
     }
+
+    for hop in &plan.hops {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+        if fk.fk_node != center_alias {
+            continue;
+        }
+        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
+            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
+        })?;
+        if !target_np.node_ids.is_empty() {
+            center_where_parts.push(id_list_predicate(
+                center_alias,
+                &fk.fk_column,
+                &target_np.node_ids,
+            ));
+        }
+    }
+
+    let mut from = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan_final(center_table, center_alias),
+            where_clause: Expr::conjoin(center_where_parts),
+            ..Default::default()
+        },
+        center_alias,
+    );
 
     // Each hop: target node connected via FK column.
     for hop in &plan.hops {
@@ -117,7 +150,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         };
 
         // Pinned target IDs.
-        if !target_np.node_ids.is_empty() {
+        if !target_np.node_ids.is_empty() && fk_alias != center_alias {
             where_parts.push(id_list_predicate(
                 &fk_alias,
                 &fk.fk_column,

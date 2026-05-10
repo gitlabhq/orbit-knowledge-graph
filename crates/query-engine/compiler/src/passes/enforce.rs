@@ -15,7 +15,7 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use crate::passes::shared::deleted_false;
+use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
 use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{HashMap, HashSet};
 
@@ -278,16 +278,46 @@ fn enforce_return_columns(
                         Expr::col(edge_alias, edge_col.as_str()),
                         Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
                     );
+                    let node_scan = if node.filters.is_empty() {
+                        TableRef::scan_final(table, &node.id)
+                    } else {
+                        let mut node_predicates = Vec::new();
+                        for (prop, filter) in &node.filters {
+                            node_predicates.push(filter_to_expr(&node.id, prop, filter));
+                        }
+                        if !node.node_ids.is_empty() {
+                            node_predicates.push(id_list_predicate(
+                                &node.id,
+                                DEFAULT_PRIMARY_KEY,
+                                &node.node_ids,
+                            ));
+                        }
+                        if let Some(ref range) = node.id_range {
+                            node_predicates.push(id_range_predicate(&node.id, range));
+                        }
+                        node_predicates.push(deleted_false(&node.id));
+                        TableRef::subquery(
+                            Query {
+                                select: vec![SelectExpr::star()],
+                                from: TableRef::scan_final(table, &node.id),
+                                where_clause: Expr::conjoin(node_predicates),
+                                ..Default::default()
+                            },
+                            &node.id,
+                        )
+                    };
                     q.from = TableRef::join(
                         JoinType::Inner,
                         std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
-                        TableRef::scan_final(table, &node.id),
+                        node_scan,
                         join_cond,
                     );
-                    q.where_clause = Some(match q.where_clause.take() {
-                        Some(existing) => Expr::and(existing, deleted_false(&node.id)),
-                        None => deleted_false(&node.id),
-                    });
+                    if node.filters.is_empty() {
+                        q.where_clause = Some(match q.where_clause.take() {
+                            Some(existing) => Expr::and(existing, deleted_false(&node.id)),
+                            None => deleted_false(&node.id),
+                        });
+                    }
                 }
 
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));

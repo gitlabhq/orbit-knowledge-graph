@@ -130,6 +130,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                 Expr::col(&narrow_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
+                            distinct: true,
                             from: TableRef::scan(&hop.edge_table, &narrow_alias),
                             where_clause: {
                                 let mut nw = Vec::new();

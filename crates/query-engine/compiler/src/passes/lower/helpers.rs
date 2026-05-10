@@ -117,20 +117,30 @@ fn emit_node_join_inner(
         column: DEFAULT_PRIMARY_KEY.to_string(),
     });
 
-    let joined = TableRef::join(
-        JoinType::Inner,
-        from,
-        TableRef::scan_final(table, alias),
-        node_join_condition(alias, edge_alias, edge_col, use_traversal_path_join, np),
-    );
-
     let selects = node_select_columns(alias, np);
     let mut wheres = latest_node_predicates(alias, np);
     if let Some(in_predicate) = in_predicate {
         wheres.push(in_predicate);
     }
 
-    Ok((joined, selects, wheres))
+    let node_scan = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan_final(table, alias),
+            where_clause: Expr::conjoin(wheres),
+            ..Default::default()
+        },
+        alias,
+    );
+
+    let joined = TableRef::join(
+        JoinType::Inner,
+        from,
+        node_scan,
+        node_join_condition(alias, edge_alias, edge_col, use_traversal_path_join, np),
+    );
+
+    Ok((joined, selects, vec![]))
 }
 
 fn node_join_condition(

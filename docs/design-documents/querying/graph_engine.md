@@ -67,8 +67,9 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
-- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions when a latest-row node scan needs a derived table.
-- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`, then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution.
+- Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
+- Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
+- FK candidate prefilters: joined FK plans may add `SELECT DISTINCT id FROM table WHERE ...` CTEs without `FINAL`, then constrain the outer `FINAL` scan with `id IN (...)` and re-apply every predicate after latest-row resolution. Center candidate CTEs are only emitted when they include target-derived predicates; the compiler does not build a same-table center candidate that only repeats the center node's own filters.
 - Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
 These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
@@ -82,6 +83,8 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 | Search (single-node) | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
 | Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
 | FK candidate CTEs | Non-`FINAL` `SELECT DISTINCT id` or FK values plus outer `FINAL` recheck | Lets ClickHouse use selective filters before the expensive latest-row scan while preserving correctness through the outer recheck |
+| Edge narrowing CTEs | Non-`FINAL` `SELECT DISTINCT edge_id` frontier | Narrows joined node `FINAL` scans while avoiding duplicate-heavy `IN` sets from fan-out edges |
+| Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
 | Hydration (UNION ALL arms) | Node table scan with `FINAL` | Excludes deleted rows and stale properties for dynamically hydrated entities |
 | Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and search semantics consistent |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
@@ -92,6 +95,7 @@ Filter placement rules for node `FINAL` scans:
 - **Mutable filters** (`state`, `status`, `draft`) also evaluate against the `FINAL` scan, preventing stale row versions from matching.
 - **`_deleted = false`** is always applied after latest-row resolution, either on the `FINAL` scan or outside a wrapping subquery.
 - **Candidate CTEs** are allowed to over-select because they are only a performance prefilter. The outer `FINAL` scan always re-applies the filters and `_deleted = false` before rows can affect traversal or aggregation results.
+- **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 

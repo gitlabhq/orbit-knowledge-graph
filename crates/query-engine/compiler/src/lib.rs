@@ -1618,8 +1618,9 @@ mod tests {
             "center should get a non-FINAL candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM gl_job AS j FINAL INNER JOIN gl_pipeline AS pipe FINAL"),
-            "outer latest-row reads should still use FINAL, got:\n{sql}"
+            sql.contains("FROM (SELECT * FROM gl_job AS j FINAL WHERE")
+                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe FINAL WHERE"),
+            "outer latest-row reads should still use FINAL with joined node filtering pushed down, got:\n{sql}"
         );
         assert!(
             sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
@@ -1676,16 +1677,90 @@ mod tests {
         let sql = compiled.base.render();
 
         assert!(
-            sql.contains("_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"),
+            sql.contains(
+                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
+            ),
             "unfiltered joined target should be narrowed by a non-FINAL candidate scan, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"),
+            !sql.contains(
+                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
+            ),
             "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM gl_job AS j1 FINAL INNER JOIN gl_job AS j2 FINAL"),
-            "outer source and joined target should still use FINAL, got:\n{sql}"
+            !sql.contains("_candidate_j1"),
+            "center candidate CTE should not be emitted when it only repeats center filters, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("j1.id IN (SELECT id FROM _candidate_j1)"),
+            "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FROM (SELECT * FROM gl_job AS j1 FINAL WHERE")
+                && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2 FINAL WHERE"),
+            "outer source and joined target should still use FINAL with joined node filtering pushed down, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn flat_chain_edge_narrowing_deduplicates_frontier() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "n", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p"}
+            ],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "p", "alias": "note_count"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains(
+                "_narrow_p AS (SELECT DISTINCT e0n.target_id AS id FROM gl_edge AS e0n WHERE"
+            ),
+            "edge-derived narrowing frontiers should deduplicate high fan-out IDs, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("p.id IN (SELECT id FROM _narrow_p)"),
+            "joined node FINAL scan should use the edge-derived frontier, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn filtered_redaction_joins_push_filters_into_final_subquery() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "f", "entity": "File", "filters": {"path": {"op": "ends_with", "value": ".rb"}}},
+                {"id": "d", "entity": "Definition", "filters": {"name": {"op": "starts_with", "value": "process"}}}
+            ],
+            "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+            "limit": 20
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
+                && sql.contains("endsWith(f.path, '.rb')"),
+            "filtered File redaction join should push filters into the FINAL subquery, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
+                && sql.contains("startsWith(d.name, 'process')"),
+            "filtered Definition redaction join should push filters into the FINAL subquery, got:\n{sql}"
         );
     }
 
