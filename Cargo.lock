@@ -4748,6 +4748,7 @@ name = "formatters"
 version = "0.1.0"
 dependencies = [
  "arrow 58.1.0",
+ "chrono",
  "compiler",
  "gkg-utils",
  "indexmap 2.14.0",

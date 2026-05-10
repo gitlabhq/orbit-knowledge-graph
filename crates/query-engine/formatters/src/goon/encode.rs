@@ -25,20 +25,14 @@ pub fn encode(response: &GraphResponse, format_version: &Version) -> String {
     let mut out = String::with_capacity(estimate_capacity(response));
     let extra_nodes = aggregation_grouped_nodes(response);
     write_header(&mut out, response, format_version, extra_nodes.len());
-    match response.query_type.as_str() {
-        "path_finding" => {
-            write_nodes(&mut out, response, &[]);
-            write_paths(&mut out, response);
-        }
-        "aggregation" => {
-            write_nodes(&mut out, response, &extra_nodes);
-            write_edges(&mut out, response);
-            write_rows(&mut out, response);
-        }
-        _ => {
-            write_nodes(&mut out, response, &[]);
-            write_edges(&mut out, response);
-        }
+    write_nodes(&mut out, response, &extra_nodes);
+    if response.query_type == "path_finding" {
+        write_paths(&mut out, response);
+    } else {
+        write_edges(&mut out, response);
+    }
+    if response.rows.is_some() {
+        write_rows(&mut out, response);
     }
     out
 }
@@ -475,25 +469,21 @@ fn is_bare_token(s: &str) -> bool {
 
 /// ClickHouse emits datetimes as `2026-05-08 23:13:59.643407`. Convert to
 /// ISO 8601 T-form so the value is bare-emittable; spaces inside a value
-/// would break the space-delimited `key=value key=value` row format.
+/// would break the space-delimited `key=value key=value` row format. We
+/// validate via chrono but rebuild the output byte-for-byte from the
+/// original so microsecond precision (6 digits) is not silently widened
+/// to chrono's nanosecond default (9 digits).
 fn normalize_iso_datetime(s: &str) -> Option<String> {
-    let bytes = s.as_bytes();
-    if bytes.len() < 19 {
+    use chrono::{DateTime, NaiveDateTime};
+    if DateTime::parse_from_rfc3339(s).is_ok() {
+        return Some(s.to_string());
+    }
+    let parses = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f").is_ok()
+        || NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f").is_ok();
+    if !parses {
         return None;
     }
-    let valid = bytes.iter().enumerate().all(|(i, &b)| match (i, b) {
-        (4 | 7, b'-') => true,
-        (10, b' ' | b'T') => true,
-        (13 | 16, b':') => true,
-        (0..=3 | 5..=6 | 8..=9 | 11..=12 | 14..=15 | 17..=18, b) => b.is_ascii_digit(),
-        (19.., b'.' | b'+' | b'-' | b'Z' | b':') => true,
-        (19.., b) => b.is_ascii_digit(),
-        _ => false,
-    });
-    if !valid {
-        return None;
-    }
-    if bytes[10] == b' ' {
+    if s.as_bytes().get(10) == Some(&b' ') {
         let mut buf = String::with_capacity(s.len());
         buf.push_str(&s[..10]);
         buf.push('T');

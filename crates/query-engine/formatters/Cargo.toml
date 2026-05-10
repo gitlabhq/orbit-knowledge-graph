@@ -14,6 +14,7 @@ indexmap = { workspace = true }
 shared = { path = "../shared" }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
+chrono = { workspace = true }
 serde = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
