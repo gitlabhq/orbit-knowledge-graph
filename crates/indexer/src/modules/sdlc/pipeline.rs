@@ -83,7 +83,10 @@ impl Pipeline {
             futures.push(
                 async {
                     let _permit = semaphore.acquire().await.expect("semaphore is not closed");
-                    let result = self.run_plan(plan, context, destination, progress).await;
+                    let position_key = format!("{}.{}", context.position_key, plan.name);
+                    let result = self
+                        .run_plan(plan, &position_key, context, destination, progress)
+                        .await;
                     (&plan.name, result)
                 }
                 .instrument(span),
@@ -108,9 +111,10 @@ impl Pipeline {
         )))
     }
 
-    async fn run_plan(
+    pub async fn run_plan(
         &self,
         plan: &PipelinePlan,
+        position_key: &str,
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
@@ -118,8 +122,7 @@ impl Pipeline {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
 
-        let position_key = format!("{}.{}", context.position_key, plan.name);
-        let checkpoint = self.load_checkpoint(&position_key).await;
+        let checkpoint = self.load_checkpoint(position_key).await;
         let params = self.build_query_params(&checkpoint.watermark, context);
 
         let mut total_rows: u64 = 0;
@@ -168,7 +171,7 @@ impl Pipeline {
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
 
-                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                self.save_batch_progress(position_key, context, &extract_query, progress)
                     .await?;
 
                 batches = next_batches;
@@ -176,7 +179,7 @@ impl Pipeline {
             } else {
                 self.drain_writes(write_futures).await?;
 
-                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                self.save_batch_progress(position_key, context, &extract_query, progress)
                     .await?;
 
                 break;
@@ -184,7 +187,7 @@ impl Pipeline {
         }
 
         self.checkpoint_store
-            .save_completed(&position_key, &context.watermark)
+            .save_completed(position_key, &context.watermark)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(

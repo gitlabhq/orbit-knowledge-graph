@@ -15,10 +15,6 @@ use crate::topic::IndexingScope;
 
 const CHECKPOINT_TABLE: &str = "checkpoint";
 
-pub enum Partition {
-    Range { index: u32, total: u32 },
-}
-
 /// The checkpoint key prefix for a given namespace, e.g. `ns.100`.
 ///
 /// The pipeline appends `.{plan_name}` to form the full key, so all
@@ -27,19 +23,36 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("ns.{namespace_id}")
 }
 
-pub fn entity_checkpoint_key(
-    scope: &IndexingScope,
-    entity_kind: &str,
-    partition: Option<&Partition>,
-) -> String {
-    let prefix = match scope {
-        IndexingScope::Global => "global".to_string(),
-        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
-    };
-    match partition {
-        None => format!("{prefix}.{entity_kind}"),
-        Some(Partition::Range { index, total }) => {
-            format!("{prefix}.{entity_kind}.p{index}of{total}")
+pub struct EntityCheckpointKey {
+    scope_prefix: String,
+    partition_suffix: Option<String>,
+}
+
+impl EntityCheckpointKey {
+    pub fn new(scope: &IndexingScope) -> Self {
+        let scope_prefix = match scope {
+            IndexingScope::Global => "global".to_string(),
+            IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
+        };
+        Self {
+            scope_prefix,
+            partition_suffix: None,
+        }
+    }
+
+    pub fn with_partition(mut self, index: u32, total: u32) -> Self {
+        self.partition_suffix = Some(format!("p{index}of{total}"));
+        self
+    }
+
+    pub fn prefix(&self) -> &str {
+        &self.scope_prefix
+    }
+
+    pub fn full_key(&self, plan_name: &str) -> String {
+        match &self.partition_suffix {
+            None => format!("{}.{plan_name}", self.scope_prefix),
+            Some(suffix) => format!("{}.{plan_name}.{suffix}", self.scope_prefix),
         }
     }
 }
@@ -302,32 +315,34 @@ mod tests {
     }
 
     #[test]
-    fn entity_checkpoint_key_global_no_partition() {
-        let key = entity_checkpoint_key(&IndexingScope::Global, "User", None);
-        assert_eq!(key, "global.User");
+    fn entity_key_global_prefix() {
+        let key = EntityCheckpointKey::new(&IndexingScope::Global);
+        assert_eq!(key.prefix(), "global");
     }
 
     #[test]
-    fn entity_checkpoint_key_namespaced_no_partition() {
+    fn entity_key_global_full_key() {
+        let key = EntityCheckpointKey::new(&IndexingScope::Global);
+        assert_eq!(key.full_key("User"), "global.User");
+    }
+
+    #[test]
+    fn entity_key_namespaced_prefix() {
         let scope = IndexingScope::Namespace {
             namespace_id: 100,
             traversal_path: "42/100/".to_string(),
         };
-        let key = entity_checkpoint_key(&scope, "MergeRequest", None);
-        assert_eq!(key, "ns.100.MergeRequest");
+        let key = EntityCheckpointKey::new(&scope);
+        assert_eq!(key.prefix(), "ns.100");
     }
 
     #[test]
-    fn entity_checkpoint_key_namespaced_with_partition() {
+    fn entity_key_namespaced_with_partition() {
         let scope = IndexingScope::Namespace {
             namespace_id: 100,
             traversal_path: "42/100/".to_string(),
         };
-        let key = entity_checkpoint_key(
-            &scope,
-            "MergeRequest",
-            Some(&Partition::Range { index: 2, total: 4 }),
-        );
-        assert_eq!(key, "ns.100.MergeRequest.p2of4");
+        let key = EntityCheckpointKey::new(&scope).with_partition(2, 4);
+        assert_eq!(key.full_key("MergeRequest"), "ns.100.MergeRequest.p2of4");
     }
 }

@@ -7,7 +7,7 @@ use tracing::info;
 
 use std::collections::HashMap;
 
-use crate::checkpoint::{Checkpoint, CheckpointStore, Partition, entity_checkpoint_key};
+use crate::checkpoint::{Checkpoint, CheckpointStore, EntityCheckpointKey};
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
@@ -60,16 +60,16 @@ impl EntityPipeline for SimpleEntityPipeline {
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
-        let base_prefix = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
+        let checkpoint_key = EntityCheckpointKey::new(&request.scope);
         let checkpoints = self
             .checkpoint_store
-            .load_by_prefix(&base_prefix)
+            .load_by_prefix(checkpoint_key.prefix())
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!("failed to load checkpoints: {err}"))
             })?;
 
-        let unified_key = format!("{base_prefix}.{}", self.plan.name);
+        let unified_key = checkpoint_key.full_key(&self.plan.name);
         let completed = checkpoints
             .get(&unified_key)
             .is_some_and(|cp| cp.is_completed());
@@ -128,10 +128,10 @@ impl SimpleEntityPipeline {
     }
 
     fn plan_single_run(&self, request: &EntityIndexingRequest) -> (PipelinePlan, PipelineContext) {
-        let position_key = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
+        let checkpoint_key = EntityCheckpointKey::new(&request.scope);
         let context = PipelineContext {
             watermark: request.watermark,
-            position_key,
+            position_key: checkpoint_key.full_key(&self.plan.name),
             base_conditions: scope_conditions(&request.scope),
         };
         (self.plan.clone(), context)
@@ -150,15 +150,11 @@ impl SimpleEntityPipeline {
             );
         }
 
-        let partition = Partition::Range {
-            index: spec.partition_index,
-            total: spec.total_partitions,
-        };
-        let position_key =
-            entity_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition));
+        let checkpoint_key = EntityCheckpointKey::new(&request.scope)
+            .with_partition(spec.partition_index, spec.total_partitions);
         let context = PipelineContext {
             watermark: request.watermark,
-            position_key,
+            position_key: checkpoint_key.full_key(&self.plan.name),
             base_conditions: scope_conditions(&request.scope),
         };
         (plan, context)
@@ -173,13 +169,8 @@ impl SimpleEntityPipeline {
         let futures: Vec<_> = runs
             .iter()
             .map(|(plan, context)| {
-                self.pipeline.run(
-                    std::slice::from_ref(plan),
-                    context,
-                    destination,
-                    progress,
-                    1,
-                )
+                self.pipeline
+                    .run_plan(plan, &context.position_key, context, destination, progress)
             })
             .collect();
 
@@ -207,12 +198,11 @@ impl SimpleEntityPipeline {
     ) -> Result<(), HandlerError> {
         let min_watermark = checkpoints
             .iter()
-            .filter(|(key, _)| key.as_str() != unified_key)
-            .filter(|(_, cp)| cp.is_completed())
+            .filter(|(key, cp)| {
+                key.as_str() != unified_key && key.starts_with(unified_key) && cp.is_completed()
+            })
             .map(|(_, cp)| cp.watermark)
-            .chain(std::iter::once(*watermark))
-            .min()
-            .unwrap_or(*watermark);
+            .fold(*watermark, Ord::min);
 
         self.checkpoint_store
             .save_completed(unified_key, &min_watermark)
@@ -242,15 +232,9 @@ fn filter_pending_partitions(
     let pending: Vec<PartitionSpec> = specs
         .into_iter()
         .filter(|spec| {
-            let partition = Partition::Range {
-                index: spec.partition_index,
-                total: spec.total_partitions,
-            };
-            let key = format!(
-                "{}.{}",
-                entity_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition)),
-                plan_name
-            );
+            let key = EntityCheckpointKey::new(&request.scope)
+                .with_partition(spec.partition_index, spec.total_partitions)
+                .full_key(plan_name);
             !matches!(checkpoints.get(&key), Some(cp) if cp.is_completed())
         })
         .collect();
