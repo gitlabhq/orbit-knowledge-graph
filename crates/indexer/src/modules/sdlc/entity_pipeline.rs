@@ -104,13 +104,6 @@ impl SimpleEntityPipeline {
         };
 
         match strategy.compute_partitions(request).await? {
-            None => {
-                info!(
-                    partition_count = strategy.partition_count(),
-                    "insufficient quantiles, falling back to single pipeline"
-                );
-                Ok(vec![self.plan_single_run(request)])
-            }
             Some(specs) => {
                 let pending =
                     filter_pending_partitions(request, &self.plan.name, specs, checkpoints);
@@ -123,6 +116,13 @@ impl SimpleEntityPipeline {
                     .iter()
                     .map(|spec| self.plan_partition_run(request, spec))
                     .collect())
+            }
+            None => {
+                info!(
+                    partition_count = strategy.partition_count(),
+                    "insufficient quantiles, falling back to single pipeline"
+                );
+                Ok(vec![self.plan_single_run(request)])
             }
         }
     }
