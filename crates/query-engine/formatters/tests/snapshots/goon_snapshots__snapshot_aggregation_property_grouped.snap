@@ -9,7 +9,7 @@ nodes:0
 edges:0
 rows:5
 group_by:severity(property)
-aggregations:vulnerability_count(count)
+aggregations:vulnerability_count(count:v)
 @nodes
 @edges
 @rows

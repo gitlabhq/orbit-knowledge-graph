@@ -9,7 +9,7 @@ nodes:3
 edges:0
 rows:3
 group_by:u(node:User)
-aggregations:merged_count(count)
+aggregations:merged_count(count:u)
 @nodes
 User(3):
 1243277 username=ghost1
