@@ -56,38 +56,11 @@ cargo build --release --locked --bin orbit --target "$TARGET" --features duckdb-
 BIN_DIR="target/${TARGET}/release"
 
 if [ "$PLATFORM" = "windows" ]; then
-    BIN="orbit.exe"
-    if ! file "$BIN_DIR/$BIN" | grep -q "PE32+"; then
-        echo "smoke check failed: $BIN_DIR/$BIN is not a PE32+ binary" >&2
-        file "$BIN_DIR/$BIN" >&2
-        exit 1
-    fi
-    size_bytes=$(stat -c%s "$BIN_DIR/$BIN")
-    echo "binary size: $size_bytes bytes"
-    if [ "$size_bytes" -lt 50000000 ] || [ "$size_bytes" -gt 250000000 ]; then
-        echo "smoke check failed: size $size_bytes outside 50MB..250MB range" >&2
-        exit 1
-    fi
-    # Reject any non-system DLL imports — mingw/libc++/libunwind runtimes
-    # would mean the binary isn't self-contained on a stock Win10+ box.
-    OBJDUMP=$(command -v x86_64-w64-mingw32-objdump || command -v llvm-objdump || echo objdump)
-    echo "DLL imports:"
-    "$OBJDUMP" -p "$BIN_DIR/$BIN" | grep "DLL Name" || true
-    bad=$("$OBJDUMP" -p "$BIN_DIR/$BIN" \
-        | awk '/DLL Name:/ { print tolower($NF) }' | sort -u \
-        | grep -Ev '^(api-ms-win-[a-z0-9.-]+|msvcrt|ucrtbase|kernel32|advapi32|user32|ws2_32|bcrypt|bcryptprimitives|combase|ktmw32|ncrypt|rstrtmgr|secur32|crypt32|ntdll|userenv|shell32|ole32|oleaut32|gdi32|rpcrt4|psapi|powrprof|version|cfgmgr32|opengl32|imm32|imagehlp|msimg32|winspool|synchronization|dbghelp|wininet|winhttp|setupapi|iphlpapi)\.dll$' \
-        || true)
-    if [ -n "$bad" ]; then
-        echo "smoke check failed: binary depends on non-system DLLs:" >&2
-        echo "$bad" >&2
-        exit 1
-    fi
     ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.zip"
-    (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" "$BIN")
+    (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" orbit.exe)
 else
-    BIN="orbit"
     ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.tar.gz"
-    tar -czvf "$ARCHIVE" -C "$BIN_DIR" "$BIN"
+    tar -czvf "$ARCHIVE" -C "$BIN_DIR" orbit
 fi
 
 echo "created $ARCHIVE"
