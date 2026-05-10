@@ -62,7 +62,12 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
         PlanBody::Aggregation {
             aggregations,
             agg_sort,
-        } => aggregation::emit_aggregation(plan, aggregations, &input.group_by, agg_sort.as_ref()),
+        } => aggregation::emit_aggregation(
+            plan,
+            aggregations,
+            &input.aggregation.group_by,
+            agg_sort.as_ref(),
+        ),
         PlanBody::Neighbors {
             center,
             direction,

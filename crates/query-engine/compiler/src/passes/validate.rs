@@ -284,16 +284,16 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
-        if input.aggregations.len() > MAX_AGGS_CAP {
+        if input.aggregation.metrics.len() > MAX_AGGS_CAP {
             return Err(QueryError::LimitExceeded(format!(
                 "aggregations count ({}) must not exceed {MAX_AGGS_CAP}",
-                input.aggregations.len()
+                input.aggregation.metrics.len()
             )));
         }
-        if input.group_by.len() > MAX_GROUP_BY_KEYS {
+        if input.aggregation.group_by.len() > MAX_GROUP_BY_KEYS {
             return Err(QueryError::LimitExceeded(format!(
                 "group_by count ({}) must not exceed {MAX_GROUP_BY_KEYS}",
-                input.group_by.len()
+                input.aggregation.group_by.len()
             )));
         }
         for rel in &input.relationships {
@@ -690,7 +690,7 @@ impl<'a> Validator<'a> {
 
     fn check_aggregations(&self, input: &Input) -> Result<()> {
         if input.query_type != QueryType::Aggregation {
-            if !input.group_by.is_empty() {
+            if !input.aggregation.group_by.is_empty() {
                 return Err(QueryError::Validation(
                     "group_by is only supported for aggregation queries".into(),
                 ));
@@ -700,14 +700,17 @@ impl<'a> Validator<'a> {
 
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
-        if input.group_by.is_empty() && input.nodes.len() > 1 && input.relationships.is_empty() {
+        if input.aggregation.group_by.is_empty()
+            && input.nodes.len() > 1
+            && input.relationships.is_empty()
+        {
             return Err(QueryError::Validation(
                 "multi-node aggregation without group_by requires relationships to constrain node joins"
                     .into(),
             ));
         }
 
-        let group_output_names = group_by_output_names(&input.group_by);
+        let group_output_names = group_by_output_names(&input.aggregation.group_by);
         let mut seen_group_output_names = HashSet::new();
         for name in &group_output_names {
             if !seen_group_output_names.insert(name.clone()) {
@@ -718,7 +721,7 @@ impl<'a> Validator<'a> {
         }
 
         let mut seen_output_names = seen_group_output_names.clone();
-        for (i, agg) in input.aggregations.iter().enumerate() {
+        for (i, agg) in input.aggregation.metrics.iter().enumerate() {
             let agg_alias = agg
                 .alias
                 .clone()
@@ -793,7 +796,7 @@ impl<'a> Validator<'a> {
             }
         }
 
-        for (i, group) in input.group_by.iter().enumerate() {
+        for (i, group) in input.aggregation.group_by.iter().enumerate() {
             let group_node = group.node();
             let node = input
                 .nodes
@@ -843,9 +846,9 @@ impl<'a> Validator<'a> {
             }
         }
 
-        if let Some(sort) = &input.aggregation_sort {
+        if let Some(sort) = &input.aggregation.sort {
             let mut output_names: HashSet<String> = group_output_names.into_iter().collect();
-            output_names.extend(input.aggregations.iter().map(|agg| {
+            output_names.extend(input.aggregation.metrics.iter().map(|agg| {
                 agg.alias
                     .clone()
                     .unwrap_or_else(|| agg.function.to_string())
@@ -982,12 +985,12 @@ impl<'a> Validator<'a> {
                     .iter()
                     .flat_map(|r| [r.from.as_str(), r.to.as_str()])
                     .collect();
-                for agg in &input.aggregations {
+                for agg in &input.aggregation.metrics {
                     if let Some(ref t) = agg.target {
                         set.insert(t.as_str());
                     }
                 }
-                for group in &input.group_by {
+                for group in &input.aggregation.group_by {
                     set.insert(group.node());
                 }
                 set

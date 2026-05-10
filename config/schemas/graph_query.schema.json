@@ -42,7 +42,7 @@
     },
     "group_by": {
       "type": "array",
-      "description": "Group keys for aggregation rows. Use kind=node to group by a node selector, or kind=property to group by a scalar node property such as vulnerability severity.",
+      "description": "Aggregation group keys. kind=node returns a node object; kind=property returns a scalar value.",
       "default": [],
       "maxItems": 4,
       "items": {
@@ -161,7 +161,31 @@
               }
             }
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": ["nodes"],
+              "properties": {
+                "nodes": {
+                  "minItems": 2
+                },
+                "relationships": {
+                  "maxItems": 0
+                }
+              }
+            },
+            "then": {
+              "required": ["group_by"],
+              "properties": {
+                "group_by": {
+                  "minItems": 1,
+                  "description": "Required for disconnected multi-node aggregation; otherwise add relationships."
+                }
+              }
+            }
+          }
+        ]
       }
     },
     {
@@ -173,12 +197,8 @@
         }
       },
       "then": {
-        "properties": {
-          "group_by": {
-            "maxItems": 0,
-            "description": "Only aggregation queries may group results."
-          }
-        }
+        "description": "Only aggregation queries may group results.",
+        "not": { "required": ["group_by"] }
       }
     },
     {
@@ -739,7 +759,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics. Compiler performance options (skip_dedup, materialize_ctes, use_semi_join) are injected by the ontology-derived schema at runtime to keep the base schema token-efficient for LLM consumers.",
+      "description": "Consumer-level presentation options. Compiler performance options are injected by the ontology-derived schema at runtime.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",

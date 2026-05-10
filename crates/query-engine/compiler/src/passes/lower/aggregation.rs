@@ -9,7 +9,7 @@ use crate::passes::shared::requested_columns;
 
 pub fn emit_aggregation(
     plan: &Plan,
-    aggregations: &[InputAggregation],
+    aggregations: &[InputAggregationMetric],
     group_by_keys: &[InputGroupByKey],
     agg_sort: Option<&InputAggSort>,
 ) -> Result<Node> {
@@ -28,7 +28,7 @@ fn default_alias(func: AggFunction) -> String {
 
 fn build_aggregation(
     plan: &Plan,
-    aggregations: &[InputAggregation],
+    aggregations: &[InputAggregationMetric],
     group_by_keys: &[InputGroupByKey],
     agg_sort: Option<&InputAggSort>,
 ) -> (Vec<SelectExpr>, Vec<Expr>, Vec<OrderExpr>) {

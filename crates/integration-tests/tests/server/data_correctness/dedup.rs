@@ -135,8 +135,19 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
     });
     // Duplicate MR 9100 should be counted once. Seed MRs 2004 and 2005 are
     // also merged in project 1000, so the total is 3.
-    resp.assert_group_node_property_str("p", "Project", 1000, "name", "Public Project");
-    resp.assert_group_row_value_i64("p", "Project", 1000, "mr_count", 3);
+    resp.assert_group_node_row("p", "Project", 1000, |row, project| {
+        assert_eq!(
+            project
+                .get("properties")
+                .and_then(|properties| properties.get("name"))
+                .and_then(|name| name.as_str()),
+            Some("Public Project")
+        );
+        assert_eq!(
+            row.get("mr_count").and_then(|count| count.as_i64()),
+            Some(3)
+        );
+    });
 }
 
 /// Search with filter: latest version matches the filter. Should return the row.

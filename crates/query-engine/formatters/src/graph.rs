@@ -160,8 +160,8 @@ impl GraphFormatter {
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
         let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
         let mut rows: Option<Vec<Map<String, Value>>> = None;
-        let aggregations = Some(&output.compiled.input.aggregations);
-        let group_by = &output.compiled.input.group_by;
+        let aggregations = Some(&output.compiled.input.aggregation.metrics);
+        let group_by = &output.compiled.input.aggregation.group_by;
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -321,7 +321,7 @@ impl GraphFormatter {
         }
     }
 
-    fn agg_col_names(aggs: &[compiler::input::InputAggregation]) -> Vec<String> {
+    fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
         aggs.iter()
             .map(|agg| {
                 agg.alias
@@ -332,7 +332,7 @@ impl GraphFormatter {
     }
 
     fn build_column_descriptors(
-        aggs: &[compiler::input::InputAggregation],
+        aggs: &[compiler::input::InputAggregationMetric],
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
@@ -372,7 +372,7 @@ impl GraphFormatter {
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
-        aggs: &[compiler::input::InputAggregation],
+        aggs: &[compiler::input::InputAggregationMetric],
         groups: &[compiler::input::InputGroupByKey],
     ) -> Vec<Map<String, Value>> {
         let group_col_names = compiler::input::group_by_output_names(groups);

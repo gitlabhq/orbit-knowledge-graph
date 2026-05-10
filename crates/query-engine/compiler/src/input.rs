@@ -116,16 +116,14 @@ pub struct Input {
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
     #[serde(default)]
-    pub aggregations: Vec<InputAggregation>,
-    #[serde(default)]
-    pub group_by: Vec<InputGroupByKey>,
+    #[serde(flatten)]
+    pub aggregation: InputAggregation,
     pub path: Option<InputPath>,
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub cursor: Option<InputCursor>,
     pub order_by: Option<InputOrderBy>,
-    pub aggregation_sort: Option<InputAggSort>,
     #[serde(default)]
     pub options: QueryOptions,
     /// Auth config for every entity type with redaction configured. Populated by
@@ -262,12 +260,6 @@ impl Input {
             && self.nodes.len() == 1
             && self.relationships.is_empty()
     }
-
-    pub fn uses_property_grouping(&self) -> bool {
-        self.group_by
-            .iter()
-            .any(|group| matches!(group, InputGroupByKey::Property { .. }))
-    }
 }
 
 impl Default for Input {
@@ -276,14 +268,12 @@ impl Default for Input {
             query_type: QueryType::Traversal,
             nodes: vec![],
             relationships: vec![],
-            aggregations: vec![],
-            group_by: vec![],
+            aggregation: InputAggregation::default(),
             path: None,
             neighbors: None,
             limit: default_limit(),
             cursor: None,
             order_by: None,
-            aggregation_sort: None,
             options: QueryOptions::default(),
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
@@ -635,9 +625,20 @@ impl Direction {
 // Aggregations
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct InputAggregation {
+    #[serde(rename = "aggregations")]
+    pub metrics: Vec<InputAggregationMetric>,
+    #[serde(rename = "group_by")]
+    pub group_by: Vec<InputGroupByKey>,
+    #[serde(rename = "aggregation_sort")]
+    pub sort: Option<InputAggSort>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct InputAggregation {
+pub struct InputAggregationMetric {
     pub function: AggFunction,
     #[serde(default)]
     pub target: Option<String>,
@@ -950,8 +951,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.query_type, QueryType::Aggregation);
-        assert_eq!(input.aggregations[0].function, AggFunction::Count);
-        assert!(input.aggregation_sort.is_some());
+        assert_eq!(input.aggregation.metrics[0].function, AggFunction::Count);
+        assert!(input.aggregation.sort.is_some());
     }
 
     #[test]
@@ -979,7 +980,7 @@ mod tests {
         let input = parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "n"}]}"#).unwrap();
         assert_eq!(input.limit, 30);
         assert!(input.relationships.is_empty());
-        assert!(input.aggregations.is_empty());
+        assert!(input.aggregation.metrics.is_empty());
     }
 
     #[test]

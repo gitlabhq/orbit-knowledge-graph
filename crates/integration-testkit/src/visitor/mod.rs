@@ -617,6 +617,30 @@ impl ResponseView {
         );
     }
 
+    pub fn assert_group_node_row(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        assert_row: impl FnOnce(&Map<String, Value>, &Map<String, Value>),
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let node = group_node_object(row, group_key).unwrap_or_else(|| {
+            panic!("group key '{group_key}' is not a node object in row: {row:?}")
+        });
+        assert_row(row, node);
+    }
+
     pub fn assert_group_row_value_i64(
         &self,
         group_key: &str,

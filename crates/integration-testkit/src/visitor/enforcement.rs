@@ -131,7 +131,7 @@ impl QueryRequirements for Input {
             }
         }
 
-        if self.aggregation_sort.is_some() {
+        if self.aggregation.sort.is_some() {
             reqs.insert(Requirement::AggregationSort);
         }
 

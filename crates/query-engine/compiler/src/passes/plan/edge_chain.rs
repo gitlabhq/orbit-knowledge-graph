@@ -179,7 +179,8 @@ pub fn plan(input: &mut Input) -> Plan {
 
     // In aggregation queries, only node group keys emit entity columns.
     if input.query_type == QueryType::Aggregation {
-        let group_by_nodes: HashSet<&str> = crate::input::node_group_ids(&input.group_by).collect();
+        let group_by_nodes: HashSet<&str> =
+            crate::input::node_group_ids(&input.aggregation.group_by).collect();
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
@@ -187,8 +188,8 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let body = if input.query_type == QueryType::Aggregation {
         PlanBody::Aggregation {
-            aggregations: input.aggregations.clone(),
-            agg_sort: input.aggregation_sort.clone(),
+            aggregations: input.aggregation.metrics.clone(),
+            agg_sort: input.aggregation.sort.clone(),
         }
     } else {
         PlanBody::Traversal
@@ -433,13 +434,14 @@ fn reorder_by_selectivity(
 fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
-    let is_group_by_node =
-        crate::input::node_group_ids(&input.group_by).any(|node| node == alias.as_str());
+    let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
+        .any(|node| node == alias.as_str());
     let is_group_by_property = input
+        .aggregation
         .group_by
         .iter()
         .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
-    let is_agg_property_target = input.aggregations.iter().any(|a| {
+    let is_agg_property_target = input.aggregation.metrics.iter().any(|a| {
         a.target.as_deref() == Some(alias.as_str())
             && a.property.is_some()
             && !matches!(a.function, AggFunction::Count)
@@ -642,7 +644,7 @@ fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
             push(prop);
         }
 
-        for agg in &input.aggregations {
+        for agg in &input.aggregation.metrics {
             if agg.target.as_deref() == Some(alias.as_str())
                 && let Some(ref prop) = agg.property
             {

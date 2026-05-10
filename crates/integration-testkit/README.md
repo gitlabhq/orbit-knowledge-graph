@@ -172,7 +172,7 @@ The mapping from query features to requirements:
 | `filters: {field: ...}` | `Filter { field }` (one per field) | `assert_filter(entity, field, pred)` |
 | `node_ids: [...]` | `NodeIds` | `node_ids`, `assert_node_order`, `assert_node_count` |
 | `query_type: aggregation` | `Aggregation` | `assert_aggregation_value_i64`, `assert_row_value_i64`, `assert_group_row_value_i64` |
-| `group_by: [{kind: "node", ...}]` | `Aggregation` | `assert_group_node_count`, `assert_group_node_ids`, `assert_group_row_value_i64` |
+| `group_by: [{kind: "node", ...}]` | `Aggregation` | `assert_group_node_count`, `assert_group_node_ids`, `assert_group_node_row`, `assert_group_row_value_i64` |
 | `group_by: [{kind: "property", ...}]` | `Aggregation` | `assert_group_column`, `assert_row_count`, `assert_row_value_i64`, `assert_row_value_str` |
 | `aggregation_sort` | `AggregationSort` | `assert_group_node_order` |
 | `query_type: path_finding` | `PathFinding` | `path_ids` |
