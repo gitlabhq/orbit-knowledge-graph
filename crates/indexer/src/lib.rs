@@ -69,7 +69,10 @@ use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
 use modules::sdlc::dispatch::{
-    EntityDescriptor, EntityDispatcher, GlobalDispatcher, NamespaceDispatcher,
+    EntityDescriptor, EntityDispatcher, GlobalDispatcher, NamespaceDispatcher, PartitionConfig,
+};
+use modules::sdlc::partition_strategy::{
+    DatalakePartitionStrategy, PartitionStrategy, partition_column,
 };
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
@@ -244,13 +247,29 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
         )),
-        Box::new(EntityDispatcher::new(
-            services.nats.clone(),
-            datalake,
-            metrics.clone(),
-            config.schedule.tasks.entity.clone(),
-            build_entity_descriptors(ontology),
-        )),
+        {
+            let entity_config = &config.engine.handlers.entity_handler;
+            let entity_datalake: Arc<dyn modules::sdlc::datalake::DatalakeQuery> =
+                Arc::new(modules::sdlc::datalake::Datalake::new(
+                    Arc::new(config.datalake.build_client()),
+                    entity_config.datalake_batch_size,
+                ));
+            let entity_checkpoint_store: Arc<dyn checkpoint::CheckpointStore> = Arc::new(
+                checkpoint::ClickHouseCheckpointStore::new(Arc::new(config.graph.build_client())),
+            );
+            let (descriptors, partition_strategies) =
+                build_entity_descriptors(ontology, entity_config, &entity_datalake);
+
+            Box::new(EntityDispatcher::new(
+                services.nats.clone(),
+                datalake,
+                entity_checkpoint_store,
+                partition_strategies,
+                metrics.clone(),
+                config.schedule.tasks.entity.clone(),
+                descriptors,
+            ))
+        },
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
@@ -301,23 +320,108 @@ pub async fn run_dispatcher(
     }
 }
 
-fn build_entity_descriptors(ontology: &ontology::Ontology) -> Vec<EntityDescriptor> {
+fn build_entity_descriptors(
+    ontology: &ontology::Ontology,
+    entity_config: &gkg_server_config::EntityHandlerConfig,
+    datalake: &Arc<dyn modules::sdlc::datalake::DatalakeQuery>,
+) -> (
+    Vec<EntityDescriptor>,
+    std::collections::HashMap<String, Arc<dyn PartitionStrategy>>,
+) {
     let mut descriptors = Vec::new();
+    let mut strategies = std::collections::HashMap::new();
 
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
+        let scope = etl.scope();
+        let partition = build_partition_config(&node.name, scope, ontology, entity_config);
+
+        if let Some(ref pc) = partition {
+            strategies.insert(
+                node.name.clone(),
+                Arc::new(DatalakePartitionStrategy::new(
+                    pc.source_table.clone(),
+                    pc.column.clone(),
+                    pc.count,
+                    Arc::clone(datalake),
+                )) as Arc<dyn PartitionStrategy>,
+            );
+        }
+
         descriptors.push(EntityDescriptor {
             entity_kind: node.name.clone(),
-            scope: etl.scope(),
+            scope,
+            partition,
         });
     }
 
     for (relationship_kind, config) in ontology.edge_etl_configs() {
+        let scope = config.scope;
+        let entity_kind = relationship_kind.to_string();
+        let partition = build_partition_config(&entity_kind, scope, ontology, entity_config);
+
+        if let Some(ref pc) = partition {
+            strategies.insert(
+                entity_kind.clone(),
+                Arc::new(DatalakePartitionStrategy::new(
+                    pc.source_table.clone(),
+                    pc.column.clone(),
+                    pc.count,
+                    Arc::clone(datalake),
+                )) as Arc<dyn PartitionStrategy>,
+            );
+        }
+
         descriptors.push(EntityDescriptor {
-            entity_kind: relationship_kind.to_string(),
-            scope: config.scope,
+            entity_kind,
+            scope,
+            partition,
         });
     }
 
-    descriptors
+    (descriptors, strategies)
+}
+
+fn build_partition_config(
+    entity_kind: &str,
+    scope: ontology::EtlScope,
+    ontology: &ontology::Ontology,
+    config: &gkg_server_config::EntityHandlerConfig,
+) -> Option<PartitionConfig> {
+    let count = config
+        .partition_overrides
+        .get(entity_kind)
+        .copied()
+        .unwrap_or(1);
+
+    if count <= 1 {
+        return None;
+    }
+
+    let (order_by, source_table) = if let Some(node) = ontology.get_node(entity_kind) {
+        let etl = node.etl.as_ref();
+        let order = etl.map(|e| e.order_by().to_vec()).unwrap_or_default();
+        let source = etl.and_then(|e| match e {
+            ontology::etl::EtlConfig::Table { source, .. } => Some(source.clone()),
+            ontology::etl::EtlConfig::Query { .. } => None,
+        });
+        (order, source)
+    } else {
+        let edge = ontology
+            .edge_etl_configs()
+            .find(|(kind, _)| *kind == entity_kind);
+        match edge {
+            Some((_, etl_config)) => (etl_config.order_by.clone(), Some(etl_config.source.clone())),
+            None => (vec![], None),
+        }
+    };
+
+    let column = partition_column(&order_by, scope)?.to_string();
+    let source_table = source_table?;
+
+    Some(PartitionConfig {
+        count,
+        column,
+        source_table,
+    })
 }

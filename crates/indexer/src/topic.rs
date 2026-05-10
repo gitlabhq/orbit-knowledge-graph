@@ -96,6 +96,16 @@ pub struct EntityIndexingRequest {
     pub entity_kind: String,
     pub watermark: DateTime<Utc>,
     pub scope: IndexingScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partition: Option<PartitionAssignment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartitionAssignment {
+    pub index: u32,
+    pub total: u32,
+    pub column: String,
+    pub bounds: PartitionBounds,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +200,7 @@ mod tests {
                 namespace_id: 9970,
                 traversal_path: "42/9970/".to_string(),
             },
+            partition: None,
         }
     }
 
@@ -198,6 +209,7 @@ mod tests {
             entity_kind: entity_kind.to_string(),
             watermark: "2024-01-01T00:00:00Z".parse().unwrap(),
             scope: IndexingScope::Global,
+            partition: None,
         }
     }
 

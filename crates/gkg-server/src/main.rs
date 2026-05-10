@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
                 nats: config.nats.clone(),
                 graph: config.graph.clone(),
                 datalake: config.datalake.clone(),
+                engine: config.engine.clone(),
                 schedule: config.schedule.clone(),
                 schema: config.schema.clone(),
                 health_bind_address: config.dispatcher_health_bind_address,

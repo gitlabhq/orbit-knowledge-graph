@@ -17,7 +17,7 @@ const MAX_PARTITION_UPPER_BOUND: &str = "99999999999999999999";
 // ---------------------------------------------------------------------------
 
 #[async_trait]
-pub(in crate::modules::sdlc) trait PartitionStrategy: Send + Sync {
+pub trait PartitionStrategy: Send + Sync {
     fn partition_count(&self) -> u32;
     fn partition_column(&self) -> &str;
 
@@ -48,7 +48,7 @@ pub(in crate::modules::sdlc) trait PartitionStrategy: Send + Sync {
 // DatalakePartitionStrategy — splits by quantiles from ClickHouse
 // ---------------------------------------------------------------------------
 
-pub(in crate::modules::sdlc) struct DatalakePartitionStrategy {
+pub(crate) struct DatalakePartitionStrategy {
     source_table: String,
     partition_column: String,
     partition_count: u32,

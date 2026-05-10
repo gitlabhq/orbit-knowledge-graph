@@ -1,19 +1,23 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use ontology::EtlScope;
 use tracing::{debug, info};
 
+use crate::checkpoint::{Checkpoint, CheckpointStore, EntityCheckpointKey};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
-use crate::topic::{EntityIndexingRequest, IndexingScope};
+use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionAssignment};
 use crate::types::Envelope;
 use gkg_server_config::{EntityDispatcherConfig, ScheduleConfiguration};
+
+use crate::modules::sdlc::partition_strategy::PartitionStrategy;
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, traversal_path
@@ -23,14 +27,23 @@ WHERE _siphon_deleted = false
   AND traversal_path != '0/'
 "#;
 
+pub struct PartitionConfig {
+    pub count: u32,
+    pub column: String,
+    pub source_table: String,
+}
+
 pub struct EntityDescriptor {
     pub entity_kind: String,
     pub scope: EtlScope,
+    pub partition: Option<PartitionConfig>,
 }
 
 pub struct EntityDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
+    checkpoint_store: Arc<dyn CheckpointStore>,
+    partition_strategies: HashMap<String, Arc<dyn PartitionStrategy>>,
     metrics: ScheduledTaskMetrics,
     config: EntityDispatcherConfig,
     entities: Vec<EntityDescriptor>,
@@ -40,6 +53,8 @@ impl EntityDispatcher {
     pub fn new(
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
+        checkpoint_store: Arc<dyn CheckpointStore>,
+        partition_strategies: HashMap<String, Arc<dyn PartitionStrategy>>,
         metrics: ScheduledTaskMetrics,
         config: EntityDispatcherConfig,
         entities: Vec<EntityDescriptor>,
@@ -47,6 +62,8 @@ impl EntityDispatcher {
         Self {
             nats,
             datalake,
+            checkpoint_store,
+            partition_strategies,
             metrics,
             config,
             entities,
@@ -108,14 +125,16 @@ impl EntityDispatcher {
             };
 
             for scope in scopes {
-                let request = EntityIndexingRequest {
-                    entity_kind: entity.entity_kind.clone(),
-                    watermark,
-                    scope,
-                };
-                match self.publish_request(&request).await? {
-                    PublishOutcome::Published => dispatched += 1,
-                    PublishOutcome::Skipped => skipped += 1,
+                let requests = self
+                    .plan_dispatch(entity, &scope, watermark)
+                    .await
+                    .map_err(TaskError::new)?;
+
+                for request in &requests {
+                    match self.publish_request(request).await? {
+                        PublishOutcome::Published => dispatched += 1,
+                        PublishOutcome::Skipped => skipped += 1,
+                    }
                 }
             }
         }
@@ -131,6 +150,139 @@ impl EntityDispatcher {
             "dispatched entity indexing requests"
         );
         Ok(())
+    }
+
+    async fn plan_dispatch(
+        &self,
+        entity: &EntityDescriptor,
+        scope: &IndexingScope,
+        watermark: DateTime<Utc>,
+    ) -> Result<Vec<EntityIndexingRequest>, crate::handler::HandlerError> {
+        let strategy = match self.partition_strategies.get(&entity.entity_kind) {
+            Some(s) => s,
+            None => {
+                return Ok(vec![EntityIndexingRequest {
+                    entity_kind: entity.entity_kind.clone(),
+                    watermark,
+                    scope: scope.clone(),
+                    partition: None,
+                }]);
+            }
+        };
+
+        let checkpoint_key = EntityCheckpointKey::new(scope);
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(checkpoint_key.prefix())
+            .await
+            .map_err(|err| {
+                crate::handler::HandlerError::Processing(format!(
+                    "failed to load checkpoints: {err}"
+                ))
+            })?;
+
+        let unified_key = checkpoint_key.full_key(&entity.entity_kind);
+
+        if checkpoints
+            .get(&unified_key)
+            .is_some_and(|cp| cp.is_completed())
+        {
+            return Ok(vec![EntityIndexingRequest {
+                entity_kind: entity.entity_kind.clone(),
+                watermark,
+                scope: scope.clone(),
+                partition: None,
+            }]);
+        }
+
+        let partition_checkpoints: Vec<(&String, &Checkpoint)> = checkpoints
+            .iter()
+            .filter(|(key, _)| key.as_str() != unified_key && key.starts_with(&unified_key))
+            .collect();
+
+        if !partition_checkpoints.is_empty()
+            && partition_checkpoints
+                .iter()
+                .all(|(_, cp)| cp.is_completed())
+        {
+            let min_watermark = partition_checkpoints
+                .iter()
+                .map(|(_, cp)| cp.watermark)
+                .min()
+                .unwrap_or(watermark);
+
+            self.checkpoint_store
+                .save_completed(&unified_key, &min_watermark)
+                .await
+                .map_err(|err| {
+                    crate::handler::HandlerError::Processing(format!(
+                        "failed to save consolidated checkpoint: {err}"
+                    ))
+                })?;
+
+            info!(
+                entity_kind = %entity.entity_kind,
+                consolidated_watermark = %min_watermark,
+                "consolidated partition checkpoints"
+            );
+
+            return Ok(vec![EntityIndexingRequest {
+                entity_kind: entity.entity_kind.clone(),
+                watermark,
+                scope: scope.clone(),
+                partition: None,
+            }]);
+        }
+
+        let dummy_request = EntityIndexingRequest {
+            entity_kind: entity.entity_kind.clone(),
+            watermark,
+            scope: scope.clone(),
+            partition: None,
+        };
+
+        let specs = match strategy.compute_partitions(&dummy_request).await? {
+            Some(specs) => specs,
+            None => {
+                info!(
+                    entity_kind = %entity.entity_kind,
+                    partition_count = strategy.partition_count(),
+                    "insufficient quantiles, dispatching non-partitioned"
+                );
+                return Ok(vec![dummy_request]);
+            }
+        };
+
+        let column = strategy.partition_column().to_string();
+        let pending: Vec<EntityIndexingRequest> = specs
+            .into_iter()
+            .filter(|spec| {
+                let key = EntityCheckpointKey::new(scope)
+                    .with_partition(spec.partition_index, spec.total_partitions)
+                    .full_key(&entity.entity_kind);
+                !matches!(checkpoints.get(&key), Some(cp) if cp.is_completed())
+            })
+            .map(|spec| EntityIndexingRequest {
+                entity_kind: entity.entity_kind.clone(),
+                watermark,
+                scope: scope.clone(),
+                partition: Some(PartitionAssignment {
+                    index: spec.partition_index,
+                    total: spec.total_partitions,
+                    column: column.clone(),
+                    bounds: spec.bounds,
+                }),
+            })
+            .collect();
+
+        info!(
+            entity_kind = %entity.entity_kind,
+            pending = pending.len(),
+            total = strategy.partition_count(),
+            "dispatching partition jobs"
+        );
+
+        Ok(pending)
     }
 
     async fn load_enabled_namespaces(&self) -> Result<Vec<EnabledNamespace>, TaskError> {
@@ -181,6 +333,7 @@ impl EntityDispatcher {
                 debug!(
                     entity_kind = %request.entity_kind,
                     scope = ?request.scope,
+                    partition = ?request.partition.as_ref().map(|p| p.index),
                     "dispatched entity indexing request"
                 );
                 Ok(PublishOutcome::Published)

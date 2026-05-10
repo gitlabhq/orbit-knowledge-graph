@@ -266,16 +266,25 @@ async fn entity_dispatcher_publishes_per_entity_requests() {
         EntityDescriptor {
             entity_kind: "User".to_string(),
             scope: EtlScope::Global,
+            partition: None,
         },
         EntityDescriptor {
             entity_kind: "Project".to_string(),
             scope: EtlScope::Namespaced,
+            partition: None,
         },
     ];
+
+    let checkpoint_store: std::sync::Arc<dyn indexer::checkpoint::CheckpointStore> =
+        std::sync::Arc::new(indexer::checkpoint::ClickHouseCheckpointStore::new(
+            std::sync::Arc::new(context.clickhouse.config.build_client()),
+        ));
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![Box::new(EntityDispatcher::new(
         services.nats.clone(),
         datalake,
+        checkpoint_store,
+        std::collections::HashMap::new(),
         metrics,
         EntityDispatcherConfig::default(),
         entities,

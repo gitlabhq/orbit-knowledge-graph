@@ -90,6 +90,8 @@ pub struct DispatcherConfig {
     #[serde(default)]
     pub datalake: ClickHouseConfiguration,
     #[serde(default)]
+    pub engine: EngineConfiguration,
+    #[serde(default)]
     pub schedule: ScheduleConfig,
     #[serde(default)]
     pub schema: SchemaConfig,
