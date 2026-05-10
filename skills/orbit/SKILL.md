@@ -79,6 +79,6 @@ and `max_hops` are capped at 3 server-side.
 ## Contributing
 
 `references/query_language.md` is synced from
-`docs/source/queries/query_language.md`. Edit the upstream file, then run
+`docs/source/remote/queries/query-language.md`. Edit the upstream file, then run
 `mise run skill:sync:orbit`. The lefthook `orbit-skill-docs-sync` job fails
 the commit if the two files drift.

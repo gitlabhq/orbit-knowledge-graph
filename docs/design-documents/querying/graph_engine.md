@@ -53,9 +53,9 @@ bloom filters lets projections be correctly selected.
 
 ## Query Engine Design
 
-There will be two ways to interact with the graph engine:
+There are two intended ways to interact with the graph engine:
 
-1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`find_nodes`, `neighbors`, `paths`, `aggregate_nodes`). The server validates input and compiles to parameterized SQL.
+1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`traversal`, `neighbors`, `path_finding`, `aggregation`). The server validates input and compiles to parameterized SQL.
 2. Cypher reader (optional): Cypher to SQL translation à la ClickGraph for teams that prefer property‑graph syntax or need Neo4j driver compatibility.
 
 The planner emits ClickHouse SQL similar to these patterns:
@@ -65,7 +65,7 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
 - Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
-- Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
+- Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results. Top-level `group_by` supports node groups and scalar property groups, and property groups keep the grouped alias table-backed so security filters and latest-row checks apply before aggregation.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... FROM table FINAL WHERE ...) AS alias` in FROM/JOIN positions when a latest-row node scan has filters or narrowing predicates that should be applied inside the `FINAL` read. FK-star center scans and joined node scans use this shape.
 - Narrowing CTEs: edge-derived narrowing CTEs use `SELECT DISTINCT` for ID frontiers so high fan-out relationships do not feed millions of duplicate values into an `IN` set.
@@ -80,13 +80,13 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
-| Search (single-node) | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
+| Single-node traversal | Node table scan with `FINAL` | Applies `ReplacingMergeTree` latest-row semantics before filters and limits |
 | Node filter CTEs | Node table scan with `FINAL` | Ensures ID frontiers are derived from latest rows, not stale matching versions |
 | FK candidate CTEs | Non-`FINAL` `SELECT DISTINCT id` or FK values plus outer `FINAL` recheck | Lets ClickHouse use selective filters before the expensive latest-row scan while preserving correctness through the outer recheck |
 | Edge narrowing CTEs | Non-`FINAL` `SELECT DISTINCT edge_id` frontier | Narrows joined node `FINAL` scans while avoiding duplicate-heavy `IN` sets from fan-out edges |
 | Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
 | Hydration (UNION ALL arms) | Node table scan with `FINAL` | Excludes deleted rows and stale properties for dynamically hydrated entities |
-| Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and search semantics consistent |
+| Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and single-node lookup semantics consistent |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
 
 Filter placement rules for node `FINAL` scans:

@@ -74,6 +74,7 @@ query type.
 | `nodes` | `array` | Multiple node selectors. Required for multi-node `traversal`, `aggregation`, and `path_finding`. Maximum 5. |
 | `relationships` | `array` | Relationship selectors for traversal or aggregation. Maximum 5. |
 | `aggregations` | `array` | Aggregation definitions. Required for `aggregation`. Maximum 10. |
+| `group_by` | `array` | Group keys for aggregation rows. Maximum 4. |
 | `path` | `object` | Path finding configuration. Required for `path_finding`. |
 | `neighbors` | `object` | Neighbor lookup configuration. Required for `neighbors`. |
 | `limit` | `integer` | Maximum rows to return. Default 30. Maximum 1000. |
@@ -286,9 +287,24 @@ Aggregation queries use `aggregations`.
 | `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
 | `alias` | `string` | Name of the output column. |
 
-Use top-level `group_by` to group aggregation rows. Node groups use
-`{"kind": "node", "node": "<node-id>"}` and property groups use
-`{"kind": "property", "node": "<node-id>", "property": "<property>"}`.
+Use top-level `group_by` to group aggregation rows. It applies to every
+aggregation in the query. Do not put grouping inside an individual aggregation.
+
+Group keys support these shapes:
+
+| Group key | Shape | Result value |
+|-----------|-------|--------------|
+| Node | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | A nested entity object in each row. |
+| Property | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | A scalar bucket value in each row. |
+
+If you omit `alias`, node groups use the node ID as the output key. Property
+groups use the property name when it is unique in the `group_by` list, or
+`<node>_<property>` when needed to avoid ambiguity. Duplicate group or aggregate
+output names are rejected.
+
+Property groups must reference a real ClickHouse-backed, filterable property
+that the caller is allowed to use. Virtual fields and unfilterable fields are
+rejected during validation.
 
 Count merged merge requests per project:
 
@@ -318,6 +334,34 @@ Count merged merge requests per project:
   "limit": 10
 }
 ```
+
+Count detected vulnerabilities by severity:
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "v",
+      "entity": "Vulnerability",
+      "filters": {"state": "detected"}
+    }
+  ],
+  "group_by": [
+    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+  ],
+  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"},
+  "limit": 10
+}
+```
+
+Aggregation responses are table-shaped. `columns` describes computed aggregate
+values, `group_columns` describes grouping keys, and `rows` carries group values
+plus metric values. Node-grouped rows store the grouped entity under the group
+key. Property-grouped rows store the scalar bucket under the group key.
 
 `collect` is listed in the input type but currently rejected by validation.
 

@@ -118,23 +118,36 @@ An example response:
 ```json
 {
   "result": {
-    "format_version": "1.2.0",
+    "format_version": "2.0.0",
     "query_type": "aggregation",
-    "nodes": [
+    "nodes": [],
+    "edges": [],
+    "group_columns": [
       {
-        "type": "Project",
-        "id": "1",
-        "name": "payments-api",
-        "full_path": "my-org/payments-api",
-        "failed_pipelines": 47
+        "name": "p",
+        "kind": "node",
+        "node": "p",
+        "entity": "Project"
       }
     ],
-    "edges": [],
     "columns": [
       {
         "name": "failed_pipelines",
         "function": "count",
         "target": "pl"
+      }
+    ],
+    "rows": [
+      {
+        "p": {
+          "type": "Project",
+          "id": "1",
+          "properties": {
+            "name": "payments-api",
+            "full_path": "my-org/payments-api"
+          }
+        },
+        "failed_pipelines": 47
       }
     ]
   },

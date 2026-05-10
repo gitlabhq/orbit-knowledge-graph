@@ -237,3 +237,26 @@ Answer: "Where are our security risks, and how did they get there?"
   "limit": 20
 }
 ```
+
+### Count vulnerabilities by severity
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "v",
+      "entity": "Vulnerability",
+      "filters": {"state": "detected"}
+    }
+  ],
+  "group_by": [
+    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "v", "alias": "vuln_count"}
+  ],
+  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "limit": 10
+}
+```

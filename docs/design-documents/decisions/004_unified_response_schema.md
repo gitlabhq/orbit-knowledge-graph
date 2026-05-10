@@ -92,7 +92,7 @@ Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids Ja
 
 ### Examples by query type
 
-Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows`. The content varies, the base shape does not.
+Every query returns `{ format_version, query_type, nodes, edges }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows`. The content varies, the base shape does not.
 
 #### Single-entity Traversal (lookup)
 
@@ -100,6 +100,7 @@ A `traversal` with a single node and no relationships — what was previously a 
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
@@ -117,6 +118,7 @@ Nodes are deduplicated. Edges are instance-level.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
@@ -140,6 +142,7 @@ Edges carry a `depth` field.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice" },
@@ -161,6 +164,7 @@ Computed values live in `rows`, not on graph nodes. `columns` describes each agg
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "aggregation",
   "nodes": [],
   "edges": [],
@@ -184,6 +188,7 @@ When no `group_by` is specified, the SQL returns only aggregate values with no e
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "aggregation",
   "nodes": [],
   "edges": [],
@@ -204,6 +209,7 @@ When `group_by` uses `kind: "property"`, the SQL returns scalar bucket values pl
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "aggregation",
   "nodes": [],
   "edges": [],
@@ -226,6 +232,7 @@ Edges carry `path_id` and `step`. Nodes are deduplicated across paths.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "path_finding",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice" },
@@ -250,6 +257,7 @@ Center node plus its neighbors. Edge direction matches the ontology.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "neighbors",
   "nodes": [
     { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
@@ -297,7 +305,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
+3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ format_version, query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
 5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.

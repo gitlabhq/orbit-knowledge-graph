@@ -58,6 +58,7 @@ The JSON query schema supports four query types through a single unified structu
 |-------|------|-------------|
 | `relationships` | `array` | Relationship traversals between nodes |
 | `aggregations` | `array` | Aggregation specs (required when `query_type` is `aggregation`) |
+| `group_by` | `array` | Group keys for aggregation rows |
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
 | `limit` | `integer` | Max results (1-1000, default: 30) |
@@ -174,8 +175,9 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
-Use top-level `group_by` to group aggregation rows. A node group uses
-`{"kind": "node", "node": "<node-id>"}`.
+Use top-level `group_by` to group aggregation rows. It applies to every
+aggregation in the query. A node group uses
+`{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
 
 ```json
 {
@@ -197,7 +199,15 @@ Use top-level `group_by` to group aggregation rows. A node group uses
 ```
 
 Use top-level `group_by` entries with `kind: "property"` to group by scalar
-properties, such as dashboard buckets.
+properties, such as dashboard buckets. Property groups use
+`{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}`.
+They must reference ClickHouse-backed, filterable properties allowed for the
+caller. Virtual fields and unfilterable fields are rejected during validation.
+
+`group_by` supports up to four keys and can mix node and property groups. If
+`alias` is omitted, node groups use the node ID. Property groups use the property
+name when unique, or `<node>_<property>` when needed to avoid ambiguity.
+Duplicate group or aggregate output names are rejected.
 
 ```json
 {

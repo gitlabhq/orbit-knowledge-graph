@@ -162,6 +162,27 @@ Count open merge requests per project, highest first:
 }
 ```
 
+Count detected vulnerabilities by severity:
+
+```json
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}
+    ],
+    "group_by": [
+      {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "v", "alias": "vuln_count"}
+    ],
+    "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+    "limit": 10
+  }
+}
+```
+
 ## `path_finding` — shortest path between nodes
 
 Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
