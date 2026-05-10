@@ -1,3 +1,21 @@
+## [0.56.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.55.0...v0.56.0) (2026-05-10)
+
+### Features
+
+* **formatters:** implement GoonFormatter encoder ([e409b01](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e409b016b03a48c7862adc93424d53e09363c4fa)) by Michael Angelo Rivera
+* **query:** support property grouping aggregations ([9a8d978](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9a8d978ce53375f3040085a17fa89ae1bc5e60f1)) by Michael Angelo Rivera
+
+### Fixes
+
+* **formatters:** surface every GraphResponse field in goon output ([354d51e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/354d51eb26e5f407b218457219ab49bad00305e7)) by Michael Angelo Rivera
+* **ontology:** target vulnerability findings at occurrences ([784677e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/784677ed852bd477317b72ebc953c9d9cf91b00e)) by Michael Angelo Rivera
+* **query:** use FINAL for node latest-row reads ([aa65346](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa65346bc99a1ea76491c1eb679d7392e0c21e62)) by Michael Angelo Rivera
+
+### Other
+
+* **e2e:** migrate aggregation queries to DSL v2 ([048d09e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/048d09e5cc6f883f977ac2f00ddd2e712e3068bf)) by Bohdan Parkhomchuk
+* **e2e:** migrate aggregation response assertions to v2 rows shape ([2cc4beb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2cc4beb802796f236d97b1d394f6d17d04aab637)) by Bohdan Parkhomchuk
+
 ## [0.55.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.54.0...v0.55.0) (2026-05-09)
 
 ### Features
