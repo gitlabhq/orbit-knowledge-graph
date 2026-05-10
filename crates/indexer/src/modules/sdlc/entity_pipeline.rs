@@ -72,18 +72,17 @@ impl EntityPipeline for SimpleEntityPipeline {
             .get(&unified_key)
             .is_some_and(|cp| cp.watermark.timestamp_micros() > 0);
 
-        if completed {
-            let runs = vec![self.plan_single_run(request)];
-            self.run_plans(&runs, destination, progress).await?;
-            return Ok(());
-        }
+        let runs = if completed {
+            vec![self.plan_single_run(request)]
+        } else {
+            self.plan_pending_runs(request, &checkpoints).await?
+        };
 
-        let runs = self.plan_pending_runs(request, &checkpoints).await?;
         if !runs.is_empty() {
             self.run_plans(&runs, destination, progress).await?;
         }
 
-        if self.partition_strategy.is_some() {
+        if !completed && self.partition_strategy.is_some() {
             self.consolidate_checkpoint(&request.scope, &request.entity_kind)
                 .await?;
         }
