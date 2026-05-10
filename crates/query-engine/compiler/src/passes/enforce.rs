@@ -3,7 +3,7 @@
 //! Ensures all query results include ID and type columns for entities, enabling
 //! the gkg-server to extract entity IDs and types for redaction validation.
 //!
-//! For aggregation queries, only nodes that appear in GROUP BY clauses can have
+//! For aggregation queries, only nodes that appear in node group keys can have
 //! their ID columns selected (aggregated nodes don't have individual IDs).
 //!
 //! For path finding queries, the start node's ID is added to the base query and
@@ -138,11 +138,9 @@ pub fn enforce_return(
     ctx.entity_auth = input.entity_auth.clone();
 
     let selectable_nodes: HashSet<&str> = match input.query_type {
-        QueryType::Aggregation => input
-            .aggregations
-            .iter()
-            .filter_map(|agg| agg.group_by.as_deref())
-            .collect(),
+        QueryType::Aggregation => {
+            crate::input::node_group_ids(&input.aggregation.group_by).collect()
+        }
         QueryType::Traversal | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
@@ -721,7 +719,9 @@ mod tests {
 
     #[test]
     fn aggregation_only_adds_columns_for_group_by_nodes() {
-        use crate::input::{AggFunction, InputAggregation};
+        use crate::input::{
+            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+        };
 
         let input = Input {
             query_type: QueryType::Aggregation,
@@ -739,13 +739,19 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            aggregations: vec![InputAggregation {
-                function: AggFunction::Count,
-                target: Some("n".to_string()),
-                group_by: Some("u".to_string()),
-                property: None,
-                alias: Some("note_count".to_string()),
-            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function: AggFunction::Count,
+                    target: Some("n".to_string()),
+                    property: None,
+                    alias: Some("note_count".to_string()),
+                }],
+                group_by: vec![InputGroupByKey::Node {
+                    node: "u".to_string(),
+                    alias: None,
+                }],
+                ..Default::default()
+            },
             limit: 10,
             ..Input::default()
         };
@@ -800,7 +806,9 @@ mod tests {
 
     #[test]
     fn aggregation_adds_redaction_id_to_group_by() {
-        use crate::input::{AggFunction, InputAggregation};
+        use crate::input::{
+            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+        };
 
         let input = Input {
             query_type: QueryType::Aggregation,
@@ -818,13 +826,19 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            aggregations: vec![InputAggregation {
-                function: AggFunction::Count,
-                target: Some("mr".to_string()),
-                group_by: Some("u".to_string()),
-                property: None,
-                alias: Some("mr_count".to_string()),
-            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function: AggFunction::Count,
+                    target: Some("mr".to_string()),
+                    property: None,
+                    alias: Some("mr_count".to_string()),
+                }],
+                group_by: vec![InputGroupByKey::Node {
+                    node: "u".to_string(),
+                    alias: None,
+                }],
+                ..Default::default()
+            },
             ..Input::default()
         };
 
@@ -856,7 +870,9 @@ mod tests {
 
     #[test]
     fn aggregation_adds_separate_pk_to_group_by() {
-        use crate::input::{AggFunction, InputAggregation};
+        use crate::input::{
+            AggFunction, InputAggregation, InputAggregationMetric, InputGroupByKey,
+        };
 
         // When the group-by node has redaction_id_column != "id", enforce
         // emits a separate _gkg_*_pk column. DuckDB rejects SELECT columns
@@ -878,13 +894,19 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            aggregations: vec![InputAggregation {
-                function: AggFunction::Count,
-                target: Some("d".to_string()),
-                group_by: Some("f".to_string()),
-                property: None,
-                alias: Some("defs".to_string()),
-            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function: AggFunction::Count,
+                    target: Some("d".to_string()),
+                    property: None,
+                    alias: Some("defs".to_string()),
+                }],
+                group_by: vec![InputGroupByKey::Node {
+                    node: "f".to_string(),
+                    alias: None,
+                }],
+                ..Default::default()
+            },
             limit: 10,
             ..Input::default()
         };

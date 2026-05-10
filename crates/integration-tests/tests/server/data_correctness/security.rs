@@ -383,11 +383,11 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [{
                 "function": "max",
                 "target": "u",
                 "property": "is_admin",
-                "group_by": "g",
                 "alias": "has_admin"
             }],
             "limit": 10
@@ -417,11 +417,11 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [{
                 "function": "count",
                 "target": "u",
                 "property": "is_auditor",
-                "group_by": "g",
                 "alias": "auditor_count"
             }],
             "limit": 10
@@ -552,11 +552,11 @@ pub(super) async fn admin_only_admin_aggregation_compiles(ctx: &TestContext) {
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [{
                 "function": "max",
                 "target": "u",
                 "property": "is_admin",
-                "group_by": "g",
                 "alias": "has_admin"
             }],
             "limit": 10
@@ -834,7 +834,8 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -843,10 +844,8 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
     .await;
 
     // Org 1 groups should have counts; org 2 group must be absent.
-    resp.assert_node("Group", 100, |n| {
-        n.prop_i64("member_count").unwrap_or(0) > 0
-    });
-    resp.assert_node_absent("Group", 900);
+    resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
+    resp.assert_group_node_absent("g", "Group", 900);
 }
 
 /// Org 2 user can see their own data and nothing from org 1.
@@ -898,7 +897,8 @@ pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestCon
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -943,7 +943,8 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1012,7 +1013,8 @@ pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1046,7 +1048,8 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1060,13 +1063,13 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
 
     // Project 1001 (Developer path, which clears the Security Manager floor)
     // surfaces with count=1.
-    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
     // Project 1000 (Reporter-only path) must not appear — the Vulnerability
     // scan was filtered to paths where the user clears Security Manager, leaving
     // Project 1000 without any matching vuln row in the INNER JOIN.
-    resp.assert_node_absent("Project", 1000);
+    resp.assert_group_node_absent("p", "Project", 1000);
     // Project 1004 is outside the user's scope entirely.
-    resp.assert_node_absent("Project", 1004);
+    resp.assert_group_node_absent("p", "Project", 1004);
 }
 
 /// Traversal with NO filters on Vulnerability. The node gets Skip hydration
@@ -1149,7 +1152,8 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1160,10 +1164,10 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
     // Project 1001 lives under 1/101/ and has vuln 8001. Security Manager
     // is the declared floor (25), so the Vulnerability alias keeps this
     // path in its startsWith predicate.
-    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
     // Projects outside 1/101/ are not in the user's scope.
-    resp.assert_node_absent("Project", 1000);
-    resp.assert_node_absent("Project", 1004);
+    resp.assert_group_node_absent("p", "Project", 1000);
+    resp.assert_group_node_absent("p", "Project", 1004);
 }
 
 /// Developer on all paths: classic aggregation baseline showing the
@@ -1180,7 +1184,8 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1197,9 +1202,9 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
     .await;
 
     // All three vuln-bearing projects appear, each with count=1.
-    resp.assert_node("Project", 1000, |n| n.prop_i64("vuln_count") == Some(1));
-    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
-    resp.assert_node("Project", 1004, |n| n.prop_i64("vuln_count") == Some(1));
+    resp.assert_group_row_value_i64("p", "Project", 1000, "vuln_count", 1);
+    resp.assert_group_row_value_i64("p", "Project", 1001, "vuln_count", 1);
+    resp.assert_group_row_value_i64("p", "Project", 1004, "vuln_count", 1);
 }
 
 /// Search on Vulnerability directly as a Reporter: the base-case read
@@ -1237,7 +1242,8 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
                 {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1251,6 +1257,145 @@ pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: 
     // result set entirely.
     resp.assert_empty_aggregation();
     resp.assert_node_absent("Project", 1000);
+}
+
+/// Property grouping exposes scalar buckets instead of graph nodes, so it
+/// must apply the same role-gated Vulnerability scan before grouping. A
+/// Reporter-only user must not learn that Project 1000 has a critical vuln.
+pub(super) async fn aggregation_vulnerability_property_grouping_reporter_only_sees_no_rows(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_empty_aggregation();
+}
+
+/// The original #347 oracle pattern also applies to property grouping: a
+/// filtered scalar bucket must not reveal whether an unauthorized
+/// Vulnerability row matched the guessed severity.
+pub(super) async fn aggregation_vulnerability_property_grouping_filter_oracle_is_neutralized(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1000]},
+                {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_empty_aggregation();
+}
+
+/// Security Manager is the exact floor for Vulnerability. Property grouping
+/// should return only the authorized severity bucket, with no graph node IDs
+/// needed in the response.
+pub(super) async fn aggregation_vulnerability_property_grouping_security_manager_sees_bucket(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/101/")]).unwrap(),
+    )
+    .await;
+
+    resp.assert_group_column("severity", "v", "severity");
+    resp.assert_row_count(1);
+    resp.assert_row_value_str(0, "severity", "high");
+    resp.assert_row_value_i64(0, "vuln_count", 1);
+}
+
+/// Compiled property-group SQL must still keep the Vulnerability alias in
+/// the role-scoped predicate path. This catches a future lowering change
+/// that selects `v.severity` but accidentally skips the SecurityPass filter.
+pub(super) async fn aggregation_vulnerability_property_grouping_sql_drops_reporter_paths(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("v.severity AS severity"),
+        "property group key must be selected from Vulnerability alias, got:\n{sql}"
+    );
+    assert!(
+        sql.contains("GROUP BY v.severity"),
+        "property group key must be grouped from Vulnerability alias, got:\n{sql}"
+    );
+
+    let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
+        matches!(
+            (&p.ch_type, &p.value),
+            (
+                gkg_utils::clickhouse::ChType::Bool,
+                serde_json::Value::Bool(false)
+            )
+        )
+    });
+    assert!(
+        has_false_bool,
+        "Vulnerability alias must compile to Bool(false) when no Security Manager paths exist, params: {:?}",
+        compiled.base.params
+    );
 }
 
 pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rejects_at_compile(
@@ -1267,7 +1412,8 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_reporter_rej
                  "filters": {"traversal_path": "1/100/1000/"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1298,7 +1444,8 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
                  "filters": {"traversal_path": "1/100/1000/"}}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "c"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1306,12 +1453,13 @@ pub(super) async fn aggregation_vulnerability_traversal_path_filter_security_man
     )
     .await;
 
-    resp.assert_node("Project", 1000, |n| n.prop_i64("c") == Some(1));
-    resp.assert_filter("Project", "traversal_path", |n| {
-        n.prop_str("traversal_path") == Some("1/100/1000/")
+    resp.assert_group_row_value_i64("p", "Project", 1000, "c", 1);
+    resp.assert_group_node_property_str("p", "Project", 1000, "traversal_path", "1/100/1000/");
+    resp.skip_requirement(Requirement::Filter {
+        field: "traversal_path".into(),
     });
-    resp.assert_node_absent("Project", 1001);
-    resp.assert_node_absent("Project", 1004);
+    resp.assert_group_node_absent("p", "Project", 1001);
+    resp.assert_group_node_absent("p", "Project", 1004);
 }
 
 /// Compiled SQL must bind `Bool(false)` (no paths) for the Vulnerability
@@ -1331,7 +1479,8 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1378,7 +1527,8 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1387,11 +1537,11 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
     .await;
 
     // Group 100: members 1, 2, 6 (edges in 1/100/) = 3
-    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
     // Group 102: members 1, 4 (edges in 1/102/) = 2
-    resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
+    resp.assert_group_row_value_i64("g", "Group", 102, "member_count", 2);
     // Group 101 is outside both paths.
-    resp.assert_node_absent("Group", 101);
+    resp.assert_group_node_absent("g", "Group", 101);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1458,7 +1608,8 @@ pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestC
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1539,7 +1690,8 @@ pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile
                 {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
                 {"id": "g", "entity": "Group"}
             ],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "hit"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
             "limit": 1
         }"#,
         &ontology,
@@ -1572,7 +1724,8 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
                 {"id": "p", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
-            "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "hit"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
             "limit": 10
         }"#,
         &ontology,
@@ -1591,7 +1744,8 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "member_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1600,8 +1754,8 @@ pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx:
     .await;
 
     // Group 100: 3 members under the allowlisted path.
-    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    resp.assert_group_row_value_i64("g", "Group", 100, "member_count", 3);
     // Groups outside 1/100/ must not surface.
-    resp.assert_node_absent("Group", 101);
-    resp.assert_node_absent("Group", 102);
+    resp.assert_group_node_absent("g", "Group", 101);
+    resp.assert_group_node_absent("g", "Group", 102);
 }

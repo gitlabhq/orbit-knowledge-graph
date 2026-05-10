@@ -121,16 +121,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "u"}],
     "aggregations": [
       {
         "function": "count",
         "target": "mr",
-        "group_by": "u",
         "alias": "mr_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "mr_count",
       "direction": "DESC"
     },
     "limit": 20
@@ -157,11 +157,11 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "mr",
-        "group_by": "p",
         "alias": "mr_count"
       }
     ],
@@ -418,16 +418,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "pipe",
-        "group_by": "p",
         "alias": "fail_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "fail_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -501,23 +501,22 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "u"}],
     "aggregations": [
       {
         "function": "avg",
         "target": "mr",
         "property": "diff_size",
-        "group_by": "u",
         "alias": "avg_diff"
       },
       {
         "function": "count",
         "target": "mr",
-        "group_by": "u",
         "alias": "mr_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 1,
+      "column": "mr_count",
       "direction": "DESC"
     },
     "limit": 15
@@ -580,16 +579,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "mr"}],
     "aggregations": [
       {
         "function": "count",
         "target": "u",
-        "group_by": "mr",
         "alias": "reviewer_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "reviewer_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -649,11 +648,11 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "pipe",
-        "group_by": "p",
         "alias": "fail_count"
       }
     ],
@@ -705,11 +704,11 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "v",
-        "group_by": "p",
         "alias": "vuln_count"
       }
     ],
@@ -740,16 +739,16 @@
         "to": "d2"
       }
     ],
+    "group_by": [{"kind": "node", "node": "d1"}],
     "aggregations": [
       {
         "function": "count",
         "target": "d2",
-        "group_by": "d1",
         "alias": "call_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "call_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -852,16 +851,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "pipe"}],
     "aggregations": [
       {
         "function": "count",
         "target": "j",
-        "group_by": "pipe",
         "alias": "fail_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "fail_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -962,11 +961,11 @@
         "max_hops": 3
       }
     ],
+    "group_by": [{"kind": "node", "node": "g"}],
     "aggregations": [
       {
         "function": "count",
         "target": "p",
-        "group_by": "g",
         "alias": "project_count"
       }
     ],
@@ -1228,16 +1227,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "mr",
-        "group_by": "p",
         "alias": "open_mrs"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "open_mrs",
       "direction": "DESC"
     },
     "limit": 10
@@ -1273,16 +1272,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "count",
         "target": "n",
-        "group_by": "p",
         "alias": "note_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "note_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -1321,16 +1320,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "pipe"}],
     "aggregations": [
       {
         "function": "count",
         "target": "s",
-        "group_by": "pipe",
         "alias": "stage_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "stage_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -1357,11 +1356,11 @@
         "to": "g"
       }
     ],
+    "group_by": [{"kind": "node", "node": "g"}],
     "aggregations": [
       {
         "function": "count",
         "target": "u",
-        "group_by": "g",
         "alias": "member_count"
       }
     ],
@@ -1808,18 +1807,17 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
       {
         "function": "avg",
         "target": "pipe",
         "property": "duration",
-        "group_by": "p",
         "alias": "avg_dur"
       },
       {
         "function": "count",
         "target": "pipe",
-        "group_by": "p",
         "alias": "pipe_count"
       }
     ],
@@ -1863,24 +1861,23 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "u"}],
     "aggregations": [
       {
         "function": "sum",
         "target": "mr",
         "property": "added_lines",
-        "group_by": "u",
         "alias": "total_added"
       },
       {
         "function": "sum",
         "target": "mr",
         "property": "removed_lines",
-        "group_by": "u",
         "alias": "total_removed"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "total_added",
       "direction": "DESC"
     },
     "limit": 10
@@ -1955,16 +1952,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "m"}],
     "aggregations": [
       {
         "function": "count",
         "target": "mr",
-        "group_by": "m",
         "alias": "mr_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "mr_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -2030,16 +2027,16 @@
         "to": "f"
       }
     ],
+    "group_by": [{"kind": "node", "node": "dir"}],
     "aggregations": [
       {
         "function": "count",
         "target": "f",
-        "group_by": "dir",
         "alias": "file_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "file_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -2328,16 +2325,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "j"}],
     "aggregations": [
       {
         "function": "count",
         "target": "j",
-        "group_by": "j",
         "alias": "fail_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "fail_count",
       "direction": "DESC"
     },
     "limit": 20
@@ -2371,16 +2368,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "mr"}],
     "aggregations": [
       {
         "function": "count",
         "target": "mr",
-        "group_by": "mr",
         "alias": "mr_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "mr_count",
       "direction": "DESC"
     },
     "limit": 20
@@ -2407,16 +2404,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "pipe"}],
     "aggregations": [
       {
         "function": "count",
         "target": "pipe",
-        "group_by": "pipe",
         "alias": "pipe_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "pipe_count",
       "direction": "DESC"
     },
     "limit": 20
@@ -2452,16 +2449,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "v"}],
     "aggregations": [
       {
         "function": "count",
         "target": "occ",
-        "group_by": "v",
         "alias": "occ_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "occ_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -2500,16 +2497,16 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "mr"}],
     "aggregations": [
       {
         "function": "count",
         "target": "n",
-        "group_by": "mr",
         "alias": "note_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "note_count",
       "direction": "DESC"
     },
     "limit": 10
@@ -2548,18 +2545,227 @@
         "to": "p"
       }
     ],
+    "group_by": [{"kind": "node", "node": "l"}],
     "aggregations": [
       {
         "function": "count",
         "target": "wi",
-        "group_by": "l",
         "alias": "wi_count"
       }
     ],
     "aggregation_sort": {
-      "agg_index": 0,
+      "column": "wi_count",
       "direction": "DESC"
     },
     "limit": 10
+  },
+  "I7 - Vulnerability count by severity": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "v",
+        "entity": "Vulnerability",
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": ["detected", "confirmed", "resolved", "dismissed"]
+          }
+        }
+      }
+    ],
+    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "v",
+        "alias": "vuln_count"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "vuln_count",
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "I8 - Security scan count by scan type": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "s",
+        "entity": "SecurityScan",
+        "filters": {
+          "latest": true
+        }
+      }
+    ],
+    "group_by": [{"kind": "property", "node": "s", "property": "scan_type"}],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "s",
+        "alias": "scan_count"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "scan_count",
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "I9 - Pipeline count by status and source": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": {
+            "op": "in",
+            "value": ["success", "failed", "running", "pending"]
+          }
+        }
+      }
+    ],
+    "group_by": [
+      {"kind": "property", "node": "pipe", "property": "status", "alias": "pipeline_status"},
+      {"kind": "property", "node": "pipe", "property": "source", "alias": "pipeline_source"}
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "pipe",
+        "alias": "pipe_count"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "pipe_count",
+      "direction": "DESC"
+    },
+    "limit": 30
+  },
+  "I10 - Merge request state draft matrix": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": ["opened", "closed", "merged"]
+          }
+        }
+      }
+    ],
+    "group_by": [
+      {"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"},
+      {"kind": "property", "node": "mr", "property": "draft", "alias": "draft"}
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "alias": "mr_count"
+      },
+      {
+        "function": "avg",
+        "target": "mr",
+        "property": "diff_size",
+        "alias": "avg_diff_size"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "mr_count",
+      "direction": "DESC"
+    },
+    "limit": 30
+  },
+  "I11 - Project visibility and MR state": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": ["opened", "closed", "merged"]
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "filters": {
+          "archived": false
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "group_by": [
+      {"kind": "property", "node": "p", "property": "visibility_level", "alias": "project_visibility"},
+      {"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "alias": "mr_count"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "mr_count",
+      "direction": "DESC"
+    },
+    "limit": 30
+  },
+  "I12 - Project and vulnerability severity": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "v",
+        "entity": "Vulnerability",
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": ["detected", "confirmed"]
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "columns": ["name", "full_path"]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "v",
+        "to": "p"
+      }
+    ],
+    "group_by": [
+      {"kind": "node", "node": "p", "alias": "project"},
+      {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "v",
+        "alias": "vuln_count"
+      }
+    ],
+    "aggregation_sort": {
+      "column": "vuln_count",
+      "direction": "DESC"
+    },
+    "limit": 20
   }
 }

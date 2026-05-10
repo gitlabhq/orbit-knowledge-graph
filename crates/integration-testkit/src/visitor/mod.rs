@@ -27,8 +27,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use query_engine::compiler::input::{Input, QueryType};
-use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse};
-use serde_json::Value;
+#[cfg(test)]
+use query_engine::formatters::ColumnDescriptor;
+use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
+use serde_json::{Map, Value};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MustInspect — drop-enforced result wrapper
@@ -117,6 +119,61 @@ pub struct ResponseView {
     asserted_edge_types: RefCell<HashSet<String>>,
 }
 
+fn row_value_i64(row: &Map<String, Value>, key: &str) -> Option<i64> {
+    row.get(key).and_then(|v| {
+        v.as_i64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+    })
+}
+
+fn row_value_f64(row: &Map<String, Value>, key: &str) -> Option<f64> {
+    row.get(key).and_then(|v| {
+        v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+    })
+}
+
+fn group_node_object<'a>(
+    row: &'a Map<String, Value>,
+    group_key: &str,
+) -> Option<&'a Map<String, Value>> {
+    row.get(group_key).and_then(Value::as_object)
+}
+
+fn group_node_id(row: &Map<String, Value>, group_key: &str) -> Option<i64> {
+    group_node_object(row, group_key).and_then(|node| {
+        node.get("id").and_then(|v| {
+            v.as_i64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+        })
+    })
+}
+
+fn group_node_matches(
+    row: &Map<String, Value>,
+    group_key: &str,
+    entity_type: &str,
+    id: i64,
+) -> bool {
+    let Some(node) = group_node_object(row, group_key) else {
+        return false;
+    };
+
+    node.get("type").and_then(Value::as_str) == Some(entity_type)
+        && group_node_id(row, group_key) == Some(id)
+}
+
+fn group_node_property<'a>(
+    row: &'a Map<String, Value>,
+    group_key: &str,
+    property: &str,
+) -> Option<&'a Value> {
+    group_node_object(row, group_key)?
+        .get("properties")?
+        .as_object()?
+        .get(property)
+}
+
 impl ResponseView {
     /// Create a view without assertion enforcement.
     ///
@@ -179,6 +236,26 @@ impl ResponseView {
 
     pub fn edges(&self) -> &[GraphEdge] {
         &self.response.edges
+    }
+
+    pub fn group_columns(&self) -> &[GroupColumnDescriptor] {
+        self.response.group_columns.as_deref().unwrap_or(&[])
+    }
+
+    pub fn rows(&self) -> &[Map<String, Value>] {
+        self.response.rows.as_deref().unwrap_or(&[])
+    }
+
+    pub fn group_node_ids_ordered(&self, group_key: &str, entity_type: &str) -> Vec<i64> {
+        self.rows()
+            .iter()
+            .filter_map(|row| {
+                let node = group_node_object(row, group_key)?;
+                (node.get("type").and_then(Value::as_str) == Some(entity_type))
+                    .then(|| group_node_id(row, group_key))
+                    .flatten()
+            })
+            .collect()
     }
 
     pub fn node_count(&self) -> usize {
@@ -416,29 +493,277 @@ impl ResponseView {
             self.response.nodes.len(),
             self.response.nodes
         );
+        assert!(
+            self.rows().is_empty(),
+            "expected empty aggregation, got {} scalar rows: {:?}",
+            self.rows().len(),
+            self.rows()
+        );
+    }
+
+    /// Assert exact scalar row count for property-grouped aggregation responses.
+    pub fn assert_row_count(&self, expected: usize) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::Cursor);
+        assert_eq!(
+            self.rows().len(),
+            expected,
+            "expected {expected} scalar rows, got {}: {:?}",
+            self.rows().len(),
+            self.rows()
+        );
+    }
+
+    pub fn assert_group_column(&self, name: &str, node: &str, property: &str) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        assert!(
+            self.group_columns().iter().any(|col| {
+                col.name == name && col.node == node && col.property.as_deref() == Some(property)
+            }),
+            "expected group column {name}={node}.{property}, got {:?}",
+            self.group_columns()
+        );
+    }
+
+    pub fn assert_group_node_count(&self, group_key: &str, expected: usize) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::NodeCount);
+        self.tracker.satisfy(Requirement::Cursor);
+        let actual = self
+            .rows()
+            .iter()
+            .filter(|row| group_node_object(row, group_key).is_some())
+            .count();
+        assert_eq!(
+            actual,
+            expected,
+            "expected {expected} grouped nodes for '{group_key}', got {actual}: {:?}",
+            self.rows()
+        );
+    }
+
+    pub fn assert_group_node_ids(&self, group_key: &str, entity_type: &str, expected: &[i64]) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::NodeIds);
+        let actual: HashSet<i64> = self
+            .rows()
+            .iter()
+            .filter_map(|row| {
+                let node = group_node_object(row, group_key)?;
+                (node.get("type").and_then(Value::as_str) == Some(entity_type))
+                    .then(|| group_node_id(row, group_key))
+                    .flatten()
+            })
+            .collect();
+        let expected_set: HashSet<i64> = expected.iter().copied().collect();
+        assert_eq!(
+            actual, expected_set,
+            "{entity_type} grouped node IDs mismatch"
+        );
+    }
+
+    pub fn assert_group_node_order(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        expected_ids: &[i64],
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::OrderBy);
+        self.tracker.satisfy(Requirement::NodeIds);
+        self.tracker.satisfy(Requirement::AggregationSort);
+        let actual = self.group_node_ids_ordered(group_key, entity_type);
+        assert_eq!(
+            actual, expected_ids,
+            "{entity_type} grouped nodes in wrong order"
+        );
+    }
+
+    pub fn assert_group_node_absent(&self, group_key: &str, entity_type: &str, id: i64) {
+        assert!(
+            !self
+                .rows()
+                .iter()
+                .any(|row| group_node_matches(row, group_key, entity_type, id)),
+            "grouped node {entity_type}:{id} should not be in rows: {:?}",
+            self.rows()
+        );
+    }
+
+    pub fn assert_group_node_property_str(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        property: &str,
+        expected: &str,
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let actual = group_node_property(row, group_key, property).and_then(Value::as_str);
+        assert_eq!(
+            actual,
+            Some(expected),
+            "grouped node {entity_type}:{id} property '{property}' mismatch"
+        );
+    }
+
+    pub fn assert_group_node_row(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        assert_row: impl FnOnce(&Map<String, Value>, &Map<String, Value>),
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let node = group_node_object(row, group_key).unwrap_or_else(|| {
+            panic!("group key '{group_key}' is not a node object in row: {row:?}")
+        });
+        assert_row(row, node);
+    }
+
+    pub fn assert_group_row_value_i64(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        key: &str,
+        expected: i64,
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let actual = row_value_i64(row, key)
+            .unwrap_or_else(|| panic!("row column '{key}' is not an integer: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "grouped node {entity_type}:{id} column '{key}': expected {expected}, got {actual}"
+        );
+    }
+
+    pub fn assert_group_row_value_f64(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        key: &str,
+        expected: f64,
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let actual = row_value_f64(row, key)
+            .unwrap_or_else(|| panic!("row column '{key}' is not a number: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "grouped node {entity_type}:{id} column '{key}': expected {expected}, got {actual}"
+        );
+    }
+
+    pub fn assert_group_row_value_str(
+        &self,
+        group_key: &str,
+        entity_type: &str,
+        id: i64,
+        key: &str,
+        expected: &str,
+    ) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .iter()
+            .find(|row| group_node_matches(row, group_key, entity_type, id))
+            .unwrap_or_else(|| {
+                panic!(
+                    "grouped node {entity_type}:{id} not found in {:?}",
+                    self.rows()
+                )
+            });
+        let actual = row.get(key).and_then(Value::as_str);
+        assert_eq!(
+            actual,
+            Some(expected),
+            "grouped node {entity_type}:{id} column '{key}' mismatch"
+        );
+    }
+
+    pub fn assert_row_value_i64(&self, row_index: usize, key: &str, expected: i64) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        let actual = row_value_i64(row, key)
+            .unwrap_or_else(|| panic!("row {row_index} column '{key}' is not an integer: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "row {row_index} column '{key}': expected {expected}, got {actual}"
+        );
+    }
+
+    pub fn assert_row_value_str(&self, row_index: usize, key: &str, expected: &str) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let row = self
+            .rows()
+            .get(row_index)
+            .unwrap_or_else(|| panic!("row {row_index} not found in {:?}", self.rows()));
+        let actual = row
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_else(|| panic!("row {row_index} column '{key}' is not a string: {row:?}"));
+        assert_eq!(
+            actual, expected,
+            "row {row_index} column '{key}': expected {expected}, got {actual}"
+        );
     }
 
     /// Assert the integer value of a column on an ungrouped aggregation response.
     ///
-    /// Ungrouped aggregations expose their value via `response.columns[*].value`
-    /// rather than on graph nodes. Satisfies [`Requirement::Aggregation`].
+    /// Ungrouped aggregations expose their values on the first table row.
+    /// Satisfies [`Requirement::Aggregation`].
     pub fn assert_aggregation_value_i64(&self, alias: &str, expected: i64) {
         self.tracker.satisfy(Requirement::Aggregation);
-        let cols = self.response.columns.as_ref().unwrap_or_else(|| {
-            panic!("ungrouped aggregation response has no columns (looking for '{alias}')")
-        });
-        let col = cols
-            .iter()
-            .find(|c| c.name == alias)
-            .unwrap_or_else(|| panic!("column '{alias}' not found in {cols:?}"));
-        let actual = col
-            .value
-            .as_ref()
-            .and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
-            })
-            .unwrap_or_else(|| panic!("column '{alias}' has no integer value: {:?}", col.value));
+        let row = self
+            .rows()
+            .first()
+            .unwrap_or_else(|| panic!("ungrouped aggregation response has no rows"));
+        let actual = row_value_i64(row, alias)
+            .unwrap_or_else(|| panic!("row column '{alias}' is not an integer: {row:?}"));
         assert_eq!(
             actual, expected,
             "column '{alias}': expected {expected}, got {actual}"
@@ -847,6 +1172,8 @@ pub(crate) mod tests {
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -861,6 +1188,8 @@ pub(crate) mod tests {
             ],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -869,12 +1198,49 @@ pub(crate) mod tests {
         GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "aggregation".to_string(),
-            nodes: vec![
-                make_node("User", 1, &[("username", json!("alice"))]),
-                make_node("User", 2, &[("username", json!("bob"))]),
-            ],
+            nodes: vec![],
             edges: vec![],
-            columns: None,
+            columns: Some(vec![ColumnDescriptor {
+                name: "c".to_string(),
+                function: "count".to_string(),
+                target: Some("u".to_string()),
+                property: None,
+            }]),
+            group_columns: Some(vec![]),
+            rows: Some(vec![json!({"c": 2}).as_object().unwrap().clone()]),
+            pagination: None,
+        }
+    }
+
+    pub(crate) fn sample_grouped_aggregation_response() -> GraphResponse {
+        GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
+            query_type: "aggregation".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            columns: Some(vec![ColumnDescriptor {
+                name: "c".to_string(),
+                function: "count".to_string(),
+                target: Some("u".to_string()),
+                property: None,
+            }]),
+            group_columns: Some(vec![GroupColumnDescriptor {
+                name: "u".to_string(),
+                kind: "node".to_string(),
+                node: "u".to_string(),
+                property: None,
+                entity: Some("User".to_string()),
+            }]),
+            rows: Some(vec![
+                json!({"u": {"type": "User", "id": "1", "properties": {"username": "alice"}}, "c": 2})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                json!({"u": {"type": "User", "id": "2", "properties": {"username": "bob"}}, "c": 1})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ]),
             pagination: None,
         }
     }
@@ -893,6 +1259,8 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -1046,6 +1414,8 @@ pub(crate) mod tests {
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 2, 1),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1067,6 +1437,8 @@ pub(crate) mod tests {
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 0, 0),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1193,6 +1565,8 @@ pub(crate) mod tests {
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         ResponseView::new(resp).assert_referential_integrity();
@@ -1304,6 +1678,8 @@ pub(crate) mod tests {
             nodes: vec![],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1336,6 +1712,8 @@ mod edge_coverage_tests {
                 make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         }
     }
@@ -1397,6 +1775,8 @@ mod edge_coverage_tests {
             nodes: vec![],
             edges: vec![],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1411,6 +1791,8 @@ mod edge_coverage_tests {
             nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
             edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);
@@ -1435,6 +1817,8 @@ mod edge_coverage_tests {
                 make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
             ],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::new(resp);

@@ -87,12 +87,12 @@ message QueryMetadata {
 }
 ```
 
-Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation column values (`columns[].value`) remain integer-typed; if an aggregate ever needs to return an Int64 that exceeds the JS safe range, that is a separate decision.
+Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation metric values live in `rows` and keep their JSON numeric type.
 `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
 
 ### Examples by query type
 
-Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. The content varies, the base shape does not.
+Every query returns `{ format_version, query_type, nodes, edges }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows`. The content varies, the base shape does not.
 
 #### Single-entity Traversal (lookup)
 
@@ -100,6 +100,7 @@ A `traversal` with a single node and no relationships — what was previously a 
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
@@ -117,6 +118,7 @@ Nodes are deduplicated. Edges are instance-level.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
@@ -140,6 +142,7 @@ Edges carry a `depth` field.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice" },
@@ -155,37 +158,70 @@ Edges carry a `depth` field.
 }
 ```
 
-#### Aggregation (grouped)
+#### Aggregation (node grouped)
 
-Computed values are inlined on the group-by nodes. `columns` describes each aggregate so the consumer can distinguish computed values from entity properties. The frontend uses `query_type` to determine display mode (table vs graph).
+Computed values live in `rows`, not on graph nodes. `columns` describes each aggregate and `group_columns` describes the group key. A node group row stores the grouped entity as a nested node object under the group key, with metric values as sibling row fields.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "aggregation",
-  "nodes": [
-    { "type": "Project", "id": "101", "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
-    { "type": "Project", "id": "102", "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
-  ],
+  "nodes": [],
   "edges": [],
+  "group_columns": [
+    { "name": "p", "kind": "node", "node": "p", "entity": "Project" }
+  ],
   "columns": [
     { "name": "mr_count", "function": "count", "target": "m" },
     { "name": "avg_mr", "function": "avg", "target": "m", "property": "id" }
+  ],
+  "rows": [
+    { "p": { "type": "Project", "id": "101", "properties": { "name": "Alpha" } }, "mr_count": 15, "avg_mr": 42.7 },
+    { "p": { "type": "Project", "id": "102", "properties": { "name": "Beta" } }, "mr_count": 8, "avg_mr": 23.1 }
   ]
 }
 ```
 
 #### Aggregation (ungrouped / scalar)
 
-When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. There are no nodes to carry the values, so `columns` holds both the metadata and the computed `value` directly. `nodes` is empty.
+When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. `nodes` and `group_columns` are empty, while `rows` contains one object with the metric values.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "aggregation",
   "nodes": [],
   "edges": [],
+  "group_columns": [],
   "columns": [
-    { "name": "total", "function": "count", "target": "p", "value": 42 },
-    { "name": "avg_size", "function": "avg", "target": "p", "property": "size", "value": 128.5 }
+    { "name": "total", "function": "count", "target": "p" },
+    { "name": "avg_size", "function": "avg", "target": "p", "property": "size" }
+  ],
+  "rows": [
+    { "total": 42, "avg_size": 128.5 }
+  ]
+}
+```
+
+#### Aggregation (property grouped)
+
+When `group_by` uses `kind: "property"`, the SQL returns scalar bucket values plus aggregate values. There are no group-by graph nodes, so `group_columns` describes the bucket keys and `rows` carries the tabular result.
+
+```json
+{
+  "format_version": "2.0.0",
+  "query_type": "aggregation",
+  "nodes": [],
+  "edges": [],
+  "group_columns": [
+    { "name": "severity", "kind": "property", "node": "v", "property": "severity" }
+  ],
+  "columns": [
+    { "name": "vulnerability_count", "function": "count", "target": "v" }
+  ],
+  "rows": [
+    { "severity": "critical", "vulnerability_count": 12 },
+    { "severity": "high", "vulnerability_count": 7 }
   ]
 }
 ```
@@ -196,6 +232,7 @@ Edges carry `path_id` and `step`. Nodes are deduplicated across paths.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "path_finding",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice" },
@@ -220,6 +257,7 @@ Center node plus its neighbors. Edge direction matches the ontology.
 
 ```json
 {
+  "format_version": "2.0.0",
   "query_type": "neighbors",
   "nodes": [
     { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
@@ -245,7 +283,7 @@ The center node (Project:101) is just another node in the list. Neighbor types a
 { "type": "User", "id": "42", "username": "alice", "name": "Alice Smith", "state": "active" }
 ```
 
-The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. For aggregation queries, computed values (like `mr_count`) are inlined as additional properties on the node.
+The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. Aggregation queries do not inline computed values on graph nodes; metrics are carried in `rows`.
 
 **Column:** describes a computed aggregation value.
 
@@ -253,7 +291,7 @@ The frontend builds composite IDs (`"User:42"`) for deduplication. Property name
 { "name": "mr_count", "function": "count", "target": "m" }
 ```
 
-Optional fields: `target` (node alias being aggregated), `property` (field being aggregated, absent for plain `count`), `value` (the computed result, present only for ungrouped aggregations where `nodes` is empty). Present for all aggregation queries so the consumer can distinguish computed values from entity properties and display correct table headers.
+Optional fields: `target` (node alias being aggregated) and `property` (field being aggregated, absent for plain `count`). Present for all aggregation queries so the consumer can display correct table headers while reading metric values from `rows`.
 
 **Edge:** two nodes connected by type and ID.
 
@@ -267,7 +305,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
+3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ format_version, query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns`, `group_columns`, and `rows` for table-shaped analytics output.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
 5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.

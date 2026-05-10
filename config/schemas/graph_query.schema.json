@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v1",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v2",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -38,6 +38,15 @@
       "maxItems": 10,
       "items": {
         "$ref": "#/$defs/Aggregation"
+      }
+    },
+    "group_by": {
+      "type": "array",
+      "description": "Aggregation group keys. kind=node returns a node object; kind=property returns a scalar value.",
+      "default": [],
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/GroupByKey"
       }
     },
     "path": {
@@ -160,20 +169,36 @@
               "properties": {
                 "nodes": {
                   "minItems": 2
+                },
+                "relationships": {
+                  "maxItems": 0
                 }
               }
             },
             "then": {
+              "required": ["group_by"],
               "properties": {
-                "aggregations": {
-                  "items": {
-                    "required": ["group_by"]
-                  }
+                "group_by": {
+                  "minItems": 1,
+                  "description": "Required for disconnected multi-node aggregation; otherwise add relationships."
                 }
               }
             }
           }
         ]
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "properties": {
+            "query_type": { "const": "aggregation" }
+          }
+        }
+      },
+      "then": {
+        "description": "Only aggregation queries may group results.",
+        "not": { "required": ["group_by"] }
       }
     },
     {
@@ -552,10 +577,6 @@
           "$ref": "#/$defs/Identifier",
           "description": "Node variable to aggregate over. If omitted, aggregates all matching nodes."
         },
-        "group_by": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable to group by. Required for multi-node aggregation; optional for single-node scalar aggregation."
-        },
         "property": {
           "$ref": "#/$defs/Identifier",
           "description": "Property to aggregate. Required for sum, avg, min, max functions."
@@ -574,6 +595,53 @@
       "then": {
         "required": ["property"]
       }
+    },
+    "GroupByKey": {
+      "description": "A group key for aggregation output rows. Node keys return an entity object per bucket; property keys return the scalar property value per bucket.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Group by a node selector.",
+          "required": ["kind", "node"],
+          "properties": {
+            "kind": {
+              "const": "node"
+            },
+            "node": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Node variable to use as the group key"
+            },
+            "alias": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Output column alias for this group key"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Group by a scalar property on a node selector.",
+          "required": ["kind", "node", "property"],
+          "properties": {
+            "kind": {
+              "const": "property"
+            },
+            "node": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Node variable whose property is used as the group key"
+            },
+            "property": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Property name to group by"
+            },
+            "alias": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Output column alias for this group key"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "AggFunction": {
       "type": "string",
@@ -669,12 +737,11 @@
     "AggregationSort": {
       "type": "object",
       "description": "Ordering for aggregation outputs",
-      "required": ["agg_index"],
+      "required": ["column"],
       "properties": {
-        "agg_index": {
-          "type": "integer",
-          "description": "Index of the aggregation in the aggregations array (0-based)",
-          "minimum": 0
+        "column": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Output column name to sort by. Can reference an aggregation alias or group key alias."
         },
         "direction": {
           "$ref": "#/$defs/OrderDirection",
@@ -692,7 +759,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics. Compiler performance options (skip_dedup, materialize_ctes, use_semi_join) are injected by the ontology-derived schema at runtime to keep the base schema token-efficient for LLM consumers.",
+      "description": "Consumer-level presentation options. Compiler performance options are injected by the ontology-derived schema at runtime.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",

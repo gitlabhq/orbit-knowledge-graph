@@ -152,10 +152,32 @@ Count open merge requests per project, highest first:
     "relationships": [
       {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
+    "group_by": [{"kind": "node", "node": "p"}],
     "aggregations": [
-      {"function": "count", "target": "mr", "group_by": "p", "alias": "open_mrs"}
+      {"function": "count", "target": "mr", "alias": "open_mrs"}
     ],
-    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
+    "limit": 10
+  }
+}
+```
+
+Count detected vulnerabilities by severity:
+
+```json
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": "detected"}}
+    ],
+    "group_by": [
+      {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+    ],
+    "aggregations": [
+      {"function": "count", "target": "v", "alias": "vuln_count"}
+    ],
+    "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
     "limit": 10
   }
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v1",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v2",
   "title": "GKG unified query response",
   "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
@@ -32,6 +32,16 @@
       "type": "array",
       "items": { "$ref": "#/$defs/column" }
     },
+    "group_columns": {
+      "description": "Present for aggregation queries. Describes each group key column. Empty for total aggregates.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/group_column" }
+    },
+    "rows": {
+      "description": "Present for aggregation queries. Each row contains group key values and aggregate values keyed by output alias.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/row" }
+    },
     "pagination": {
       "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
       "$ref": "#/$defs/pagination"
@@ -52,7 +62,7 @@
         }
       },
       "additionalProperties": {
-        "description": "Entity properties selected by the query, plus any inlined aggregation values. Property names match ontology definitions.",
+        "description": "Entity properties selected by the query. Property names match ontology definitions.",
         "type": ["string", "integer", "number", "boolean", "null"]
       }
     },
@@ -105,7 +115,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Output column name. Matches the key on the node where the aggregate value appears. Either the user-supplied alias or the function name (e.g. 'count')."
+          "description": "Output column name. Matches the row key for the aggregate value. Either the user-supplied alias or the function name (e.g. 'count')."
         },
         "function": {
           "type": "string",
@@ -119,10 +129,67 @@
         "property": {
           "type": "string",
           "description": "Property being aggregated (e.g. 'id'). Absent for count without a property."
+        }
+      }
+    },
+    "group_column": {
+      "type": "object",
+      "required": ["name", "kind", "node"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Output column name for the group key."
         },
-        "value": {
-          "description": "Computed value for ungrouped (scalar) aggregations. Absent for grouped aggregations where values live on entity nodes.",
-          "type": ["string", "integer", "number", "boolean", "null"]
+        "kind": {
+          "type": "string",
+          "description": "Group key kind.",
+          "enum": ["node", "property"]
+        },
+        "node": {
+          "type": "string",
+          "description": "Node alias used by the group key."
+        },
+        "property": {
+          "type": "string",
+          "description": "Ontology property used as the group key. Present when kind is property."
+        },
+        "entity": {
+          "type": "string",
+          "description": "Ontology entity type for the node alias."
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "description": "Aggregation row keyed by group and aggregate output aliases.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": ["string", "integer", "number", "boolean", "null"] },
+          { "$ref": "#/$defs/group_node" }
+        ]
+      }
+    },
+    "group_node": {
+      "type": "object",
+      "description": "Node-valued group key.",
+      "required": ["type", "id", "properties"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Entity type name matching the ontology."
+        },
+        "id": {
+          "type": "string",
+          "description": "Entity primary key, serialized as a string."
+        },
+        "properties": {
+          "type": "object",
+          "description": "Selected properties for the grouped node.",
+          "additionalProperties": {
+            "type": ["string", "integer", "number", "boolean", "null"]
+          }
         }
       }
     },

@@ -70,16 +70,17 @@ q5:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
         {"id": "p", "entity": "Project"}
       ],
       "relationships": [
         {"type": "IN_PROJECT", "from": "mr", "to": "p"}
       ],
+      "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [
-        {"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}
+        {"function": "count", "target": "mr", "alias": "mr_count"}
       ],
-      "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
       "limit": 10
     }
 
@@ -111,8 +112,9 @@ q7:
       "relationships": [
         {"type": "IN_PROJECT", "from": "pipe", "to": "p"}
       ],
+      "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [
-        {"function": "count", "target": "pipe", "group_by": "p", "alias": "total_pipelines"}
+        {"function": "count", "target": "pipe", "alias": "total_pipelines"}
       ],
       "limit": 20
     }
@@ -260,16 +262,17 @@ q17:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "note", "entity": "Note"},
+        {"id": "note", "entity": "Note", "filters": {"noteable_type": "MergeRequest"}},
         {"id": "author", "entity": "User"}
       ],
       "relationships": [
         {"type": "AUTHORED", "from": "author", "to": "note"}
       ],
+      "group_by": [{"kind": "node", "node": "author"}],
       "aggregations": [
-        {"function": "count", "target": "note", "group_by": "author", "alias": "note_count"}
+        {"function": "count", "target": "note", "alias": "note_count"}
       ],
-      "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+      "aggregation_sort": {"column": "note_count", "direction": "DESC"},
       "limit": 20
     }
 
@@ -308,16 +311,17 @@ q20:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
         {"id": "author", "entity": "User"}
       ],
       "relationships": [
         {"type": "AUTHORED", "from": "author", "to": "mr"}
       ],
+      "group_by": [{"kind": "node", "node": "author"}],
       "aggregations": [
-        {"function": "count", "target": "mr", "group_by": "author", "alias": "mr_count"}
+        {"function": "count", "target": "mr", "alias": "mr_count"}
       ],
-      "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
       "limit": 20
     }
 
@@ -327,7 +331,7 @@ q21:
     {
       "query_type": "aggregation",
       "nodes": [
-        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
         {"id": "reviewer", "entity": "User"},
         {"id": "p", "entity": "Project"}
       ],
@@ -335,8 +339,9 @@ q21:
         {"type": "REVIEWER", "from": "reviewer", "to": "mr"},
         {"type": "IN_PROJECT", "from": "mr", "to": "p"}
       ],
+      "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [
-        {"function": "count", "target": "reviewer", "group_by": "p", "alias": "reviewer_count"}
+        {"function": "count", "target": "reviewer", "alias": "reviewer_count"}
       ],
       "limit": 15
     }
@@ -446,8 +451,104 @@ q29:
       "nodes": [
         {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
       ],
+      "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
       "aggregations": [
         {"function": "count", "target": "v", "alias": "total"}
       ],
+      "aggregation_sort": {"column": "total", "direction": "DESC"},
       "limit": 10
+    }
+
+q30:
+  desc: Merge requests by state
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}}
+      ],
+      "group_by": [{"kind": "property", "node": "mr", "property": "state"}],
+      "aggregations": [
+        {"function": "count", "target": "mr", "alias": "mr_count"}
+      ],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+q31:
+  desc: Pipeline duration by status
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}}
+      ],
+      "group_by": [{"kind": "property", "node": "pipe", "property": "status"}],
+      "aggregations": [
+        {"function": "count", "target": "pipe", "alias": "pipeline_count"},
+        {"function": "avg", "target": "pipe", "property": "duration", "alias": "avg_duration"}
+      ],
+      "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+q32:
+  desc: Jobs by status and when
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "job", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}}
+      ],
+      "group_by": [
+        {"kind": "property", "node": "job", "property": "status", "alias": "job_status"},
+        {"kind": "property", "node": "job", "property": "when", "alias": "job_when"}
+      ],
+      "aggregations": [
+        {"function": "count", "target": "job", "alias": "job_count"}
+      ],
+      "aggregation_sort": {"column": "job_count", "direction": "DESC"},
+      "limit": 20
+    }
+
+q33:
+  desc: Vulnerabilities by severity and state
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "v", "entity": "Vulnerability", "filters": {"report_type": {"op": "in", "value": ["sast", "dependency_scanning", "container_scanning", "secret_detection"]}}}
+      ],
+      "group_by": [
+        {"kind": "property", "node": "v", "property": "severity", "alias": "severity"},
+        {"kind": "property", "node": "v", "property": "state", "alias": "state"}
+      ],
+      "aggregations": [
+        {"function": "count", "target": "v", "alias": "vuln_count"}
+      ],
+      "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+      "limit": 30
+    }
+
+q34:
+  desc: Merge request state by project
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": "$sample"}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+      ],
+      "group_by": [
+        {"kind": "node", "node": "p", "alias": "project"},
+        {"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}
+      ],
+      "aggregations": [
+        {"function": "count", "target": "mr", "alias": "mr_count"}
+      ],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 20
     }

@@ -19,14 +19,14 @@ pub enum Requirement {
     NodeIds,
     /// Query type is `path_finding` — test must call `path_ids` + `path`.
     PathFinding,
-    /// Query type is `aggregation` — test must assert a property value on a result node.
+    /// Query type is `aggregation` — test must assert an aggregate row value.
     Aggregation,
     /// Traversal query includes edge type — test must assert edges of this type
     /// via `edges_of_type`, `assert_edge_exists`, or `assert_edge_absent`.
     Relationship { edge_type: String },
     /// Query type is `neighbors` — test must verify neighbor edges.
     Neighbors,
-    /// Query has `aggregation_sort` — test must call `assert_node_order`.
+    /// Query has `aggregation_sort` — test must verify row ordering.
     AggregationSort,
     /// Query has `cursor` — test must call `assert_node_count` to verify the page.
     Cursor,
@@ -54,7 +54,7 @@ impl std::fmt::Display for Requirement {
             Self::AggregationSort => {
                 write!(
                     f,
-                    "AggregationSort (query has aggregation_sort — call assert_node_order)"
+                    "AggregationSort (query has aggregation_sort — verify row ordering)"
                 )
             }
             Self::Cursor => {
@@ -131,7 +131,7 @@ impl QueryRequirements for Input {
             }
         }
 
-        if self.aggregation_sort.is_some() {
+        if self.aggregation.sort.is_some() {
             reqs.insert(Requirement::AggregationSort);
         }
 
@@ -223,8 +223,9 @@ mod tests {
     use query_engine::compiler::input::parse_input;
 
     use crate::visitor::tests::{
-        make_node, make_path_edge, sample_aggregation_response, sample_neighbors_response,
-        sample_response, sample_search_response,
+        make_node, make_path_edge, sample_aggregation_response,
+        sample_grouped_aggregation_response, sample_neighbors_response, sample_response,
+        sample_search_response,
     };
     use crate::visitor::{NodeExt, ResponseView};
     use query_engine::formatters::GraphResponse;
@@ -400,7 +401,8 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-                "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "c"}],
+                "group_by": [{"kind": "node", "node": "u"}],
+                "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -433,7 +435,7 @@ mod tests {
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+                "aggregation_sort": {"column": "c", "direction": "DESC"},
                 "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -519,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn for_query_aggregation_satisfied_by_assert_node() {
+    fn for_query_aggregation_satisfied_by_assert_aggregation_value() {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
@@ -527,7 +529,7 @@ mod tests {
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
-        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+        view.assert_aggregation_value_i64("c", 2);
     }
 
     #[test]
@@ -544,6 +546,8 @@ mod tests {
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
@@ -667,18 +671,18 @@ mod tests {
     }
 
     #[test]
-    fn for_query_aggregation_sort_satisfied_by_assert_node_order() {
+    fn for_query_aggregation_sort_satisfied_by_group_node_order() {
         let input = parse_test_input(
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
+                "group_by": [{"kind": "node", "node": "u"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+                "aggregation_sort": {"column": "c", "direction": "DESC"},
                 "limit": 10}"#,
         );
-        let view = ResponseView::for_query(&input, sample_aggregation_response());
-        // aggregation queries don't require NodeCount
-        view.assert_node_order("User", &[1, 2]);
-        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+        let view = ResponseView::for_query(&input, sample_grouped_aggregation_response());
+        view.assert_group_node_order("u", "User", &[1, 2]);
+        view.assert_group_row_value_i64("u", "User", 1, "c", 2);
     }
 
     #[test]
@@ -864,6 +868,8 @@ mod tests {
             nodes: vec![make_node("User", 1, &[]), make_node("Project", 1000, &[])],
             edges: vec![make_path_edge("User", 1, "Project", 1000, "CONTAINS", 0, 0)],
             columns: None,
+            group_columns: None,
+            rows: None,
             pagination: None,
         };
         let view = ResponseView::for_query(&input, resp);
@@ -877,11 +883,11 @@ mod tests {
             r#"{"query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User"}],
                 "aggregations": [{"function": "count", "target": "u", "alias": "c"}],
-                "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+                "aggregation_sort": {"column": "c", "direction": "DESC"},
                 "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_aggregation_response());
-        view.assert_node("User", 1, |n| n.prop_str("username") == Some("alice"));
+        view.assert_aggregation_value_i64("c", 2);
         drop(view);
     }
 

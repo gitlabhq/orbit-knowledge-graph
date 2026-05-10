@@ -74,7 +74,8 @@ fn aggregation_query() {
             {"id": "u", "entity": "User", "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
-        "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
+        "group_by": [{"kind": "node", "node": "u"}],
+        "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
         "limit": 10
     }"#;
 

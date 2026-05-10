@@ -58,6 +58,7 @@ The JSON query schema supports four query types through a single unified structu
 |-------|------|-------------|
 | `relationships` | `array` | Relationship traversals between nodes |
 | `aggregations` | `array` | Aggregation specs (required when `query_type` is `aggregation`) |
+| `group_by` | `array` | Group keys for aggregation rows |
 | `path` | `object` | Path finding config (required when `query_type` is `path_finding`) |
 | `neighbors` | `object` | Neighbors config (required when `query_type` is `neighbors`) |
 | `limit` | `integer` | Max results (1-1000, default: 30) |
@@ -174,6 +175,10 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
+Use top-level `group_by` to group aggregation rows. It applies to every
+aggregation in the query. A node group uses
+`{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
+
 ```json
 {
   "query_type": "aggregation",
@@ -184,13 +189,47 @@ Group and aggregate results.
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
+  "group_by": [{"kind": "node", "node": "u"}],
   "aggregations": [
-    {"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}
+    {"function": "count", "target": "mr", "alias": "mr_count"}
   ],
   "limit": 10,
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
+  "aggregation_sort": {"column": "mr_count", "direction": "DESC"}
 }
 ```
+
+Use top-level `group_by` entries with `kind: "property"` to group by scalar
+properties, such as dashboard buckets. Property groups use
+`{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}`.
+They must reference ClickHouse-backed, filterable properties allowed for the
+caller. Virtual fields and unfilterable fields are rejected during validation.
+
+`group_by` supports up to four keys and can mix node and property groups. If
+`alias` is omitted, node groups use the node ID. Property groups use the property
+name when unique, or `<node>_<property>` when needed to avoid ambiguity.
+Duplicate group or aggregate output names are rejected.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
+  ],
+  "group_by": [
+    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "v", "alias": "vulnerability_count"}
+  ],
+  "limit": 10,
+  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"}
+}
+```
+
+Aggregation responses are table-shaped: `columns` describes the metrics,
+`group_columns` describes any grouping keys, and `rows` carries group values
+plus metric values. Node groups put a nested node object in the row under the
+group key; property groups put the scalar bucket value there.
 
 | Aggregation Function | Description | Requires `property` |
 |---------------------|-------------|---------------------|
@@ -414,7 +453,8 @@ All enum-like fields (entity types, relationship types, property names) are vali
 - Entity types must be one of the known node types (e.g., `User`, `Project`, `MergeRequest`, `Issue`)
 - Relationship types must be one of the known edge types (e.g., `AUTHORED`, `IN_PROJECT`, `CONTAINS`)
 - Properties must exist on their referenced entity
-- Aggregation targets/group_by must reference valid nodes
+- Aggregation targets and `group_by` entries must reference valid nodes
+- Aggregation property group keys must reference valid nodes and column-backed, filterable properties
 - Filter operators are limited to a small, explicit set (`eq`, `in`, `gte`, `lte`, etc.), represented as enums in the AST
 
 If a value is not in the allow-list, we reject the request with a validation error rather than passing it through to SQL. This means the LLM cannot introduce new table names, join arbitrary system tables, or call random functions.

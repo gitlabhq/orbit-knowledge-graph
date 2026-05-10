@@ -50,6 +50,7 @@ pub(crate) fn failure_reason(err: &QueryError) -> &'static str {
         QueryError::PaginationError(_) => "pagination",
         QueryError::AllowlistRejected(_) => "ontology",
         QueryError::Authorization(_) => "authorization",
+        QueryError::Restrict(_) => "restrict",
         QueryError::Ontology(_) => "ontology_internal",
         QueryError::DepthExceeded(_) => "depth",
         QueryError::LimitExceeded(_) => "limit",

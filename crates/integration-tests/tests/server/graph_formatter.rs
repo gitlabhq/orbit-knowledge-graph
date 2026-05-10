@@ -52,6 +52,46 @@ fn node_ids(nodes: &[Value], entity_type: &str) -> HashSet<i64> {
         .collect()
 }
 
+fn aggregation_rows(value: &Value) -> &Vec<Value> {
+    value["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("aggregation response has no rows: {value:?}"))
+}
+
+fn first_aggregation_row(value: &Value) -> &Value {
+    aggregation_rows(value)
+        .first()
+        .unwrap_or_else(|| panic!("aggregation response has no rows: {value:?}"))
+}
+
+fn aggregation_nodes(value: &Value, group_key: &str) -> Vec<Value> {
+    aggregation_rows(value)
+        .iter()
+        .filter_map(|row| {
+            let group = row.get(group_key)?.as_object()?;
+            let mut node = serde_json::Map::new();
+            node.insert("type".to_string(), group.get("type")?.clone());
+            node.insert("id".to_string(), group.get("id")?.clone());
+
+            if let Some(properties) = group.get("properties").and_then(Value::as_object) {
+                for (key, value) in properties {
+                    node.insert(key.clone(), value.clone());
+                }
+            }
+
+            if let Some(row_obj) = row.as_object() {
+                for (key, value) in row_obj {
+                    if key != group_key {
+                        node.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+
+            Some(Value::Object(node))
+        })
+        .collect()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Data seeding
 // ─────────────────────────────────────────────────────────────────────────────
@@ -560,7 +600,8 @@ async fn aggregation_count_exact(ctx: &TestContext) {
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -570,12 +611,12 @@ async fn aggregation_count_exact(ctx: &TestContext) {
     assert_eq!(value["query_type"], "aggregation");
     assert!(value["edges"].as_array().unwrap().is_empty());
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "u");
     assert!(nodes.iter().all(|n| n["type"] == "User"));
     assert!(nodes.iter().all(|n| n.get("group_count").is_some()));
     assert!(nodes.iter().all(|n| n["group_count"].is_i64()));
 
-    let alice = find_node(nodes, "User", 1);
+    let alice = find_node(&nodes, "User", 1);
     assert_eq!(
         alice["group_count"].as_i64().unwrap(),
         2,
@@ -584,7 +625,7 @@ async fn aggregation_count_exact(ctx: &TestContext) {
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
     assert!(alice["id"].is_string());
 
-    let bob = find_node(nodes, "User", 2);
+    let bob = find_node(&nodes, "User", 2);
     assert_eq!(
         bob["group_count"].as_i64().unwrap(),
         1,
@@ -592,14 +633,14 @@ async fn aggregation_count_exact(ctx: &TestContext) {
     );
     assert_eq!(bob["username"].as_str().unwrap(), "bob");
 
-    let charlie = find_node(nodes, "User", 3);
+    let charlie = find_node(&nodes, "User", 3);
     assert_eq!(
         charlie["group_count"].as_i64().unwrap(),
         1,
         "charlie is in group 102 only"
     );
 
-    let unicode = find_node(nodes, "User", 5);
+    let unicode = find_node(&nodes, "User", 5);
     assert_eq!(
         unicode["group_count"].as_i64().unwrap(),
         1,
@@ -621,25 +662,26 @@ async fn aggregation_redaction(ctx: &TestContext) {
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
             "limit": 10
         }"#,
         &svc,
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
-    let ids = node_ids(nodes, "User");
+    let nodes = aggregation_nodes(&value, "u");
+    let ids = node_ids(&nodes, "User");
     assert!(ids.contains(&1));
     assert!(ids.contains(&2));
     assert!(!ids.contains(&3), "user 3 should be redacted");
     assert!(!ids.contains(&4), "user 4 should be redacted");
     assert!(!ids.contains(&5), "user 5 should be redacted");
 
-    let alice = find_node(nodes, "User", 1);
+    let alice = find_node(&nodes, "User", 1);
     assert_eq!(alice["username"].as_str().unwrap(), "alice");
     assert!(alice["group_count"].is_i64());
-    let bob = find_node(nodes, "User", 2);
+    let bob = find_node(&nodes, "User", 2);
     assert_eq!(bob["username"].as_str().unwrap(), "bob");
 }
 
@@ -1133,18 +1175,19 @@ async fn aggregation_sum(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "sum", "target": "u", "group_by": "g", "property": "id", "alias": "id_sum"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "sum", "target": "u", "property": "id", "alias": "id_sum"}],
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "g");
     assert!(nodes.iter().all(|n| n["type"] == "Group"));
     assert!(nodes.iter().all(|n| n["id_sum"].is_i64()));
 
-    let g100 = find_node(nodes, "Group", 100);
+    let g100 = find_node(&nodes, "Group", 100);
     assert_eq!(g100["name"].as_str().unwrap(), "Public Group");
     assert_eq!(
         g100["id_sum"].as_i64().unwrap(),
@@ -1152,7 +1195,7 @@ async fn aggregation_sum(ctx: &TestContext) {
         "group 100 has users 1 and 5"
     );
 
-    let g101 = find_node(nodes, "Group", 101);
+    let g101 = find_node(&nodes, "Group", 101);
     assert_eq!(g101["name"].as_str().unwrap(), "Private Group");
     assert_eq!(
         g101["id_sum"].as_i64().unwrap(),
@@ -1160,7 +1203,7 @@ async fn aggregation_sum(ctx: &TestContext) {
         "group 101 has users 1 and 2"
     );
 
-    let g102 = find_node(nodes, "Group", 102);
+    let g102 = find_node(&nodes, "Group", 102);
     assert_eq!(
         g102["id_sum"].as_i64().unwrap(),
         3 + 4,
@@ -1180,28 +1223,29 @@ async fn aggregation_avg(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "avg", "target": "u", "group_by": "g", "property": "id", "alias": "avg_id"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "avg", "target": "u", "property": "id", "alias": "avg_id"}],
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "g");
     assert!(nodes.iter().all(|n| n["type"] == "Group"));
     assert!(
         nodes.iter().all(|n| n["avg_id"].is_f64()),
         "AVG must produce floating point values"
     );
 
-    let g101 = find_node(nodes, "Group", 101);
+    let g101 = find_node(&nodes, "Group", 101);
     assert_eq!(g101["name"].as_str().unwrap(), "Private Group");
     assert!(
         (g101["avg_id"].as_f64().unwrap() - 1.5).abs() < 0.01,
         "avg of users 1,2 = 1.5"
     );
 
-    let g102 = find_node(nodes, "Group", 102);
+    let g102 = find_node(&nodes, "Group", 102);
     assert!(
         (g102["avg_id"].as_f64().unwrap() - 3.5).abs() < 0.01,
         "avg of users 3,4 = 3.5"
@@ -1220,9 +1264,10 @@ async fn aggregation_min_max(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [
-                {"function": "min", "target": "u", "group_by": "g", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "group_by": "g", "property": "id", "alias": "max_id"}
+                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
+                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1230,15 +1275,15 @@ async fn aggregation_min_max(ctx: &TestContext) {
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
-    for node in nodes {
+    let nodes = aggregation_nodes(&value, "g");
+    for node in &nodes {
         let min_val = node["min_id"].as_i64().unwrap();
         let max_val = node["max_id"].as_i64().unwrap();
         assert!(min_val <= max_val, "min must be <= max");
     }
 
     // Group 101 has users 1,2 → min=1, max=2
-    let priv_group = find_node(nodes, "Group", 101);
+    let priv_group = find_node(&nodes, "Group", 101);
     assert_eq!(priv_group["min_id"].as_i64().unwrap(), 1);
     assert_eq!(priv_group["max_id"].as_i64().unwrap(), 2);
 }
@@ -1253,8 +1298,9 @@ async fn aggregation_min_string(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [
-                {"function": "min", "target": "u", "group_by": "g", "property": "username", "alias": "min_username"}
+                {"function": "min", "target": "u", "property": "username", "alias": "min_username"}
             ],
             "limit": 10
         }"#,
@@ -1262,14 +1308,14 @@ async fn aggregation_min_string(ctx: &TestContext) {
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "g");
     assert!(nodes.iter().all(|n| n["min_username"].is_string()));
 
-    let public_group = find_node(nodes, "Group", 100);
+    let public_group = find_node(&nodes, "Group", 100);
     assert_eq!(public_group["min_username"].as_str().unwrap(), "alice");
-    let private_group = find_node(nodes, "Group", 101);
+    let private_group = find_node(&nodes, "Group", 101);
     assert_eq!(private_group["min_username"].as_str().unwrap(), "alice");
-    let internal_group = find_node(nodes, "Group", 102);
+    let internal_group = find_node(&nodes, "Group", 102);
     assert_eq!(internal_group["min_username"].as_str().unwrap(), "charlie");
 }
 
@@ -1283,10 +1329,11 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [
-                {"function": "count", "target": "u", "group_by": "g", "alias": "member_count"},
-                {"function": "avg", "target": "u", "group_by": "g", "property": "id", "alias": "avg_id"},
-                {"function": "min", "target": "u", "group_by": "g", "property": "id", "alias": "min_id"}
+                {"function": "count", "target": "u", "alias": "member_count"},
+                {"function": "avg", "target": "u", "property": "id", "alias": "avg_id"},
+                {"function": "min", "target": "u", "property": "id", "alias": "min_id"}
             ],
             "limit": 10
         }"#,
@@ -1294,16 +1341,16 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "g");
     assert!(nodes.iter().all(|n| n["type"] == "Group"));
-    for node in nodes {
+    for node in &nodes {
         assert!(node["member_count"].is_i64());
         assert!(node["avg_id"].is_f64());
         assert!(node["min_id"].is_i64());
         assert!(node["id"].is_string());
     }
 
-    let g100 = find_node(nodes, "Group", 100);
+    let g100 = find_node(&nodes, "Group", 100);
     assert_eq!(
         g100["member_count"].as_i64().unwrap(),
         2,
@@ -1315,7 +1362,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
         "min user id in group 100"
     );
 
-    let g101 = find_node(nodes, "Group", 101);
+    let g101 = find_node(&nodes, "Group", 101);
     assert_eq!(
         g101["member_count"].as_i64().unwrap(),
         2,
@@ -1359,8 +1406,9 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     assert_eq!(columns[0]["name"], "total");
     assert_eq!(columns[0]["function"], "count");
     assert_eq!(columns[0]["target"], "g");
+    let row = first_aggregation_row(&value);
     assert_eq!(
-        columns[0]["value"].as_i64().unwrap(),
+        row["total"].as_i64().unwrap(),
         5,
         "should count all 5 groups (100, 101, 102, 200, 300)"
     );
@@ -1389,18 +1437,19 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     assert_eq!(columns.len(), 3);
     assert_eq!(columns[0]["name"], "total");
     assert_eq!(columns[0]["function"], "count");
-    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
     assert_eq!(columns[1]["name"], "min_id");
     assert_eq!(columns[1]["function"], "min");
     assert_eq!(columns[1]["property"], "id");
-    assert_eq!(columns[1]["value"].as_i64().unwrap(), 100);
     assert_eq!(columns[2]["name"], "max_id");
     assert_eq!(columns[2]["function"], "max");
     assert_eq!(columns[2]["property"], "id");
-    assert_eq!(columns[2]["value"].as_i64().unwrap(), 300);
+    let row = first_aggregation_row(&value);
+    assert_eq!(row["total"].as_i64().unwrap(), 5);
+    assert_eq!(row["min_id"].as_i64().unwrap(), 100);
+    assert_eq!(row["max_id"].as_i64().unwrap(), 300);
 }
 
-async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
+async fn grouped_aggregation_uses_node_group_rows(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
@@ -1410,21 +1459,22 @@ async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "u");
     assert!(
         !nodes.is_empty(),
-        "grouped aggregation should have entity nodes"
+        "grouped aggregation should have node group cells"
     );
     assert!(
         nodes.iter().all(|n| n["type"] == "User"),
-        "grouped aggregation should only have entity nodes"
+        "grouped aggregation should only have User node group cells"
     );
 
     let columns = value["columns"].as_array().unwrap();
@@ -1456,13 +1506,12 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
 
     assert!(value["nodes"].as_array().unwrap().is_empty());
 
-    // Count is SQL-level (pre-redaction), so it reflects all 5 groups under the
-    // traversal_path allowlist regardless of the MockRedactionService policy.
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(columns.len(), 1);
     assert_eq!(columns[0]["name"], "total");
     assert_eq!(columns[0]["function"], "count");
-    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
+    let row = first_aggregation_row(&value);
+    assert_eq!(row["total"].as_i64().unwrap(), 5);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2458,7 +2507,8 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "g", "group_by": "u"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "g"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -2473,11 +2523,11 @@ async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
     );
     assert_eq!(columns[0]["function"], "count");
 
-    let nodes = value["nodes"].as_array().unwrap();
-    let alice = find_node(nodes, "User", 1);
+    let nodes = aggregation_nodes(&value, "u");
+    let alice = find_node(&nodes, "User", 1);
     assert!(
         alice.get("count").is_some(),
-        "aggregate value must appear under key 'count' on entity node"
+        "aggregate value must appear under key 'count' in the node group row"
     );
     assert_eq!(alice["count"].as_i64().unwrap(), 2);
 }
@@ -2502,7 +2552,8 @@ async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
         "ungrouped default alias must be function name"
     );
     assert_eq!(columns[0]["function"], "count");
-    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
+    let row = first_aggregation_row(&value);
+    assert_eq!(row["count"].as_i64().unwrap(), 5);
 }
 
 async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
@@ -2515,10 +2566,11 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
             "aggregations": [
-                {"function": "count", "target": "u", "group_by": "g"},
-                {"function": "min", "target": "u", "property": "id", "group_by": "g"},
-                {"function": "max", "target": "u", "property": "id", "group_by": "g"}
+                {"function": "count", "target": "u"},
+                {"function": "min", "target": "u", "property": "id"},
+                {"function": "max", "target": "u", "property": "id"}
             ],
             "limit": 10
         }"#,
@@ -2532,8 +2584,8 @@ async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
     assert_eq!(columns[1]["name"], "min");
     assert_eq!(columns[2]["name"], "max");
 
-    let nodes = value["nodes"].as_array().unwrap();
-    let g100 = find_node(nodes, "Group", 100);
+    let nodes = aggregation_nodes(&value, "g");
+    let g100 = find_node(&nodes, "Group", 100);
     assert!(g100.get("count").is_some(), "count key must exist on node");
     assert!(g100.get("min").is_some(), "min key must exist on node");
     assert!(g100.get("max").is_some(), "max key must exist on node");
@@ -2549,8 +2601,9 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g"}],
-            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u"}],
+            "aggregation_sort": {"column": "count", "direction": "DESC"},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2563,7 +2616,7 @@ async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
         "sorted aggregation default alias must be function name"
     );
 
-    let nodes = value["nodes"].as_array().unwrap();
+    let nodes = aggregation_nodes(&value, "g");
     assert!(!nodes.is_empty());
     assert!(
         nodes.iter().all(|n| n.get("count").is_some()),
@@ -2626,7 +2679,7 @@ async fn graph_formatter_e2e() {
         // Ungrouped aggregation
         ungrouped_count_emits_aggregates,
         ungrouped_multiple_functions_emits_aggregates,
-        grouped_aggregation_uses_entity_nodes,
+        grouped_aggregation_uses_node_group_rows,
         ungrouped_count_with_redaction,
         // Default alias (no user-supplied alias)
         no_alias_grouped_count_uses_function_name,
