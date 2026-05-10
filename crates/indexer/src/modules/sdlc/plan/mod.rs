@@ -13,7 +13,14 @@ use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
 use crate::handler::HandlerError;
+use crate::topic::PartitionBounds;
 use ast::{Expr, Op, OrderExpr, Query};
+
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct PartitionFilter {
+    pub column: String,
+    pub bounds: PartitionBounds,
+}
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
 /// SQL on demand. Immutable: `advance` and `resume_from` return new instances.
@@ -26,7 +33,7 @@ pub(in crate::modules::sdlc) struct ExtractQuery {
     /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
     /// that gets replaced with the partition filter + keyset pagination clause at emit time.
     raw_template: Option<String>,
-    partition_filter: Option<String>,
+    partition_filter: Option<PartitionFilter>,
 }
 
 impl ExtractQuery {
@@ -59,10 +66,20 @@ impl ExtractQuery {
     }
 
     pub fn to_sql(&self) -> String {
+        let partition_expr = self.partition_filter.as_ref().map(|f| match &f.bounds {
+            PartitionBounds::Range {
+                lower_bound,
+                upper_bound,
+            } => Expr::raw(format!(
+                "{col} >= '{lower_bound}' AND {col} < '{upper_bound}'",
+                col = f.column
+            )),
+        });
+
         if let Some(template) = &self.raw_template {
             let mut suffix = String::new();
-            if let Some(filter) = &self.partition_filter {
-                suffix.push_str(&format!(" AND {filter}"));
+            if let Some(expr) = &partition_expr {
+                suffix.push_str(&format!(" AND {}", codegen::emit_expr_to_string(expr)));
             }
             if let Some(expr) = self.build_cursor_expr() {
                 suffix.push_str(&format!(" AND {}", codegen::emit_expr_to_string(&expr)));
@@ -71,11 +88,8 @@ impl ExtractQuery {
         }
 
         let mut query = self.base_query.clone();
-        query.where_clause = Expr::and_all([
-            query.where_clause,
-            self.partition_filter.as_ref().map(|f| Expr::raw(f.clone())),
-            self.build_cursor_expr(),
-        ]);
+        query.where_clause =
+            Expr::and_all([query.where_clause, partition_expr, self.build_cursor_expr()]);
 
         query.order_by = self
             .sort_key_columns
@@ -116,8 +130,8 @@ impl ExtractQuery {
         self.batch_size
     }
 
-    pub fn with_partition_filter(mut self, filter_sql: String) -> Self {
-        self.partition_filter = Some(filter_sql);
+    pub fn with_partition_filter(mut self, column: String, bounds: PartitionBounds) -> Self {
+        self.partition_filter = Some(PartitionFilter { column, bounds });
         self
     }
 
@@ -458,10 +472,17 @@ mod tests {
         assert!(query.to_sql().contains("ORDER BY traversal_path, id"));
     }
 
+    fn test_bounds() -> PartitionBounds {
+        PartitionBounds::Range {
+            lower_bound: "0".to_string(),
+            upper_bound: "25000000".to_string(),
+        }
+    }
+
     #[test]
     fn partition_filter_adds_to_where_clause() {
         let query = simple_query(vec!["id"], 1000);
-        let filtered = query.with_partition_filter("id >= '0' AND id < '25000000'".to_string());
+        let filtered = query.with_partition_filter("id".to_string(), test_bounds());
         let sql = filtered.to_sql();
 
         assert!(sql.contains("id >= '0' AND id < '25000000'"), "sql: {sql}");
@@ -472,7 +493,7 @@ mod tests {
     fn partition_filter_composes_with_cursor() {
         let query = simple_query(vec!["id"], 1000);
         let filtered = query
-            .with_partition_filter("id >= '0' AND id < '25000000'".to_string())
+            .with_partition_filter("id".to_string(), test_bounds())
             .resume_from(&position_with_cursor(vec!["42"]));
         let sql = filtered.to_sql();
 

@@ -11,7 +11,7 @@ use crate::checkpoint::{Checkpoint, CheckpointStore, Partition, entity_checkpoin
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
-use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionBounds, PartitionSpec};
+use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionSpec};
 
 use super::partition_strategy::PartitionStrategy;
 use super::pipeline::{Pipeline, PipelineContext};
@@ -143,10 +143,10 @@ impl SimpleEntityPipeline {
     ) -> (PipelinePlan, PipelineContext) {
         let mut plan = self.plan.clone();
         if let Some(strategy) = &self.partition_strategy {
-            let column = strategy.partition_column();
-            plan.extract_query = plan
-                .extract_query
-                .with_partition_filter(partition_filter_sql(column, spec));
+            plan.extract_query = plan.extract_query.with_partition_filter(
+                strategy.partition_column().to_string(),
+                spec.bounds.clone(),
+            );
         }
 
         let partition = Partition::Range {
@@ -277,15 +277,6 @@ fn scope_conditions(scope: &IndexingScope) -> BTreeMap<String, String> {
         IndexingScope::Namespace { traversal_path, .. } => {
             BTreeMap::from([("traversal_path".to_string(), traversal_path.clone())])
         }
-    }
-}
-
-fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
-    match &spec.bounds {
-        PartitionBounds::Range {
-            lower_bound,
-            upper_bound,
-        } => format!("{column} >= '{lower_bound}' AND {column} < '{upper_bound}'"),
     }
 }
 
