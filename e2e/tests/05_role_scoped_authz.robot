@@ -293,12 +293,12 @@ Direct Vulnerability Search
 Response Has Project Count
     [Arguments]    ${resp}    ${project_id}    ${expected}
     ${pid}=    Convert To Integer    ${project_id}
-    ${found}=    Evaluate    [node for node in $resp["result"]["nodes"] if int(node["id"]) == ${pid}]
+    ${found}=    Evaluate    [row for row in $resp["result"]["rows"] if int(row["p"]["id"]) == ${pid}]
     Should Not Be Empty    ${found}
     Should Be True    ${found[0]["vuln_count"]} >= ${expected}
 
 Response Does Not Have Project
     [Arguments]    ${resp}    ${project_id}
     ${pid}=    Convert To Integer    ${project_id}
-    ${found}=    Evaluate    any(int(node["id"]) == ${pid} for node in $resp["result"]["nodes"])
+    ${found}=    Evaluate    any(int(row["p"]["id"]) == ${pid} for row in $resp["result"]["rows"])
     Should Not Be True    ${found}

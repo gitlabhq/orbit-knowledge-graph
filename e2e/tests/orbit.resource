@@ -40,7 +40,7 @@ Orbit Count Nodes
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
     ...    headers=${headers}    json=${body}    expected_status=200
-    RETURN    ${resp.json()["result"]["columns"][0]["value"]}
+    RETURN    ${resp.json()["result"]["rows"][0]["count"]}
 
 Verify Node Indexed
     [Documentation]    Assert that one node of ${entity} with id=${node_id} is queryable.
@@ -149,7 +149,7 @@ Orbit Count Nodes With Filters
     ${query}=    Create Dictionary    query_type=aggregation
     ...    nodes=${{[$node]}}    aggregations=${{[$agg]}}
     ${resp}=    Orbit Query    ${query}
-    RETURN    ${resp["result"]["columns"][0]["value"]}
+    RETURN    ${resp["result"]["rows"][0]["count"]}
 
 Orbit Traversal Two Hop
     [Documentation]    Traversal between two nodes via a single relationship. Returns the parsed response.
