@@ -338,7 +338,7 @@ Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`)
 
 The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
 
-GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a follow-up MR alongside the actual GOON encoding (ADR 009).
+GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) is added alongside the actual GOON encoding (ADR 012).
 
 ## Consequences
 
