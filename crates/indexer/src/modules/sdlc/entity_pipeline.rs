@@ -72,7 +72,7 @@ impl EntityPipeline for SimpleEntityPipeline {
         let unified_key = format!("{base_prefix}.{}", self.plan.name);
         let completed = checkpoints
             .get(&unified_key)
-            .is_some_and(|cp| cp.watermark.timestamp_micros() > 0);
+            .is_some_and(|cp| cp.is_completed());
 
         let runs = if completed {
             vec![self.plan_single_run(request)]
@@ -258,7 +258,7 @@ fn filter_pending_partitions(
                 entity_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition)),
                 plan_name
             );
-            !matches!(checkpoints.get(&key), Some(cp) if cp.cursor_values.is_none())
+            !matches!(checkpoints.get(&key), Some(cp) if cp.is_completed())
         })
         .collect();
 

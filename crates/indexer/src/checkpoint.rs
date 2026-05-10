@@ -62,6 +62,12 @@ pub struct Checkpoint {
     pub cursor_values: Option<Vec<String>>,
 }
 
+impl Checkpoint {
+    pub fn is_completed(&self) -> bool {
+        self.cursor_values.is_none()
+    }
+}
+
 #[async_trait]
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
