@@ -168,7 +168,8 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "open_mr_count"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "open_mr_count"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -182,13 +183,12 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
     });
 
     // alice authored MR 2000 (opened) and 2001 (opened) = 2
-    resp.assert_node("User", 1, |n| {
-        n.prop_str("username") == Some("alice") && n.prop_i64("open_mr_count") == Some(2)
-    });
+    resp.assert_group_node_property_str("u", "User", 1, "username", "alice");
+    resp.assert_group_row_value_i64("u", "User", 1, "open_mr_count", 2);
     // bob authored MR 2002 (merged), not opened = should not appear
-    resp.assert_node_absent("User", 2);
+    resp.assert_group_node_absent("u", "User", 2);
     // charlie authored MR 2003 (closed), not opened = should not appear
-    resp.assert_node_absent("User", 3);
+    resp.assert_group_node_absent("u", "User", 3);
 }
 
 /// Cross-namespace: User 2 is MEMBER_OF group 100 (ns `1/100/`) but authored
@@ -344,7 +344,8 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
             "limit": 20
         }"#,
         &allow_all(),
@@ -355,13 +356,13 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
     // Group 100 CONTAINS projects 1000 (edge ns 1/100/1000/) and 1002
     // (edge ns 1/100/1002/) — both in the 1/100/ subtree.
     // Group 200 CONTAINS Project 1010 (edge ns 1/100/200/1010/) — also in scope.
-    resp.assert_node_count(2);
-    resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
-    resp.assert_node("Group", 200, |n| n.prop_i64("project_count") == Some(1));
+    resp.assert_group_node_count("g", 2);
+    resp.assert_group_row_value_i64("g", "Group", 100, "project_count", 2);
+    resp.assert_group_row_value_i64("g", "Group", 200, "project_count", 1);
 
     // Groups 101 and 102 have CONTAINS edges outside 1/100/ — must not appear
-    resp.assert_node_absent("Group", 101);
-    resp.assert_node_absent("Group", 102);
+    resp.assert_group_node_absent("g", "Group", 101);
+    resp.assert_group_node_absent("g", "Group", 102);
 }
 
 /// Cross-namespace neighbors isolation: scoped to `1/101/`, neighbors of

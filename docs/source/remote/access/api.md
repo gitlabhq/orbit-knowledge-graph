@@ -97,15 +97,15 @@ curl --request POST \
       "relationships": [
         {"type": "IN_PROJECT", "from": "pl", "to": "p"}
       ],
+      "group_by": [{"kind": "node", "node": "p"}],
       "aggregations": [
         {
           "function": "count",
           "target": "pl",
-          "group_by": "p",
           "alias": "failed_pipelines"
         }
       ],
-      "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+      "aggregation_sort": {"column": "failed_pipelines", "direction": "DESC"},
       "limit": 10
     },
     "format": "raw"

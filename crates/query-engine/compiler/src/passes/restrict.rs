@@ -255,14 +255,15 @@ pub fn restrict(
         }
     }
 
-    for group in &input.group_by_properties {
-        let Some(entity) = entity_of(input, &group.node) else {
+    for group in crate::input::property_groups(&input.group_by) {
+        let (node, property, _) = group;
+        let Some(entity) = entity_of(input, node) else {
             continue;
         };
-        if ontology.is_admin_only(entity, &group.property) {
+        if ontology.is_admin_only(entity, property) {
             return Err(QueryError::Validation(format!(
-                "group_by_properties on \"{}\" for {entity}: field requires administrator access",
-                group.property
+                "group_by on \"{}\" for {entity}: field requires administrator access",
+                property
             )));
         }
     }
@@ -274,7 +275,7 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggFunction, FilterOp, InputAggregation, InputFilter, InputGroupByProperty, InputNode,
+        AggFunction, FilterOp, InputAggregation, InputFilter, InputGroupByKey, InputNode,
         InputOrderBy, OrderDirection, QueryType,
     };
     use crate::types::{AccessLevel, TraversalPath};
@@ -629,7 +630,6 @@ mod tests {
             aggregations: vec![InputAggregation {
                 function,
                 target: Some("_u".into()),
-                group_by: None,
                 property: property.map(String::from),
                 alias: Some("_agg".into()),
             }],
@@ -650,7 +650,7 @@ mod tests {
                 scoped_node(),
             ],
             relationships: vec![rel("_u", "_g")],
-            group_by_properties: vec![InputGroupByProperty {
+            group_by: vec![InputGroupByKey::Property {
                 node: "_u".into(),
                 property: property.into(),
                 alias: None,
@@ -658,7 +658,6 @@ mod tests {
             aggregations: vec![InputAggregation {
                 function: AggFunction::Count,
                 target: Some("_u".into()),
-                group_by: None,
                 property: None,
                 alias: Some("_agg".into()),
             }],
@@ -678,7 +677,6 @@ mod tests {
             aggregations: vec![InputAggregation {
                 function,
                 target: Some("_u".into()),
-                group_by: None,
                 property: property.map(String::from),
                 alias: Some("_agg".into()),
             }],
@@ -783,9 +781,8 @@ mod tests {
         let mut input = input_with_property_group("is_admin");
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(
-            err.to_string().contains("group_by_properties")
-                && err.to_string().contains("administrator"),
-            "expected admin_only group_by_properties rejection, got: {err}"
+            err.to_string().contains("group_by") && err.to_string().contains("administrator"),
+            "expected admin_only group_by rejection, got: {err}"
         );
     }
 

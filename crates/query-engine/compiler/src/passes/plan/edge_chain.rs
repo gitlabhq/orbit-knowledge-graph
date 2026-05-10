@@ -177,13 +177,9 @@ pub fn plan(input: &mut Input) -> Plan {
 
     resolve_dedup_columns(&mut nodes, input);
 
-    // In aggregation queries, only group_by nodes emit columns.
+    // In aggregation queries, only node group keys emit entity columns.
     if input.query_type == QueryType::Aggregation {
-        let group_by_nodes: HashSet<&str> = input
-            .aggregations
-            .iter()
-            .filter_map(|a| a.group_by.as_deref())
-            .collect();
+        let group_by_nodes: HashSet<&str> = crate::input::node_group_ids(&input.group_by).collect();
         for np in nodes.values_mut() {
             np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
@@ -437,14 +433,12 @@ fn reorder_by_selectivity(
 fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
-    let is_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
+    let is_group_by_node =
+        crate::input::node_group_ids(&input.group_by).any(|node| node == alias.as_str());
     let is_group_by_property = input
-        .group_by_properties
+        .group_by
         .iter()
-        .any(|group| group.node == *alias);
+        .any(|group| matches!(group, crate::input::InputGroupByKey::Property { node, .. } if node == alias));
     let is_agg_property_target = input.aggregations.iter().any(|a| {
         a.target.as_deref() == Some(alias.as_str())
             && a.property.is_some()
@@ -452,7 +446,7 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
     });
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
-    if is_group_by || is_group_by_property || is_agg_property_target || is_order_by_target {
+    if is_group_by_node || is_group_by_property || is_agg_property_target || is_order_by_target {
         return HydrationStrategy::Join;
     }
 

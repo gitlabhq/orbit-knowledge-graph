@@ -174,8 +174,8 @@ Match nodes and relationships, return matching entities.
 
 Group and aggregate results.
 
-Use `group_by` inside an aggregation to group by an entity node selector. The
-value must be a node `id`, not a property name.
+Use top-level `group_by` to group aggregation rows. A node group uses
+`{"kind": "node", "node": "<node-id>"}`.
 
 ```json
 {
@@ -187,16 +187,17 @@ value must be a node `id`, not a property name.
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"}
   ],
+  "group_by": [{"kind": "node", "node": "u"}],
   "aggregations": [
-    {"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}
+    {"function": "count", "target": "mr", "alias": "mr_count"}
   ],
   "limit": 10,
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
+  "aggregation_sort": {"column": "mr_count", "direction": "DESC"}
 }
 ```
 
-Use top-level `group_by_properties` to group by scalar properties, such as
-dashboard buckets.
+Use top-level `group_by` entries with `kind: "property"` to group by scalar
+properties, such as dashboard buckets.
 
 ```json
 {
@@ -204,19 +205,21 @@ dashboard buckets.
   "nodes": [
     {"id": "v", "entity": "Vulnerability", "filters": {"report_type": "sast"}}
   ],
-  "group_by_properties": [
-    {"node": "v", "property": "severity", "alias": "severity"}
+  "group_by": [
+    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
   ],
   "aggregations": [
     {"function": "count", "target": "v", "alias": "vulnerability_count"}
   ],
   "limit": 10,
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
+  "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"}
 }
 ```
 
-Property-grouped aggregation responses include `group_columns` and `rows`
-instead of attaching aggregate values to graph nodes.
+Aggregation responses are table-shaped: `columns` describes the metrics,
+`group_columns` describes any grouping keys, and `rows` carries group values
+plus metric values. Node groups put a nested node object in the row under the
+group key; property groups put the scalar bucket value there.
 
 | Aggregation Function | Description | Requires `property` |
 |---------------------|-------------|---------------------|
@@ -440,8 +443,8 @@ All enum-like fields (entity types, relationship types, property names) are vali
 - Entity types must be one of the known node types (e.g., `User`, `Project`, `MergeRequest`, `Issue`)
 - Relationship types must be one of the known edge types (e.g., `AUTHORED`, `IN_PROJECT`, `CONTAINS`)
 - Properties must exist on their referenced entity
-- Aggregation targets/group_by must reference valid nodes
-- Aggregation `group_by_properties` entries must reference valid nodes and column-backed, filterable properties
+- Aggregation targets and `group_by` entries must reference valid nodes
+- Aggregation property group keys must reference valid nodes and column-backed, filterable properties
 - Filter operators are limited to a small, explicit set (`eq`, `in`, `gte`, `lte`, etc.), represented as enums in the AST
 
 If a value is not in the allow-list, we reject the request with a validation error rather than passing it through to SQL. This means the LLM cannot introduce new table names, join arbitrary system tables, or call random functions.

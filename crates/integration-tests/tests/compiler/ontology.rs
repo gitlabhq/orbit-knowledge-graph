@@ -265,7 +265,8 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
             {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "group_by": [{"kind": "node", "node": "u"}],
+        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -403,7 +404,8 @@ fn multi_hop_aggregation() {
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
-        "aggregations": [{"function": "count", "target": "p", "group_by": "u", "alias": "project_count"}],
+        "group_by": [{"kind": "node", "node": "u"}],
+        "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}],
         "limit": 10
     }"#;
 
@@ -1450,7 +1452,8 @@ fn calls_aggregation_compiles() {
             {"id": "callee", "entity": "Definition"}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "aggregations": [{"function": "count", "target": "caller", "group_by": "callee", "alias": "callers"}],
+        "group_by": [{"kind": "node", "node": "callee"}],
+        "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
         "limit": 1
     }"#;
 

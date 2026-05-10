@@ -273,8 +273,9 @@ mod tests {
             "relationships": [
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [
-                {"function": "count", "target": "mr", "group_by": "p", "alias": "open_mr_count"}
+                {"function": "count", "target": "mr", "alias": "open_mr_count"}
             ],
             "limit": 1
         }));

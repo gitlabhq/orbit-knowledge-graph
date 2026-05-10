@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v1",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/graph_query/v2",
   "title": "GraphQueryAsJSON",
   "description": "Schema for LLM-generated graph queries that compile to ClickHouse SQL",
   "type": "object",
@@ -40,13 +40,13 @@
         "$ref": "#/$defs/Aggregation"
       }
     },
-    "group_by_properties": {
+    "group_by": {
       "type": "array",
-      "description": "Scalar properties to group aggregation rows by. Use this for buckets such as count vulnerabilities by severity. Cannot be combined with aggregation-level group_by node grouping.",
+      "description": "Group keys for aggregation rows. Use kind=node to group by a node selector, or kind=property to group by a scalar node property such as vulnerability severity.",
       "default": [],
       "maxItems": 4,
       "items": {
-        "$ref": "#/$defs/GroupByProperty"
+        "$ref": "#/$defs/GroupByKey"
       }
     },
     "path": {
@@ -161,44 +161,7 @@
               }
             }
           }
-        },
-        "allOf": [
-          {
-            "if": {
-              "allOf": [
-                {
-                  "required": ["nodes"],
-                  "properties": {
-                    "nodes": {
-                      "minItems": 2
-                    }
-                  }
-                },
-                {
-                  "anyOf": [
-                    { "not": { "required": ["group_by_properties"] } },
-                    {
-                      "properties": {
-                        "group_by_properties": {
-                          "maxItems": 0
-                        }
-                      }
-                    }
-                  ]
-                }
-              ]
-            },
-            "then": {
-              "properties": {
-                "aggregations": {
-                  "items": {
-                    "required": ["group_by"]
-                  }
-                }
-              }
-            }
-          }
-        ]
+        }
       }
     },
     {
@@ -211,9 +174,9 @@
       },
       "then": {
         "properties": {
-          "group_by_properties": {
+          "group_by": {
             "maxItems": 0,
-            "description": "Only aggregation queries may group by scalar properties."
+            "description": "Only aggregation queries may group results."
           }
         }
       }
@@ -594,10 +557,6 @@
           "$ref": "#/$defs/Identifier",
           "description": "Node variable to aggregate over. If omitted, aggregates all matching nodes."
         },
-        "group_by": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Required for multi-node aggregation unless using top-level group_by_properties. Must be a node selector id, not a property name."
-        },
         "property": {
           "$ref": "#/$defs/Identifier",
           "description": "Property to aggregate. Required for sum, avg, min, max functions."
@@ -617,25 +576,52 @@
         "required": ["property"]
       }
     },
-    "GroupByProperty": {
-      "type": "object",
-      "description": "A scalar node property to group aggregation rows by.",
-      "required": ["node", "property"],
-      "properties": {
-        "node": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Node variable whose property is used as the group key"
+    "GroupByKey": {
+      "description": "A group key for aggregation output rows. Node keys return an entity object per bucket; property keys return the scalar property value per bucket.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Group by a node selector.",
+          "required": ["kind", "node"],
+          "properties": {
+            "kind": {
+              "const": "node"
+            },
+            "node": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Node variable to use as the group key"
+            },
+            "alias": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Output column alias for this group key"
+            }
+          },
+          "additionalProperties": false
         },
-        "property": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Property name to group by"
-        },
-        "alias": {
-          "$ref": "#/$defs/Identifier",
-          "description": "Output column alias for this group key"
+        {
+          "type": "object",
+          "description": "Group by a scalar property on a node selector.",
+          "required": ["kind", "node", "property"],
+          "properties": {
+            "kind": {
+              "const": "property"
+            },
+            "node": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Node variable whose property is used as the group key"
+            },
+            "property": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Property name to group by"
+            },
+            "alias": {
+              "$ref": "#/$defs/Identifier",
+              "description": "Output column alias for this group key"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "AggFunction": {
       "type": "string",
@@ -731,12 +717,11 @@
     "AggregationSort": {
       "type": "object",
       "description": "Ordering for aggregation outputs",
-      "required": ["agg_index"],
+      "required": ["column"],
       "properties": {
-        "agg_index": {
-          "type": "integer",
-          "description": "Index of the aggregation in the aggregations array (0-based)",
-          "minimum": 0
+        "column": {
+          "$ref": "#/$defs/Identifier",
+          "description": "Output column name to sort by. Can reference an aggregation alias or group key alias."
         },
         "direction": {
           "$ref": "#/$defs/OrderDirection",

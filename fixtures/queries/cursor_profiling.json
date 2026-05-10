@@ -54,8 +54,9 @@
       {"id": "p", "entity": "Project", "columns": ["name"]}
     ],
     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mr_count"}],
-    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "group_by": [{"kind": "node", "node": "p"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "merged_mr_count"}],
+    "aggregation_sort": {"column": "merged_mr_count", "direction": "DESC"},
     "limit": 20,
     "cursor": {"offset": 0, "page_size": 5}
   },
@@ -67,8 +68,9 @@
       {"id": "p", "entity": "Project", "columns": ["name"]}
     ],
     "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-    "aggregations": [{"function": "sum", "target": "pipe", "property": "duration", "group_by": "p", "alias": "total_pipeline_seconds"}],
-    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "group_by": [{"kind": "node", "node": "p"}],
+    "aggregations": [{"function": "sum", "target": "pipe", "property": "duration", "alias": "total_pipeline_seconds"}],
+    "aggregation_sort": {"column": "total_pipeline_seconds", "direction": "DESC"},
     "limit": 15,
     "cursor": {"offset": 0, "page_size": 5}
   },
@@ -103,7 +105,7 @@
     "query_type": "traversal",
     "nodes": [
       {"id": "u", "entity": "User"},
-      {"id": "mr", "entity": "MergeRequest"}
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}}
     ],
     "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
     "limit": 50,
@@ -119,7 +121,7 @@
 
   "11_search_all_mrs_cursor": {
     "query_type": "traversal",
-    "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"]},
+    "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"], "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
     "limit": 100,
     "cursor": {"offset": 0, "page_size": 20}
   },
@@ -142,7 +144,7 @@
   "13_large_result_traversal_all_jobs_cursor": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "j", "entity": "Job"},
+      {"id": "j", "entity": "Job", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}},
       {"id": "pipe", "entity": "Pipeline"}
     ],
     "relationships": [{"type": "IN_PIPELINE", "from": "j", "to": "pipe"}],
@@ -153,11 +155,12 @@
   "14_aggregation_no_sort_cursor": {
     "query_type": "aggregation",
     "nodes": [
-      {"id": "mr", "entity": "MergeRequest"},
+      {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
       {"id": "p", "entity": "Project", "columns": ["name"]}
     ],
     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+    "group_by": [{"kind": "node", "node": "p"}],
+    "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
     "limit": 20,
     "cursor": {"offset": 0, "page_size": 5}
   },
@@ -178,5 +181,49 @@
       {"id": "end", "entity": "Project", "node_ids": [13764]}
     ],
     "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+  },
+
+  "17_property_group_vulnerabilities_by_severity_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "v", "entity": "Vulnerability", "filters": {"state": {"op": "in", "value": ["detected", "confirmed", "resolved", "dismissed"]}}}
+    ],
+    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+    "aggregations": [{"function": "count", "target": "v", "alias": "vulnerability_count"}],
+    "aggregation_sort": {"column": "vulnerability_count", "direction": "DESC"},
+    "limit": 20,
+    "cursor": {"offset": 0, "page_size": 5}
+  },
+
+  "18_property_group_pipeline_status_source_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed", "running", "pending"]}}}
+    ],
+    "group_by": [
+      {"kind": "property", "node": "pipe", "property": "status", "alias": "status"},
+      {"kind": "property", "node": "pipe", "property": "source", "alias": "source"}
+    ],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+    "limit": 30,
+    "cursor": {"offset": 0, "page_size": 10}
+  },
+
+  "19_node_property_group_project_pipeline_status_cursor": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "in", "value": ["success", "failed"]}}},
+      {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+    ],
+    "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+    "group_by": [
+      {"kind": "node", "node": "p", "alias": "project"},
+      {"kind": "property", "node": "pipe", "property": "status", "alias": "pipeline_status"}
+    ],
+    "aggregations": [{"function": "count", "target": "pipe", "alias": "pipeline_count"}],
+    "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+    "limit": 30,
+    "cursor": {"offset": 0, "page_size": 10}
   }
 }

@@ -119,24 +119,24 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
     )
     .await;
 
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Project", &[1000]);
+    resp.assert_group_node_count("p", 1);
+    resp.assert_group_node_ids("p", "Project", &[1000]);
     // MR is the aggregation target (counted), not a returned node — skip filter check.
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
     // Duplicate MR 9100 should be counted once. Seed MRs 2004 and 2005 are
     // also merged in project 1000, so the total is 3.
-    resp.assert_node("Project", 1000, |n| {
-        n.prop_str("name") == Some("Public Project") && n.prop_i64("mr_count") == Some(3)
-    });
+    resp.assert_group_node_property_str("p", "Project", 1000, "name", "Public Project");
+    resp.assert_group_row_value_i64("p", "Project", 1000, "mr_count", 3);
 }
 
 /// Search with filter: latest version matches the filter. Should return the row.
@@ -242,23 +242,23 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
     )
     .await;
 
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Project", &[1002]);
+    resp.assert_group_node_count("p", 1);
+    resp.assert_group_node_ids("p", "Project", &[1002]);
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
     // Only MR 9201 should be counted (state='merged').
     // MR 9200 must NOT be counted: its latest version has state='opened'.
-    resp.assert_node("Project", 1002, |n| {
-        n.prop_i64("mr_count") == Some(1) && n.prop_str("name") == Some("Internal Project")
-    });
+    resp.assert_group_node_property_str("p", "Project", 1002, "name", "Internal Project");
+    resp.assert_group_row_value_i64("p", "Project", 1002, "mr_count", 1);
 }
 
 /// Duplicate user rows. Traversal should produce one edge, not two.
@@ -655,20 +655,20 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
                 {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
             "limit": 10
         }"#,
         &dedup_svc(),
     )
     .await;
 
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Project", &[1002]);
+    resp.assert_group_node_count("p", 1);
+    resp.assert_group_node_ids("p", "Project", &[1002]);
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
     // MR 9900 is deleted, only MR 9901 should be counted.
-    resp.assert_node("Project", 1002, |n| {
-        n.prop_i64("mr_count") == Some(1) && n.prop_str("name") == Some("Internal Project")
-    });
+    resp.assert_group_node_property_str("p", "Project", 1002, "name", "Internal Project");
+    resp.assert_group_row_value_i64("p", "Project", 1002, "mr_count", 1);
 }

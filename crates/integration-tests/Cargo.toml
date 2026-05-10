@@ -39,6 +39,7 @@ rustls = { workspace = true }
 serde = { workspace = true }
 health-check = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }
 tar = { workspace = true }

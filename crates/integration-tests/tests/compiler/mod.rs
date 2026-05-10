@@ -1,4 +1,5 @@
 mod dialects;
+mod fixtures;
 mod macros;
 mod ontology;
 mod pipeline;

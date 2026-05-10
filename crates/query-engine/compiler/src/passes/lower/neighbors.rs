@@ -71,6 +71,21 @@ pub fn emit_neighbors(
             OrderExpr::asc(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN)),
         ]
     };
+    let projected_tiebreakers = || -> Vec<OrderExpr> {
+        vec![
+            OrderExpr::asc(Expr::ident(redaction_id_column(&center_id))),
+            OrderExpr::asc(Expr::ident(neighbor_id_column())),
+            OrderExpr::asc(Expr::ident(relationship_type_column())),
+            OrderExpr::asc(Expr::ident(neighbor_is_outgoing_column())),
+        ]
+    };
+    let tie_breakers = || {
+        if direction == Direction::Both {
+            projected_tiebreakers()
+        } else {
+            edge_tiebreakers()
+        }
+    };
     let order_by = match &plan.order_by {
         Some(ob) => {
             let mut exprs = vec![if ob.direction == OrderDirection::Desc {
@@ -79,11 +94,11 @@ pub fn emit_neighbors(
                 OrderExpr::asc(Expr::col(&ob.node, &ob.property))
             }];
             if plan.cursor.is_some() {
-                exprs.extend(edge_tiebreakers());
+                exprs.extend(tie_breakers());
             }
             exprs
         }
-        None if plan.cursor.is_some() => edge_tiebreakers(),
+        None if plan.cursor.is_some() => tie_breakers(),
         None => vec![],
     };
 

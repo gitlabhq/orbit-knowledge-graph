@@ -171,8 +171,8 @@ The mapping from query features to requirements:
 | `order_by` | `OrderBy` | `assert_node_order` |
 | `filters: {field: ...}` | `Filter { field }` (one per field) | `assert_filter(entity, field, pred)` |
 | `node_ids: [...]` | `NodeIds` | `node_ids`, `assert_node_order`, `assert_node_count` |
-| `query_type: aggregation` | `Aggregation` | `assert_node` |
-| `aggregation_sort` | `AggregationSort` | `assert_node_order` |
+| `query_type: aggregation` | `Aggregation` | `assert_aggregation_value_i64`, `assert_row_value_i64`, `assert_group_row_value_i64` |
+| `aggregation_sort` | `AggregationSort` | `assert_group_node_order` |
 | `query_type: path_finding` | `PathFinding` | `path_ids` |
 | `query_type: neighbors` | `Neighbors` | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |
 | `relationships: [{type: T}]` | `Relationship { edge_type: T }` (one per type) | `edges_of_type`, `assert_edge_exists`, `assert_edge_absent` |

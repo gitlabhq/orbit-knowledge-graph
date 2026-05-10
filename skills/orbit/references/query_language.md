@@ -79,7 +79,7 @@ query type.
 | `limit` | `integer` | Maximum rows to return. Default 30. Maximum 1000. |
 | `cursor` | `object` | Offset pagination over authorized results. |
 | `order_by` | `object` | Sort rows by a node property. |
-| `aggregation_sort` | `object` | Sort aggregation rows by aggregation index. |
+| `aggregation_sort` | `object` | Sort aggregation rows by output column. |
 | `options` | `object` | Presentation and debug options. |
 
 ## Node selectors
@@ -283,9 +283,12 @@ Aggregation queries use `aggregations`.
 |-------|------|-------------|
 | `function` | `string` | `count`, `sum`, `avg`, `min`, or `max`. |
 | `target` | `string` | Node alias to aggregate. |
-| `group_by` | `string` | Node alias to group by. Required for multi-node aggregation. |
 | `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
 | `alias` | `string` | Name of the output column. |
+
+Use top-level `group_by` to group aggregation rows. Node groups use
+`{"kind": "node", "node": "<node-id>"}` and property groups use
+`{"kind": "property", "node": "<node-id>", "property": "<property>"}`.
 
 Count merged merge requests per project:
 
@@ -307,10 +310,11 @@ Count merged merge requests per project:
   "relationships": [
     {"type": "IN_PROJECT", "from": "mr", "to": "project"}
   ],
+  "group_by": [{"kind": "node", "node": "project"}],
   "aggregations": [
-    {"function": "count", "target": "mr", "group_by": "project", "alias": "merged_mrs"}
+    {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
   "limit": 10
 }
 ```

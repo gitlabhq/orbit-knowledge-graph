@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
 use crate::input::{
-    AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType, group_by_property_output_names,
+    AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType, group_by_output_names,
 };
 use crate::types::SecurityContext;
 use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
@@ -257,7 +257,7 @@ impl<'a> Validator<'a> {
         const MAX_FILTERS_PER_REL: usize = 10;
         const MAX_COLUMNS: usize = 50;
         const MAX_REL_TYPES: usize = 10;
-        const MAX_GROUP_BY_PROPERTIES: usize = 4;
+        const MAX_GROUP_BY_KEYS: usize = 4;
 
         if input.nodes.len() > MAX_NODES_CAP {
             return Err(QueryError::DepthExceeded(format!(
@@ -290,10 +290,10 @@ impl<'a> Validator<'a> {
                 input.aggregations.len()
             )));
         }
-        if input.group_by_properties.len() > MAX_GROUP_BY_PROPERTIES {
+        if input.group_by.len() > MAX_GROUP_BY_KEYS {
             return Err(QueryError::LimitExceeded(format!(
-                "group_by_properties count ({}) must not exceed {MAX_GROUP_BY_PROPERTIES}",
-                input.group_by_properties.len()
+                "group_by count ({}) must not exceed {MAX_GROUP_BY_KEYS}",
+                input.group_by.len()
             )));
         }
         for rel in &input.relationships {
@@ -690,9 +690,9 @@ impl<'a> Validator<'a> {
 
     fn check_aggregations(&self, input: &Input) -> Result<()> {
         if input.query_type != QueryType::Aggregation {
-            if input.uses_property_grouping() {
+            if !input.group_by.is_empty() {
                 return Err(QueryError::Validation(
-                    "group_by_properties is only supported for aggregation queries".into(),
+                    "group_by is only supported for aggregation queries".into(),
                 ));
             }
             return Ok(());
@@ -700,45 +700,30 @@ impl<'a> Validator<'a> {
 
         let node_ids: Vec<&str> = input.nodes.iter().map(|n| n.id.as_str()).collect();
 
-        let has_grouped = input.aggregations.iter().any(|a| a.group_by.is_some());
-        let has_property_grouping = input.uses_property_grouping();
-        let has_ungrouped = input.aggregations.iter().any(|a| a.group_by.is_none());
-        if has_grouped && has_property_grouping {
+        if input.group_by.is_empty() && input.nodes.len() > 1 && input.relationships.is_empty() {
             return Err(QueryError::Validation(
-                "cannot mix 'group_by' node grouping with 'group_by_properties' in the same query"
+                "multi-node aggregation without group_by requires relationships to constrain node joins"
                     .into(),
             ));
         }
-        if !has_property_grouping && has_grouped && has_ungrouped {
-            return Err(QueryError::Validation(
-                "cannot mix grouped and ungrouped aggregations in the same query".into(),
-            ));
-        }
 
-        // Multi-node aggregation without group_by produces a full cross-join
-        // scan that will timeout on any real dataset. Require group_by when
-        // there are 2+ nodes.
-        if !has_property_grouping && input.nodes.len() > 1 && has_ungrouped {
-            return Err(QueryError::Validation(
-                "multi-node aggregation requires 'group_by' on each aggregation".into(),
-            ));
-        }
-
-        let mut property_group_output_names = HashSet::new();
-        for name in group_by_property_output_names(&input.group_by_properties) {
-            if !property_group_output_names.insert(name.clone()) {
+        let group_output_names = group_by_output_names(&input.group_by);
+        let mut seen_group_output_names = HashSet::new();
+        for name in &group_output_names {
+            if !seen_group_output_names.insert(name.clone()) {
                 return Err(QueryError::Validation(format!(
-                    "duplicate group_by_properties output alias \"{name}\""
+                    "duplicate group_by output alias \"{name}\""
                 )));
             }
         }
 
+        let mut seen_output_names = seen_group_output_names.clone();
         for (i, agg) in input.aggregations.iter().enumerate() {
             let agg_alias = agg
                 .alias
                 .clone()
                 .unwrap_or_else(|| agg.function.to_string());
-            if has_property_grouping && property_group_output_names.contains(&agg_alias) {
+            if !seen_output_names.insert(agg_alias.clone()) {
                 return Err(QueryError::Validation(format!(
                     "aggregation[{i}] output alias \"{agg_alias}\" conflicts with another output column"
                 )));
@@ -770,15 +755,6 @@ impl<'a> Validator<'a> {
                 return Err(QueryError::ReferenceError(format!(
                     "aggregation[{}] references undefined node \"{}\" in 'target'",
                     i, target
-                )));
-            }
-
-            if let Some(group_by) = &agg.group_by
-                && !node_ids.contains(&group_by.as_str())
-            {
-                return Err(QueryError::ReferenceError(format!(
-                    "aggregation[{}] references undefined node \"{}\" in 'group_by'",
-                    i, group_by
                 )));
             }
 
@@ -817,15 +793,16 @@ impl<'a> Validator<'a> {
             }
         }
 
-        for (i, group) in input.group_by_properties.iter().enumerate() {
+        for (i, group) in input.group_by.iter().enumerate() {
+            let group_node = group.node();
             let node = input
                 .nodes
                 .iter()
-                .find(|n| n.id == group.node)
+                .find(|n| n.id == group_node)
                 .ok_or_else(|| {
                     QueryError::ReferenceError(format!(
-                        "group_by_properties[{i}] references undefined node \"{}\"",
-                        group.node
+                        "group_by[{i}] references undefined node \"{}\"",
+                        group_node
                     ))
                 })?;
             let entity = node
@@ -833,33 +810,50 @@ impl<'a> Validator<'a> {
                 .as_ref()
                 .ok_or_else(|| QueryError::ReferenceError("missing entity".into()))?;
 
+            let Some(property) = group.property() else {
+                continue;
+            };
+
             self.ontology
-                .validate_field(entity, &group.property)
+                .validate_field(entity, property)
                 .map_err(|e| {
-                    QueryError::AllowlistRejected(format!(
-                        "invalid property in group_by_properties[{i}]: {e}"
-                    ))
+                    QueryError::AllowlistRejected(format!("invalid property in group_by[{i}]: {e}"))
                 })?;
 
             if !self
                 .ontology
-                .check_field_flag(entity, &group.property, |f| f.filterable)
+                .check_field_flag(entity, property, |f| f.filterable)
             {
                 return Err(QueryError::Validation(format!(
-                    "group_by_properties[{i}] on \"{}\" for {entity}: field is not filterable",
-                    group.property
+                    "group_by[{i}] on \"{}\" for {entity}: field is not filterable",
+                    property
                 )));
             }
 
             if let Some(field) = self
                 .ontology
                 .get_node(entity)
-                .and_then(|n| n.fields.iter().find(|f| f.name == group.property))
+                .and_then(|n| n.fields.iter().find(|f| f.name == property))
                 && field.is_virtual()
             {
                 return Err(QueryError::Validation(format!(
-                    "group_by_properties[{i}] on \"{}\" for {entity}: field is virtual and cannot be grouped in SQL",
-                    group.property
+                    "group_by[{i}] on \"{}\" for {entity}: field is virtual and cannot be grouped in SQL",
+                    property
+                )));
+            }
+        }
+
+        if let Some(sort) = &input.aggregation_sort {
+            let mut output_names: HashSet<String> = group_output_names.into_iter().collect();
+            output_names.extend(input.aggregations.iter().map(|agg| {
+                agg.alias
+                    .clone()
+                    .unwrap_or_else(|| agg.function.to_string())
+            }));
+            if !output_names.contains(&sort.column) {
+                return Err(QueryError::ReferenceError(format!(
+                    "aggregation_sort references unknown output column \"{}\"",
+                    sort.column
                 )));
             }
         }
@@ -992,12 +986,9 @@ impl<'a> Validator<'a> {
                     if let Some(ref t) = agg.target {
                         set.insert(t.as_str());
                     }
-                    if let Some(ref g) = agg.group_by {
-                        set.insert(g.as_str());
-                    }
                 }
-                for group in &input.group_by_properties {
-                    set.insert(group.node.as_str());
+                for group in &input.group_by {
+                    set.insert(group.node());
                 }
                 set
             }
@@ -1129,10 +1120,10 @@ mod tests {
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+                "group_by": [{"kind": "node", "node": "u"}],
                 "aggregations": [{
                     "function": "count",
                     "target": "n",
-                    "group_by": "u",
                     "alias": "note_count"
                 }]
             }"#,
@@ -1208,10 +1199,10 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "group_by": [{"kind": "node", "node": "missing"}],
                 "aggregations": [{
                     "function": "count",
                     "target": "u",
-                    "group_by": "missing",
                     "alias": "c"
                 }]
             }"#,
@@ -1237,7 +1228,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
         );
@@ -1246,7 +1237,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "missing", "property": "visibility_level"}],
+                "group_by": [{"kind": "property", "node": "missing", "property": "visibility_level"}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
             "undefined node \"missing\"",
@@ -1256,7 +1247,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "p", "property": "not_real"}],
+                "group_by": [{"kind": "property", "node": "p", "property": "not_real"}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
             "invalid property",
@@ -1266,7 +1257,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "p", "entity": "Project", "node_ids": [1]},
-                "group_by_properties": [{"node": "p", "property": "visibility_level"}]
+                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}]
             }"#,
             "only supported for aggregation",
         );
@@ -1275,22 +1266,24 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "p", "property": "visibility_level"}],
+                "group_by": [
+                    {"kind": "property", "node": "p", "property": "visibility_level", "alias": "bucket"},
+                    {"kind": "node", "node": "p", "alias": "bucket"}
+                ],
                 "aggregations": [{
                     "function": "count",
                     "target": "p",
-                    "group_by": "p",
                     "alias": "project_count"
                 }]
             }"#,
-            "cannot mix 'group_by'",
+            "duplicate group_by output alias",
         );
 
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "p", "property": "visibility_level", "alias": "count"}],
+                "group_by": [{"kind": "property", "node": "p", "property": "visibility_level", "alias": "count"}],
                 "aggregations": [{"function": "count", "target": "p"}]
             }"#,
             "conflicts with another output column",
@@ -1390,7 +1383,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
-                "group_by_properties": [{"node": "p", "property": "name"}],
+                "group_by": [{"kind": "property", "node": "p", "property": "name"}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "project_count"}]
             }"#,
         )
@@ -1536,8 +1529,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mixed_grouped_and_ungrouped_aggregations() {
-        assert_rejects(
+    fn accepts_top_level_group_by_for_all_aggregations() {
+        assert_ok(
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
@@ -1545,17 +1538,17 @@ mod tests {
                     {"id": "g", "entity": "Group"}
                 ],
                 "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+                "group_by": [{"kind": "node", "node": "u"}],
                 "aggregations": [
                     {"function": "count", "target": "u", "alias": "total"},
-                    {"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}
+                    {"function": "count", "target": "g", "alias": "group_count"}
                 ]
             }"#,
-            "cannot mix grouped and ungrouped aggregations",
         );
     }
 
     #[test]
-    fn rejects_multi_node_aggregation_without_group_by() {
+    fn rejects_disconnected_multi_node_aggregation_without_group_by() {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
@@ -1563,12 +1556,11 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"},
                     {"id": "p", "entity": "Project", "node_ids": [278964]}
                 ],
-                "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
                 "aggregations": [
                     {"function": "count", "target": "mr", "alias": "total"}
                 ]
             }"#,
-            "multi-node aggregation requires 'group_by'",
+            "without group_by requires relationships",
         );
     }
 
@@ -1607,7 +1599,8 @@ mod tests {
                     {"id": "mr", "entity": "MergeRequest"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr", "direction": "both"}],
-                "aggregations": [{"function": "count", "target": "mr", "group_by": "u"}]
+                "group_by": [{"kind": "node", "node": "u"}],
+                "aggregations": [{"function": "count", "target": "mr"}]
             }"#,
             "does not support direction",
         );
@@ -2295,7 +2288,8 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+                "group_by": [{"kind": "node", "node": "p"}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
         // Aggregation without any selectivity
@@ -2307,7 +2301,8 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+                "group_by": [{"kind": "node", "node": "p"}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
             "full edge table scans",
         );
@@ -2348,7 +2343,8 @@ mod tests {
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
-                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+                "group_by": [{"kind": "node", "node": "p"}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "c"}]
             }"#,
         );
         // path_finding with narrow id_range: OK (within MAX_PATH_ANCHOR_RANGE)
@@ -2502,7 +2498,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "g", "entity": "Group", "node_ids": [1]}],
-            "group_by_properties": [{"node": "g", "property": "private_note"}],
+            "group_by": [{"kind": "property", "node": "g", "property": "private_note"}],
             "aggregations": [{"function": "count", "target": "g", "alias": "group_count"}],
             "limit": 10
         }"#,
@@ -2512,7 +2508,7 @@ mod tests {
         let err = validator.check_references(&input).unwrap_err();
         assert!(
             err.to_string().contains("not filterable"),
-            "expected group_by_properties filterable rejection, got: {err}"
+            "expected group_by filterable rejection, got: {err}"
         );
     }
 
@@ -2660,7 +2656,8 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
-            "aggregations": [{"function": "count", "node": "u", "group_by": "p"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "u"}],
             "options": {"skip_dedup": true}
         }"#,
         )
