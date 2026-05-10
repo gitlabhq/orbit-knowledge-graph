@@ -15,9 +15,20 @@ use super::partition_strategy::PartitionStrategy;
 use super::pipeline::{Pipeline, PipelineContext};
 use super::plan::PipelinePlan;
 
-// ---------------------------------------------------------------------------
-// EntityPipeline — the trait each entity kind implements
-// ---------------------------------------------------------------------------
+enum Mode {
+    Consolidated,
+    Single,
+    Partitioned(Vec<PartitionSpec>),
+}
+
+enum Phase {
+    Plan(Mode),
+    Run {
+        mode: Mode,
+        runs: Vec<(PipelinePlan, PipelineContext)>,
+    },
+    Consolidate(Mode),
+}
 
 #[async_trait]
 pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
@@ -28,10 +39,6 @@ pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError>;
 }
-
-// ---------------------------------------------------------------------------
-// SimpleEntityPipeline — the common entry point for entity-level indexing
-// ---------------------------------------------------------------------------
 
 pub(in crate::modules::sdlc) struct SimpleEntityPipeline {
     plan: PipelinePlan,
@@ -108,29 +115,6 @@ impl EntityPipeline for SimpleEntityPipeline {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// State machine types
-// ---------------------------------------------------------------------------
-
-enum Mode {
-    Consolidated,
-    Single,
-    Partitioned(Vec<PartitionSpec>),
-}
-
-enum Phase {
-    Plan(Mode),
-    Run {
-        mode: Mode,
-        runs: Vec<(PipelinePlan, PipelineContext)>,
-    },
-    Consolidate(Mode),
-}
-
-// ---------------------------------------------------------------------------
-// Private methods
-// ---------------------------------------------------------------------------
 
 impl SimpleEntityPipeline {
     async fn decide_mode(&self, request: &EntityIndexingRequest) -> Result<Mode, HandlerError> {
@@ -327,10 +311,6 @@ impl SimpleEntityPipeline {
         Ok(())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Free functions
-// ---------------------------------------------------------------------------
 
 fn scope_conditions(scope: &IndexingScope) -> BTreeMap<String, String> {
     match scope {
