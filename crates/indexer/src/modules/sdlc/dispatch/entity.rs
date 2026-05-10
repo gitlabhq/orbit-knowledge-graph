@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use clickhouse_client::FromArrowColumn;
 use ontology::EtlScope;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -19,6 +19,7 @@ const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = false
+  AND traversal_path != ''
   AND traversal_path != '0/'
 "#;
 
@@ -152,20 +153,9 @@ impl EntityDispatcher {
         let namespaces: Vec<EnabledNamespace> = namespace_ids
             .into_iter()
             .zip(traversal_paths)
-            .filter(|(id, path)| {
-                let valid = gkg_utils::traversal_path::is_valid(path);
-                if !valid {
-                    warn!(
-                        namespace_id = *id,
-                        traversal_path = %path,
-                        "skipping enabled namespace with invalid traversal_path"
-                    );
-                }
-                valid
-            })
-            .map(|(id, path)| EnabledNamespace {
-                namespace_id: id,
-                traversal_path: path,
+            .map(|(namespace_id, traversal_path)| EnabledNamespace {
+                namespace_id,
+                traversal_path,
             })
             .collect();
 
