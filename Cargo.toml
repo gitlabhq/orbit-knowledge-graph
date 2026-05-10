@@ -165,6 +165,11 @@ moka = { version = "0.12", features = ["future"] }
 axum = { version = "0.8.8", features = ["macros"] }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 rust-embed = { version = "8.11.0", features = ["interpolate-folder-path", "debug-embed"] }
+semver = { version = "1.0", features = ["serde"] }
+
+# Formatter test dependencies
+insta = { version = "1.40", features = ["yaml"] }
+proptest = "1.5"
 
 # Health check dependencies
 kube = { version = "3.0", features = ["client", "runtime", "ws"] }

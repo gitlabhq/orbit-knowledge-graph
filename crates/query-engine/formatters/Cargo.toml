@@ -15,15 +15,15 @@ shared = { path = "../shared" }
 types = { path = "../types" }
 compiler = { path = "../compiler" }
 serde = { workspace = true }
-semver = { version = "1.0", features = ["serde"] }
+semver = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 
 [dev-dependencies]
 arrow = { workspace = true }
-insta = { version = "1.40", features = ["yaml"] }
-proptest = "1.5"
-rand = "0.8"
+insta = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }
 
 [lints]
 workspace = true
