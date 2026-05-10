@@ -116,14 +116,14 @@ pub struct Input {
     #[serde(default)]
     pub relationships: Vec<InputRelationship>,
     #[serde(default)]
-    pub aggregations: Vec<InputAggregation>,
+    #[serde(flatten)]
+    pub aggregation: InputAggregation,
     pub path: Option<InputPath>,
     pub neighbors: Option<InputNeighbors>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub cursor: Option<InputCursor>,
     pub order_by: Option<InputOrderBy>,
-    pub aggregation_sort: Option<InputAggSort>,
     #[serde(default)]
     pub options: QueryOptions,
     /// Auth config for every entity type with redaction configured. Populated by
@@ -268,13 +268,12 @@ impl Default for Input {
             query_type: QueryType::Traversal,
             nodes: vec![],
             relationships: vec![],
-            aggregations: vec![],
+            aggregation: InputAggregation::default(),
             path: None,
             neighbors: None,
             limit: default_limit(),
             cursor: None,
             order_by: None,
-            aggregation_sort: None,
             options: QueryOptions::default(),
             entity_auth: HashMap::new(),
             compiler: CompilerMetadata::default(),
@@ -626,17 +625,136 @@ impl Direction {
 // Aggregations
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
 pub struct InputAggregation {
+    #[serde(rename = "aggregations")]
+    pub metrics: Vec<InputAggregationMetric>,
+    #[serde(rename = "group_by")]
+    pub group_by: Vec<InputGroupByKey>,
+    #[serde(rename = "aggregation_sort")]
+    pub sort: Option<InputAggSort>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputAggregationMetric {
     pub function: AggFunction,
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
-    pub group_by: Option<String>,
-    #[serde(default)]
     pub property: Option<String>,
     #[serde(default)]
     pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum InputGroupByKey {
+    Node {
+        node: String,
+        #[serde(default)]
+        alias: Option<String>,
+    },
+    Property {
+        node: String,
+        property: String,
+        #[serde(default)]
+        alias: Option<String>,
+    },
+}
+
+impl InputGroupByKey {
+    pub fn node(&self) -> &str {
+        match self {
+            Self::Node { node, .. } | Self::Property { node, .. } => node,
+        }
+    }
+
+    pub fn alias(&self) -> Option<&str> {
+        match self {
+            Self::Node { alias, .. } | Self::Property { alias, .. } => alias.as_deref(),
+        }
+    }
+
+    pub fn property(&self) -> Option<&str> {
+        match self {
+            Self::Node { .. } => None,
+            Self::Property { property, .. } => Some(property),
+        }
+    }
+
+    pub fn output_name(&self, is_unique_property: bool) -> String {
+        match self {
+            Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
+            Self::Property {
+                node,
+                property,
+                alias,
+            } => alias.clone().unwrap_or_else(|| {
+                if is_unique_property {
+                    property.clone()
+                } else {
+                    format!("{}_{}", node, property)
+                }
+            }),
+        }
+    }
+
+    pub fn is_node_group(&self) -> bool {
+        matches!(self, Self::Node { .. })
+    }
+
+    pub fn is_property_group(&self) -> bool {
+        matches!(self, Self::Property { .. })
+    }
+}
+
+pub fn group_by_output_names(groups: &[InputGroupByKey]) -> Vec<String> {
+    let mut property_counts: HashMap<&str, usize> = HashMap::new();
+    for group in groups {
+        if let Some(property) = group.property() {
+            *property_counts.entry(property).or_default() += 1;
+        }
+    }
+
+    groups
+        .iter()
+        .map(|group| {
+            let is_unique_property = group
+                .property()
+                .map(|property| property_counts[property] == 1)
+                .unwrap_or(false);
+            group.output_name(is_unique_property)
+        })
+        .collect()
+}
+
+pub fn node_group_ids(groups: &[InputGroupByKey]) -> impl Iterator<Item = &str> {
+    groups.iter().filter_map(|group| match group {
+        InputGroupByKey::Node { node, .. } => Some(node.as_str()),
+        InputGroupByKey::Property { .. } => None,
+    })
+}
+
+pub fn property_groups(
+    groups: &[InputGroupByKey],
+) -> impl Iterator<Item = (&str, &str, Option<&str>)> {
+    groups.iter().filter_map(|group| match group {
+        InputGroupByKey::Property {
+            node,
+            property,
+            alias,
+        } => Some((node.as_str(), property.as_str(), alias.as_deref())),
+        InputGroupByKey::Node { .. } => None,
+    })
+}
+
+pub fn group_by_kind(group: &InputGroupByKey) -> &'static str {
+    match group {
+        InputGroupByKey::Node { .. } => "node",
+        InputGroupByKey::Property { .. } => "property",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::Display)]
@@ -739,7 +857,7 @@ pub enum OrderDirection {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct InputAggSort {
-    pub agg_index: usize,
+    pub column: String,
     #[serde(default)]
     pub direction: OrderDirection,
 }
@@ -821,16 +939,20 @@ mod tests {
 
     #[test]
     fn aggregation() {
-        let input = parse_input(r#"{
+        let input = parse_input(
+            r#"{
             "query_type": "aggregation",
             "nodes": [{"id": "n"}, {"id": "u"}],
-            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
-            "aggregation_sort": {"agg_index": 0, "direction": "DESC"}
-        }"#).unwrap();
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregation_sort": {"column": "note_count", "direction": "DESC"}
+        }"#,
+        )
+        .unwrap();
 
         assert_eq!(input.query_type, QueryType::Aggregation);
-        assert_eq!(input.aggregations[0].function, AggFunction::Count);
-        assert!(input.aggregation_sort.is_some());
+        assert_eq!(input.aggregation.metrics[0].function, AggFunction::Count);
+        assert!(input.aggregation.sort.is_some());
     }
 
     #[test]
@@ -858,7 +980,7 @@ mod tests {
         let input = parse_input(r#"{"query_type": "traversal", "nodes": [{"id": "n"}]}"#).unwrap();
         assert_eq!(input.limit, 30);
         assert!(input.relationships.is_empty());
-        assert!(input.aggregations.is_empty());
+        assert!(input.aggregation.metrics.is_empty());
     }
 
     #[test]

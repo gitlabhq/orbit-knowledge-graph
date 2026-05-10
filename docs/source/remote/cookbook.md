@@ -103,10 +103,11 @@ Answer: "Help me understand this codebase."
     {"type": "AUTHORED", "from": "u", "to": "mr"},
     {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
+  "group_by": [{"kind": "node", "node": "u"}],
   "aggregations": [
-    {"function": "count", "target": "mr", "group_by": "u", "alias": "merged_mrs"}
+    {"function": "count", "target": "mr", "alias": "merged_mrs"}
   ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "aggregation_sort": {"column": "merged_mrs", "direction": "DESC"},
   "limit": 10
 }
 ```
@@ -134,10 +135,11 @@ Answer: "How are our services connected?"
   "relationships": [
     {"type": "IMPORTS", "from": "sym", "to": "def"}
   ],
+  "group_by": [{"kind": "node", "node": "def"}],
   "aggregations": [
-    {"function": "count", "target": "sym", "group_by": "def", "alias": "import_count"}
+    {"function": "count", "target": "sym", "alias": "import_count"}
   ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "aggregation_sort": {"column": "import_count", "direction": "DESC"},
   "limit": 20
 }
 ```
@@ -158,10 +160,11 @@ Answer: "Where are our CI/CD problems?"
   "relationships": [
     {"type": "IN_PROJECT", "from": "pl", "to": "p"}
   ],
+  "group_by": [{"kind": "node", "node": "p"}],
   "aggregations": [
-    {"function": "count", "target": "pl", "group_by": "p", "alias": "failed_count"}
+    {"function": "count", "target": "pl", "alias": "failed_count"}
   ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "aggregation_sort": {"column": "failed_count", "direction": "DESC"},
   "limit": 10
 }
 ```
@@ -226,10 +229,34 @@ Answer: "Where are our security risks, and how did they get there?"
   "relationships": [
     {"type": "IN_PROJECT", "from": "v", "to": "p"}
   ],
+  "group_by": [{"kind": "node", "node": "p"}],
   "aggregations": [
-    {"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}
+    {"function": "count", "target": "v", "alias": "vuln_count"}
   ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
   "limit": 20
+}
+```
+
+### Count vulnerabilities by severity
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "v",
+      "entity": "Vulnerability",
+      "filters": {"state": "detected"}
+    }
+  ],
+  "group_by": [
+    {"kind": "property", "node": "v", "property": "severity", "alias": "severity"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "v", "alias": "vuln_count"}
+  ],
+  "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+  "limit": 10
 }
 ```

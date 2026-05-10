@@ -391,7 +391,7 @@ pub(super) async fn traversal_variable_length_includes_depth_2_path_to_project(c
 
 pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestContext) {
     // Aggregation analog of the M1 cliff. group_by=u keeps the per-User row
-    // so we can read the count from User 7's `n` property. Two matching
+    // so we can read the count from that row's `n` column. Two matching
     // paths exist (Group 200, depth-1) and (Group 100, depth-2), so n=2 when
     // the depth-2 arm is correctly scanned. Pre-fix bug returned n=1.
     let resp = run_query(
@@ -409,15 +409,16 @@ pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestCont
                 {"type": "IN_PROJECT", "from": "wi", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
             ],
-            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "n"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "n"}],
             "limit": 5
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_ids("User", &[7]);
-    resp.assert_node("User", 7, |n| n.prop_i64("n") == Some(2));
+    resp.assert_group_node_ids("u", "User", &[7]);
+    resp.assert_group_row_value_i64("u", "User", 7, "n", 2);
 }
 
 pub(super) async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {

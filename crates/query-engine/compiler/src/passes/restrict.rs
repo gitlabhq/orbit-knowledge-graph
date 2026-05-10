@@ -38,7 +38,7 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
         .collect();
 
     if reachable.is_empty() {
-        return Err(QueryError::Validation(
+        return Err(QueryError::Restrict(
             "aggregation requires at least one node scoped by traversal_path \
              (e.g. Group, Project, Note); aggregating on globally-scoped entities \
              such as User alone is not permitted"
@@ -74,7 +74,7 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
         .iter()
         .find(|n| !reachable.contains(n.id.as_str()))
     {
-        return Err(QueryError::Validation(format!(
+        return Err(QueryError::Restrict(format!(
             "aggregation node \"{}\" is globally-scoped and must be connected to a \
              traversal_path-scoped node via \"relationships\" or \"path\"",
             orphan.id
@@ -214,7 +214,7 @@ pub fn restrict(
 
         for prop in node.filters.keys() {
             if ontology.is_admin_only(entity, prop) {
-                return Err(QueryError::Validation(format!(
+                return Err(QueryError::Restrict(format!(
                     "filter on \"{prop}\" for {entity}: field requires administrator access"
                 )));
             }
@@ -235,13 +235,13 @@ pub fn restrict(
         && let Some(entity) = entity_of(input, &ob.node)
         && ontology.is_admin_only(entity, &ob.property)
     {
-        return Err(QueryError::Validation(format!(
+        return Err(QueryError::Restrict(format!(
             "order_by on \"{}\" for {entity}: field requires administrator access",
             ob.property
         )));
     }
 
-    for agg in &input.aggregations {
+    for agg in &input.aggregation.metrics {
         let (Some(prop), Some(target)) = (&agg.property, &agg.target) else {
             continue;
         };
@@ -249,8 +249,21 @@ pub fn restrict(
             continue;
         };
         if ontology.is_admin_only(entity, prop) {
-            return Err(QueryError::Validation(format!(
+            return Err(QueryError::Restrict(format!(
                 "aggregation on \"{prop}\" for {entity}: field requires administrator access"
+            )));
+        }
+    }
+
+    for group in crate::input::property_groups(&input.aggregation.group_by) {
+        let (node, property, _) = group;
+        let Some(entity) = entity_of(input, node) else {
+            continue;
+        };
+        if ontology.is_admin_only(entity, property) {
+            return Err(QueryError::Restrict(format!(
+                "group_by on \"{}\" for {entity}: field requires administrator access",
+                property
             )));
         }
     }
@@ -262,8 +275,8 @@ pub fn restrict(
 mod tests {
     use super::*;
     use crate::input::{
-        AggFunction, FilterOp, InputAggregation, InputFilter, InputNode, InputOrderBy,
-        OrderDirection, QueryType,
+        AggFunction, FilterOp, InputAggregation, InputAggregationMetric, InputFilter,
+        InputGroupByKey, InputNode, InputOrderBy, OrderDirection, QueryType,
     };
     use crate::types::{AccessLevel, TraversalPath};
     use ontology::{DataType, RequiredRole};
@@ -547,6 +560,10 @@ mod tests {
         let ctx = non_admin_ctx();
         let mut input = input_with_filter("is_admin", Value::Bool(true));
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Restrict(_)),
+            "admin-only field rejection should be a restrict error, got: {err:?}"
+        );
         let msg = err.to_string();
         assert!(
             msg.contains("is_admin"),
@@ -614,13 +631,46 @@ mod tests {
                 scoped_node(),
             ],
             relationships: vec![rel("_u", "_g")],
-            aggregations: vec![InputAggregation {
-                function,
-                target: Some("_u".into()),
-                group_by: None,
-                property: property.map(String::from),
-                alias: Some("_agg".into()),
-            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function,
+                    target: Some("_u".into()),
+                    property: property.map(String::from),
+                    alias: Some("_agg".into()),
+                }],
+                ..Default::default()
+            },
+            ..Input::default()
+        }
+    }
+
+    fn input_with_property_group(property: &str) -> Input {
+        Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "_u".into(),
+                    entity: Some("User".into()),
+                    columns: Some(ColumnSelection::List(vec!["username".into()])),
+                    ..Default::default()
+                },
+                scoped_node(),
+            ],
+            relationships: vec![rel("_u", "_g")],
+            aggregation: InputAggregation {
+                group_by: vec![InputGroupByKey::Property {
+                    node: "_u".into(),
+                    property: property.into(),
+                    alias: None,
+                }],
+                metrics: vec![InputAggregationMetric {
+                    function: AggFunction::Count,
+                    target: Some("_u".into()),
+                    property: None,
+                    alias: Some("_agg".into()),
+                }],
+                ..Default::default()
+            },
             ..Input::default()
         }
     }
@@ -634,13 +684,15 @@ mod tests {
                 columns: Some(ColumnSelection::List(vec!["username".into()])),
                 ..Default::default()
             }],
-            aggregations: vec![InputAggregation {
-                function,
-                target: Some("_u".into()),
-                group_by: None,
-                property: property.map(String::from),
-                alias: Some("_agg".into()),
-            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function,
+                    target: Some("_u".into()),
+                    property: property.map(String::from),
+                    alias: Some("_agg".into()),
+                }],
+                ..Default::default()
+            },
             ..Input::default()
         }
     }
@@ -688,6 +740,10 @@ mod tests {
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Restrict(_)),
+            "admin-only aggregation rejection should be a restrict error, got: {err:?}"
+        );
         let msg = err.to_string();
         assert!(
             msg.contains("is_admin"),
@@ -732,6 +788,30 @@ mod tests {
         let ont = ontology();
         let ctx = admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
+        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_rejects_group_by_property_on_admin_only_field() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = input_with_property_group("is_admin");
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Restrict(_)),
+            "admin-only group_by rejection should be a restrict error, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("group_by") && err.to_string().contains("administrator"),
+            "expected admin_only group_by rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn admin_can_group_by_property_on_admin_only_field() {
+        let ont = ontology();
+        let ctx = admin_ctx();
+        let mut input = input_with_property_group("is_admin");
         assert!(restrict(&mut input, &ont, &ctx).is_ok());
     }
 
@@ -788,6 +868,10 @@ mod tests {
         // the reachability check must reject it.
         input.relationships.clear();
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(
+            matches!(err, QueryError::Restrict(_)),
+            "aggregation reachability rejection should be a restrict error, got: {err:?}"
+        );
         let msg = err.to_string();
         assert!(
             msg.contains("globally-scoped") && msg.contains("relationships"),

@@ -116,12 +116,12 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 
 **KG Web Service:**
 
-- **Query Health**: p50/p95 latency by tool (`find_nodes`, `traverse`, `explore`, `aggregate`), memory spikes, and rows/bytes read per query.
+- **Query Health**: p50/p95 latency by query type (`traversal`, `aggregation`, `path_finding`, `neighbors`), memory spikes, and rows/bytes read per query.
 - MCP tools latency (p50, p95, p99), usage and success rate
 
 *Query pipeline metrics:*
 
-The query pipeline instruments end-to-end query execution from security check through formatted output. All duration histograms use the shared `LATENCY` bucket set. All histograms and counters carry a `query_type` label (for example, `find_nodes`, `traverse`, `explore`, `aggregate`).
+The query pipeline instruments end-to-end query execution from security check through formatted output. All duration histograms use the shared `LATENCY` bucket set. All histograms and counters carry a `query_type` label (for example, `traversal`, `aggregation`, `path_finding`, `neighbors`).
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|

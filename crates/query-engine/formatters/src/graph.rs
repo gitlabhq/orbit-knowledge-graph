@@ -5,7 +5,7 @@ use compiler::{
 };
 use indexmap::IndexMap;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use shared::PipelineOutput;
 use types::{QueryResult, QueryResultRow};
@@ -54,6 +54,10 @@ pub struct GraphResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub columns: Option<Vec<ColumnDescriptor>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_columns: Option<Vec<GroupColumnDescriptor>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<Vec<Map<String, Value>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pagination: Option<PaginationResponse>,
 }
 
@@ -66,8 +70,18 @@ pub struct ColumnDescriptor {
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub property: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(feature = "testutils", derive(serde::Deserialize))]
+pub struct GroupColumnDescriptor {
+    pub name: String,
+    pub kind: String,
+    pub node: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub value: Option<Value>,
+    pub property: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -144,7 +158,10 @@ impl GraphFormatter {
         let mut edges: Vec<GraphEdge> = Vec::new();
         let mut edge_set: HashSet<EdgeKey> = HashSet::new();
         let mut columns: Option<Vec<ColumnDescriptor>> = None;
-        let aggregations = Some(&output.compiled.input.aggregations);
+        let mut group_columns: Option<Vec<GroupColumnDescriptor>> = None;
+        let mut rows: Option<Vec<Map<String, Value>>> = None;
+        let aggregations = Some(&output.compiled.input.aggregation.metrics);
+        let group_by = &output.compiled.input.aggregation.group_by;
 
         let edge_prefixes: Vec<&str> = result_context
             .edges()
@@ -163,13 +180,20 @@ impl GraphFormatter {
                 );
             }
             Some(QueryType::Aggregation) => {
-                columns = self.extract_aggregation(
-                    result,
-                    result_context,
-                    &edge_prefixes,
-                    aggregations,
-                    &mut node_map,
-                );
+                if let Some(aggs) = aggregations {
+                    columns = Some(Self::build_column_descriptors(aggs));
+                    group_columns = Some(Self::build_group_column_descriptors(
+                        group_by,
+                        &output.compiled.input.nodes,
+                    ));
+                    rows = Some(Self::extract_aggregation_rows(
+                        result,
+                        result_context,
+                        &edge_prefixes,
+                        aggs,
+                        group_by,
+                    ));
+                }
             }
             Some(QueryType::PathFinding) => {
                 self.extract_path_finding(result, &mut node_map, &mut edges);
@@ -199,6 +223,8 @@ impl GraphFormatter {
             nodes: node_map.into_values().collect(),
             edges,
             columns,
+            group_columns,
+            rows,
             pagination,
         }
     }
@@ -295,7 +321,7 @@ impl GraphFormatter {
         }
     }
 
-    fn agg_col_names(aggs: &[compiler::input::InputAggregation]) -> Vec<String> {
+    fn agg_col_names(aggs: &[compiler::input::InputAggregationMetric]) -> Vec<String> {
         aggs.iter()
             .map(|agg| {
                 agg.alias
@@ -306,7 +332,7 @@ impl GraphFormatter {
     }
 
     fn build_column_descriptors(
-        aggs: &[compiler::input::InputAggregation],
+        aggs: &[compiler::input::InputAggregationMetric],
     ) -> Vec<ColumnDescriptor> {
         aggs.iter()
             .map(|agg| ColumnDescriptor {
@@ -317,77 +343,103 @@ impl GraphFormatter {
                 function: agg.function.to_string(),
                 target: agg.target.clone(),
                 property: agg.property.clone(),
-                value: None,
             })
             .collect()
     }
 
-    fn extract_aggregation(
-        &self,
+    fn build_group_column_descriptors(
+        groups: &[compiler::input::InputGroupByKey],
+        input_nodes: &[compiler::input::InputNode],
+    ) -> Vec<GroupColumnDescriptor> {
+        let names = compiler::input::group_by_output_names(groups);
+        groups
+            .iter()
+            .zip(names)
+            .map(|(group, name)| GroupColumnDescriptor {
+                name,
+                kind: compiler::input::group_by_kind(group).to_string(),
+                node: group.node().to_string(),
+                property: group.property().map(ToString::to_string),
+                entity: input_nodes
+                    .iter()
+                    .find(|node| node.id == group.node())
+                    .and_then(|node| node.entity.clone()),
+            })
+            .collect()
+    }
+
+    fn extract_aggregation_rows(
         result: &QueryResult,
         result_context: &ResultContext,
         edge_prefixes: &[&str],
-        aggregations: Option<&Vec<compiler::input::InputAggregation>>,
-        node_map: &mut IndexMap<(String, i64), GraphNode>,
-    ) -> Option<Vec<ColumnDescriptor>> {
-        let aggs = aggregations?;
+        aggs: &[compiler::input::InputAggregationMetric],
+        groups: &[compiler::input::InputGroupByKey],
+    ) -> Vec<Map<String, Value>> {
+        let group_col_names = compiler::input::group_by_output_names(groups);
         let agg_col_names = Self::agg_col_names(aggs);
-        // The compiler rejects mixed grouped/ungrouped aggregations in the
-        // same query, so this is always all-or-nothing.
-        let is_ungrouped = aggs.iter().all(|a| a.group_by.is_none());
-
-        if is_ungrouped {
-            let mut columns = Self::build_column_descriptors(aggs);
-            if let Some(row) = result.authorized_rows().next() {
-                for (col, col_name) in columns.iter_mut().zip(&agg_col_names) {
-                    if let Some(val) = row.get(col_name) {
-                        col.value = Some(column_value_to_json(val));
-                    }
-                }
-            }
-            return if columns.is_empty() {
-                None
-            } else {
-                Some(columns)
-            };
-        }
-
-        // Grouped: values live on entity nodes, columns just describe them.
-        let columns = Self::build_column_descriptors(aggs);
+        let mut rows = Vec::new();
 
         for row in result.authorized_rows() {
-            for node in result_context.nodes() {
-                let Some(id) = row.get_public_id(node) else {
-                    continue;
-                };
-                let Some(entity_type) = row.get_type(node) else {
-                    continue;
-                };
+            let mut obj = Map::new();
 
-                let mut properties = Self::extract_node_properties(row, &node.alias, edge_prefixes);
-
-                for col_name in &agg_col_names {
-                    if !is_reserved_node_key(col_name)
-                        && let Some(value) = row.get(col_name)
-                    {
-                        properties.insert(col_name.clone(), column_value_to_json(value));
+            for (group, col_name) in groups.iter().zip(&group_col_names) {
+                match group {
+                    compiler::input::InputGroupByKey::Property { .. } => {
+                        obj.insert(
+                            col_name.clone(),
+                            row.get(col_name)
+                                .map(column_value_to_json)
+                                .unwrap_or(Value::Null),
+                        );
+                    }
+                    compiler::input::InputGroupByKey::Node { node, .. } => {
+                        obj.insert(
+                            col_name.clone(),
+                            Self::extract_group_node(row, result_context, node, edge_prefixes),
+                        );
                     }
                 }
-
-                let key = (entity_type.to_string(), id);
-                node_map.entry(key).or_insert_with(|| GraphNode {
-                    entity_type: entity_type.to_string(),
-                    id,
-                    properties,
-                });
             }
+
+            for col_name in &agg_col_names {
+                if let Some(value) = row.get(col_name) {
+                    obj.insert(col_name.clone(), column_value_to_json(value));
+                }
+            }
+            rows.push(obj);
         }
 
-        if columns.is_empty() {
-            None
-        } else {
-            Some(columns)
-        }
+        rows
+    }
+
+    fn extract_group_node(
+        row: &QueryResultRow,
+        result_context: &ResultContext,
+        alias: &str,
+        edge_prefixes: &[&str],
+    ) -> Value {
+        let Some(node) = result_context.get(alias) else {
+            return Value::Null;
+        };
+        let Some(id) = row.get_public_id(node) else {
+            return Value::Null;
+        };
+        let Some(entity_type) = row.get_type(node) else {
+            return Value::Null;
+        };
+
+        let mut obj = Map::new();
+        obj.insert("type".to_string(), Value::String(entity_type.to_string()));
+        obj.insert("id".to_string(), Value::String(id.to_string()));
+        obj.insert(
+            "properties".to_string(),
+            Value::Object(Self::extract_node_properties(
+                row,
+                &node.alias,
+                edge_prefixes,
+            )),
+        );
+        Value::Object(obj)
     }
 
     fn extract_path_finding(
@@ -632,6 +684,58 @@ mod tests {
         }
     }
 
+    fn make_property_grouped_aggregation_output() -> PipelineOutput {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("severity", DataType::Utf8, false),
+            Field::new("vulnerability_count", DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["critical", "high"])),
+                Arc::new(Int64Array::from(vec![2, 1])),
+            ],
+        )
+        .unwrap();
+
+        let result_ctx = ResultContext::new().with_query_type(QueryType::Aggregation);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "aggregation".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::Aggregation,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "aggregation",
+                    "nodes": [{"id": "v", "entity": "Vulnerability"}],
+                    "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+                    "aggregations": [{
+                        "function": "count",
+                        "target": "v",
+                        "alias": "vulnerability_count"
+                    }],
+                    "limit": 10
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        }
+    }
+
     #[test]
     fn search_produces_nodes_no_edges() {
         let output = make_search_output();
@@ -642,6 +746,49 @@ mod tests {
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
         assert!(response.columns.is_none(), "search should not have columns");
+        assert!(
+            response.group_columns.is_none(),
+            "search should not have group columns"
+        );
+        assert!(response.rows.is_none(), "search should not have rows");
+    }
+
+    #[test]
+    fn property_grouped_aggregation_produces_rows() {
+        let output = make_property_grouped_aggregation_output();
+        let formatter = GraphFormatter;
+        let response = formatter.build_response(&output);
+
+        assert_eq!(response.query_type, "aggregation");
+        assert!(response.nodes.is_empty());
+        assert!(response.edges.is_empty());
+
+        let group_columns = response.group_columns.expect("group columns");
+        assert_eq!(
+            group_columns,
+            vec![GroupColumnDescriptor {
+                name: "severity".into(),
+                kind: "property".into(),
+                node: "v".into(),
+                property: Some("severity".into()),
+                entity: Some("Vulnerability".into()),
+            }]
+        );
+
+        let columns = response.columns.expect("aggregate columns");
+        assert_eq!(columns[0].name, "vulnerability_count");
+        assert_eq!(columns[0].function, "count");
+
+        let rows = response.rows.expect("property grouped rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0].get("severity").and_then(Value::as_str),
+            Some("critical")
+        );
+        assert_eq!(
+            rows[0].get("vulnerability_count").and_then(Value::as_i64),
+            Some(2)
+        );
     }
 
     #[test]

@@ -2453,7 +2453,8 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "group_by": [{"kind": "node", "node": "u"}],
+        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "limit": 10
     }"#;
 
@@ -2554,7 +2555,8 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
+        "group_by": [{"kind": "node", "node": "u"}],
+        "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
         "limit": 10
     }"#;
 

@@ -44,7 +44,7 @@ impl Plan {
 pub enum PlanBody {
     Traversal,
     Aggregation {
-        aggregations: Vec<InputAggregation>,
+        aggregations: Vec<InputAggregationMetric>,
         agg_sort: Option<InputAggSort>,
     },
     Neighbors {

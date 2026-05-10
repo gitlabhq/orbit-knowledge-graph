@@ -413,7 +413,8 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "total_mrs"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
             "limit": 10
         }"#;
 
@@ -448,10 +449,10 @@ mod tests {
                 {"id": "f", "entity": "File"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "f",
-                "group_by": "p",
                 "alias": "files"
             }],
             "limit": 10
@@ -489,10 +490,10 @@ mod tests {
                 }}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "open_mrs"
             }],
             "limit": 10
@@ -822,6 +823,31 @@ mod tests {
     }
 
     #[test]
+    fn cursor_neighbors_both_orders_by_projected_columns() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
+            "neighbors": {"node": "mr", "direction": "both"},
+            "limit": 100,
+            "cursor": {"offset": 0, "page_size": 20}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("ORDER BY _gkg_mr_id ASC, _gkg_neighbor_id ASC"),
+            "cursor neighbors over UNION should order by projected aliases, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("ORDER BY e.source_id"),
+            "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn wildcard_aggregation_infers_relationship_kinds_from_endpoint_entities() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
@@ -832,7 +858,8 @@ mod tests {
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mrs"}],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "mrs"}],
             "limit": 10
         }"#;
 
@@ -948,10 +975,10 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "AUTHORED", "from": "u", "to": "mr"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "merged_mrs"
             }],
             "limit": 5
@@ -1002,10 +1029,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "user_mrs"
             }],
             "limit": 5
@@ -1146,7 +1173,8 @@ mod tests {
                 "min_hops": 1,
                 "max_hops": 2
             }],
-            "aggregations": [{"function": "count", "target": "f", "group_by": "p"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "f"}],
             "limit": 10
         }"#;
 
@@ -1193,10 +1221,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "user_mrs"
             }],
             "limit": 5,
@@ -1241,7 +1269,8 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
             ],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "n"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
             "limit": 3
         }"#;
 
@@ -1435,10 +1464,10 @@ mod tests {
                 }}
             ],
             "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "group_by": [{"kind": "node", "node": "u"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "u",
                 "alias": "n"
             }],
             "limit": 10
@@ -1471,10 +1500,10 @@ mod tests {
                 {"id": "proj", "entity": "Project", "node_ids": [1]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
+            "group_by": [{"kind": "node", "node": "proj"}],
             "aggregations": [{
                 "function": "count",
                 "target": "v",
-                "group_by": "proj",
                 "alias": "n"
             }],
             "limit": 10
@@ -1486,6 +1515,72 @@ mod tests {
         assert!(
             sql.contains("gl_vulnerability"),
             "role-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn aggregation_group_by_property_emits_scalar_group_key() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "group_by": [{"kind": "property", "node": "p", "property": "visibility_level"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "p",
+                "alias": "project_count"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("p.visibility_level AS visibility_level"),
+            "property group key must be selected as a scalar column, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("GROUP BY p.visibility_level"),
+            "property group key must drive GROUP BY, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("_gkg_p_id"),
+            "property grouping should not emit node-group columns, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn aggregation_group_by_property_keeps_role_gated_target_table() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "group_by": [{"kind": "property", "node": "v", "property": "severity"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "v",
+                "alias": "vulnerability_count"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "role-gated grouped entity must remain in FROM for SecurityPass, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("v.severity AS severity") && sql.contains("GROUP BY v.severity"),
+            "security property grouping must use the protected node alias, got:\n{sql}"
         );
     }
 
@@ -1544,7 +1639,8 @@ mod tests {
                         {"id": "p", "entity": "Project"}
                     ],
                     "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-                    "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "merged_mrs"}],
+                    "group_by": [{"kind": "node", "node": "p"}],
+                    "aggregations": [{"function": "count", "target": "mr", "alias": "merged_mrs"}],
                     "limit": 10
                 }"#,
             ),
@@ -1639,7 +1735,8 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "j", "group_by": "j", "alias": "fail_count"}],
+            "group_by": [{"kind": "node", "node": "j"}],
+            "aggregations": [{"function": "count", "target": "j", "alias": "fail_count"}],
             "limit": 20
         }"#;
 
@@ -1717,7 +1814,8 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "n", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p"}
             ],
-            "aggregations": [{"function": "count", "target": "n", "group_by": "p", "alias": "note_count"}],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
             "limit": 10
         }"#;
 
@@ -1816,10 +1914,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "user_mrs"
             }],
             "limit": 5,
@@ -1891,10 +1989,10 @@ mod tests {
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
+            "group_by": [{"kind": "node", "node": "p"}],
             "aggregations": [{
                 "function": "count",
                 "target": "mr",
-                "group_by": "p",
                 "alias": "user_mrs"
             }],
             "limit": 5

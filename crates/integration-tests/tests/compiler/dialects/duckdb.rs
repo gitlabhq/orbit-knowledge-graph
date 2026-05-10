@@ -95,8 +95,9 @@ fn aggregation() {
             {"id": "n", "entity": "Note"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+        "group_by": [{"kind": "node", "node": "u"}],
         "aggregations": [
-            {"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}
+            {"function": "count", "target": "n", "alias": "note_count"}
         ],
         "limit": 10
     }"#,

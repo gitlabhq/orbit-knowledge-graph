@@ -12,7 +12,8 @@ use shared::PipelineOutput;
 
 pub use goon::GoonFormatter;
 pub use graph::{
-    ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, PaginationResponse,
+    ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
+    PaginationResponse,
 };
 pub use raw_row::row_to_json;
 
