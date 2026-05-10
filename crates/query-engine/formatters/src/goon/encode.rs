@@ -4,7 +4,9 @@ use std::fmt::Write;
 use semver::Version;
 use serde_json::{Map, Value};
 
-use super::super::graph::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
+use super::super::graph::{
+    ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor,
+};
 
 const LONG_TEXT_LIMIT: usize = 200;
 const HARD_VALUE_LIMIT: usize = 1000;
@@ -129,10 +131,7 @@ fn write_header(
             }
         }
         if let Some(cols) = &response.columns {
-            let parts: Vec<String> = cols
-                .iter()
-                .map(|c| format!("{}({})", c.name, c.function))
-                .collect();
+            let parts: Vec<String> = cols.iter().map(format_aggregation_descriptor).collect();
             if !parts.is_empty() {
                 let _ = writeln!(out, "aggregations:{}", parts.join(","));
             }
@@ -140,13 +139,36 @@ fn write_header(
     }
 }
 
+/// Render a metric column descriptor with its target node alias and (when set)
+/// the aggregated property, so a reader can tell `count(v)` (count of v rows)
+/// from `max(v.updated_at)` (max of v.updated_at) — both used to encode as
+/// just `count` / `max`.
+fn format_aggregation_descriptor(col: &ColumnDescriptor) -> String {
+    let body = match (&col.target, &col.property) {
+        (Some(target), Some(property)) => format!("{}:{target}.{property}", col.function),
+        (Some(target), None) => format!("{}:{target}", col.function),
+        (None, _) => col.function.clone(),
+    };
+    format!("{}({body})", col.name)
+}
+
+/// Render a group-by descriptor. For node kinds the entity type travels as
+/// `name(node:Entity)`; for property kinds we surface the underlying ontology
+/// property whenever the output column was aliased away from it
+/// (`severity_bucket(property:severity)`), so the dimension stays
+/// self-describing.
 fn format_group_descriptor(group: &GroupColumnDescriptor) -> String {
     match group.kind.as_str() {
         "node" => match &group.entity {
             Some(entity) => format!("{}(node:{})", group.name, entity),
             None => format!("{}(node)", group.name),
         },
-        "property" => format!("{}(property)", group.name),
+        "property" => match group.property.as_deref() {
+            Some(property) if property != group.name => {
+                format!("{}(property:{property})", group.name)
+            }
+            _ => format!("{}(property)", group.name),
+        },
         other => format!("{}({other})", group.name),
     }
 }
@@ -199,7 +221,14 @@ fn write_edges(out: &mut String, response: &GraphResponse) {
             last_type = Some(edge_type);
         }
         for e in slice {
-            let _ = writeln!(out, "{}:{} --> {}:{}", e.from, e.from_id, e.to, e.to_id);
+            let _ = write!(out, "{}:{} --> {}:{}", e.from, e.from_id, e.to, e.to_id);
+            // Variable-length traversals tag each edge with the hop at which
+            // it was found. Surface it so a reader can tell a depth-1 hit
+            // from a depth-3 one.
+            if let Some(d) = e.depth {
+                let _ = write!(out, " depth={d}");
+            }
+            out.push('\n');
         }
     }
 }
@@ -256,14 +285,19 @@ fn write_row(
 
 /// Node-kind group columns arrive as `{type, id, properties}` objects. Render
 /// them as `Entity:id` so a row stays one line — full property bodies belong
-/// in the @nodes section, not the @rows table.
+/// in the @nodes section, not the @rows table. A literal `null` cell is a
+/// real bucket value (a row counted "no severity assigned"); render it as
+/// the bare token `null` rather than dropping the column, which would make
+/// the row look like `count=5` and lose the dimension.
 fn format_row_cell(value: &Value, key: &str) -> String {
-    if let Value::Object(obj) = value
-        && let (Some(Value::String(t)), Some(Value::String(id))) = (obj.get("type"), obj.get("id"))
-    {
-        return format!("{t}:{id}");
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Object(obj) => match (obj.get("type"), obj.get("id")) {
+            (Some(Value::String(t)), Some(Value::String(id))) => format!("{t}:{id}"),
+            _ => format_value(value, key),
+        },
+        _ => format_value(value, key),
     }
-    format_value(value, key)
 }
 
 fn write_paths(out: &mut String, response: &GraphResponse) {

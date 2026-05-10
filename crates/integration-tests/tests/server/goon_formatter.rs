@@ -292,7 +292,7 @@ async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestC
         s.contains("group_by:g(node:Group)"),
         "node-kind group must declare entity: {s}"
     );
-    assert!(s.contains("aggregations:user_count(count)"));
+    assert!(s.contains("aggregations:user_count(count:u)"));
     assert!(s.contains("@rows\n"), "must emit @rows section: {s}");
     assert!(s.contains("@nodes\n"));
     assert!(
@@ -334,7 +334,7 @@ async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
         "property group must declare kind=property: {s}"
     );
     assert!(
-        s.contains("aggregations:user_count(count)"),
+        s.contains("aggregations:user_count(count:u)"),
         "metric must surface: {s}"
     );
     assert!(s.contains("@rows\n"));
@@ -369,7 +369,7 @@ async fn ungrouped_aggregation_emits_single_row_no_group_by_line(ctx: &TestConte
         !s.contains("group_by:"),
         "ungrouped aggregation must not emit group_by line: {s}"
     );
-    assert!(s.contains("aggregations:total(count)"));
+    assert!(s.contains("aggregations:total(count:u)"));
     assert!(
         s.contains("\ntotal=3\n"),
         "single-row metric value must inline (3 users in Group:100): {s}"

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use super::encode::encode;
 use super::fixtures::*;
+use crate::graph::{ColumnDescriptor, GroupColumnDescriptor};
 
 fn version() -> Version {
     Version::new(1, 0, 0)
@@ -480,6 +481,174 @@ fn aggregation_function_appears_in_header() {
     let out = enc(&r);
     assert!(out.contains("aggregations:c(count)"));
     assert!(out.contains("group_by:severity(property)"));
+}
+
+#[test]
+fn aggregation_descriptor_carries_target_node_alias() {
+    // ColumnDescriptor.target identifies which node the aggregate ranges
+    // over. Dropping it makes `count` ambiguous when a query has multiple
+    // aggregatable nodes.
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![ColumnDescriptor {
+        name: "user_count".into(),
+        function: "count".into(),
+        target: Some("u".into()),
+        property: None,
+    }]);
+    r.group_columns = Some(vec![]);
+    r.rows = Some(vec![agg_row(&[("user_count", json!(42))])]);
+    assert!(enc(&r).contains("aggregations:user_count(count:u)"));
+}
+
+#[test]
+fn aggregation_descriptor_carries_target_dot_property_for_max_over_property() {
+    // For `max(target=v, property=updated_at)` the consumer needs to
+    // know it's the max of v.updated_at, not just "max".
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![ColumnDescriptor {
+        name: "latest_update".into(),
+        function: "max".into(),
+        target: Some("v".into()),
+        property: Some("updated_at".into()),
+    }]);
+    r.group_columns = Some(vec![]);
+    r.rows = Some(vec![agg_row(&[(
+        "latest_update",
+        json!("2026-05-08T22:55:58Z"),
+    )])]);
+    assert!(
+        enc(&r).contains("aggregations:latest_update(max:v.updated_at)"),
+        "max-over-property must surface both target and property: {}",
+        enc(&r)
+    );
+}
+
+#[test]
+fn property_group_with_alias_surfaces_underlying_property() {
+    // `{kind:property, node:v, property:severity, alias:severity_bucket}`
+    // — without surfacing `severity` the reader sees `severity_bucket`
+    // and can't tell which ontology property drives the dimension.
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("count", "count")]);
+    r.group_columns = Some(vec![GroupColumnDescriptor {
+        name: "severity_bucket".into(),
+        kind: "property".into(),
+        node: "v".into(),
+        property: Some("severity".into()),
+        entity: None,
+    }]);
+    r.rows = Some(vec![agg_row(&[
+        ("severity_bucket", json!("critical")),
+        ("count", json!(5)),
+    ])]);
+    assert!(
+        enc(&r).contains("group_by:severity_bucket(property:severity)"),
+        "aliased property group must surface the underlying property: {}",
+        enc(&r)
+    );
+}
+
+#[test]
+fn property_group_omits_property_when_alias_matches() {
+    // No alias drift — keep the line terse rather than repeating.
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("count", "count")]);
+    r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
+    r.rows = Some(vec![agg_row(&[
+        ("severity", json!("critical")),
+        ("count", json!(5)),
+    ])]);
+    let out = enc(&r);
+    assert!(out.contains("group_by:severity(property)"));
+    assert!(
+        !out.contains("property:severity"),
+        "no need to repeat when alias matches: {out}"
+    );
+}
+
+#[test]
+fn null_group_bucket_renders_as_bare_null_not_dropped() {
+    // ClickHouse can return NULL for a property-kind group key when rows
+    // have no value for that column. The bucket itself is a meaningful
+    // result ("rows with no severity assigned"); dropping the cell would
+    // make the row look like `count=5` and lose the dimension entirely.
+    // The string "null" is quoted (`"null"`) so the bare `null` token is
+    // unambiguous.
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("count", "count")]);
+    r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
+    r.rows = Some(vec![
+        agg_row(&[("severity", Value::Null), ("count", json!(5))]),
+        agg_row(&[("severity", json!("critical")), ("count", json!(2))]),
+    ]);
+    let out = enc(&r);
+    assert!(
+        out.contains("severity=null count=5"),
+        "null bucket must surface as `null`, not be dropped: {out}"
+    );
+    assert!(out.contains("severity=critical count=2"));
+}
+
+#[test]
+fn null_metric_value_renders_as_bare_null_not_dropped() {
+    // `min(updated_at)` over an empty bucket comes back as null. The
+    // header still declares the column; the row should keep it.
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("first_seen", "min")]);
+    r.group_columns = Some(vec![property_group("status", "s", "status")]);
+    r.rows = Some(vec![agg_row(&[
+        ("status", json!("never_run")),
+        ("first_seen", Value::Null),
+    ])]);
+    let out = enc(&r);
+    assert!(
+        out.contains("status=never_run first_seen=null"),
+        "null metric must surface, not be dropped: {out}"
+    );
+}
+
+#[test]
+fn variable_length_traversal_edges_carry_depth() {
+    // Variable-length traversal (`max_hops>1`) tags each hit with the hop
+    // it was found at. Without surfacing it, depth-1 and depth-3 results
+    // are indistinguishable in the output.
+    let mut deep = edge("MEMBER_OF", "User", 1, "Group", 200);
+    deep.depth = Some(2);
+    let mut shallow = edge("MEMBER_OF", "User", 1, "Group", 100);
+    shallow.depth = Some(1);
+    let r = response(
+        "traversal",
+        vec![
+            node("User", 1, &[]),
+            node("Group", 100, &[]),
+            node("Group", 200, &[]),
+        ],
+        vec![shallow, deep],
+    );
+    let out = enc(&r);
+    assert!(
+        out.contains("User:1 --> Group:100 depth=1"),
+        "depth-1 edge must surface depth: {out}"
+    );
+    assert!(
+        out.contains("User:1 --> Group:200 depth=2"),
+        "depth-2 edge must surface depth: {out}"
+    );
+}
+
+#[test]
+fn fixed_traversal_edges_omit_depth_field() {
+    // Single-hop traversal: depth is None. We must not write `depth=`.
+    let r = response(
+        "traversal",
+        vec![node("User", 1, &[]), node("Group", 100, &[])],
+        vec![edge("MEMBER_OF", "User", 1, "Group", 100)],
+    );
+    let out = enc(&r);
+    assert!(
+        !out.contains("depth="),
+        "fixed-hop edges must not emit depth: {out}"
+    );
 }
 
 #[test]
