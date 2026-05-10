@@ -316,7 +316,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                         };
 
                         let content = if use_llm_format {
-                            Some(Content::FormattedText(formatted.to_string()))
+                            // GoonFormatter::format returns Value::String(raw_goon_bytes).
+                            // `to_string()` on a Value JSON-encodes it (adds quotes + \n
+                            // escapes). Workhorse then JSON-encodes again when wrapping
+                            // into the {result, ...} envelope, producing literal `\n` in
+                            // the UI. Extract the inner string so the gRPC field carries
+                            // raw goon text.
+                            let text = match formatted {
+                                serde_json::Value::String(s) => s,
+                                other => other.to_string(),
+                            };
+                            Some(Content::FormattedText(text))
                         } else {
                             Some(Content::ResultJson(formatted.to_string()))
                         };
