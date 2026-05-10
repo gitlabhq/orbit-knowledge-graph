@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tracing::info;
 
 use std::collections::HashMap;
@@ -85,7 +85,7 @@ impl EntityPipeline for SimpleEntityPipeline {
         }
 
         if !completed && self.partition_strategy.is_some() {
-            self.consolidate_checkpoint(&request.scope, &request.entity_kind)
+            self.consolidate_checkpoint(&checkpoints, &unified_key, &request.watermark)
                 .await?;
         }
 
@@ -201,28 +201,21 @@ impl SimpleEntityPipeline {
 
     async fn consolidate_checkpoint(
         &self,
-        scope: &IndexingScope,
-        entity_kind: &str,
+        checkpoints: &HashMap<String, Checkpoint>,
+        unified_key: &str,
+        watermark: &DateTime<Utc>,
     ) -> Result<(), HandlerError> {
-        let base_prefix = entity_checkpoint_key(scope, entity_kind, None);
-        let checkpoints = self
-            .checkpoint_store
-            .load_by_prefix(&base_prefix)
-            .await
-            .map_err(|err| {
-                HandlerError::Processing(format!("failed to load checkpoints: {err}"))
-            })?;
-
-        let unified_key = format!("{base_prefix}.{}", self.plan.name);
         let min_watermark = checkpoints
             .iter()
-            .filter(|(key, _)| *key != &unified_key)
+            .filter(|(key, _)| key.as_str() != unified_key)
+            .filter(|(_, cp)| cp.is_completed())
             .map(|(_, cp)| cp.watermark)
-            .min();
+            .chain(std::iter::once(*watermark))
+            .min()
+            .unwrap_or(*watermark);
 
-        let watermark = min_watermark.unwrap_or_else(Utc::now);
         self.checkpoint_store
-            .save_completed(&unified_key, &watermark)
+            .save_completed(unified_key, &min_watermark)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -231,7 +224,7 @@ impl SimpleEntityPipeline {
             })?;
 
         info!(
-            consolidated_watermark = %watermark,
+            consolidated_watermark = %min_watermark,
             "consolidated partition checkpoints"
         );
 
