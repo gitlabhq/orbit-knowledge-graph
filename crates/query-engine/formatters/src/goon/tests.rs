@@ -470,44 +470,119 @@ fn path_step_tie_is_stable_across_input_order() {
 
 #[test]
 fn aggregation_function_appears_in_header() {
-    let mut r = response(
-        "aggregation",
-        vec![node(
-            "User",
-            1,
-            &[("username", json!("a")), ("c", json!(5))],
-        )],
-        vec![],
-    );
-    r.columns = Some(vec![aggregation_column("c", "count", None)]);
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("c", "count")]);
+    r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
+    r.rows = Some(vec![agg_row(&[
+        ("severity", json!("critical")),
+        ("c", json!(5)),
+    ])]);
     let out = enc(&r);
     assert!(out.contains("aggregations:c(count)"));
+    assert!(out.contains("group_by:severity(property)"));
 }
 
 #[test]
-fn aggregation_preserves_server_order() {
-    let mut r = response(
-        "aggregation",
-        vec![
-            node("User", 1, &[("username", json!("a")), ("c", json!(100))]),
-            node("User", 2, &[("username", json!("b")), ("c", json!(50))]),
-        ],
-        vec![],
+fn aggregation_property_grouping_emits_rows_section() {
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("vulnerability_count", "count")]);
+    r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
+    r.rows = Some(vec![
+        agg_row(&[
+            ("severity", json!("critical")),
+            ("vulnerability_count", json!(120)),
+        ]),
+        agg_row(&[
+            ("severity", json!("high")),
+            ("vulnerability_count", json!(2350)),
+        ]),
+    ]);
+    let out = enc(&r);
+    assert!(
+        out.contains("rows:2"),
+        "header must declare row count: {out}"
     );
-    r.columns = Some(vec![aggregation_column("c", "count", None)]);
+    assert!(out.contains("@rows\n"), "must emit @rows section: {out}");
+    assert!(out.contains("severity=critical vulnerability_count=120"));
+    assert!(out.contains("severity=high vulnerability_count=2350"));
+}
+
+#[test]
+fn aggregation_preserves_server_row_order() {
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("c", "count")]);
+    r.group_columns = Some(vec![property_group("severity", "v", "severity")]);
+    r.rows = Some(vec![
+        agg_row(&[("severity", json!("high")), ("c", json!(100))]),
+        agg_row(&[("severity", json!("low")), ("c", json!(50))]),
+    ]);
     let out = enc(&r);
     let pos_100 = out.find("c=100").expect("c=100 missing");
     let pos_50 = out.find("c=50").expect("c=50 missing");
-    assert!(pos_100 < pos_50, "server order not preserved:\n{out}");
+    assert!(pos_100 < pos_50, "server row order not preserved:\n{out}");
 }
 
 #[test]
-fn ungrouped_aggregation_inlines_values_in_header() {
+fn aggregation_node_grouping_lifts_unique_nodes_into_at_nodes() {
+    // Each row carries the grouped node inline; the encoder must dedup and
+    // surface it once in @nodes so rows can stay one line as `Entity:id`.
     let mut r = response("aggregation", vec![], vec![]);
-    r.columns = Some(vec![aggregation_column("total", "count", Some(json!(42)))]);
+    r.columns = Some(vec![aggregation_column("count", "count")]);
+    r.group_columns = Some(vec![
+        node_group("project", "p", "Project"),
+        property_group("severity", "v", "severity"),
+    ]);
+    r.rows = Some(vec![
+        agg_row(&[
+            (
+                "project",
+                node_group_cell("Project", 278964, &[("name", json!("GitLab"))]),
+            ),
+            ("severity", json!("critical")),
+            ("count", json!(12)),
+        ]),
+        agg_row(&[
+            (
+                "project",
+                node_group_cell("Project", 278964, &[("name", json!("GitLab"))]),
+            ),
+            ("severity", json!("high")),
+            ("count", json!(45)),
+        ]),
+    ]);
+    let out = enc(&r);
+    assert!(out.contains("group_by:project(node:Project),severity(property)"));
+    assert!(
+        out.contains("nodes:1"),
+        "node-kind group must dedup to 1: {out}"
+    );
+    assert!(out.contains("Project(1):"));
+    assert!(
+        out.matches("278964 name=GitLab").count() == 1,
+        "Project should appear in @nodes exactly once: {out}"
+    );
+    assert!(out.contains("project=Project:278964 severity=critical count=12"));
+    assert!(out.contains("project=Project:278964 severity=high count=45"));
+}
+
+#[test]
+fn ungrouped_aggregation_emits_single_row() {
+    let mut r = response("aggregation", vec![], vec![]);
+    r.columns = Some(vec![aggregation_column("total", "count")]);
+    r.group_columns = Some(vec![]);
+    r.rows = Some(vec![agg_row(&[("total", json!(42))])]);
     let out = enc(&r);
     assert!(out.contains("aggregations:total(count)"));
-    assert!(out.contains("values:total=42"));
+    assert!(out.contains("rows:1"));
+    assert!(
+        !out.contains("group_by:"),
+        "ungrouped aggregation must not declare group_by: {out}"
+    );
+    assert!(out.contains("@rows\n"));
+    assert!(
+        out.contains("\ntotal=42\n"),
+        "single-row aggregation must inline metric value: {out}"
+    );
 }
 
 // ---------------------------------------------------------------------------

@@ -264,7 +264,10 @@ async fn quoting_handles_strings_with_spaces_and_escapes(ctx: &TestContext) {
     );
 }
 
-async fn aggregation_header_carries_columns_and_function(ctx: &TestContext) {
+async fn aggregation_node_grouping_lifts_unique_nodes_and_emits_rows(ctx: &TestContext) {
+    // Top-level `group_by` with kind=node — group by entity. Encoder
+    // dedups the inlined node, surfaces it in @nodes once, and rows
+    // reference it as `g=Group:id`.
     let output = run_pipeline(
         ctx,
         r#"{"query_type": "aggregation",
@@ -273,7 +276,8 @@ async fn aggregation_header_carries_columns_and_function(ctx: &TestContext) {
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
-            "aggregations": [{"function": "count", "target": "u", "group_by": "g"}],
+            "group_by": [{"kind": "node", "node": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
             "limit": 10}"#,
         &allow_all(),
         test_security_context(),
@@ -285,10 +289,91 @@ async fn aggregation_header_carries_columns_and_function(ctx: &TestContext) {
 
     assert!(s.contains("query_type:aggregation"));
     assert!(
-        s.contains("aggregations:count(count)"),
-        "aggregation function must surface in @header: {s}"
+        s.contains("group_by:g(node:Group)"),
+        "node-kind group must declare entity: {s}"
     );
+    assert!(s.contains("aggregations:user_count(count)"));
+    assert!(s.contains("@rows\n"), "must emit @rows section: {s}");
     assert!(s.contains("@nodes\n"));
+    assert!(
+        s.contains("Group(1):"),
+        "lifted Group must appear once in @nodes: {s}"
+    );
+    assert!(
+        s.contains("g=Group:100"),
+        "row must reference the lifted node by Entity:id: {s}"
+    );
+}
+
+async fn aggregation_property_grouping_emits_scalar_rows(ctx: &TestContext) {
+    // Top-level `group_by` with kind=property — group by ontology-validated
+    // node property (User.state). Pure scalar group values, no node lift.
+    let output = run_pipeline(
+        ctx,
+        r#"{"query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "node_ids": [100]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "group_by": [{"kind": "property", "node": "u", "property": "state"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "user_count"}],
+            "aggregation_sort": {"column": "user_count", "direction": "DESC"},
+            "limit": 10}"#,
+        &allow_all(),
+        test_security_context(),
+    )
+    .await;
+
+    let value = GoonFormatter.format(&output);
+    let s = goon_str(&value);
+
+    assert!(s.contains("query_type:aggregation"));
+    assert!(
+        s.contains("group_by:state(property)"),
+        "property group must declare kind=property: {s}"
+    );
+    assert!(
+        s.contains("aggregations:user_count(count)"),
+        "metric must surface: {s}"
+    );
+    assert!(s.contains("@rows\n"));
+    assert!(
+        s.contains("state=active"),
+        "active state bucket must appear bare: {s}"
+    );
+}
+
+async fn ungrouped_aggregation_emits_single_row_no_group_by_line(ctx: &TestContext) {
+    // No top-level group_by — single scalar row.
+    let output = run_pipeline(
+        ctx,
+        r#"{"query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "node_ids": [100]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "limit": 1}"#,
+        &allow_all(),
+        test_security_context(),
+    )
+    .await;
+
+    let value = GoonFormatter.format(&output);
+    let s = goon_str(&value);
+
+    assert!(s.contains("rows:1"), "single-row scalar agg: {s}");
+    assert!(
+        !s.contains("group_by:"),
+        "ungrouped aggregation must not emit group_by line: {s}"
+    );
+    assert!(s.contains("aggregations:total(count)"));
+    assert!(
+        s.contains("\ntotal=3\n"),
+        "single-row metric value must inline (3 users in Group:100): {s}"
+    );
 }
 
 async fn graph_and_goon_formatters_agree_on_node_and_edge_counts(ctx: &TestContext) {
@@ -338,7 +423,9 @@ async fn goon_formatter_e2e() {
         traversal_emits_header_nodes_and_edges_sections,
         empty_result_still_emits_section_markers,
         quoting_handles_strings_with_spaces_and_escapes,
-        aggregation_header_carries_columns_and_function,
+        aggregation_node_grouping_lifts_unique_nodes_and_emits_rows,
+        aggregation_property_grouping_emits_scalar_rows,
+        ungrouped_aggregation_emits_single_row_no_group_by_line,
         graph_and_goon_formatters_agree_on_node_and_edge_counts,
     );
 }

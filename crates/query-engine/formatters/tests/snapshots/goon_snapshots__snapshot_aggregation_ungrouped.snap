@@ -7,7 +7,9 @@ query_type:aggregation
 goon_version:1.0.0
 nodes:0
 edges:0
+rows:1
 aggregations:total(count)
-values:total=2347
 @nodes
 @edges
+@rows
+total=2347

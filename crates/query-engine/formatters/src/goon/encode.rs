@@ -4,7 +4,7 @@ use std::fmt::Write;
 use semver::Version;
 use serde_json::{Map, Value};
 
-use super::super::graph::{GraphEdge, GraphNode, GraphResponse};
+use super::super::graph::{GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor};
 
 const LONG_TEXT_LIMIT: usize = 200;
 const HARD_VALUE_LIMIT: usize = 1000;
@@ -23,30 +23,100 @@ fn column_priority(key: &str) -> u8 {
 
 pub fn encode(response: &GraphResponse, format_version: &Version) -> String {
     let mut out = String::with_capacity(estimate_capacity(response));
-    write_header(&mut out, response, format_version);
-    if response.query_type == "path_finding" {
-        write_nodes(&mut out, response);
-        write_paths(&mut out, response);
-    } else {
-        write_nodes(&mut out, response);
-        write_edges(&mut out, response);
+    let extra_nodes = aggregation_grouped_nodes(response);
+    write_header(&mut out, response, format_version, extra_nodes.len());
+    match response.query_type.as_str() {
+        "path_finding" => {
+            write_nodes(&mut out, response, &[]);
+            write_paths(&mut out, response);
+        }
+        "aggregation" => {
+            write_nodes(&mut out, response, &extra_nodes);
+            write_edges(&mut out, response);
+            write_rows(&mut out, response);
+        }
+        _ => {
+            write_nodes(&mut out, response, &[]);
+            write_edges(&mut out, response);
+        }
+    }
+    out
+}
+
+/// Aggregation responses keep `nodes` empty — node-kind group cells inline
+/// `{type, id, properties}` into each row. Lift those into a deduplicated
+/// node list so a reader can resolve `Entity:id` row cells against an
+/// `@nodes` section instead of repeating the same properties on every row.
+fn aggregation_grouped_nodes(response: &GraphResponse) -> Vec<GraphNode> {
+    if response.query_type != "aggregation" {
+        return Vec::new();
+    }
+    let Some(rows) = &response.rows else {
+        return Vec::new();
+    };
+    let Some(groups) = &response.group_columns else {
+        return Vec::new();
+    };
+    let node_keys: Vec<&str> = groups
+        .iter()
+        .filter(|g| g.kind == "node")
+        .map(|g| g.name.as_str())
+        .collect();
+    if node_keys.is_empty() {
+        return Vec::new();
+    }
+    let mut seen: std::collections::HashSet<(String, i64)> = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for row in rows {
+        for key in &node_keys {
+            let Some(Value::Object(obj)) = row.get(*key) else {
+                continue;
+            };
+            let Some(Value::String(entity_type)) = obj.get("type") else {
+                continue;
+            };
+            let Some(Value::String(id_str)) = obj.get("id") else {
+                continue;
+            };
+            let Ok(id) = id_str.parse::<i64>() else {
+                continue;
+            };
+            if !seen.insert((entity_type.clone(), id)) {
+                continue;
+            }
+            let properties = match obj.get("properties") {
+                Some(Value::Object(p)) => p.clone(),
+                _ => Map::new(),
+            };
+            out.push(GraphNode {
+                entity_type: entity_type.clone(),
+                id,
+                properties,
+            });
+        }
     }
     out
 }
 
 fn estimate_capacity(response: &GraphResponse) -> usize {
-    128 + response.nodes.len() * 96 + response.edges.len() * 48
+    let row_count = response.rows.as_ref().map_or(0, Vec::len);
+    128 + response.nodes.len() * 96 + response.edges.len() * 48 + row_count * 64
 }
 
 // ---------------------------------------------------------------------------
 // Sections
 // ---------------------------------------------------------------------------
 
-fn write_header(out: &mut String, response: &GraphResponse, format_version: &Version) {
+fn write_header(
+    out: &mut String,
+    response: &GraphResponse,
+    format_version: &Version,
+    extra_node_count: usize,
+) {
     out.push_str("@header\n");
     let _ = writeln!(out, "query_type:{}", response.query_type);
     let _ = writeln!(out, "goon_version:{format_version}");
-    let _ = writeln!(out, "nodes:{}", response.nodes.len());
+    let _ = writeln!(out, "nodes:{}", response.nodes.len() + extra_node_count);
     let _ = writeln!(out, "edges:{}", response.edges.len());
     if let Some(p) = &response.pagination {
         if p.has_more {
@@ -54,41 +124,53 @@ fn write_header(out: &mut String, response: &GraphResponse, format_version: &Ver
         }
         let _ = writeln!(out, "total_rows:{}", p.total_rows);
     }
-    if response.query_type == "aggregation"
-        && let Some(cols) = &response.columns
-    {
-        let parts: Vec<String> = cols
-            .iter()
-            .map(|c| format!("{}({})", c.name, c.function))
-            .collect();
-        if !parts.is_empty() {
-            let _ = writeln!(out, "aggregations:{}", parts.join(","));
+    if response.query_type == "aggregation" {
+        if let Some(rows) = &response.rows {
+            let _ = writeln!(out, "rows:{}", rows.len());
         }
-        let inline: Vec<String> = cols
-            .iter()
-            .filter_map(|c| {
-                c.value
-                    .as_ref()
-                    .map(|v| format!("{}={}", c.name, format_value(v, &c.name)))
-            })
-            .collect();
-        if !inline.is_empty() {
-            let _ = writeln!(out, "values:{}", inline.join(" "));
+        if let Some(groups) = &response.group_columns {
+            let parts: Vec<String> = groups.iter().map(format_group_descriptor).collect();
+            if !parts.is_empty() {
+                let _ = writeln!(out, "group_by:{}", parts.join(","));
+            }
+        }
+        if let Some(cols) = &response.columns {
+            let parts: Vec<String> = cols
+                .iter()
+                .map(|c| format!("{}({})", c.name, c.function))
+                .collect();
+            if !parts.is_empty() {
+                let _ = writeln!(out, "aggregations:{}", parts.join(","));
+            }
         }
     }
 }
 
-fn write_nodes(out: &mut String, response: &GraphResponse) {
+fn format_group_descriptor(group: &GroupColumnDescriptor) -> String {
+    match group.kind.as_str() {
+        "node" => match &group.entity {
+            Some(entity) => format!("{}(node:{})", group.name, entity),
+            None => format!("{}(node)", group.name),
+        },
+        "property" => format!("{}(property)", group.name),
+        other => format!("{}({other})", group.name),
+    }
+}
+
+fn write_nodes(out: &mut String, response: &GraphResponse, extra: &[GraphNode]) {
     out.push_str("@nodes\n");
-    if response.nodes.is_empty() {
+    if response.nodes.is_empty() && extra.is_empty() {
         return;
     }
+    // For aggregation, server-side row order is meaningful (sort applied);
+    // for everything else we sort by (entity_type, id) for determinism.
     let preserve_order = response.query_type == "aggregation";
-    let groups = group_nodes(response, preserve_order);
+    let combined: Vec<&GraphNode> = response.nodes.iter().chain(extra.iter()).collect();
+    let groups = group_node_refs(&combined, preserve_order);
     for (entity_type, indices) in groups {
         let _ = writeln!(out, "{}({}):", entity_type, indices.len());
         for idx in indices {
-            write_node_row(out, &response.nodes[idx]);
+            write_node_row(out, combined[idx]);
         }
     }
 }
@@ -126,6 +208,68 @@ fn write_edges(out: &mut String, response: &GraphResponse) {
             let _ = writeln!(out, "{}:{} --> {}:{}", e.from, e.from_id, e.to, e.to_id);
         }
     }
+}
+
+/// Aggregation rows are server-ordered (sort comes from `aggregation_sort`),
+/// so preserve order. Within a row, render group columns first then metric
+/// columns to mirror the table-shape declared in `@header`.
+fn write_rows(out: &mut String, response: &GraphResponse) {
+    out.push_str("@rows\n");
+    let Some(rows) = &response.rows else { return };
+    if rows.is_empty() {
+        return;
+    }
+    let group_keys: Vec<&str> = response
+        .group_columns
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|g| g.name.as_str())
+        .collect();
+    let metric_keys: Vec<&str> = response
+        .columns
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    for row in rows {
+        write_row(out, row, &group_keys, &metric_keys);
+    }
+}
+
+fn write_row(
+    out: &mut String,
+    row: &Map<String, Value>,
+    group_keys: &[&str],
+    metric_keys: &[&str],
+) {
+    let mut first = true;
+    for key in group_keys.iter().chain(metric_keys.iter()) {
+        let Some(value) = row.get(*key) else { continue };
+        let formatted = format_row_cell(value, key);
+        if formatted.is_empty() {
+            continue;
+        }
+        if !first {
+            out.push(' ');
+        }
+        first = false;
+        let _ = write!(out, "{key}={formatted}");
+    }
+    out.push('\n');
+}
+
+/// Node-kind group columns arrive as `{type, id, properties}` objects. Render
+/// them as `Entity:id` so a row stays one line — full property bodies belong
+/// in the @nodes section, not the @rows table.
+fn format_row_cell(value: &Value, key: &str) -> String {
+    if let Value::Object(obj) = value
+        && let (Some(Value::String(t)), Some(Value::String(id))) = (obj.get("type"), obj.get("id"))
+    {
+        return format!("{t}:{id}");
+    }
+    format_value(value, key)
 }
 
 fn write_paths(out: &mut String, response: &GraphResponse) {
@@ -168,18 +312,21 @@ fn write_paths(out: &mut String, response: &GraphResponse) {
 // Ordering
 // ---------------------------------------------------------------------------
 
-fn group_nodes(response: &GraphResponse, preserve_order: bool) -> Vec<(&str, Vec<usize>)> {
-    let mut order: Vec<usize> = (0..response.nodes.len()).collect();
+fn group_node_refs<'a>(
+    nodes: &'a [&'a GraphNode],
+    preserve_order: bool,
+) -> Vec<(&'a str, Vec<usize>)> {
+    let mut order: Vec<usize> = (0..nodes.len()).collect();
     if !preserve_order {
         order.sort_by(|&a, &b| {
-            let na = &response.nodes[a];
-            let nb = &response.nodes[b];
+            let na = nodes[a];
+            let nb = nodes[b];
             na.entity_type.cmp(&nb.entity_type).then(na.id.cmp(&nb.id))
         });
     }
     let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
     for idx in order {
-        let entity_type = response.nodes[idx].entity_type.as_str();
+        let entity_type = nodes[idx].entity_type.as_str();
         match groups.last_mut() {
             Some(last) if last.0 == entity_type => last.1.push(idx),
             _ => groups.push((entity_type, vec![idx])),

@@ -1,6 +1,9 @@
 use serde_json::{Map, Value, json};
 
-use crate::graph::{ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, PaginationResponse};
+use crate::graph::{
+    ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor,
+    PaginationResponse,
+};
 
 pub fn response(query_type: &str, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) -> GraphResponse {
     GraphResponse {
@@ -9,6 +12,8 @@ pub fn response(query_type: &str, nodes: Vec<GraphNode>, edges: Vec<GraphEdge>) 
         nodes,
         edges,
         columns: None,
+        group_columns: None,
+        rows: None,
         pagination: None,
     }
 }
@@ -59,14 +64,53 @@ pub fn path_edge(
     }
 }
 
-pub fn aggregation_column(name: &str, function: &str, value: Option<Value>) -> ColumnDescriptor {
+pub fn aggregation_column(name: &str, function: &str) -> ColumnDescriptor {
     ColumnDescriptor {
         name: name.into(),
         function: function.into(),
         target: None,
         property: None,
-        value,
     }
+}
+
+pub fn property_group(name: &str, node: &str, property: &str) -> GroupColumnDescriptor {
+    GroupColumnDescriptor {
+        name: name.into(),
+        kind: "property".into(),
+        node: node.into(),
+        property: Some(property.into()),
+        entity: None,
+    }
+}
+
+pub fn node_group(name: &str, node: &str, entity: &str) -> GroupColumnDescriptor {
+    GroupColumnDescriptor {
+        name: name.into(),
+        kind: "node".into(),
+        node: node.into(),
+        property: None,
+        entity: Some(entity.into()),
+    }
+}
+
+pub fn agg_row(pairs: &[(&str, Value)]) -> Map<String, Value> {
+    let mut row = Map::new();
+    for (k, v) in pairs {
+        row.insert((*k).into(), v.clone());
+    }
+    row
+}
+
+pub fn node_group_cell(entity_type: &str, id: i64, props: &[(&str, Value)]) -> Value {
+    let mut properties = Map::new();
+    for (k, v) in props {
+        properties.insert((*k).into(), v.clone());
+    }
+    let mut obj = Map::new();
+    obj.insert("type".into(), Value::String(entity_type.into()));
+    obj.insert("id".into(), Value::String(id.to_string()));
+    obj.insert("properties".into(), Value::Object(properties));
+    Value::Object(obj)
 }
 
 pub fn pagination(has_more: bool, total_rows: usize) -> PaginationResponse {

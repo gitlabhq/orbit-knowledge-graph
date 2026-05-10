@@ -1,0 +1,20 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:aggregation
+goon_version:1.0.0
+nodes:0
+edges:0
+rows:5
+group_by:severity(property)
+aggregations:vulnerability_count(count)
+@nodes
+@edges
+@rows
+severity=medium vulnerability_count=8421
+severity=high vulnerability_count=2350
+severity=low vulnerability_count=1542
+severity=critical vulnerability_count=120
+severity=info vulnerability_count=42

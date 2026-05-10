@@ -3,7 +3,10 @@ use std::sync::LazyLock;
 use semver::Version;
 use serde_json::{Map, Value, json};
 
-use formatters::{ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, PaginationResponse};
+use formatters::{
+    ColumnDescriptor, GraphEdge, GraphNode, GraphResponse, GroupColumnDescriptor,
+    PaginationResponse,
+};
 
 static FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| Version::new(1, 0, 0));
 
@@ -26,6 +29,8 @@ fn empty_response(query_type: &str) -> GraphResponse {
         nodes: vec![],
         edges: vec![],
         columns: None,
+        group_columns: None,
+        rows: None,
         pagination: None,
     }
 }
@@ -108,48 +113,96 @@ fn snapshot_traversal() {
 }
 
 #[test]
-fn snapshot_aggregation_grouped() {
+fn snapshot_aggregation_node_grouped() {
+    // Group by entity node (User) — author leaderboard. Each row's grouped
+    // node is inlined as `{type, id, properties}`; the encoder lifts the
+    // unique nodes into @nodes so rows stay one-line `User:id` references.
     let mut r = empty_response("aggregation");
-    r.nodes = vec![
-        GraphNode {
-            entity_type: "User".into(),
-            id: 1243277,
-            properties: props(&[
-                ("username", json!("ghost1")),
-                ("merged_count", json!(65555)),
-            ]),
-        },
-        GraphNode {
-            entity_type: "User".into(),
-            id: 35702613,
-            properties: props(&[("username", json!("bot_a")), ("merged_count", json!(21277))]),
-        },
-        GraphNode {
-            entity_type: "User".into(),
-            id: 26832240,
-            properties: props(&[("username", json!("bot_b")), ("merged_count", json!(20289))]),
-        },
-    ];
     r.columns = Some(vec![ColumnDescriptor {
         name: "merged_count".into(),
         function: "count".into(),
-        target: None,
+        target: Some("u".into()),
         property: None,
-        value: None,
     }]);
+    r.group_columns = Some(vec![GroupColumnDescriptor {
+        name: "u".into(),
+        kind: "node".into(),
+        node: "u".into(),
+        property: None,
+        entity: Some("User".into()),
+    }]);
+    let user_cell = |id: i64, username: &str| {
+        let mut props = Map::new();
+        props.insert("username".into(), json!(username));
+        let mut obj = Map::new();
+        obj.insert("type".into(), json!("User"));
+        obj.insert("id".into(), json!(id.to_string()));
+        obj.insert("properties".into(), Value::Object(props));
+        Value::Object(obj)
+    };
+    let row = |user: Value, count: i64| {
+        let mut m = Map::new();
+        m.insert("u".into(), user);
+        m.insert("merged_count".into(), json!(count));
+        m
+    };
+    r.rows = Some(vec![
+        row(user_cell(1243277, "ghost1"), 65555),
+        row(user_cell(35702613, "bot_a"), 21277),
+        row(user_cell(26832240, "bot_b"), 20289),
+    ]);
+    insta::assert_snapshot!(run(r));
+}
+
+#[test]
+fn snapshot_aggregation_property_grouped() {
+    // Group by property (vulnerability severity bucket). Pure scalar group
+    // values — no node lift needed; @nodes stays empty.
+    let mut r = empty_response("aggregation");
+    r.columns = Some(vec![ColumnDescriptor {
+        name: "vulnerability_count".into(),
+        function: "count".into(),
+        target: Some("v".into()),
+        property: None,
+    }]);
+    r.group_columns = Some(vec![GroupColumnDescriptor {
+        name: "severity".into(),
+        kind: "property".into(),
+        node: "v".into(),
+        property: Some("severity".into()),
+        entity: None,
+    }]);
+    let bucket = |sev: &str, count: i64| {
+        let mut m = Map::new();
+        m.insert("severity".into(), json!(sev));
+        m.insert("vulnerability_count".into(), json!(count));
+        m
+    };
+    r.rows = Some(vec![
+        bucket("medium", 8421),
+        bucket("high", 2350),
+        bucket("low", 1542),
+        bucket("critical", 120),
+        bucket("info", 42),
+    ]);
     insta::assert_snapshot!(run(r));
 }
 
 #[test]
 fn snapshot_aggregation_ungrouped() {
+    // Single-row scalar aggregation — no group_by. The single row carries
+    // the metric value directly in @rows.
     let mut r = empty_response("aggregation");
     r.columns = Some(vec![ColumnDescriptor {
         name: "total".into(),
         function: "count".into(),
         target: None,
         property: None,
-        value: Some(json!(2347)),
     }]);
+    r.group_columns = Some(vec![]);
+    let mut row = Map::new();
+    row.insert("total".into(), json!(2347));
+    r.rows = Some(vec![row]);
     insta::assert_snapshot!(run(r));
 }
 
