@@ -64,48 +64,68 @@ impl EntityPipeline for SimpleEntityPipeline {
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
-        if self.has_consolidated_checkpoint(request).await? {
-            let runs = vec![self.plan_single_run(request)];
-            self.run_plans(&runs, destination, progress).await?;
-            return Ok(());
+        let mode = self.decide_mode(request).await?;
+        let mut phase = Phase::Plan(mode);
+
+        loop {
+            phase = match phase {
+                Phase::Plan(mode) => {
+                    let runs = match &mode {
+                        Mode::Consolidated | Mode::Single => {
+                            vec![self.plan_single_run(request)]
+                        }
+                        Mode::Partitioned(specs) => specs
+                            .iter()
+                            .map(|spec| self.plan_partition_run(request, spec))
+                            .collect(),
+                    };
+                    Phase::Run { mode, runs }
+                }
+
+                Phase::Run { mode, runs } => {
+                    if let Mode::Partitioned(specs) = &mode {
+                        info!(
+                            entity_kind = %request.entity_kind,
+                            partitions = runs.len(),
+                            total = specs.len(),
+                            "running partitioned pipeline"
+                        );
+                    }
+                    if !runs.is_empty() {
+                        self.run_plans(&runs, destination, progress).await?;
+                    }
+                    Phase::Consolidate(mode)
+                }
+
+                Phase::Consolidate(mode) => {
+                    if let Mode::Partitioned(_) = mode {
+                        self.consolidate_checkpoint(&request.scope, &request.entity_kind)
+                            .await?;
+                    }
+                    return Ok(());
+                }
+            };
         }
-
-        let Some(strategy) = &self.partition_strategy else {
-            let runs = vec![self.plan_single_run(request)];
-            self.run_plans(&runs, destination, progress).await?;
-            return Ok(());
-        };
-
-        let runs = match strategy.compute_partitions(request).await? {
-            None => {
-                info!(
-                    partition_count = strategy.partition_count(),
-                    "insufficient quantiles, falling back to single pipeline"
-                );
-                let runs = vec![self.plan_single_run(request)];
-                self.run_plans(&runs, destination, progress).await?;
-                return Ok(());
-            }
-            Some(specs) => {
-                let runs: Vec<_> = specs
-                    .iter()
-                    .map(|spec| self.plan_partition_run(request, spec))
-                    .collect();
-                info!(
-                    entity_kind = %request.entity_kind,
-                    partitions = runs.len(),
-                    "running partitioned pipeline"
-                );
-                runs
-            }
-        };
-
-        self.run_plans(&runs, destination, progress).await?;
-        self.consolidate_checkpoint(&request.scope, &request.entity_kind)
-            .await?;
-
-        Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// State machine types
+// ---------------------------------------------------------------------------
+
+enum Mode {
+    Consolidated,
+    Single,
+    Partitioned(Vec<PartitionSpec>),
+}
+
+enum Phase {
+    Plan(Mode),
+    Run {
+        mode: Mode,
+        runs: Vec<(PipelinePlan, PipelineContext)>,
+    },
+    Consolidate(Mode),
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +133,30 @@ impl EntityPipeline for SimpleEntityPipeline {
 // ---------------------------------------------------------------------------
 
 impl SimpleEntityPipeline {
+    async fn decide_mode(&self, request: &EntityIndexingRequest) -> Result<Mode, HandlerError> {
+        if self.has_consolidated_checkpoint(request).await? {
+            return Ok(Mode::Consolidated);
+        }
+
+        let Some(strategy) = &self.partition_strategy else {
+            return Ok(Mode::Single);
+        };
+
+        match strategy.compute_partitions(request).await? {
+            None => {
+                info!(
+                    partition_count = strategy.partition_count(),
+                    "insufficient quantiles, falling back to single pipeline"
+                );
+                Ok(Mode::Single)
+            }
+            Some(specs) => {
+                let pending = self.pending_partitions(request, specs).await?;
+                Ok(Mode::Partitioned(pending))
+            }
+        }
+    }
+
     async fn has_consolidated_checkpoint(
         &self,
         request: &EntityIndexingRequest,
@@ -129,6 +173,47 @@ impl SimpleEntityPipeline {
             .map_err(|err| HandlerError::Processing(format!("failed to load checkpoint: {err}")))?;
 
         Ok(checkpoint.is_some_and(|cp| cp.watermark.timestamp_micros() > 0))
+    }
+
+    async fn pending_partitions(
+        &self,
+        request: &EntityIndexingRequest,
+        specs: Vec<PartitionSpec>,
+    ) -> Result<Vec<PartitionSpec>, HandlerError> {
+        let base_prefix = entity_checkpoint_key(&request.scope, &request.entity_kind, None);
+        let checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(&base_prefix)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to load checkpoints: {err}"))
+            })?;
+
+        let total = specs.len();
+        let pending: Vec<PartitionSpec> = specs
+            .into_iter()
+            .filter(|spec| {
+                let partition = Partition::Range {
+                    index: spec.partition_index,
+                    total: spec.total_partitions,
+                };
+                let key = format!(
+                    "{}.{}",
+                    entity_checkpoint_key(&request.scope, &request.entity_kind, Some(&partition)),
+                    self.plan.name
+                );
+                !matches!(checkpoints.get(&key), Some(cp) if cp.cursor_values.is_none())
+            })
+            .collect();
+
+        if pending.len() < total {
+            info!(
+                pending = pending.len(),
+                total, "resuming partitioned pipeline, some partitions already completed"
+            );
+        }
+
+        Ok(pending)
     }
 
     fn plan_single_run(&self, request: &EntityIndexingRequest) -> (PipelinePlan, PipelineContext) {
