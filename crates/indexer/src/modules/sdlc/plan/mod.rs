@@ -24,8 +24,9 @@ pub(in crate::modules::sdlc) struct ExtractQuery {
     cursor_values: Vec<String>,
     batch_size: u64,
     /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
-    /// that gets replaced with the keyset pagination WHERE clause at emit time.
+    /// that gets replaced with the partition filter + keyset pagination clause at emit time.
     raw_template: Option<String>,
+    partition_filter: Option<String>,
 }
 
 impl ExtractQuery {
@@ -36,6 +37,7 @@ impl ExtractQuery {
             cursor_values: Vec::new(),
             batch_size,
             raw_template: None,
+            partition_filter: None,
         }
     }
 
@@ -52,23 +54,28 @@ impl ExtractQuery {
             cursor_values: Vec::new(),
             batch_size,
             raw_template: Some(template),
+            partition_filter: None,
         }
     }
 
     pub fn to_sql(&self) -> String {
         if let Some(template) = &self.raw_template {
-            let cursor_sql = match self.build_cursor_expr() {
-                Some(expr) => format!(" AND {}", codegen::emit_expr_to_string(&expr)),
-                None => String::new(),
-            };
-            return template.replace("{CURSOR}", &cursor_sql);
+            let mut suffix = String::new();
+            if let Some(filter) = &self.partition_filter {
+                suffix.push_str(&format!(" AND {filter}"));
+            }
+            if let Some(expr) = self.build_cursor_expr() {
+                suffix.push_str(&format!(" AND {}", codegen::emit_expr_to_string(&expr)));
+            }
+            return template.replace("{CURSOR}", &suffix);
         }
 
         let mut query = self.base_query.clone();
-
-        if let Some(cursor_expr) = self.build_cursor_expr() {
-            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
-        }
+        query.where_clause = Expr::and_all([
+            query.where_clause,
+            self.partition_filter.as_ref().map(|f| Expr::raw(f.clone())),
+            self.build_cursor_expr(),
+        ]);
 
         query.order_by = self
             .sort_key_columns
@@ -109,15 +116,8 @@ impl ExtractQuery {
         self.batch_size
     }
 
-    pub fn with_additional_filter(mut self, filter_sql: &str) -> Self {
-        if let Some(template) = &mut self.raw_template {
-            *template = template.replace("{CURSOR}", &format!(" AND {filter_sql}{{CURSOR}}"));
-        } else {
-            self.base_query.where_clause = Expr::and_all([
-                self.base_query.where_clause,
-                Some(Expr::raw(filter_sql.to_string())),
-            ]);
-        }
+    pub fn with_partition_filter(mut self, filter_sql: String) -> Self {
+        self.partition_filter = Some(filter_sql);
         self
     }
 
@@ -459,9 +459,9 @@ mod tests {
     }
 
     #[test]
-    fn with_additional_filter_adds_to_where_clause() {
+    fn partition_filter_adds_to_where_clause() {
         let query = simple_query(vec!["id"], 1000);
-        let filtered = query.with_additional_filter("id >= '0' AND id < '25000000'");
+        let filtered = query.with_partition_filter("id >= '0' AND id < '25000000'".to_string());
         let sql = filtered.to_sql();
 
         assert!(sql.contains("id >= '0' AND id < '25000000'"), "sql: {sql}");
@@ -469,10 +469,10 @@ mod tests {
     }
 
     #[test]
-    fn with_additional_filter_composes_with_cursor() {
+    fn partition_filter_composes_with_cursor() {
         let query = simple_query(vec!["id"], 1000);
         let filtered = query
-            .with_additional_filter("id >= '0' AND id < '25000000'")
+            .with_partition_filter("id >= '0' AND id < '25000000'".to_string())
             .resume_from(&position_with_cursor(vec!["42"]));
         let sql = filtered.to_sql();
 

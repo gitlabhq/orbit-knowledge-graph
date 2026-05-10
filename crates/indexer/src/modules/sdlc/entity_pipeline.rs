@@ -151,7 +151,7 @@ impl SimpleEntityPipeline {
             let column = strategy.partition_column();
             plan.extract_query = plan
                 .extract_query
-                .with_additional_filter(&partition_filter_sql(column, spec));
+                .with_partition_filter(partition_filter_sql(column, spec));
         }
 
         let partition = Partition::Range {
