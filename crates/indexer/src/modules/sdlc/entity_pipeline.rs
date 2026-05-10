@@ -34,6 +34,8 @@ pub(in crate::modules::sdlc) struct SimpleEntityPipeline {
     pipeline: Arc<Pipeline>,
 }
 
+// Additive: SimpleEntityPipeline will absorb Pipeline (pipeline.rs)
+// once entity-level indexing fully replaces the namespace-level path.
 impl SimpleEntityPipeline {
     pub fn new(
         plan: PipelinePlan,
