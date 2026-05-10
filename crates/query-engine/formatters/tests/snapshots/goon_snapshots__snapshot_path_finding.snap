@@ -1,0 +1,18 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:path_finding
+goon_version:1.0.0
+nodes:3
+edges:2
+@nodes
+MergeRequest(1):
+482927048 iid=18 state=merged
+Project(1):
+278964 name=GitLab
+User(1):
+64248 username=stanhu
+@paths
+path=0: User:64248 --AUTHORED--> MergeRequest:482927048 --IN_PROJECT--> Project:278964

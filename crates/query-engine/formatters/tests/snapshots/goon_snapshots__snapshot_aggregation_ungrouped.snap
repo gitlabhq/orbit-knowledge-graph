@@ -1,0 +1,15 @@
+---
+source: crates/query-engine/formatters/tests/goon_snapshots.rs
+expression: run(r)
+---
+@header
+query_type:aggregation
+goon_version:1.0.0
+nodes:0
+edges:0
+rows:1
+aggregations:total(count)
+@nodes
+@edges
+@rows
+total=2347

@@ -35,6 +35,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
+- GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
 
 ## Where to find things

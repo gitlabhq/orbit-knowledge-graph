@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use gkg_utils::arrow::ColumnValue;
 use shared::PipelineOutput;
 
-pub use goon::GoonFormatter;
+pub use goon::{GOON_OUTPUT_FORMAT_VERSION, GoonFormatter, encode as goon_encode};
 pub use graph::{
     ColumnDescriptor, GraphEdge, GraphFormatter, GraphNode, GraphResponse, GroupColumnDescriptor,
     PaginationResponse,

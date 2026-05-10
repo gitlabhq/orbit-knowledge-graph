@@ -9,6 +9,7 @@ mod server {
     pub mod analytics;
     pub mod data_correctness;
     pub mod denormalization;
+    pub mod goon_formatter;
     pub mod graph_formatter;
     pub mod graph_status;
     pub mod grpc_tls;
