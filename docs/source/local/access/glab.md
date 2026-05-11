@@ -3,7 +3,7 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: The glab orbit local subcommands and glab orbit setup are planned for a future glab release. Until they ship, build from source and use the orbit binary directly.
-title: Use Orbit Local with the glab CLI
+title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
 {{< details >}}
@@ -22,7 +22,7 @@ title: Use Orbit Local with the glab CLI
 
 > [!disclaimer]
 
-The [`glab` CLI](https://docs.gitlab.com/cli/) is the canonical way to install,
+The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to install,
 run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
 `glab orbit remote`, so the same patterns work whether you query the GitLab
 instance or your local machine.
@@ -30,7 +30,7 @@ instance or your local machine.
 > [!note]
 > Both `glab orbit local` and `glab orbit setup` are planned for a future glab
 > release. Every command on this page is the future shape, not the current one.
-> Until they ship, build from source - see [Use the orbit CLI directly](cli.md).
+> Until they ship, build from source - see [use `orbit` directly](cli.md).
 
 Two top-level commands (both planned, not yet shipped):
 

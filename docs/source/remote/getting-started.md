@@ -25,10 +25,6 @@ title: Get started with Orbit Remote
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-<!-- -->
-
-> [!disclaimer]
-
 ## Prerequisites
 
 - Owner role on the top-level group you want to enable Orbit on

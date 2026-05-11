@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: How Orbit Local builds and queries a code graph on your machine using the orbit CLI and DuckDB.
+description: How Orbit Local builds and queries a code graph on your machine using the Orbit CLI and DuckDB.
 title: How Orbit Local works
 ---
 
@@ -19,10 +19,6 @@ title: How Orbit Local works
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 {{< /history >}}
-
-> [!disclaimer]
-
-<!-- -->
 
 > [!note]
 > Orbit Local is experimental. Capabilities and command shape may

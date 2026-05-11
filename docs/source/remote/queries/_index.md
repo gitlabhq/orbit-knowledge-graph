@@ -25,10 +25,6 @@ title: Queries
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-<!-- -->
-
-> [!disclaimer]
-
 Orbit queries are JSON objects that describe graph work. A query can fetch one
 kind of object, traverse relationships between objects, count matching objects,
 find a path, or ask for the neighbors of a node.

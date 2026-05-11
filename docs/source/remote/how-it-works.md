@@ -25,10 +25,6 @@ title: How Orbit Remote works
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-<!-- -->
-
-> [!disclaimer]
-
 ## Indexing pipeline
 
 Orbit indexes data from two sources and combines them into a single graph.

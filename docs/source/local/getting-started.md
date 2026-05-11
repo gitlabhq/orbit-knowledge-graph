@@ -20,10 +20,6 @@ title: Get started with Orbit Local
 
 {{< /history >}}
 
-> [!disclaimer]
-
-<!-- -->
-
 > [!note]
 > Orbit Local is experimental. Until packaged binaries ship,
 > you must build from source.
@@ -35,8 +31,8 @@ work, then run your first query.
 
 | Method | Best for | Setup |
 |---|---|---|
-| [orbit CLI](access/cli.md) | Direct CLI use, scripting, indexing tasks | Build the binary from source |
-| [glab CLI](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit local` (planned) - today, use `orbit` directly |
+| [The Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | Build the binary from source |
+| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit local` (planned) - today, use `orbit` directly |
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | Manual MCP config; `glab orbit setup` planned |
 
 The query language is identical across all three. Whatever you learn in one

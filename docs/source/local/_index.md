@@ -20,8 +20,6 @@ title: Orbit Local
 
 {{< /history >}}
 
-> [!disclaimer]
-
 Orbit Local runs entirely on your machine. Build a code graph for any local
 repository and query it using the same query language as Orbit Remote. No
 GitLab account, no network connection required.
@@ -44,8 +42,8 @@ GitLab account, no network connection required.
 
 | Method | Description |
 |---|---|
-| [orbit CLI](access/cli.md) | Run the `orbit` binary directly to index and query |
-| [glab CLI](access/glab.md) | Drive Orbit Local through `glab orbit local` (planned) |
+| [The Orbit CLI (`orbit`)](access/cli.md) | Run the `orbit` binary directly to index and query |
+| [The GitLab CLI (`glab`)](access/glab.md) | Drive Orbit Local through `glab orbit local` (planned) |
 | [MCP](access/mcp.md) | Expose the local graph to Claude Code, Codex, and other agents |
 
 ## Billing
