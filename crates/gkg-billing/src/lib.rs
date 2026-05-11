@@ -8,9 +8,11 @@
 
 pub mod constants;
 pub mod inputs;
+mod metrics;
 mod observer;
 mod tracker;
 
 pub use inputs::BillingInputs;
+pub use metrics::register as register_metrics;
 pub use observer::BillingObserver;
 pub use tracker::{BillingTracker, SnowplowBillingTracker};
