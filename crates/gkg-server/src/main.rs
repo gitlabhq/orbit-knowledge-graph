@@ -216,10 +216,16 @@ async fn run_webserver(
                  set GKG_BILLING__COLLECTOR_URL"
             ));
         }
-        info!(collector_url = %config.billing.collector_url, "initializing billing event tracker");
+        info!(
+            collector_url = %config.billing.collector_url,
+            app_id = gkg_billing::constants::APP_ID,
+            "initializing billing event tracker"
+        );
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
+    } else {
+        info!("billing tracker disabled (billing.enabled=false) — no events will be emitted");
     }
 
     if config.analytics.enabled {
