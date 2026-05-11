@@ -46,6 +46,7 @@ pub fn emit_neighbors(
         filters: &[(String, InputFilter)],
         node_ids: &[i64],
         id_range: Option<&InputIdRange>,
+        extra_select: &[&str],
     ) -> (TableRef, Expr) {
         let mut scan_where = Vec::new();
         for (prop, filter) in filters {
@@ -57,10 +58,13 @@ pub fn emit_neighbors(
         if let Some(range) = id_range {
             scan_where.push(id_range_predicate(alias, range));
         }
-        let select = vec![
+        let mut select = vec![
             SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
             SelectExpr::col(alias, DELETED_COLUMN),
         ];
+        for col in extra_select {
+            select.push(SelectExpr::col(alias, *col));
+        }
         dedup_subquery(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY)
     }
 
@@ -172,15 +176,22 @@ pub fn emit_neighbors(
         ];
 
         let mut from: TableRef = edge_table_scan(&edge_table, edge_alias);
+        let needs_center_table = !center_uses_default_pk;
 
-        // Non-denorm filters: inline latest-row JOIN instead of CTE.
         if has_non_denorm {
+            let redaction_col = center_redaction_col.as_str();
+            let extra: Vec<&str> = if needs_center_table {
+                vec![redaction_col]
+            } else {
+                Vec::new()
+            };
             let (center_subq, deleted_filter) = build_center_dedup(
                 &center_id,
                 &center_table,
                 &center_filters,
                 &center_node_ids,
                 center_id_range.as_ref(),
+                &extra,
             );
             from = TableRef::join(
                 JoinType::Inner,
@@ -200,16 +211,18 @@ pub fn emit_neighbors(
                 redaction_id_column(&center_id),
             ));
         } else {
-            from = TableRef::join(
-                JoinType::Inner,
-                from,
-                TableRef::scan_final(&center_table, &center_id),
-                Expr::eq(
-                    Expr::col(edge_alias, center_edge_col),
-                    Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
-                ),
-            );
-            where_parts.push(deleted_false(&center_id));
+            if !has_non_denorm {
+                from = TableRef::join(
+                    JoinType::Inner,
+                    from,
+                    TableRef::scan_final(&center_table, &center_id),
+                    Expr::eq(
+                        Expr::col(edge_alias, center_edge_col),
+                        Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
+                    ),
+                );
+                where_parts.push(deleted_false(&center_id));
+            }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),
                 redaction_id_column(&center_id),

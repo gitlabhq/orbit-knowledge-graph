@@ -215,6 +215,91 @@ pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext)
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
 }
 
+pub(super) async fn neighbors_non_default_pk_with_non_denorm_filter(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {
+                "id": "d",
+                "entity": "MergeRequestDiff",
+                "filters": {"head_commit_sha": {"op": "starts_with", "value": "aaaa"}}
+            },
+            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "head_commit_sha".into(),
+    });
+    resp.assert_referential_integrity();
+    resp.assert_node_count(3);
+    resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
+    resp.assert_node_ids("MergeRequest", &[2000]);
+    resp.assert_edge_set("HAS_DIFF", &[(2000, 5000), (2000, 5001)]);
+}
+
+pub(super) async fn neighbors_non_default_pk_filter_excludes_non_matching(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {
+                "id": "d",
+                "entity": "MergeRequestDiff",
+                "filters": {"head_commit_sha": {"op": "eq", "value": "no-such-sha"}}
+            },
+            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.skip_requirement(Requirement::Filter {
+        field: "head_commit_sha".into(),
+    });
+    resp.skip_requirement(Requirement::Relationship {
+        edge_type: "HAS_DIFF".into(),
+    });
+    resp.skip_requirement(Requirement::Neighbors);
+    resp.assert_node_count(0);
+    assert_eq!(resp.edge_count(), 0);
+}
+
+pub(super) async fn neighbors_non_default_pk_redaction_uses_merge_request_id(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("merge_request", &[2001]);
+
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {
+                "id": "d",
+                "entity": "MergeRequestDiff",
+                "filters": {"head_commit_sha": {"op": "starts_with", "value": "bbbb"}}
+            },
+            "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["HAS_DIFF"]}
+        }"#,
+        &svc,
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "head_commit_sha".into(),
+    });
+    resp.assert_node_count(2);
+    resp.assert_node_ids("MergeRequestDiff", &[5002]);
+    resp.assert_node_ids("MergeRequest", &[2001]);
+    resp.assert_edge_set("HAS_DIFF", &[(2001, 5002)]);
+    resp.assert_node_absent("MergeRequestDiff", 5000);
+    resp.assert_node_absent("MergeRequestDiff", 5001);
+    resp.assert_node_absent("MergeRequest", 2000);
+}
+
 pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
     // Group 100 has incoming MEMBER_OF from users and outgoing CONTAINS to
     // projects/subgroups. With direction: "both", edges should preserve their

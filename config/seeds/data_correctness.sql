@@ -166,10 +166,10 @@ INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, interna
     (3002, repeat('x', 10000), 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/'),
     (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/');
 
-INSERT INTO gl_merge_request_diff (id, merge_request_id, state, traversal_path) VALUES
-    (5000, 2000, 'collected', '1/100/1000/'),
-    (5001, 2000, 'collected', '1/100/1000/'),
-    (5002, 2001, 'collected', '1/100/1000/');
+INSERT INTO gl_merge_request_diff (id, merge_request_id, state, head_commit_sha, traversal_path) VALUES
+    (5000, 2000, 'collected', 'aaaaaaaa1111', '1/100/1000/'),
+    (5001, 2000, 'collected', 'aaaaaaaa2222', '1/100/1000/'),
+    (5002, 2001, 'collected', 'bbbbbbbb3333', '1/100/1000/');
 
 INSERT INTO gl_milestone (id, iid, title, state, traversal_path) VALUES
     (6000, 1, 'Sprint 1', 'active', '1/100/'),

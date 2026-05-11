@@ -476,6 +476,39 @@ fn multi_table_path_finding_scans_all_tables() {
 }
 
 #[test]
+fn neighbors_non_default_pk_with_non_denorm_filter_no_alias_clash() {
+    use ontology::DataType;
+    let ontology = ontology::Ontology::new()
+        .with_nodes(["File"])
+        .with_edges(["DEFINES"])
+        .with_fields("File", [("path", DataType::String)])
+        .with_default_columns("File", ["path"])
+        .with_redaction("File", "project", "project_id");
+
+    let json = r#"{
+        "query_type": "neighbors",
+        "node": {
+            "id": "f",
+            "entity": "File",
+            "filters": {"path": {"op": "contains", "value": "labkit"}}
+        },
+        "neighbors": {"node": "f", "direction": "both"}
+    }"#;
+    let result = compile(json, &ontology, &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    let gl_file_refs = rendered.matches("gl_file").count();
+    assert_eq!(
+        gl_file_refs, 2,
+        "expected one gl_file scan per direction arm; got {gl_file_refs}\nSQL:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("f.project_id AS project_id"),
+        "dedup subquery must surface redaction id column: {rendered}"
+    );
+}
+
+#[test]
 fn multi_table_neighbors_scans_all_tables() {
     let json = r#"{
         "query_type": "neighbors",

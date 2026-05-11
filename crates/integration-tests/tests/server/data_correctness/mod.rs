@@ -121,6 +121,9 @@ async fn data_correctness() {
         neighbors::neighbors_dynamic_columns_all_returns_properties,
         neighbors::neighbors_center_node_properties_hydrated,
         neighbors::neighbors_both_direction_preserves_edge_direction,
+        neighbors::neighbors_non_default_pk_with_non_denorm_filter,
+        neighbors::neighbors_non_default_pk_filter_excludes_non_matching,
+        neighbors::neighbors_non_default_pk_redaction_uses_merge_request_id,
         // edge cases
         edge_cases::giant_string_survives_pipeline,
         edge_cases::sql_injection_string_preserved,
