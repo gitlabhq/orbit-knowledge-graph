@@ -1,9 +1,3 @@
-//! Billing event pipeline metrics.
-//!
-//! Counters cover the three observable outcomes of the per-query billing path:
-//! a successful handoff to the Snowplow tracker, a drop because the event
-//! could not be built, and an event rejected by the tracker at handoff.
-
 use crate::MetricSpec;
 
 pub mod labels {

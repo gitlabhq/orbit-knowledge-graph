@@ -27,13 +27,10 @@ impl BillingMetrics {
     }
 }
 
-/// Pre-register every billing counter series at zero so it appears in
-/// `/metrics` before any query runs. The OTel SDK only emits a series after
-/// the first `.add()` call, so without this `BillingEventsDroppedToZero`
-/// (`rate(emitted) == 0`) compares against absent rather than zero.
-///
-/// `dropped` is touched once per known `reason` value so the labelled series
-/// appear too; new reasons added later only register on first increment.
+/// Zero-touch every series at startup so OTel registers them before any
+/// query fires — `rate(...) == 0` alerts compare against zero, not absent.
+/// `dropped` is touched per known `reason` value; new reasons register on
+/// first real increment.
 pub fn register() {
     METRICS.emitted.add(0, &[]);
     METRICS.rejected.add(0, &[]);
