@@ -155,8 +155,24 @@ impl PipelineObserver for BillingObserver {
         {
             let _span =
                 tracing::info_span!("billing.track", query_type = self.query_type).entered();
-            tracker.track(event);
-            METRICS.emitted.add(1, &[]);
+            match tracker.track(event) {
+                Ok(()) => {
+                    METRICS.emitted.add(1, &[]);
+                }
+                Err(e) => {
+                    let correlation_id = correlation_id_string();
+                    tracing::error!(
+                        error = %e,
+                        user_id = self.inputs.user_id,
+                        realm = ?self.inputs.realm,
+                        query_type = self.query_type,
+                        source_type = %self.inputs.source_type,
+                        correlation_id = %correlation_id,
+                        "billing tracker rejected event at enqueue"
+                    );
+                    METRICS.rejected.add(1, &[]);
+                }
+            }
         }
     }
 }
@@ -168,7 +184,7 @@ mod tests {
     use query_engine::pipeline::{PipelineError, PipelineObserver};
 
     use super::*;
-    use crate::tracker::InMemoryBillingTracker;
+    use crate::tracker::{FailingBillingTracker, InMemoryBillingTracker};
 
     fn test_inputs() -> BillingInputs {
         BillingInputs {
@@ -291,5 +307,15 @@ mod tests {
         let mut obs = BillingObserver::new(None, test_inputs());
         obs.set_query_type("traversal");
         obs.finish(1, 0);
+    }
+
+    #[test]
+    fn billing_observer_handles_tracker_rejection() {
+        let tracker = Arc::new(FailingBillingTracker::new());
+        let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
+        obs.set_query_type("traversal");
+        obs.finish(1, 0);
+
+        assert_eq!(tracker.count(), 1);
     }
 }
