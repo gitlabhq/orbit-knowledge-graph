@@ -49,6 +49,7 @@ impl BillingObserver {
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
             tracing::warn!(
                 user_id = self.inputs.user_id,
+                source_type = %self.inputs.source_type,
                 correlation_id = %correlation_id,
                 "billing event skipped: realm missing from JWT claims"
             );
@@ -59,6 +60,7 @@ impl BillingObserver {
             tracing::warn!(
                 user_id = self.inputs.user_id,
                 raw_realm = raw_realm,
+                source_type = %self.inputs.source_type,
                 correlation_id = %correlation_id,
                 "billing event skipped: unrecognized realm value"
             );
@@ -111,6 +113,8 @@ impl BillingObserver {
                 tracing::error!(
                     error = %e,
                     user_id = self.inputs.user_id,
+                    realm = realm,
+                    source_type = %self.inputs.source_type,
                     correlation_id = %correlation_id,
                     "failed to build billing event"
                 );
