@@ -42,9 +42,9 @@ impl BillingTracker for SnowplowBillingTracker {
             tracing::error!(
                 error = %e,
                 correlation_id = %correlation_id,
-                "failed to track billing event"
+                "billing tracker rejected event at enqueue"
             );
-            METRICS.track_errors.add(1, &[]);
+            METRICS.rejected.add(1, &[]);
         }
     }
 }

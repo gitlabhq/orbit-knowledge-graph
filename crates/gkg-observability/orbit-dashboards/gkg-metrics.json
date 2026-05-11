@@ -22,9 +22,9 @@
       "domain": "billing.events"
     },
     {
-      "otel_name": "gkg.billing.track.errors",
-      "prom_name": "gkg_billing_track_errors_total",
-      "description": "Errors returned by the Snowplow tracker when handing off a billing event.",
+      "otel_name": "gkg.billing.events.rejected",
+      "prom_name": "gkg_billing_events_rejected_total",
+      "description": "Billing events refused by the labkit tracker at enqueue (queue full or tracker shutdown). HTTP delivery failures to the Snowplow collector occur in labkit's background loop and are not surfaced through this counter.",
       "kind": "counter",
       "labels": [],
       "stability": "stable",

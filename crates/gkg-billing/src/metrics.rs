@@ -13,7 +13,7 @@ pub(crate) static METRICS: LazyLock<BillingMetrics> = LazyLock::new(BillingMetri
 pub(crate) struct BillingMetrics {
     pub emitted: Counter<u64>,
     pub dropped: Counter<u64>,
-    pub track_errors: Counter<u64>,
+    pub rejected: Counter<u64>,
 }
 
 impl BillingMetrics {
@@ -22,7 +22,7 @@ impl BillingMetrics {
         Self {
             emitted: spec::EVENTS_EMITTED.build_counter_u64(&meter),
             dropped: spec::EVENTS_DROPPED.build_counter_u64(&meter),
-            track_errors: spec::TRACK_ERRORS.build_counter_u64(&meter),
+            rejected: spec::EVENTS_REJECTED.build_counter_u64(&meter),
         }
     }
 }
@@ -36,7 +36,7 @@ impl BillingMetrics {
 /// appear too; new reasons added later only register on first increment.
 pub fn register() {
     METRICS.emitted.add(0, &[]);
-    METRICS.track_errors.add(0, &[]);
+    METRICS.rejected.add(0, &[]);
     for reason in [
         REASON_REALM_MISSING,
         REASON_REALM_UNRECOGNIZED,
