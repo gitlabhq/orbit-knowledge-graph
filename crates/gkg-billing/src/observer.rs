@@ -153,8 +153,14 @@ impl PipelineObserver for BillingObserver {
         if let Some(ref tracker) = self.tracker
             && let Some(event) = self.build_event()
         {
-            let _span =
-                tracing::info_span!("billing.track", query_type = self.query_type).entered();
+            let _span = tracing::info_span!(
+                "billing.track",
+                query_type = self.query_type,
+                user_id = self.inputs.user_id,
+                realm = ?self.inputs.realm,
+                correlation_id = %correlation_id_string(),
+            )
+            .entered();
             match tracker.track(event) {
                 Ok(()) => {
                     METRICS.emitted.add(1, &[]);
