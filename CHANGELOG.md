@@ -1,3 +1,14 @@
+## [0.56.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.56.0...v0.56.1) (2026-05-11)
+
+### Fixes
+
+* **grpc:** send raw goon bytes in formatted_text ([ff37c55](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff37c55c15946a4e1fddbe649a6720df21847e17)) by Michael Angelo Rivera
+
+### Other
+
+* **adr:** add ADR 012 for GOON format design ([4cff5f1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4cff5f151b798cd322c60714c4374f0e1d3fa030)) by Michael Angelo Rivera
+* refactor follow-up - remove extra disclaimers and fix CLI references ([00f5ada](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00f5adaafdee61ebaece40fd4408fac97b481ba9)) by Uma Chandran
+
 ## [0.56.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.55.0...v0.56.0) (2026-05-10)
 
 ### Features
