@@ -5161,9 +5161,11 @@ dependencies = [
 name = "gkg-billing"
 version = "0.1.0"
 dependencies = [
+ "gkg-observability",
  "gkg-server-config",
  "labkit",
  "labkit-events",
+ "opentelemetry",
  "query-engine",
  "serde_json",
  "tracing",
