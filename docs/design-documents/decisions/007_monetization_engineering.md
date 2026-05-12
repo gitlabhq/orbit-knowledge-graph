@@ -332,7 +332,30 @@ stop
 claims[:source_type] = caller_channel  # "frontend", "dws", "mcp", "core", "rest"
 ```
 
-### 1.3 Layer B: GKG billable event emission
+### 1.3 Billing attribution: namespace selection
+
+GKG queries have no per-request namespace context — every query scopes across all top-level namespaces the user can access. The JWT's `root_namespace_id` claim therefore cannot be inferred from the request body and must be resolved by Rails before the call.
+
+**Decision.** Introduce a per-user preference `knowledge_graph_governing_namespace_id`. Do not reuse `duo_default_namespace_id`.
+
+**Alternatives considered:**
+
+- *Generalize `duo_default_namespace_id`.* Rejected. Duo's setting carries governance semantics (tool policies, AI controls) that GKG doesn't inherit.
+- *Infer per-request namespace.* Rejected. Architecturally infeasible: every GKG query is global across all of the user's top-level namespaces by design.
+
+**Candidate logic.** Namespaces where the user is a member AND the namespace has a Premium or Ultimate plan.
+
+**Block-on-null behavior.** MCP and REST queries return a structured error pointing the user to the setting when `knowledge_graph_governing_namespace_id` is null and the user has more than one eligible namespace. Auto-set silently when exactly one candidate exists.
+
+**UX surface.** User Preferences (`/-/profile/preferences`), placed alongside the Duo default namespace selector. Visible only when the user has more than one eligible Orbit namespace.
+
+**JWT wiring.** Rails resolves `knowledge_graph_governing_namespace_id` server-side per request and sets `claims.root_namespace_id` before calling GKG. GKG continues to consume only the signed JWT claim — no untrusted body field.
+
+**Accepted trade-off.** All GKG events bill to the governing namespace even when the user queries content owned by other namespaces.
+
+See [orbit/knowledge-graph#471](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/471) for the full discussion.
+
+### 1.4 Layer B: GKG billable event emission
 
 GKG emits billable events directly to the billing service at `billing.prdsub.gitlab.net`. This requires implementing JWT OIDC token minting in `labkit-rs` ([orbit/kg#307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/307)).
 
@@ -362,7 +385,7 @@ GKG emits billable events directly to the billing service at `billing.prdsub.git
 - [labkit-go PoC](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/work_items/98#note_3108588468)
 - [Server-side validation MR](https://gitlab.com/gitlab-org/analytics-section/platform-insights/core/-/merge_requests/106)
 
-### 1.4 Layer C: OTel metrics tagging
+### 1.5 Layer C: OTel metrics tagging
 
 Add `source_type` as a `KeyValue` label on all existing pipeline metrics via the `OTelPipelineObserver`:
 
@@ -376,7 +399,7 @@ let base_attrs = vec![
 
 This lets us query Prometheus/Grafana for metrics like `gkg.query.pipeline.duration{source_type="dws"}` vs `{source_type="mcp"}` without depending on the billing pipeline.
 
-### 1.5 Layer D: Pre-execution quota check
+### 1.6 Layer D: Pre-execution quota check
 
 Before executing a query, the GKG webserver checks whether the namespace has remaining quota by calling the billing service. The result is cached per namespace to avoid a round-trip on every request.
 
@@ -404,7 +427,7 @@ let needs_quota_check = matches!(
 );
 ```
 
-### 1.6 JWT claims change
+### 1.7 JWT claims change
 
 `source_type` is carried exclusively in the JWT claims — the gRPC proto (`gkg.proto`) is **not** modified. Adding `source_type` to the proto request body would create an unsigned, untrusted field that any caller could set to any value, enabling spoofing. The JWT is signed by Rails with the shared HS256 secret, so GKG can trust the claim.
 
@@ -419,7 +442,7 @@ pub struct Claims {
 
 `SourceType` is a Rust enum defined in the GKG codebase (not generated from proto). Rails sets the `source_type` claim when constructing the JWT before calling GKG. GKG reads it from the validated token.
 
-### 1.7 Validation
+### 1.8 Validation
 
 - **Billing events:** Confirm events arrive at `billing.prdsub.gitlab.net` from staging GKG deployment. Verify all source types produce events. Pipeline health can be observed via the `gkg.billing.events.*` counter family — `emitted` should rise with query traffic and `dropped`/`rejected` should remain at zero.
 - **OTel metrics:** Query Prometheus for `gkg_query_pipeline_duration_bucket` with `source_type` label and confirm breakdown by channel.
@@ -711,7 +734,7 @@ The billable events emitted by the GKG webserver (Phase 1) arrive at `billing.pr
 | Event field | CDot use |
 |-------------|----------|
 | `source_type` | Determines multiplier: `dws` → 0x (zero-rated), `mcp` → 1x (charged), `frontend`/`core` → ignored |
-| `namespace_id` | Billing attribution on .com |
+| `root_namespace_id` | Billing attribution on .com (see [Section 1.3](#13-billing-attribution-namespace-selection) for how Rails resolves this) |
 | `instance_id` | Billing attribution on Dedicated |
 | `query_type` | Analytics only (not used for pricing in Phase 4) |
 
