@@ -7,19 +7,42 @@ set -euo pipefail
 #
 # Required env (provided by GitLab CI on tag pipelines):
 #   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
+#
+# Optional env:
+#   PACKAGE_NAME   Package registry name (default: orbit-local). Set to a
+#                  different value (e.g. orbit-local-dev) to upload to a
+#                  staging path without touching the production release.
+#
+# Flags:
+#   --upload-only  Upload tarballs to the package registry but skip waiting
+#                  for a Release object and adding asset links. Use this when
+#                  there is no corresponding GitLab Release (e.g. MR pipelines).
 
-: "${CI_COMMIT_TAG:?CI_COMMIT_TAG is required}"
+UPLOAD_ONLY=false
+for arg in "$@"; do
+  case "$arg" in
+    --upload-only) UPLOAD_ONLY=true ;;
+    *) echo "unknown argument: $arg" >&2; exit 1 ;;
+  esac
+done
+
 : "${CI_API_V4_URL:?CI_API_V4_URL is required}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is required}"
 : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is required}"
 
-VERSION="${CI_COMMIT_TAG#v}"
-PACKAGE_NAME="orbit-local"
+if [ "$UPLOAD_ONLY" = false ]; then
+  : "${CI_COMMIT_TAG:?CI_COMMIT_TAG is required (use --upload-only to skip release linking)}"
+fi
+
+VERSION="${CI_COMMIT_TAG:-dev}"
+VERSION="${VERSION#v}"
+PACKAGE_NAME="${PACKAGE_NAME:-orbit-local}"
 ARTIFACTS=(
   "orbit-local-linux-x86_64.tar.gz"
   "orbit-local-linux-aarch64.tar.gz"
   "orbit-local-darwin-x86_64.tar.gz"
   "orbit-local-darwin-aarch64.tar.gz"
+  "orbit-local-windows-x86_64.tar.gz"
 )
 
 for artifact in "${ARTIFACTS[@]}"; do
@@ -88,6 +111,13 @@ for artifact in "${ARTIFACTS[@]}"; do
   upload_file "$artifact"
   upload_file "${artifact}.sha256"
 done
+
+if [ "$UPLOAD_ONLY" = true ]; then
+  echo "Upload-only mode: skipping release linking."
+  echo "Artifacts uploaded to package registry under '${PACKAGE_NAME}/${VERSION}/'."
+  echo "Done."
+  exit 0
+fi
 
 wait_for_release
 

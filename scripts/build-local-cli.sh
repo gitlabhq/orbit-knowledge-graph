@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Build the `orbit` local CLI binary and package it as
 # orbit-local-<platform>-<arch>.tar.gz in the repository root. The binary
-# inside the archive is `orbit`; the `orbit-local-` prefix on the archive
-# matches the orbit-local crate name and disambiguates from the gkg-server
-# image release. PLATFORM/ARCH default to the host (linux/macOS amd64 or
-# arm64). Supported triples: {x86_64,aarch64}-unknown-linux-gnu and
-# {x86_64,aarch64}-apple-darwin.
+# inside the archive is `orbit` (or `orbit.exe` on Windows); the `orbit-local-`
+# prefix on the archive matches the orbit-local crate name and disambiguates
+# from the gkg-server image release. PLATFORM/ARCH default to the host.
+# Supported triples: {x86_64,aarch64}-unknown-linux-gnu,
+# {x86_64,aarch64}-apple-darwin, and x86_64-pc-windows-msvc.
 
 PLATFORM="${PLATFORM:-$(uname -s)}"
 PLATFORM=$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')
@@ -30,6 +30,11 @@ case "$PLATFORM" in
             x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
         esac
         ;;
+    windows)
+        case "$ARCH" in
+            x86_64) TARGET="x86_64-pc-windows-msvc" ;;
+        esac
+        ;;
 esac
 
 if [ -z "${TARGET:-}" ]; then
@@ -45,5 +50,9 @@ echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
 cargo build --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
 
 ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.tar.gz"
-tar -czvf "$ARCHIVE" -C "target/${TARGET}/release" orbit
+if [ "$PLATFORM" = "windows" ]; then
+    tar -czvf "$ARCHIVE" -C "target/${TARGET}/release" orbit.exe
+else
+    tar -czvf "$ARCHIVE" -C "target/${TARGET}/release" orbit
+fi
 echo "created $ARCHIVE"
