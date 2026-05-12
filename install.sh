@@ -1,18 +1,45 @@
 #!/bin/bash
 # Orbit local CLI (`orbit`) installation script.
-# Supports macOS (darwin) and Linux on x86_64 and aarch64.
-#
-# Usage:
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --version v0.51.0
-#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --force
-#
-# Or, after downloading:
-#   bash install.sh
+# Supports macOS (darwin), Linux, and Windows (Git Bash) on x86_64 and aarch64.
+# Run with --help for usage examples.
 
 set -euo pipefail
 
-INSTALL_DIR="${HOME}/.local/bin"
+usage() {
+    cat <<EOF
+Usage: $0 [OPTIONS]
+
+OPTIONS:
+    --version VERSION    Install a specific version (e.g., v0.51.0). Defaults to the latest release.
+    --force              Reinstall even if 'orbit' already exists in the install directory.
+    --help               Show this help message.
+
+EXAMPLES:
+    # Linux / macOS
+    curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash
+    curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --version v0.51.0
+    curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --force
+
+    # Windows (CMD or PowerShell, no Git Bash required)
+    C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh'
+    C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh --version v0.51.0'
+    C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh --force'
+
+    # After downloading:
+    bash install.sh
+    bash install.sh --version v0.51.0
+    bash install.sh --force
+EOF
+}
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        INSTALL_DIR="${LOCALAPPDATA:-$USERPROFILE/AppData/Local}/Programs/orbit"
+        ;;
+    *)
+        INSTALL_DIR="${HOME}/.local/bin"
+        ;;
+esac
 TEMP_DIR=$(mktemp -d)
 VERSION=""
 FORCE_INSTALL=false
@@ -40,22 +67,6 @@ success() {
 
 warning() {
     echo -e "${YELLOW}$1${NC}"
-}
-
-usage() {
-    cat <<EOF
-Usage: $0 [OPTIONS]
-
-OPTIONS:
-    --version VERSION    Install a specific version (e.g., v0.51.0). Defaults to the latest release.
-    --force              Reinstall even if 'orbit' already exists in the install directory.
-    --help               Show this help message.
-
-EXAMPLES:
-    bash install.sh
-    bash install.sh --version v0.51.0
-    bash install.sh --force
-EOF
 }
 
 while [[ $# -gt 0 ]]; do
@@ -93,9 +104,10 @@ fi
 
 detect_os() {
     case "$(uname -s)" in
-        Linux*)  echo "linux" ;;
-        Darwin*) echo "darwin" ;;
-        *)       error "Unsupported operating system: $(uname -s)" ;;
+        Linux*)              echo "linux" ;;
+        Darwin*)             echo "darwin" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *)                   error "Unsupported operating system: $(uname -s)" ;;
     esac
 }
 
@@ -156,12 +168,37 @@ Actual:   $actual_checksum"
     success "Checksum verified successfully."
 }
 
+install_vcredist() {
+    local installed=false
+    if reg query "HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\X64" /v Installed 2>/dev/null | grep -q "0x1"; then
+        installed=true
+    elif reg query "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\X64" /v Installed 2>/dev/null | grep -q "0x1"; then
+        installed=true
+    fi
+    if [ "$installed" = true ]; then
+        return
+    fi
+
+    echo "Installing Visual C++ Redistributable (required by orbit on Windows)..."
+    if command_exists winget; then
+        winget install --id Microsoft.VCRedist.2015+.x64 \
+            --accept-package-agreements --accept-source-agreements --silent || true
+    else
+        local vcredist="${TEMP_DIR}/vc_redist.x64.exe"
+        download_file "https://aka.ms/vs/17/release/vc_redist.x64.exe" "$vcredist"
+        cmd //c "$vcredist" /install /quiet /norestart || true
+    fi
+}
+
 install_orbit() {
     local platform="$1"
     local arch="$2"
 
-    if [ "$FORCE_INSTALL" = false ] && [ -f "$INSTALL_DIR/orbit" ]; then
-        warning "Orbit local CLI is already installed at $INSTALL_DIR/orbit"
+    local binary_name="orbit"
+    [ "$platform" = "windows" ] && binary_name="orbit.exe"
+
+    if [ "$FORCE_INSTALL" = false ] && [ -f "$INSTALL_DIR/$binary_name" ]; then
+        warning "Orbit local CLI is already installed at $INSTALL_DIR/$binary_name"
         echo "To upgrade or reinstall:"
         echo "  - Reinstall same/latest: run with --force"
         echo "  - Install specific:      run with --version vX.Y.Z [and optionally --force]"
@@ -209,9 +246,13 @@ install_orbit() {
         error "Failed to extract the tarball."
     fi
 
-    local orbit_binary="${TEMP_DIR}/orbit"
+    local orbit_binary="${TEMP_DIR}/${binary_name}"
     if [ ! -f "$orbit_binary" ]; then
-        orbit_binary=$(find "$TEMP_DIR" -maxdepth 2 -name "orbit" -type f -perm -u+x | head -n 1)
+        if [ "$platform" = "windows" ]; then
+            orbit_binary=$(find "$TEMP_DIR" -maxdepth 2 -name "$binary_name" -type f | head -n 1)
+        else
+            orbit_binary=$(find "$TEMP_DIR" -maxdepth 2 -name "$binary_name" -type f -perm -u+x | head -n 1)
+        fi
         if [ -z "$orbit_binary" ]; then
             error "orbit binary not found in the extracted files."
         fi
@@ -226,17 +267,47 @@ install_orbit() {
     esac
 
     echo "Installing orbit to $INSTALL_DIR..."
-    if command_exists install; then
-        install -m 0755 "$orbit_binary" "$INSTALL_DIR/orbit"
+    if [ "$platform" = "windows" ]; then
+        cp "$orbit_binary" "$INSTALL_DIR/$binary_name"
+    elif command_exists install; then
+        install -m 0755 "$orbit_binary" "$INSTALL_DIR/$binary_name"
     else
         chmod +x "$orbit_binary"
-        mv "$orbit_binary" "$INSTALL_DIR/orbit"
+        mv "$orbit_binary" "$INSTALL_DIR/$binary_name"
     fi
 
-    success "Orbit local CLI has been installed to $INSTALL_DIR/orbit"
+    success "Orbit local CLI has been installed to $INSTALL_DIR/$binary_name"
 }
 
 update_path() {
+    local platform="$1"
+
+    if [ "$platform" = "windows" ]; then
+        # Update Windows user PATH via registry (persistent for CMD, PowerShell, and new terminals)
+        local win_dir
+        win_dir=$(cygpath -w "$INSTALL_DIR" 2>/dev/null || echo "$INSTALL_DIR")
+        local current_path
+        current_path=$(reg query "HKCU\Environment" /v PATH 2>/dev/null \
+            | grep -i "PATH" | sed 's/.*REG_[^ ]* *//' || echo "")
+        if echo "$current_path" | grep -qiF "$win_dir"; then
+            echo "Windows PATH already contains $win_dir"
+        else
+            reg add "HKCU\Environment" /v PATH /t REG_EXPAND_SZ \
+                /d "${win_dir};${current_path}" /f >/dev/null
+            success "Windows user PATH updated. Open a new terminal to apply."
+        fi
+
+        # Also add to ~/.bashrc so Git Bash sessions pick it up immediately
+        local bashrc="${HOME}/.bashrc"
+        touch "$bashrc"
+        if ! grep -Fq "# Added by Orbit local CLI installer" "$bashrc"; then
+            printf '\n# Added by Orbit local CLI installer\nexport PATH="%s:$PATH"\n' \
+                "$INSTALL_DIR" >> "$bashrc"
+            success "Git Bash PATH updated in $bashrc"
+        fi
+        return
+    fi
+
     local targets=()
     local os_name
     os_name="$(uname -s)"
@@ -307,13 +378,17 @@ main() {
 
     ensure_dependencies
     install_orbit "$platform" "$arch"
-    update_path
+    [ "$platform" = "windows" ] && install_vcredist
+    update_path "$platform"
 
     echo
     success "Installation complete."
     echo
     echo "To start using orbit in your terminal, run:"
-    if [ "$platform" = "darwin" ]; then
+    if [ "$platform" = "windows" ]; then
+        echo "  - Git Bash: 'source ~/.bashrc' or open a new Git Bash window."
+        echo "  - CMD/PowerShell: open a new terminal (Windows PATH was updated)."
+    elif [ "$platform" = "darwin" ]; then
         echo "  - zsh:  'source ~/.zshrc' (login shells: 'source ~/.zprofile')"
         echo "  - bash: 'source ~/.bash_profile'"
     else
@@ -322,8 +397,10 @@ main() {
     fi
     echo "  - Or open a new terminal."
     echo
-    echo "If you use a different shell, add \$HOME/.local/bin to PATH manually."
-    echo
+    if [ "$platform" != "windows" ]; then
+        echo "If you use a different shell, add \$HOME/.local/bin to PATH manually."
+        echo
+    fi
     echo "Then verify the installation with: orbit --version"
 }
 
