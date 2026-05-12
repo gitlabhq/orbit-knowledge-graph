@@ -1,7 +1,7 @@
 # ADR 007: Orbit monetization engineering
 
 **Date:** 2026-03-26
-**Author:** @michaelangeloio
+**Author:** `@michaelangeloio`, `@snachnolkar`
 **Status:** Draft
 **Epic:** [gitlab-org&21198](https://gitlab.com/groups/gitlab-org/-/epics/21198)
 **Parent Epic:** [GKG Core Development Workstream &20357](https://gitlab.com/groups/gitlab-org/-/epics/20357)
@@ -421,7 +421,7 @@ pub struct Claims {
 
 ### 1.7 Validation
 
-- **Billing events:** Confirm events arrive at `billing.prdsub.gitlab.net` from staging GKG deployment. Verify all source types produce events.
+- **Billing events:** Confirm events arrive at `billing.prdsub.gitlab.net` from staging GKG deployment. Verify all source types produce events. Pipeline health can be observed via the `gkg.billing.events.*` counter family — `emitted` should rise with query traffic and `dropped`/`rejected` should remain at zero.
 - **OTel metrics:** Query Prometheus for `gkg_query_pipeline_duration_bucket` with `source_type` label and confirm breakdown by channel.
 - **Quota check:** Verify that a namespace at quota receives gRPC `RESOURCE_EXHAUSTED` for MCP/REST queries, while DWS/frontend/core queries still succeed.
 
