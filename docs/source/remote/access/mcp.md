@@ -47,11 +47,21 @@ supports the Model Context Protocol.
 
 Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
 
+**Claude Code** supports the Orbit endpoint over the built-in HTTP transport.
+Register it with one command:
+
+```shell
+claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
+```
+
+The first `query_graph` or `get_graph_schema` call opens your browser to
+authenticate with GitLab. No JSON config edit required.
+
 Some clients only support local stdio MCP servers. For those,
 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
 as a local command.
 
-**Claude Code, Cursor, Codex** — add to your agent's MCP config:
+**Cursor, Codex, and other JSON-config clients** — add to your agent's MCP config:
 
 ```json
 {
