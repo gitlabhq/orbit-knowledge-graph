@@ -32,7 +32,7 @@ impl EntityCheckpointKey {
     pub fn new(scope: &IndexingScope) -> Self {
         let scope_prefix = match scope {
             IndexingScope::Global => "global".to_string(),
-            IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
+            IndexingScope::Namespace { namespace_id, .. } => namespace_position_key(*namespace_id),
         };
         Self {
             scope_prefix,
