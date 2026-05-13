@@ -57,15 +57,10 @@ pub struct Claims {
     pub deployment_type: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
-    /// Populated by Rails (see `gitlab!232123`). Identifies the feature the
-    /// consumer is exercising — used as a CustomersDot quota cache-key field.
-    /// Absent on rollouts that predate the Rails claim work; quota checks
-    /// fail open when missing so the GKG side can ship ahead of Rails.
-    #[serde(default)]
-    pub feature_qualified_name: Option<String>,
     /// Populated by Rails. Tier/SKU under which the consumer holds the
     /// feature (e.g. `duo_enterprise`). Quota cache-key field; quota checks
-    /// fail open when missing for the same reason as `feature_qualified_name`.
+    /// fail open when missing so the GKG side can ship ahead of the Rails
+    /// claim work (`gitlab!232123`).
     #[serde(default)]
     pub feature_enablement_type: Option<String>,
 }

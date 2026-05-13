@@ -39,7 +39,6 @@ impl From<&Claims> for QuotaInputs {
             global_user_id: c.global_user_id.clone(),
             root_namespace_id: c.root_namespace_id,
             unique_instance_id: c.unique_instance_id.clone(),
-            feature_qualified_name: c.feature_qualified_name.clone(),
             feature_enablement_type: c.feature_enablement_type.clone(),
         }
     }
