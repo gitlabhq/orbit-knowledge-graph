@@ -661,7 +661,53 @@ pub enum InputGroupByKey {
         property: String,
         #[serde(default)]
         alias: Option<String>,
+        #[serde(default)]
+        truncate: Option<TruncateUnit>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncateUnit {
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+impl TruncateUnit {
+    pub fn ch_function(self) -> &'static str {
+        match self {
+            Self::Minute => "toStartOfMinute",
+            Self::Hour => "toStartOfHour",
+            Self::Day => "toStartOfDay",
+            Self::Week => "toStartOfWeek",
+            Self::Month => "toStartOfMonth",
+            Self::Quarter => "toStartOfQuarter",
+            Self::Year => "toStartOfYear",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minute => "minute",
+            Self::Hour => "hour",
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Quarter => "quarter",
+            Self::Year => "year",
+        }
+    }
+
+    /// Granularities whose bucket cardinality is too high to allow without
+    /// the caller scoping the query to a bounded set.
+    pub fn requires_selectivity_guard(self) -> bool {
+        matches!(self, Self::Minute | Self::Hour)
+    }
 }
 
 impl InputGroupByKey {
@@ -684,6 +730,13 @@ impl InputGroupByKey {
         }
     }
 
+    pub fn truncate(&self) -> Option<TruncateUnit> {
+        match self {
+            Self::Property { truncate, .. } => *truncate,
+            Self::Node { .. } => None,
+        }
+    }
+
     pub fn output_name(&self, is_unique_property: bool) -> String {
         match self {
             Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
@@ -691,11 +744,16 @@ impl InputGroupByKey {
                 node,
                 property,
                 alias,
+                truncate,
             } => alias.clone().unwrap_or_else(|| {
-                if is_unique_property {
+                let base = if is_unique_property {
                     property.clone()
                 } else {
                     format!("{}_{}", node, property)
+                };
+                match truncate {
+                    Some(unit) => format!("{}_{}", base, unit.name()),
+                    None => base,
                 }
             }),
         }
@@ -745,6 +803,7 @@ pub fn property_groups(
             node,
             property,
             alias,
+            ..
         } => Some((node.as_str(), property.as_str(), alias.as_deref())),
         InputGroupByKey::Node { .. } => None,
     })

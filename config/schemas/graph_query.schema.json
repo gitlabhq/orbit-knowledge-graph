@@ -634,6 +634,11 @@
               "$ref": "#/$defs/Identifier",
               "description": "Property name to group by"
             },
+            "truncate": {
+              "type": "string",
+              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"],
+              "description": "Truncate a Date or DateTime property to the start of the given unit before grouping. minute and hour additionally require node_ids on the truncated node or a filter on the truncated property to bound cardinality."
+            },
             "alias": {
               "$ref": "#/$defs/Identifier",
               "description": "Output column alias for this group key"

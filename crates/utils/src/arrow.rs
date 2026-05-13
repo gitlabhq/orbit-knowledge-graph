@@ -4,9 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Int8Array,
-    Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray,
-    StringArray, StringBuilder, StructArray, TimestampMicrosecondArray,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
+    Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
+    ListArray, PrimitiveArray, StringArray, StringBuilder, StructArray, TimestampMicrosecondArray,
     TimestampMicrosecondBuilder, TimestampMillisecondArray, TimestampNanosecondArray,
     TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
@@ -273,6 +273,12 @@ impl ArrowUtils {
         }
         if let Some(arr) = array.as_any().downcast_ref::<TimestampNanosecondArray>() {
             return timestamp_to_string(arr.value_as_datetime(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Date32Array>() {
+            return date_to_string(arr.value_as_date(idx));
+        }
+        if let Some(arr) = array.as_any().downcast_ref::<Date64Array>() {
+            return date_to_string(arr.value_as_date(idx));
         }
 
         ColumnValue::Null
@@ -670,6 +676,11 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
 
 fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
     dt.map(|d| ColumnValue::String(d.format("%Y-%m-%dT%H:%M:%SZ").to_string()))
+        .unwrap_or(ColumnValue::Null)
+}
+
+fn date_to_string(d: Option<chrono::NaiveDate>) -> ColumnValue {
+    d.map(|d| ColumnValue::String(d.format("%Y-%m-%d").to_string()))
         .unwrap_or(ColumnValue::Null)
 }
 
