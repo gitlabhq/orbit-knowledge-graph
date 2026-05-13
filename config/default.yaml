@@ -143,6 +143,12 @@ billing:
   quota:
     enabled: false
     customers_dot_url: "https://customers.gitlab.com"
+    # CustomersDot admin credentials (X-Admin-Email / X-Admin-Token headers).
+    # Leave empty to disable. In prod, sourced from K8s secret files; locally,
+    # override via GKG_BILLING__QUOTA__API_USER / GKG_BILLING__QUOTA__API_TOKEN.
+    # Check the "Subscription Portal" 1Password vault.
+    api_user: ""
+    api_token: ""
     request_timeout_ms: 2000
     default_ttl_secs: 3600
     max_cache_entries: 10000

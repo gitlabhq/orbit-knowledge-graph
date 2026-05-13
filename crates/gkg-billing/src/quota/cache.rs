@@ -182,7 +182,14 @@ mod tests {
     async fn caches_allow_decisions() {
         let (url, counter) = counting_status_server(AxumStatus::OK).await;
         let client = Arc::new(
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap(),
+            QuotaClient::new(
+                url,
+                "test@example.com",
+                "test-token",
+                Duration::from_secs(5),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
         );
         let cache = QuotaCache::new(client, 1024);
 
@@ -202,7 +209,14 @@ mod tests {
         // denies for the same key must produce exactly one upstream call.
         let (url, counter) = counting_status_server(AxumStatus::PAYMENT_REQUIRED).await;
         let client = Arc::new(
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap(),
+            QuotaClient::new(
+                url,
+                "test@example.com",
+                "test-token",
+                Duration::from_secs(5),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
         );
         let cache = QuotaCache::new(client, 1024);
 
@@ -221,7 +235,14 @@ mod tests {
     async fn coalesces_concurrent_misses_for_same_key() {
         let (url, counter) = counting_status_server(AxumStatus::OK).await;
         let client = Arc::new(
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap(),
+            QuotaClient::new(
+                url,
+                "test@example.com",
+                "test-token",
+                Duration::from_secs(5),
+                Duration::from_secs(3600),
+            )
+            .unwrap(),
         );
         let cache = Arc::new(QuotaCache::new(client, 1024));
 

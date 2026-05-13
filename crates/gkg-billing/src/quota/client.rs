@@ -1,10 +1,13 @@
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use reqwest::header::{CACHE_CONTROL, HeaderValue};
+use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use tracing::warn;
 
 use super::key::CacheKey;
+
+const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
+const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum QuotaDecision {
@@ -50,11 +53,33 @@ pub(crate) struct QuotaClient {
 impl QuotaClient {
     pub(crate) fn new(
         base_url: String,
+        api_user: &str,
+        api_token: &str,
         request_timeout: Duration,
         default_ttl: Duration,
     ) -> Result<Self, reqwest::Error> {
+        // Bake the admin credentials into the client's default headers so
+        // every call carries `X-Admin-Email` / `X-Admin-Token`. CDot's
+        // `Api::V1::Consumers::ResolveController` uses these for the Admin
+        // token authentication handler — without them the resolve endpoint
+        // returns 401, which would silently fall through to FailOpen.
+        let mut headers = HeaderMap::new();
+        // Invalid header values (control chars, etc.) shouldn't happen with
+        // well-formed credentials from config, but treat parse failures the
+        // same as empty creds by skipping the header — caller gates the
+        // service to disabled when creds are blank, so we shouldn't end up
+        // here with garbage in normal operation.
+        if let Ok(v) = HeaderValue::from_str(api_user) {
+            headers.insert(X_ADMIN_EMAIL, v);
+        }
+        if let Ok(mut v) = HeaderValue::from_str(api_token) {
+            v.set_sensitive(true);
+            headers.insert(X_ADMIN_TOKEN, v);
+        }
+
         let http = reqwest::Client::builder()
             .timeout(request_timeout)
+            .default_headers(headers)
             .build()?;
         Ok(Self {
             http,
@@ -207,8 +232,14 @@ mod tests {
     #[tokio::test]
     async fn two_hundred_maps_to_allow() {
         let url = stub_server(AxumStatus::OK, Some("max-age=60")).await;
-        let client =
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap();
+        let client = QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
         let outcome = client.check(&sample_key()).await;
         match outcome {
             QuotaOutcome::Decided { decision, ttl } => {
@@ -222,8 +253,14 @@ mod tests {
     #[tokio::test]
     async fn four_oh_two_maps_to_quota_exhausted() {
         let url = stub_server(AxumStatus::PAYMENT_REQUIRED, None).await;
-        let client =
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(42)).unwrap();
+        let client = QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(42),
+        )
+        .unwrap();
         let outcome = client.check(&sample_key()).await;
         match outcome {
             QuotaOutcome::Decided { decision, ttl } => {
@@ -237,8 +274,14 @@ mod tests {
     #[tokio::test]
     async fn four_oh_three_maps_to_entitlement_failed() {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
-        let client =
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap();
+        let client = QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
         let outcome = client.check(&sample_key()).await;
         assert!(matches!(
             outcome,
@@ -252,8 +295,14 @@ mod tests {
     #[tokio::test]
     async fn five_xx_fails_open() {
         let url = stub_server(AxumStatus::INTERNAL_SERVER_ERROR, None).await;
-        let client =
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap();
+        let client = QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
         assert_eq!(client.check(&sample_key()).await, QuotaOutcome::FailOpen);
     }
 
@@ -264,8 +313,14 @@ mod tests {
         // surprise codes (418, 503, 504, gateway proxies, ...) don't block
         // traffic.
         let url = stub_server(AxumStatus::IM_A_TEAPOT, None).await;
-        let client =
-            QuotaClient::new(url, Duration::from_secs(5), Duration::from_secs(3600)).unwrap();
+        let client = QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
         assert_eq!(client.check(&sample_key()).await, QuotaOutcome::FailOpen);
     }
 
@@ -275,6 +330,8 @@ mod tests {
         // Unroutable port — the connect fails before any response can be read.
         let client = QuotaClient::new(
             "http://127.0.0.1:1".into(),
+            "test@example.com",
+            "test-token",
             Duration::from_millis(500),
             Duration::from_secs(3600),
         )

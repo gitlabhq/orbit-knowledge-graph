@@ -36,19 +36,34 @@ struct QuotaServiceInner {
 }
 
 impl QuotaService {
-    /// Build a quota service from `BillingConfig`. The check fires only when
-    /// **both** `billing.enabled` and `billing.quota.enabled` are true — the
-    /// parent flag is the SOX-audited surface, the child is the operational
-    /// kill-switch. Either flag off → returns a disabled service that always
-    /// allows.
+    /// Build a quota service from `BillingConfig`. The check fires when
+    /// `billing.quota.enabled` is true, independently of `billing.enabled` —
+    /// billing event emission and quota enforcement are separate operational
+    /// concerns (you may want one without the other during rollout).
     pub fn from_config(billing: &BillingConfig, environment: &str) -> Result<Self, reqwest::Error> {
-        if !(billing.enabled && billing.quota.enabled) {
+        if !billing.quota.enabled {
             return Ok(Self { inner: None });
         }
 
         let cfg = &billing.quota;
+
+        // Mirrors AIGW's `self.enabled = api_user is not None and api_token is not None`
+        // guard (lib/usage_quota/client.py). Without admin credentials every
+        // call to CDot returns 401, which falls through our match arm into
+        // FailOpen and silently bypasses the gate. Return disabled so prod
+        // can't accidentally ship a no-op quota check.
+        if cfg.api_user.is_empty() || cfg.api_token.is_empty() {
+            warn!(
+                "quota.enabled=true but api_user or api_token is empty; \
+                 disabling quota gate to avoid silent fail-open on 401"
+            );
+            return Ok(Self { inner: None });
+        }
+
         let client = QuotaClient::new(
             cfg.customers_dot_url.clone(),
+            &cfg.api_user,
+            &cfg.api_token,
             Duration::from_millis(cfg.request_timeout_ms),
             Duration::from_secs(cfg.default_ttl_secs),
         )?;
@@ -158,6 +173,8 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url,
+                api_user: "test@example.com".into(),
+                api_token: "test-token".into(),
                 request_timeout_ms: 5_000,
                 default_ttl_secs: 3600,
                 max_cache_entries: 1024,
@@ -176,20 +193,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn from_config_disabled_when_billing_off() {
-        // billing.quota.enabled = true but billing.enabled = false → still disabled.
-        // This is the SOX gate: quota cannot fire without the parent billing flag.
+    async fn from_config_independent_of_billing_flag() {
+        // Quota gate fires regardless of billing.enabled — emission and
+        // enforcement are separate concerns. With billing.enabled=false and
+        // billing.quota.enabled=true the gate must still fire (a 402 stub
+        // here proves we actually reached the wire).
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let cfg = BillingConfig {
             enabled: false,
             collector_url: String::new(),
             quota: QuotaConfig {
                 enabled: true,
-                customers_dot_url: "http://unused".into(),
-                ..Default::default()
+                customers_dot_url: url,
+                api_user: "test@example.com".into(),
+                api_token: "test-token".into(),
+                request_timeout_ms: 5_000,
+                default_ttl_secs: 3600,
+                max_cache_entries: 1024,
             },
         };
         let svc = QuotaService::from_config(&cfg, "production").unwrap();
-        assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+
+        let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -204,6 +231,33 @@ mod tests {
         };
         let svc = QuotaService::from_config(&cfg, "production").unwrap();
         assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn from_config_disabled_when_api_credentials_missing() {
+        // Mirrors AIGW: without admin creds we'd hit 401 in prod and silently
+        // fail open. Force the service disabled so operators see "off" rather
+        // than "always allow."
+        let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
+        let cfg = BillingConfig {
+            enabled: true,
+            collector_url: String::new(),
+            quota: QuotaConfig {
+                enabled: true,
+                customers_dot_url: url,
+                api_user: String::new(),
+                api_token: String::new(),
+                request_timeout_ms: 5_000,
+                default_ttl_secs: 3600,
+                max_cache_entries: 1024,
+            },
+        };
+        let svc = QuotaService::from_config(&cfg, "production").unwrap();
+
+        // Even though the stub would return 402, the service is disabled and
+        // never touches the wire.
+        assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

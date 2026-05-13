@@ -220,23 +220,33 @@ async fn run_webserver(
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
+    }
 
-        if config.billing.quota.enabled {
-            if config.billing.quota.customers_dot_url.trim().is_empty() {
-                return Err(anyhow::anyhow!(
-                    "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
-                     set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
-                ));
-            }
-            info!(
-                customers_dot_url = %config.billing.quota.customers_dot_url,
-                "initializing usage quota gate"
-            );
-            let environment = config.analytics.deployment.environment.as_str();
-            let quota = QuotaService::from_config(&config.billing, environment)
-                .map_err(|e| anyhow::anyhow!("quota service initialization failed: {e}"))?;
-            grpc_server = grpc_server.with_quota(Arc::new(quota));
+    if config.billing.quota.enabled {
+        if config.billing.quota.customers_dot_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
+                 set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
+            ));
         }
+        if config.billing.quota.api_user.trim().is_empty()
+            || config.billing.quota.api_token.trim().is_empty()
+        {
+            return Err(anyhow::anyhow!(
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is empty — \
+                 set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN \
+                 (or mount /etc/secrets/billing__quota__api_token in K8s). Without these \
+                 CustomersDot returns 401 and the gate silently fails open."
+            ));
+        }
+        info!(
+            customers_dot_url = %config.billing.quota.customers_dot_url,
+            "initializing usage quota gate"
+        );
+        let environment = config.analytics.deployment.environment.as_str();
+        let quota = QuotaService::from_config(&config.billing, environment)
+            .map_err(|e| anyhow::anyhow!("quota service initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_quota(Arc::new(quota));
     }
 
     if config.analytics.enabled {
