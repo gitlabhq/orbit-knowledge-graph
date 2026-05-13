@@ -51,13 +51,13 @@ properties:
     type: string
     source: new_path
     nullable: false
-    description: "File path after rename or move."
+    description: "File path after the change. Differs from old_path only on renames."
 
   old_path:
     type: string
     source: old_path
     nullable: false
-    description: "File path before the change."
+    description: "File path before the change. Preferred for file lookups."
 
   new_file:
     type: boolean
