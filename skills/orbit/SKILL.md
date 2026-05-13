@@ -96,7 +96,7 @@ glab orbit local --update    # update to latest compatible version
 |---|---|
 | Query the production GitLab Knowledge Graph | `glab orbit remote` |
 | Index a local repository for offline analysis | `glab orbit local` |
-| Use the Orbit binary directly without glab wrappers | `glab orbit local --` |
+| Use a custom or pre-built binary instead of the managed one | Set `orbit_local_binary_path` / `GLAB_ORBIT_LOCAL_BINARY_PATH` |
 
 See [`references/local_cli.md`](references/local_cli.md) for full config keys,
 pass-through args, and usage examples.

@@ -31,6 +31,8 @@ glab orbit local --install --yes
 glab orbit local --update
 ```
 
+`--install` and `--update` are mutually exclusive; passing both returns an error.
+
 ## Pass-through args
 
 All arguments that are not `--install`, `--update`, `--yes`/`-y`, or `--help` are
@@ -39,7 +41,7 @@ passed directly to the Orbit local binary:
 ```bash
 glab orbit local <subcommand> [flags...]
 glab orbit local --help        # shows this glab wrapper's help
-glab orbit local -- --help     # passes --help through to the orbit binary
+glab orbit local -- --help     # forwards both '--' and '--help' as raw args to the orbit binary
 ```
 
 ## Configuration
