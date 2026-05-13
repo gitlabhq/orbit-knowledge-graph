@@ -272,10 +272,10 @@ Find merged merge requests in a project:
 }
 ```
 
-Find every pipeline that ran for one merge request. To match what the merge
-request's **Pipelines** tab, the REST `/merge_requests/:iid/pipelines`
-endpoint, and the GraphQL `mergeRequest.pipelines` connection return, filter
-`Pipeline.source` to `merge_request_event`:
+Find every pipeline that ran for one merge request. Always filter
+`Pipeline.source = "merge_request_event"` to match what the merge request's
+**Pipelines** tab, the REST `/merge_requests/:iid/pipelines` endpoint, and
+the GraphQL `mergeRequest.pipelines` connection return:
 
 ```json
 {
@@ -294,25 +294,24 @@ endpoint, and the GraphQL `mergeRequest.pipelines` connection return, filter
 }
 ```
 
-`merge_request_id` is the merge request's internal numeric `id` (not the
-project-scoped `iid`). Look it up first with a `MergeRequest` traversal that
+`merge_request_id` is the merge request's internal numeric `id`, not the
+project-scoped `iid`. Look it up first with a `MergeRequest` traversal that
 filters by `iid` and `project_id`, then plug the `id` into the query above.
 
-The `source` filter matters. The graph links every CI pipeline ever spawned
-in the context of a merge request to that merge request, including the
-downstream child pipelines that parent pipelines trigger (`source` =
-`parent_pipeline`). Without the `source = "merge_request_event"` filter,
-both the `Pipeline.merge_request_id` property and the
-`MergeRequest --TRIGGERED--> Pipeline` edge return every parent *and* child
-pipeline. The result over-counts by a large factor for any merge request with
-parent-child pipeline fan-out, and does not match the merge request UI or
-REST API definitions of "pipelines for this MR". Apply the same filter when
-traversing `MergeRequest --TRIGGERED--> Pipeline` in a multi-node query.
+Both `Pipeline.merge_request_id` and the `MergeRequest --TRIGGERED-->
+Pipeline` edge link an MR to every CI pipeline spawned in its context,
+including the downstream child pipelines (`source = "parent_pipeline"`)
+that the top-level MR pipelines trigger. Without the
+`source = "merge_request_event"` filter, the result over-counts by a large
+factor on any MR that uses parent-child pipeline fan-out, and does not
+match the MR UI or the REST and GraphQL definitions of "pipelines for this
+MR". Apply the same filter when traversing
+`MergeRequest --TRIGGERED--> Pipeline` in a multi-node query.
 
-`MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` is a related but different
-edge. It points to the single most recent pipeline running against the tip
-of the merge request's source branch. Use it for "what is currently running",
-not for pipeline history.
+`MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` is a different edge. It
+points to the single most recent pipeline running against the tip of the
+merge request's source branch. Use it for "what is currently running", not
+for pipeline history.
 
 ## Aggregation
 

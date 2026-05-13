@@ -77,12 +77,23 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 
 ## Pipelines that ran for one merge request
 
-To match the merge request's **Pipelines** tab, the REST
-`/merge_requests/:iid/pipelines` endpoint, and the GraphQL
-`mergeRequest.pipelines` connection, filter `Pipeline.source` to
-`merge_request_event`. `merge_request_id` is the merge request's internal `id`
-(not the project-scoped `iid`); look it up with the [MR-by-IID recipe](#look-up-a-merge-request-by-iid)
-above and use the returned `id`.
+> **Always filter `Pipeline.source = "merge_request_event"` for this question.**
+> The graph also stores the downstream child pipelines those top-level MR
+> pipelines triggered (`source = "parent_pipeline"`). Both
+> `Pipeline.merge_request_id` and the `MergeRequest --TRIGGERED--> Pipeline`
+> edge return parents **and** children. Without the `source` filter you
+> will over-count by a factor of 5-10× and the answer will not match the
+> MR's **Pipelines** tab, the REST `/merge_requests/:iid/pipelines`
+> endpoint, or the GraphQL `mergeRequest.pipelines` connection.
+> `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` is unrelated: it points
+> to the one current head pipeline, useful for "what is running now" but
+> not for history.
+
+The canonical query is single-node and filters `Pipeline.merge_request_id`
+plus `source`. `merge_request_id` is the MR's internal numeric `id` (not the
+project-scoped `iid`); look it up first with the
+[MR-by-IID recipe](#look-up-a-merge-request-by-iid) and reuse the returned
+`id`.
 
 ```json
 {
@@ -102,19 +113,31 @@ above and use the returned `id`.
 }
 ```
 
-> **The `source` filter matters.** The graph links every CI pipeline spawned
-> in the context of a merge request — including the downstream child
-> pipelines (`source = "parent_pipeline"`) that parent pipelines trigger.
-> Without the `source = "merge_request_event"` filter, both
-> `Pipeline.merge_request_id` and the `MergeRequest --TRIGGERED--> Pipeline`
-> edge return parent **and** child pipelines, which over-counts and does
-> not match what the MR UI / REST / GraphQL surfaces show.
->
-> `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` points to one pipeline (the
-> current head). Use it for "what is running now", not for history.
+Apply the same filter when narrowing by status — for example, "failed
+pipelines for this MR":
 
-Count those pipelines by status (use `aggregation`, not `length` after a
-traversal — the server enforces selectivity and a default limit of 30):
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p", "entity": "Pipeline",
+      "filters": {
+        "merge_request_id": {"op": "eq", "value": 482908721},
+        "source": {"op": "eq", "value": "merge_request_event"},
+        "status": {"op": "eq", "value": "failed"}
+      },
+      "columns": ["id", "status", "sha", "ref", "failure_reason", "duration", "created_at"]
+    },
+    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "limit": 100
+  }
+}
+```
+
+Count by status with a single-node `aggregation` (keep the node count at
+one — adding `MergeRequest` or `Project` as extra nodes can change the
+underlying join shape and inflate the count):
 
 ```json
 {
@@ -135,7 +158,9 @@ traversal — the server enforces selectivity and a default limit of 30):
 }
 ```
 
-The same filter applies when starting from the MR side via `TRIGGERED`:
+If you only have the MR's `iid` and not its internal `id`, the equivalent
+two-node form via `TRIGGERED` works — still with the `source` filter on the
+Pipeline node:
 
 ```json
 {
