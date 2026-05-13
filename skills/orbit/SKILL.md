@@ -90,6 +90,14 @@ glab orbit local --update    # update to latest compatible version
 
 **Supported platforms:** macOS and Linux only (x86_64/aarch64; no Windows).
 
+### When to prefer `glab orbit local` vs `glab orbit remote`
+
+| Scenario | Recommended |
+|---|---|
+| Query the production GitLab Knowledge Graph | `glab orbit remote` |
+| Index a local repository for offline analysis | `glab orbit local` |
+| Use the Orbit binary directly without glab wrappers | `glab orbit local --` |
+
 See [`references/local_cli.md`](references/local_cli.md) for full config keys,
 pass-through args, and usage examples.
 
