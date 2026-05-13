@@ -75,6 +75,87 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 }
 ```
 
+## Pipelines that ran for one merge request
+
+To match the merge request's **Pipelines** tab, the REST
+`/merge_requests/:iid/pipelines` endpoint, and the GraphQL
+`mergeRequest.pipelines` connection, filter `Pipeline.source` to
+`merge_request_event`. `merge_request_id` is the merge request's internal `id`
+(not the project-scoped `iid`); look it up with the [MR-by-IID recipe](#look-up-a-merge-request-by-iid)
+above and use the returned `id`.
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p", "entity": "Pipeline",
+      "filters": {
+        "merge_request_id": {"op": "eq", "value": 482908721},
+        "source": {"op": "eq", "value": "merge_request_event"}
+      },
+      "columns": ["id", "status", "source", "sha", "ref", "created_at"]
+    },
+    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "limit": 100
+  }
+}
+```
+
+> **The `source` filter matters.** The graph links every CI pipeline spawned
+> in the context of a merge request — including the downstream child
+> pipelines (`source = "parent_pipeline"`) that parent pipelines trigger.
+> Without the `source = "merge_request_event"` filter, both
+> `Pipeline.merge_request_id` and the `MergeRequest --TRIGGERED--> Pipeline`
+> edge return parent **and** child pipelines, which over-counts and does
+> not match what the MR UI / REST / GraphQL surfaces show.
+>
+> `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` points to one pipeline (the
+> current head). Use it for "what is running now", not for history.
+
+Count those pipelines by status (use `aggregation`, not `length` after a
+traversal — the server enforces selectivity and a default limit of 30):
+
+```json
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "p", "entity": "Pipeline",
+       "filters": {
+         "merge_request_id": {"op": "eq", "value": 482908721},
+         "source": {"op": "eq", "value": "merge_request_event"}
+       }}
+    ],
+    "group_by": [{"kind": "property", "node": "p", "property": "status", "alias": "status"}],
+    "aggregations": [{"function": "count", "target": "p", "alias": "pipeline_count"}],
+    "aggregation_sort": {"column": "pipeline_count", "direction": "DESC"},
+    "limit": 20
+  }
+}
+```
+
+The same filter applies when starting from the MR side via `TRIGGERED`:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest",
+       "filters": {"iid": {"op": "eq", "value": 235291},
+                   "project_id": {"op": "eq", "value": 278964}}},
+      {"id": "p",  "entity": "Pipeline",
+       "filters": {"source": {"op": "eq", "value": "merge_request_event"}},
+       "columns": ["id", "status", "sha", "created_at"]}
+    ],
+    "relationships": [{"type": "TRIGGERED", "from": "mr", "to": "p"}],
+    "order_by": {"node": "p", "property": "created_at", "direction": "DESC"},
+    "limit": 100
+  }
+}
+```
+
 ## `traversal` (multi-node) — start from nodes, follow relationships
 
 List opened merge requests and their authors. Requires at least two nodes and
