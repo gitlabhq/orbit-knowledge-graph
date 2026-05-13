@@ -13,7 +13,7 @@ use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
-use gkg_billing::BillingTracker;
+use gkg_billing::{BillingTracker, QuotaService};
 
 use super::service::KnowledgeGraphServiceImpl;
 
@@ -64,6 +64,11 @@ impl GrpcServer {
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
+        self
+    }
+
+    pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
+        self.service = self.service.with_quota(quota);
         self
     }
 

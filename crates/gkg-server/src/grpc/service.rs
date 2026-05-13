@@ -31,7 +31,7 @@ use crate::proto::{
     invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
-use gkg_billing::BillingTracker;
+use gkg_billing::{BillingTracker, QuotaInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
@@ -71,6 +71,7 @@ pub struct KnowledgeGraphServiceImpl {
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
     stream_timeout_secs: u64,
+    quota: Arc<QuotaService>,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -99,7 +100,13 @@ impl KnowledgeGraphServiceImpl {
             cluster_health,
             graph_status,
             stream_timeout_secs,
+            quota: Arc::new(QuotaService::disabled()),
         }
+    }
+
+    pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
+        self.quota = quota;
+        self
     }
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
@@ -277,6 +284,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
         record_ai_session_id(&claims.ai_session_id);
+
+        // Quota gate runs before we open the streaming channel so a denied
+        // request short-circuits with gRPC RESOURCE_EXHAUSTED instead of
+        // leaving a half-used stream open.
+        self.quota.check(&QuotaInputs::from(&claims)).await?;
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
@@ -1121,6 +1133,8 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            feature_qualified_name: None,
+            feature_enablement_type: None,
         }
     }
 

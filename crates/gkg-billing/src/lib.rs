@@ -10,9 +10,11 @@ pub mod constants;
 pub mod inputs;
 mod metrics;
 mod observer;
+pub mod quota;
 mod tracker;
 
 pub use inputs::BillingInputs;
 pub use metrics::register as register_metrics;
 pub use observer::BillingObserver;
+pub use quota::{QuotaInputs, QuotaService};
 pub use tracker::{BillingTracker, SnowplowBillingTracker};

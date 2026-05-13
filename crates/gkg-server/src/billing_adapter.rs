@@ -8,7 +8,7 @@
 //! directly. Per SOX boundary policy, this file plus the `gkg-billing`
 //! crate are the entire auditable surface for billing in this repository.
 
-use gkg_billing::BillingInputs;
+use gkg_billing::{BillingInputs, QuotaInputs};
 
 use crate::auth::Claims;
 
@@ -26,6 +26,21 @@ impl From<&Claims> for BillingInputs {
             host_name: c.host_name.clone(),
             root_namespace_id: c.root_namespace_id,
             deployment_type: c.deployment_type.clone(),
+        }
+    }
+}
+
+impl From<&Claims> for QuotaInputs {
+    fn from(c: &Claims) -> Self {
+        Self {
+            source_type: c.source_type.clone(),
+            user_id: c.user_id as i64,
+            realm: c.realm.clone(),
+            global_user_id: c.global_user_id.clone(),
+            root_namespace_id: c.root_namespace_id,
+            unique_instance_id: c.unique_instance_id.clone(),
+            feature_qualified_name: c.feature_qualified_name.clone(),
+            feature_enablement_type: c.feature_enablement_type.clone(),
         }
     }
 }

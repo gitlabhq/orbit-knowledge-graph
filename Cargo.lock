@@ -5161,13 +5161,20 @@ dependencies = [
 name = "gkg-billing"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "gkg-observability",
  "gkg-server-config",
  "labkit",
  "labkit-events",
+ "moka",
  "opentelemetry",
  "query-engine",
+ "rand 0.10.1",
+ "reqwest 0.13.3",
+ "rustls",
  "serde_json",
+ "tokio",
+ "tonic",
  "tracing",
 ]
 
@@ -11169,6 +11176,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

@@ -91,6 +91,8 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            feature_qualified_name: None,
+            feature_enablement_type: None,
         };
 
         let token = encode(
