@@ -49,7 +49,9 @@ Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
 
 Some clients only support local stdio MCP servers. For those,
 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
-as a local command:
+as a local command.
+
+**Claude Code, Cursor, Codex** — add to your agent's MCP config:
 
 ```json
 {
@@ -61,6 +63,24 @@ as a local command:
   }
 }
 ```
+
+**opencode** — add to `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "mcp": {
+    "gitlab-orbit": {
+      "type": "local",
+      "command": ["npx", "mcp-remote", "https://gitlab.com/api/v4/orbit/mcp"]
+    }
+  }
+}
+```
+
+> [!note]
+> opencode requires `"type": "local"` and places command and arguments together
+> in a single array. Using a separate `args` field or omitting `type` causes a
+> `ConfigInvalidError`.
 
 Authentication uses your existing `glab auth login` session - no token to copy or
 paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
