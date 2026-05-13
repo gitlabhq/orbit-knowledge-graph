@@ -20,7 +20,7 @@ EXAMPLES:
     curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --version v0.51.0
     curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --force
 
-    # Windows (CMD or PowerShell, no Git Bash required)
+    # Windows Git Bash Supports Execution from: CMD, powershell or pwsh
     C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh'
     C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh --version v0.51.0'
     C:\Progra~1\Git\bin\sh.exe -c 'curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh -o $TMP/install.sh ; bash $TMP/install.sh --force'
