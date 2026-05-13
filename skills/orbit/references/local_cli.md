@@ -40,9 +40,15 @@ passed directly to the Orbit local binary:
 
 ```bash
 glab orbit local <subcommand> [flags...]
-glab orbit local --help        # shows this glab wrapper's help
-glab orbit local -- --help     # forwards both '--' and '--help' as raw args to the orbit binary
+glab orbit local --help           # shows this glab wrapper's help
+glab orbit local help             # shows the orbit binary's top-level help
+glab orbit local index --help     # shows orbit's help for the 'index' subcommand
 ```
+
+> **Note:** `glab orbit local -- --help` does **not** show orbit's help. glab forwards
+> `--` and `--help` as-is, but orbit's argument parser treats `--` as end-of-flags and
+> then sees `--help` as an unknown subcommand name, resulting in an error. Use
+> `glab orbit local help` instead.
 
 ## Configuration
 
