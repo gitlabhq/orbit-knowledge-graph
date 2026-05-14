@@ -1,0 +1,472 @@
+name: "Ruby DSL declarations — CanCanCan conditions, mixin imports, prepend_mod_with (issue #600162)"
+
+fixtures:
+  # ── CanCanCan policy DSL (Gap 1) ──────────────────────────────
+  - path: app/policies/base_policy.rb
+    content: |
+      class BasePolicy
+        def team_member?
+          true
+        end
+
+        def maintainer?
+          true
+        end
+
+        def admin?
+          false
+        end
+      end
+
+  - path: app/policies/project_policy.rb
+    content: |
+      class ProjectPolicy < BasePolicy
+        condition(:guest) { team_member? }
+        condition(:reporter) { team_member? && !maintainer? }
+        condition(:maintainer) { maintainer? }
+        condition(:admin) { admin? }
+
+        policy :read_namespace do
+          enable :read_namespace
+        end
+      end
+
+  # ── Mixin imports (Gap 2) ─────────────────────────────────────
+  - path: app/models/concerns/internal_events_tracking.rb
+    content: |
+      module Gitlab
+        module InternalEventsTracking
+          def track_internal_event(name)
+            true
+          end
+        end
+      end
+
+  - path: app/services/track_service.rb
+    content: |
+      class TrackService
+        include Gitlab::InternalEventsTracking
+        extend Forwardable
+
+        def run
+          track_internal_event("hit")
+        end
+      end
+
+  # ── GitLab CE/EE composition (Gap 3) ──────────────────────────
+  - path: ee/app/models/ee/project.rb
+    content: |
+      module EE
+        module Project
+          def ee_only_method
+            true
+          end
+        end
+      end
+
+  - path: app/models/project.rb
+    content: |
+      class Project
+        def repository
+          @repository
+        end
+      end
+
+      Project.prepend_mod_with('Project')
+
+  - path: ee/app/models/ee/routable.rb
+    content: |
+      module EE
+        module Routable
+          def routable_helper
+            true
+          end
+        end
+      end
+
+  - path: app/models/namespace.rb
+    content: |
+      class Namespace
+        def name
+          @name
+        end
+      end
+
+      Namespace.include_mod_with('Routable')
+
+  # Gap A: qualified receiver (`::Foo` and `Foo::Bar`) on prepend_mod_with
+  - path: ee/app/models/ee/issue.rb
+    content: |
+      module EE
+        module Issue
+          def ee_issue_method
+            true
+          end
+        end
+      end
+
+  - path: app/models/issue.rb
+    content: |
+      class Issue
+        def title
+          @title
+        end
+      end
+
+      ::Issue.prepend_mod_with('Issue')
+
+  # Gap B: prepend_mod_with for a class nested inside a module. GitLab's
+  # prepend_mod_with('Token') resolves to the flat `EE::Token` regardless
+  # of the receiver's namespace depth.
+  - path: ee/app/models/ee/token.rb
+    content: |
+      module EE
+        module Token
+          def ee_token_method
+            true
+          end
+        end
+      end
+
+  - path: app/models/gitlab/auth/token.rb
+    content: |
+      module Gitlab
+        module Auth
+          class Token
+            def value
+              @value
+            end
+          end
+        end
+      end
+
+      Gitlab::Auth::Token.prepend_mod_with('Token')
+
+  # Gap C: prepend_mod_with with kwargs (non-string positional args should be ignored)
+  - path: ee/app/models/ee/group.rb
+    content: |
+      module EE
+        module Group
+          def ee_group_method
+            true
+          end
+        end
+      end
+
+  - path: app/models/group.rb
+    content: |
+      class Group
+        def path
+          @path
+        end
+      end
+
+      Group.prepend_mod_with('Group', namespace: ::EE)
+
+  # Multi-arg `include` on one line should produce one ImportedSymbol per
+  # constant. Also exercises a class that has BOTH a superclass and
+  # prepend_mod_with — all three EXTENDS edges should land.
+  - path: app/models/concerns/sortable.rb
+    content: |
+      module Sortable
+        def sort_by_field(field)
+          true
+        end
+      end
+
+  - path: app/models/concerns/cacheable.rb
+    content: |
+      module Cacheable
+        def cache_key
+          "cache"
+        end
+      end
+
+  - path: ee/app/models/ee/widget.rb
+    content: |
+      module EE
+        module Widget
+          def ee_widget_method
+            true
+          end
+        end
+      end
+
+  - path: app/models/widget.rb
+    content: |
+      class Widget < ApplicationRecord
+        include Sortable, Cacheable
+
+        def name
+          @name
+        end
+      end
+
+      Widget.prepend_mod_with('Widget')
+
+  # Required for the Widget < ApplicationRecord EXTENDS to resolve.
+  - path: app/models/application_record.rb
+    content: |
+      class ApplicationRecord
+        def save!
+        end
+      end
+
+  # `condition` with kwargs and `condition` without a block. The first
+  # should still emit a def and own its block; the second should NOT own
+  # the (nonexistent) subtree.
+  - path: app/policies/group_policy.rb
+    content: |
+      class GroupPolicy < BasePolicy
+        condition(:owner, scope: :user) { team_member? }
+        condition :stale_token
+
+        before_save :sanitize_input
+      end
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # GAP 1: condition/policy become synthetic Method defs
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "condition declarations become Method definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'ProjectPolicy::guest',
+        'ProjectPolicy::reporter',
+        'ProjectPolicy::maintainer',
+        'ProjectPolicy::admin'
+      ] AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "policy declaration becomes Method definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'ProjectPolicy::read_namespace'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP 1: CALLS through DSL block bodies attribute to synth def
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "condition :guest body calls inherited team_member?"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ProjectPolicy::guest'
+        AND callee.fqn = 'BasePolicy::team_member?'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "condition :reporter body calls both team_member? and maintainer?"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ProjectPolicy::reporter'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "BasePolicy::team_member?" } }
+      - { row: { callee: "BasePolicy::maintainer?" } }
+
+  - name: "condition :admin body calls inherited admin?"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ProjectPolicy::admin'
+        AND callee.fqn = 'BasePolicy::admin?'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP 2: include Module produces ImportedSymbol
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "include Gitlab::InternalEventsTracking produces ImportedSymbol"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/services/track_service.rb'
+        AND s.import_type = 'Include'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "InternalEventsTracking", path: "Gitlab" } }
+
+  - name: "extend Forwardable produces ImportedSymbol"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/services/track_service.rb'
+        AND s.import_type = 'Extend'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Forwardable", path: "" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP 3: prepend_mod_with as EXTENDS + ImportedSymbol
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Project.prepend_mod_with('Project') creates EXTENDS to EE::Project"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Project'
+        AND parent.fqn = 'EE::Project'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "Namespace.include_mod_with('Routable') creates EXTENDS to EE::Routable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Namespace'
+        AND parent.fqn = 'EE::Routable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "prepend_mod_with also surfaces as ImportedSymbol (EE::Project)"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/models/project.rb'
+        AND s.import_type = 'PrependModWith'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Project", path: "EE" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP A: qualified receiver on prepend_mod_with
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "::Issue.prepend_mod_with('Issue') creates EXTENDS to EE::Issue"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Issue'
+        AND parent.fqn = 'EE::Issue'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP B: prepend_mod_with for a class nested inside modules
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Gitlab::Auth::Token.prepend_mod_with('Token') creates EXTENDS to EE::Token"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Gitlab::Auth::Token'
+        AND e.edge_kind = 'Extends'
+      RETURN parent.fqn AS parent
+    assert:
+      - { row: { parent: "EE::Token" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # GAP C: prepend_mod_with with kwargs ignores non-string args
+  # ══════════════════════════════════════════════════════════════
+
+  # ══════════════════════════════════════════════════════════════
+  # Multi-arg `include`: one ImportedSymbol + one EXTENDS per constant
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "include Sortable, Cacheable produces two ImportedSymbol rows"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/models/widget.rb'
+        AND s.import_type = 'Include'
+      RETURN s.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Sortable" } }
+      - { row: { name: "Cacheable" } }
+
+  - name: "Widget has three EXTENDS edges (superclass + 2 includes + prepend_mod_with)"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Widget'
+        AND e.edge_kind = 'Extends'
+      RETURN parent.fqn AS parent
+    assert:
+      - { row_count: 4 }
+      - { row: { parent: "ApplicationRecord" } }
+      - { row: { parent: "Sortable" } }
+      - { row: { parent: "Cacheable" } }
+      - { row: { parent: "EE::Widget" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # Negative & defensive: kwargs in condition, blockless condition,
+  # callbacks that reference (not define) methods.
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "condition(:owner, scope: :user) { ... } still extracts :owner as a Method def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'GroupPolicy::owner'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "condition(:owner) body calls attribute to the synthetic def under kwargs"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'GroupPolicy::owner'
+        AND callee.fqn = 'BasePolicy::team_member?'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "blockless `condition :stale_token` still emits a def but does not own a subtree"
+    queries:
+      - query: |
+          MATCH (d:Definition)
+          WHERE d.fqn = 'GroupPolicy::stale_token'
+            AND d.definition_type = 'Method'
+          RETURN d.fqn AS fqn
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'GroupPolicy::stale_token'
+            AND e.edge_kind = 'Calls'
+          RETURN callee.fqn AS callee
+        assert:
+          - { empty: true }
+
+  - name: "callback symbol args do NOT create synthetic defs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'GroupPolicy::sanitize_input'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 0 }
+
+  - name: "Group.prepend_mod_with('Group', namespace: ::EE) emits only EE::Group"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE child.fqn = 'Group'
+            AND e.edge_kind = 'Extends'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "EE::Group" } }
+      - query: |
+          MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+          WHERE f.path = 'app/models/group.rb'
+            AND s.import_type = 'PrependModWith'
+          RETURN s.name AS name, s.path AS path
+        assert:
+          - { row_count: 1 }
+          - { row: { name: "Group", path: "EE" } }

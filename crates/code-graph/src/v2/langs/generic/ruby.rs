@@ -2,10 +2,12 @@ use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, FieldAccessEntry, ImportRule,
-    LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
-    scope, scopes,
+    LanguageHooks, LoopRule, ReferenceRule, ScopeHookOutcome, ScopeRule, binding, branch,
+    loop_rule, reference, scope, scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use crate::v2::types::{
+    BindingKind, CanonicalDefinition, CanonicalImport, DefKind, ImportBindingKind, ImportMode,
+};
 use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -168,14 +170,17 @@ impl DslLanguage for RubyDsl {
     }
 }
 
-/// Extract synthetic definitions from attr_accessor/attr_reader/attr_writer
-/// and alias declarations.
+/// Extract synthetic definitions from Ruby DSL declarations
+/// (`attr_accessor`, `delegate`, `scope`, ActiveRecord associations, etc.)
+/// and from CanCanCan `condition :name { ... }` / `policy :name do ... end`
+/// — the latter return `OwnsSubtree` so refs inside the block attribute to
+/// the synthetic def, not the enclosing class.
 fn ruby_extract_attr_methods(
     node: &N<'_>,
-    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    defs: &mut Vec<CanonicalDefinition>,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
-) -> bool {
+) -> ScopeHookOutcome {
     let nk = node.kind();
     let nk_ref = nk.as_ref();
 
@@ -184,23 +189,14 @@ fn ruby_extract_attr_methods(
         if let Some(name_node) = node.field("name") {
             let name = name_node.text().to_string();
             if !name.is_empty() {
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
+                push_synthetic_method(defs, scope_stack, sep, name, "Method", DefKind::Method);
             }
         }
-        return true;
+        return ScopeHookOutcome::Handled;
     }
 
     if nk_ref != "call" {
-        return false;
+        return ScopeHookOutcome::NotHandled;
     }
     let method = node
         .field("method")
@@ -208,155 +204,145 @@ fn ruby_extract_attr_methods(
         .unwrap_or_default();
 
     let Some(args) = node.field("arguments") else {
-        return RUBY_DSL_METHODS.contains(&method.as_str());
+        return if RUBY_DSL_METHODS.contains(&method.as_str()) {
+            ScopeHookOutcome::Handled
+        } else {
+            ScopeHookOutcome::NotHandled
+        };
     };
 
-    // Helper: extract a method name from a simple_symbol node.
-    // `:foo` → `"foo"`. Returns None for non-symbol nodes.
-    let symbol_name = |node: &N<'_>| -> Option<String> {
-        if node.kind().as_ref() != "simple_symbol" {
-            return None;
-        }
-        let text = node.text();
-        let name = text.strip_prefix(':')?;
-        (!name.is_empty()).then(|| name.to_string())
-    };
-
-    // Helper: extract a method name from a simple_symbol OR string node.
-    // `:foo` → `"foo"`, `"foo"` → `"foo"`. Returns None for anything else.
-    let literal_name = |node: &N<'_>| -> Option<String> {
-        match node.kind().as_ref() {
-            "simple_symbol" => {
-                let text = node.text();
-                text.strip_prefix(':')
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-            }
-            "string" => node
-                .children()
-                .find(|c| c.kind().as_ref() == "string_content")
-                .map(|c| c.text().to_string())
-                .filter(|s| !s.is_empty()),
-            _ => None,
+    let symbols =
+        |args: &N<'_>| -> Vec<String> { args.children().filter_map(|a| symbol_text(&a)).collect() };
+    let push_each = |defs: &mut Vec<CanonicalDefinition>,
+                     names: Vec<String>,
+                     def_type: &'static str,
+                     kind: DefKind| {
+        for n in names {
+            push_synthetic_method(defs, scope_stack, sep, n, def_type, kind);
         }
     };
-
-    // Helper: push a synthetic def for each symbol arg (skips non-symbol children like pairs)
-    let push_symbol_defs = |args: &N<'_>,
-                            defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-                            def_type: &'static str,
-                            kind: DefKind| {
-        for arg in args.children() {
-            let Some(name) = symbol_name(&arg) else {
-                continue;
-            };
-            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
-                definition_type: def_type,
-                kind,
-                name,
-                fqn,
-                range: crate::v2::types::Range::empty(),
-                is_top_level: false,
-                metadata: None,
-            });
-        }
-    };
-
-    // Helper: push one synthetic def from the first symbol arg
-    let push_first_symbol = |args: &N<'_>,
-                             defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
-                             def_type: &'static str,
-                             kind: DefKind| {
-        for arg in args.children() {
-            let Some(name) = symbol_name(&arg) else {
-                continue;
-            };
-            let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-            defs.push(crate::v2::types::CanonicalDefinition {
-                definition_type: def_type,
-                kind,
-                name,
-                fqn,
-                range: crate::v2::types::Range::empty(),
-                is_top_level: false,
-                metadata: None,
-            });
-            break;
+    let push_first = |defs: &mut Vec<CanonicalDefinition>,
+                      mut names: Vec<String>,
+                      def_type: &'static str,
+                      kind: DefKind| {
+        if !names.is_empty() {
+            push_synthetic_method(defs, scope_stack, sep, names.remove(0), def_type, kind);
         }
     };
 
     match method.as_str() {
-        "attr_accessor" | "attr_reader" | "attr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
-            true
-        }
-        "class_attribute" | "mattr_accessor" | "cattr_accessor" | "mattr_reader"
-        | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
-            push_symbol_defs(&args, defs, "Attribute", DefKind::Property);
-            true
+        "attr_accessor" | "attr_reader" | "attr_writer" | "class_attribute" | "mattr_accessor"
+        | "cattr_accessor" | "mattr_reader" | "mattr_writer" | "cattr_reader" | "cattr_writer" => {
+            push_each(defs, symbols(&args), "Attribute", DefKind::Property);
+            ScopeHookOutcome::Handled
         }
         "delegate" => {
-            push_symbol_defs(&args, defs, "Method", DefKind::Method);
-            true
+            push_each(defs, symbols(&args), "Method", DefKind::Method);
+            ScopeHookOutcome::Handled
         }
         "def_delegators" | "def_delegator" => {
-            let mut skip_first = true;
-            for arg in args.children() {
-                let Some(name) = symbol_name(&arg) else {
-                    continue;
-                };
-                if skip_first {
-                    skip_first = false;
-                    continue;
-                }
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
+            // First symbol is the receiver; the rest are the methods.
+            let mut names = symbols(&args);
+            if !names.is_empty() {
+                names.remove(0);
             }
-            true
+            push_each(defs, names, "Method", DefKind::Method);
+            ScopeHookOutcome::Handled
         }
         "define_method" => {
-            for arg in args.children() {
-                let Some(name) = literal_name(&arg) else {
-                    continue;
-                };
-                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
-                defs.push(crate::v2::types::CanonicalDefinition {
-                    definition_type: "Method",
-                    kind: DefKind::Method,
-                    name,
-                    fqn,
-                    range: crate::v2::types::Range::empty(),
-                    is_top_level: false,
-                    metadata: None,
-                });
-                break;
+            // Accepts a symbol OR string literal as the method name.
+            let name = args.children().find_map(|a| literal_text(&a));
+            if let Some(n) = name {
+                push_synthetic_method(defs, scope_stack, sep, n, "Method", DefKind::Method);
             }
-            true
+            ScopeHookOutcome::Handled
         }
         "scope" => {
-            push_first_symbol(&args, defs, "StaticMethod", DefKind::Method);
-            true
+            push_first(defs, symbols(&args), "StaticMethod", DefKind::Method);
+            ScopeHookOutcome::Handled
         }
         "has_many" | "belongs_to" | "has_one" | "has_and_belongs_to_many" => {
-            push_first_symbol(&args, defs, "Method", DefKind::Method);
-            true
+            push_first(defs, symbols(&args), "Method", DefKind::Method);
+            ScopeHookOutcome::Handled
         }
-        // Callbacks: not handled here. Symbol args are refs, not defs.
+        // CanCanCan: `condition(:name) { body }` / `policy :name do ... end`
+        // produce a Method def whose CALLS edges come from the block body.
+        "condition" | "policy" => {
+            let has_block = node
+                .children()
+                .any(|c| matches!(c.kind().as_ref(), "do_block" | "block"));
+            let Some(name) = args.children().find_map(|a| symbol_text(&a)) else {
+                return ScopeHookOutcome::Handled;
+            };
+            let idx = defs.len() as u32;
+            push_synthetic_method(defs, scope_stack, sep, name, "Method", DefKind::Method);
+            if has_block {
+                ScopeHookOutcome::OwnsSubtree(idx)
+            } else {
+                ScopeHookOutcome::Handled
+            }
+        }
+        // Callbacks take symbol args that REFERENCE existing methods.
         "before_action" | "after_action" | "around_action" | "before_filter" | "after_filter"
         | "around_filter" | "before_validation" | "after_validation" | "after_create"
         | "after_save" | "before_save" | "before_create" | "after_update" | "before_update"
-        | "after_destroy" | "before_destroy" | "after_commit" | "after_rollback" => false,
-        _ => false,
+        | "after_destroy" | "before_destroy" | "after_commit" | "after_rollback" => {
+            ScopeHookOutcome::NotHandled
+        }
+        _ => ScopeHookOutcome::NotHandled,
     }
+}
+
+/// Push a `Method`-shaped synthetic def with `name` under the current scope.
+fn push_synthetic_method(
+    defs: &mut Vec<CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+    name: String,
+    def_type: &'static str,
+    kind: DefKind,
+) {
+    let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+    defs.push(CanonicalDefinition {
+        definition_type: def_type,
+        kind,
+        name,
+        fqn,
+        range: crate::v2::types::Range::empty(),
+        is_top_level: false,
+        metadata: None,
+    });
+}
+
+/// `:foo` → `Some("foo")`. None for non-symbol nodes or empty symbols.
+fn symbol_text(node: &N<'_>) -> Option<String> {
+    if node.kind().as_ref() != "simple_symbol" {
+        return None;
+    }
+    node.text()
+        .strip_prefix(':')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Static text of `:foo` or `"foo"`. None for dynamic / non-literal nodes.
+fn literal_text(node: &N<'_>) -> Option<String> {
+    match node.kind().as_ref() {
+        "simple_symbol" => symbol_text(node),
+        "string" => string_text(node),
+        _ => None,
+    }
+}
+
+/// Static contents of a `"foo"` node. None for interpolated strings.
+fn string_text(node: &N<'_>) -> Option<String> {
+    if node.kind().as_ref() != "string" {
+        return None;
+    }
+    node.children()
+        .find(|c| c.kind().as_ref() == "string_content")
+        .map(|c| c.text().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// DSL methods recognized by the on_scope hook. Used for early-return
@@ -424,19 +410,17 @@ fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
     None
 }
 
-/// Extract super types: superclass + include/extend calls in the class body.
+/// Extract super types from a class node: direct superclass, body-level
+/// `include`/`extend`/`prepend`, and GitLab `prepend_mod_with`-family calls
+/// (which often live at file scope, outside the class body — we walk
+/// ancestors to find them).
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
-    // Direct superclass: class Dog < Animal
-    // The "superclass" field wraps the type in a `superclass` node
-    // that includes the `<` token. Extract the inner constant or
-    // scope_resolution child directly.
     if let Some(s) = node.field("superclass")
-        && let Some(type_node) = s.children().find(|c| {
-            let k = c.kind();
-            k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
-        })
+        && let Some(type_node) = s
+            .children()
+            .find(|c| matches!(c.kind().as_ref(), "constant" | "scope_resolution"))
     {
         let name = type_node.text().to_string();
         if !name.is_empty() {
@@ -444,23 +428,21 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
         }
     }
 
-    // include/extend in body: include Foo, extend Bar
     if let Some(body) = node.field("body") {
         for child in body.children() {
             if child.kind().as_ref() != "call" {
                 continue;
             }
-            let method_name = child
+            let method = child
                 .field("method")
                 .map(|m| m.text().to_string())
                 .unwrap_or_default();
-            if method_name != "include" && method_name != "extend" && method_name != "prepend" {
+            if !matches!(method.as_str(), "include" | "extend" | "prepend") {
                 continue;
             }
             if let Some(args) = child.field("arguments") {
                 for arg in args.children() {
-                    let kind = arg.kind();
-                    if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
+                    if matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
                         types.push(arg.text().to_string());
                     }
                 }
@@ -468,53 +450,171 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
         }
     }
 
+    let class_name = node
+        .field("name")
+        .map(|n| n.text().to_string())
+        .unwrap_or_default();
+    if !class_name.is_empty() {
+        ruby_collect_mod_with_super_types(node, &class_name, &mut types);
+    }
+
     types
+}
+
+/// Walk ancestors of `class_node` collecting `EE::Arg` entries from
+/// `<Receiver>.prepend_mod_with('Arg')` / `include_mod_with` / `extend_mod_with`
+/// calls whose receiver's terminal `::` segment matches `class_name`.
+/// Walking ancestors (not just direct siblings) covers the common nested
+/// case `module Foo; class Bar; end; end; Foo::Bar.prepend_mod_with('Bar')`.
+fn ruby_collect_mod_with_super_types(
+    class_node: &N<'_>,
+    class_name: &str,
+    types: &mut Vec<String>,
+) {
+    let mut current = class_node.parent();
+    while let Some(ancestor) = current {
+        for sibling in ancestor.children() {
+            let call = if sibling.kind().as_ref() == "call" {
+                sibling
+            } else if let Some(c) = sibling.children().find(|c| c.kind().as_ref() == "call") {
+                c
+            } else {
+                continue;
+            };
+            let Some((_, names)) = parse_mod_with_call(&call) else {
+                continue;
+            };
+            // Receiver may be bare (`Project`), top-level-qualified
+            // (`::Project`), or namespace-qualified (`Foo::Project`).
+            let receiver_matches = call
+                .field("receiver")
+                .map(|r| {
+                    let t = r.text();
+                    let t = t.as_ref();
+                    t.rsplit("::").next().unwrap_or(t) == class_name
+                })
+                .unwrap_or(false);
+            if receiver_matches {
+                types.extend(names);
+            }
+        }
+        current = ancestor.parent();
+    }
+}
+
+/// Recognize `prepend_mod_with`/`include_mod_with`/`extend_mod_with` and
+/// return the matching `import_type` label + the `EE::`-qualified names
+/// derived from string literal args. Returns `None` if `call` isn't one
+/// of these macros. Skips non-literal-string args (kwargs, constants).
+fn parse_mod_with_call(call: &N<'_>) -> Option<(&'static str, Vec<String>)> {
+    let method = call.field("method")?.text().to_string();
+    let label = match method.as_str() {
+        "prepend_mod_with" => "PrependModWith",
+        "include_mod_with" => "IncludeModWith",
+        "extend_mod_with" => "ExtendModWith",
+        _ => return None,
+    };
+    let args = call.field("arguments")?;
+    let names = args
+        .children()
+        .filter_map(|arg| {
+            let raw = string_text(&arg)?;
+            Some(if raw.starts_with("EE::") {
+                raw
+            } else {
+                format!("EE::{raw}")
+            })
+        })
+        .collect();
+    Some((label, names))
 }
 
 fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
     if node.kind().as_ref() != "call" {
         return false;
     }
-
-    let method = match node.field("method") {
-        Some(m) => m.text().to_string(),
-        None => return false,
-    };
-
-    if method != "require" && method != "require_relative" {
+    let Some(method) = node.field("method").map(|m| m.text().to_string()) else {
         return false;
+    };
+    let Some(args) = node.field("arguments") else {
+        return false;
+    };
+
+    match method.as_str() {
+        "require" | "require_relative" => {
+            let path = args
+                .find(Child, Kind("string"))
+                .and_then(|s| s.find(Child, Kind("string_content")))
+                .map(|c| c.text().to_string());
+            if let Some(path) = path {
+                imports.push(CanonicalImport {
+                    import_type: if method == "require_relative" {
+                        "RequireRelative"
+                    } else {
+                        "Require"
+                    },
+                    binding_kind: ImportBindingKind::SideEffect,
+                    mode: ImportMode::Runtime,
+                    path,
+                    name: None,
+                    alias: None,
+                    scope_fqn: None,
+                    range: crate::v2::types::Range::empty(),
+                    is_type_only: false,
+                    wildcard: false,
+                });
+            }
+            true
+        }
+        "include" | "extend" | "prepend" => {
+            let import_type = match method.as_str() {
+                "include" => "Include",
+                "extend" => "Extend",
+                _ => "Prepend",
+            };
+            for arg in args.children() {
+                if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
+                    continue;
+                }
+                push_named_import(imports, import_type, arg.text().to_string());
+            }
+            true
+        }
+        // GitLab CE/EE composition: `Project.prepend_mod_with('Project')`
+        // resolves to `EE::Project` at runtime. EXTENDS edges are emitted
+        // separately by `ruby_super_types`.
+        "prepend_mod_with" | "include_mod_with" | "extend_mod_with" => {
+            if let Some((import_type, names)) = parse_mod_with_call(node) {
+                for fqn in names {
+                    push_named_import(imports, import_type, fqn);
+                }
+            }
+            true
+        }
+        _ => false,
     }
+}
 
-    let arg = node
-        .field("arguments")
-        .and_then(|args| args.find(Child, Kind("string")))
-        .and_then(|s| s.find(Child, Kind("string_content")))
-        .map(|c| c.text().to_string());
-
-    let Some(path) = arg else {
-        return true;
-    };
-
-    let import_type = if method == "require_relative" {
-        "RequireRelative"
-    } else {
-        "Require"
-    };
-
+fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static str, fqn: String) {
+    if fqn.is_empty() {
+        return;
+    }
+    let (path, leaf) = fqn
+        .rsplit_once("::")
+        .map(|(p, l)| (p.to_string(), l.to_string()))
+        .unwrap_or((String::new(), fqn));
     imports.push(CanonicalImport {
         import_type,
-        binding_kind: ImportBindingKind::SideEffect,
-        mode: ImportMode::Runtime,
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
         path,
-        name: None,
+        name: Some(leaf),
         alias: None,
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
     });
-
-    true
 }
 
 fn ruby_imported_symbol_candidates(
