@@ -634,14 +634,33 @@
               "$ref": "#/$defs/Identifier",
               "description": "Property name to group by"
             },
-            "truncate": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"],
-              "description": "Truncate a Date or DateTime property to the start of the given unit before grouping. minute and hour additionally require node_ids on the truncated node or a filter on the truncated property to bound cardinality."
+            "transform": {
+              "$ref": "#/$defs/PropertyTransform",
+              "description": "Optional transformation applied to the property before grouping (e.g. date truncation). Discriminated by `kind` to leave room for future transforms without churning the group_by shape."
             },
             "alias": {
               "$ref": "#/$defs/Identifier",
               "description": "Output column alias for this group key"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PropertyTransform": {
+      "description": "A function applied to a group_by property. Tagged enum: add new variants by adding new `kind` values.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Truncate a Date or DateTime property to the start of `unit`. `minute` and `hour` additionally require node_ids on the truncated node or a filter on the truncated property so the resulting bucket set stays bounded.",
+          "required": ["kind", "unit"],
+          "properties": {
+            "kind": {
+              "const": "truncate"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
             }
           },
           "additionalProperties": false

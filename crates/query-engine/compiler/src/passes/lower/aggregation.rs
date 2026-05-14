@@ -41,12 +41,14 @@ fn build_aggregation(
             InputGroupByKey::Property {
                 node,
                 property,
-                truncate,
+                transform,
                 ..
             } => {
                 let col = Expr::col(node, property);
-                let expr = match truncate {
-                    Some(unit) => Expr::func(unit.ch_function(), vec![col]),
+                let expr = match transform {
+                    Some(crate::input::PropertyTransform::Truncate { unit }) => {
+                        Expr::func(unit.ch_function(), vec![col])
+                    }
                     None => col,
                 };
                 select.push(SelectExpr::new(expr.clone(), alias));

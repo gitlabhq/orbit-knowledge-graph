@@ -662,8 +662,29 @@ pub enum InputGroupByKey {
         #[serde(default)]
         alias: Option<String>,
         #[serde(default)]
-        truncate: Option<TruncateUnit>,
+        transform: Option<PropertyTransform>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PropertyTransform {
+    /// Truncate a Date or DateTime property to the start of `unit`.
+    Truncate { unit: TruncateUnit },
+}
+
+impl PropertyTransform {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Truncate { .. } => "truncate",
+        }
+    }
+
+    pub fn output_suffix(&self) -> String {
+        match self {
+            Self::Truncate { unit } => unit.name().to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -730,11 +751,16 @@ impl InputGroupByKey {
         }
     }
 
-    pub fn truncate(&self) -> Option<TruncateUnit> {
+    pub fn transform(&self) -> Option<&PropertyTransform> {
         match self {
-            Self::Property { truncate, .. } => *truncate,
+            Self::Property { transform, .. } => transform.as_ref(),
             Self::Node { .. } => None,
         }
+    }
+
+    pub fn truncate(&self) -> Option<TruncateUnit> {
+        self.transform()
+            .map(|PropertyTransform::Truncate { unit }| *unit)
     }
 
     pub fn output_name(&self, is_unique_property: bool) -> String {
@@ -744,15 +770,15 @@ impl InputGroupByKey {
                 node,
                 property,
                 alias,
-                truncate,
+                transform,
             } => alias.clone().unwrap_or_else(|| {
                 let base = if is_unique_property {
                     property.clone()
                 } else {
                     format!("{}_{}", node, property)
                 };
-                match truncate {
-                    Some(unit) => format!("{}_{}", base, unit.name()),
+                match transform {
+                    Some(t) => format!("{}_{}", base, t.output_suffix()),
                     None => base,
                 }
             }),

@@ -95,7 +95,7 @@ fn group_by_property_truncate_month_wraps_column() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "truncate": "month"}
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}}
         ],
         "limit": 50
     }"#;
@@ -122,7 +122,7 @@ fn group_by_property_truncate_all_units_compile() {
                 ],
                 "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
                 "group_by": [
-                    {{"kind": "property", "node": "u", "property": "created_at", "truncate": "{unit}"}}
+                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
                 ],
                 "limit": 10
             }}"#
@@ -156,7 +156,7 @@ fn group_by_truncate_minute_without_selectivity_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "truncate": "minute"}
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
         ],
         "limit": 10
     }"#;
@@ -177,7 +177,7 @@ fn group_by_truncate_minute_with_node_ids_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "truncate": "minute"}
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
         ],
         "limit": 10
     }"#;
@@ -199,7 +199,7 @@ fn group_by_truncate_hour_with_property_filter_accepted() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "truncate": "hour"}
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "hour"}}
         ],
         "limit": 50
     }"#;
@@ -216,7 +216,7 @@ fn group_by_truncate_on_non_date_property_rejected() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "confidential", "truncate": "month"}
+            {"kind": "property", "node": "u", "property": "confidential", "transform": {"kind": "truncate", "unit": "month"}}
         ],
         "limit": 10
     }"#;
@@ -237,7 +237,7 @@ fn group_by_truncate_custom_alias_preserved() {
         ],
         "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
         "group_by": [
-            {"kind": "property", "node": "u", "property": "created_at", "truncate": "month", "alias": "bucket"}
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
         ],
         "limit": 10
     }"#;
