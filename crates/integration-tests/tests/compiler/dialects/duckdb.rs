@@ -141,6 +141,61 @@ fn neighbors() {
 }
 
 #[test]
+fn group_by_truncate_emits_duckdb_date_trunc() {
+    let result = compile_local(
+        r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
+        ],
+        "limit": 10
+    }"#,
+        &test_ontology(),
+    )
+    .unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("date_trunc('month', u.created_at)"),
+        "expected DuckDB date_trunc('month', ...); got:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("toStartOfMonth"),
+        "ClickHouse-only toStartOfMonth must not leak into DuckDB SQL:\n{rendered}"
+    );
+}
+
+#[test]
+fn group_by_truncate_all_units_emit_duckdb_date_trunc() {
+    for unit in ["minute", "hour", "day", "week", "month", "quarter", "year"] {
+        let json = format!(
+            r#"{{
+                "query_type": "aggregation",
+                "nodes": [
+                    {{"id": "u", "entity": "Note", "node_ids": [1]}}
+                ],
+                "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
+                "group_by": [
+                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
+                ],
+                "limit": 10
+            }}"#
+        );
+        let result = compile_local(&json, &test_ontology())
+            .unwrap_or_else(|e| panic!("compile_local failed for unit {unit}: {e:?}"));
+        let rendered = result.base.render();
+        let expected = format!("date_trunc('{unit}', u.created_at)");
+        assert!(
+            rendered.contains(&expected),
+            "unit {unit}: expected `{expected}` in DuckDB SQL; got:\n{rendered}"
+        );
+    }
+}
+
+#[test]
 fn node_ids_expand_params() {
     let sql = parse_duckdb(
         r#"{
