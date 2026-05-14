@@ -636,7 +636,7 @@
             },
             "transform": {
               "$ref": "#/$defs/PropertyTransform",
-              "description": "Optional transformation applied to the property before grouping (e.g. date truncation). Discriminated by `kind` to leave room for future transforms without churning the group_by shape."
+              "description": "Optional transform applied to the property before grouping (e.g. date truncation)."
             },
             "alias": {
               "$ref": "#/$defs/Identifier",
@@ -648,20 +648,15 @@
       ]
     },
     "PropertyTransform": {
-      "description": "A function applied to a group_by property. Tagged enum: add new variants by adding new `kind` values.",
+      "description": "Tagged enum: add new variants by `kind`.",
       "oneOf": [
         {
           "type": "object",
-          "description": "Truncate a Date or DateTime property to the start of `unit`. `minute` and `hour` additionally require node_ids on the truncated node or a filter on the truncated property so the resulting bucket set stays bounded.",
+          "description": "Truncate a Date/DateTime property. minute/hour require node_ids or a filter on the property.",
           "required": ["kind", "unit"],
           "properties": {
-            "kind": {
-              "const": "truncate"
-            },
-            "unit": {
-              "type": "string",
-              "enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]
-            }
+            "kind": {"const": "truncate"},
+            "unit": {"enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]}
           },
           "additionalProperties": false
         }
