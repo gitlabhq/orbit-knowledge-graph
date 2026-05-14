@@ -1996,7 +1996,16 @@ style:
             .expect("Definition should exist");
         assert_eq!(
             definition.default_columns,
-            vec!["id", "name", "fqn", "definition_type", "file_path"]
+            vec![
+                "id",
+                "name",
+                "fqn",
+                "definition_type",
+                "file_path",
+                "commit_sha",
+                "start_line",
+                "end_line"
+            ]
         );
     }
 
