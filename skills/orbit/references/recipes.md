@@ -181,6 +181,96 @@ Pipeline node:
 }
 ```
 
+## MRs that touched a file (historical coverage)
+
+> **Use `HAS_DIFF`, not `HAS_LATEST_DIFF`, for historical-coverage questions.**
+> `HAS_LATEST_DIFF` only links a merge request to its **most recent** diff
+> snapshot. An MR that touched a file in an earlier revision but not in
+> its final diff is invisible through `HAS_LATEST_DIFF`. For questions
+> like "every MR that ever touched file X", traverse
+> `MergeRequest --HAS_DIFF--> MergeRequestDiff --HAS_FILE-->
+> MergeRequestDiffFile` (the one-to-N edge over all snapshots).
+> Using `HAS_LATEST_DIFF` here can undercount by 80%+ on long-lived files.
+
+`MergeRequestDiffFile.new_path` differs from `old_path` only on renames,
+so for stable file lookups (and to keep the same row shape across an
+MR's history) filter and group by `old_path` — see the
+[ontology note on the two columns](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml):
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr",   "entity": "MergeRequest",
+       "columns": ["iid", "title", "state", "project_id"]},
+      {"id": "diff", "entity": "MergeRequestDiff"},
+      {"id": "f",    "entity": "MergeRequestDiffFile",
+       "filters": {"old_path": {"op": "eq", "value": "app/services/base_service.rb"}}}
+    ],
+    "relationships": [
+      {"type": "HAS_DIFF", "from": "mr",   "to": "diff"},
+      {"type": "HAS_FILE", "from": "diff", "to": "f"}
+    ],
+    "limit": 100
+  }
+}
+```
+
+> **Known coverage gap.** `HAS_FILE` edges between `MergeRequestDiff` and
+> `MergeRequestDiffFile` are sparsely populated in the current Orbit
+> dataset. If this query returns far fewer files than expected for a
+> given MR, fall back to the GitLab Commits REST API
+> (`GET /projects/:id/repository/commits/:sha/diff`) for that MR's diff
+> list. Report the result as "incomplete coverage" rather than as
+> authoritative.
+
+## Subclasses / descendants of a class
+
+For "every subclass of `ApplicationRecord`" or "descendants of
+`Boards::BaseService`", traverse `Definition` via the `EXTENDS` edge
+(child → parent). `EXTENDS` is the single high-level inheritance edge in
+the ontology — the indexer collapses language-specific kinds (class
+extension, interface implementation, Go struct embedding) into it.
+`Definition.fqn` is the fully qualified name (e.g.
+`Boards::BaseService`); use it instead of bare `name` when the parent
+class is namespaced:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "parent", "entity": "Definition",
+       "filters": {"fqn": {"op": "eq", "value": "ApplicationRecord"}}},
+      {"id": "child",  "entity": "Definition",
+       "columns": ["name", "fqn", "file_path"]}
+    ],
+    "relationships": [
+      {"type": "EXTENDS", "from": "child", "to": "parent",
+       "max_hops": 3}
+    ],
+    "limit": 1000
+  }
+}
+```
+
+> **Coverage gap on large or EE-namespaced inheritance trees.** Definition
+> indexing is known to be incomplete for:
+>
+> - **Large trees.** `ApplicationRecord` has been observed at ~64%
+>   coverage (489 indexed vs 769 by `grep -r "class.*<.*ApplicationRecord"`).
+> - **EE-only subclasses.** `Boards::BaseService` returns its 15 direct CE
+>   subclasses but misses ~5 EE subclasses in the `EpicLists` namespace.
+> - **Small trees are fine.** `Members::BaseService` returns 6/6 correct.
+>
+> When the parent class is well-known and the result count looks low,
+> cross-check with `grep -rn "class \\w\\+ < ${ParentClass}" path/to/repo`
+> and report both numbers, flagging the graph result as "incomplete
+> coverage". Do not present a graph-only inheritance count as
+> authoritative without a second-source check. See the "Reporting
+> results" section in [`SKILL.md`](../SKILL.md) for phrasing guidance.
+
 ## `traversal` (multi-node) — start from nodes, follow relationships
 
 List opened merge requests and their authors. Requires at least two nodes and
