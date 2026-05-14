@@ -661,7 +661,74 @@ pub enum InputGroupByKey {
         property: String,
         #[serde(default)]
         alias: Option<String>,
+        #[serde(default)]
+        transform: Option<PropertyTransform>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PropertyTransform {
+    /// Truncate a Date or DateTime property to the start of `unit`.
+    Truncate { unit: TruncateUnit },
+}
+
+impl PropertyTransform {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Truncate { .. } => "truncate",
+        }
+    }
+
+    pub fn output_suffix(&self) -> String {
+        match self {
+            Self::Truncate { unit } => unit.name().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncateUnit {
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Quarter,
+    Year,
+}
+
+impl TruncateUnit {
+    pub fn ch_function(self) -> &'static str {
+        match self {
+            Self::Minute => "toStartOfMinute",
+            Self::Hour => "toStartOfHour",
+            Self::Day => "toStartOfDay",
+            Self::Week => "toStartOfWeek",
+            Self::Month => "toStartOfMonth",
+            Self::Quarter => "toStartOfQuarter",
+            Self::Year => "toStartOfYear",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minute => "minute",
+            Self::Hour => "hour",
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+            Self::Quarter => "quarter",
+            Self::Year => "year",
+        }
+    }
+
+    /// Granularities whose bucket cardinality is too high to allow without
+    /// the caller scoping the query to a bounded set.
+    pub fn requires_selectivity_guard(self) -> bool {
+        matches!(self, Self::Minute | Self::Hour)
+    }
 }
 
 impl InputGroupByKey {
@@ -684,6 +751,18 @@ impl InputGroupByKey {
         }
     }
 
+    pub fn transform(&self) -> Option<&PropertyTransform> {
+        match self {
+            Self::Property { transform, .. } => transform.as_ref(),
+            Self::Node { .. } => None,
+        }
+    }
+
+    pub fn truncate(&self) -> Option<TruncateUnit> {
+        self.transform()
+            .map(|PropertyTransform::Truncate { unit }| *unit)
+    }
+
     pub fn output_name(&self, is_unique_property: bool) -> String {
         match self {
             Self::Node { node, alias } => alias.clone().unwrap_or_else(|| node.clone()),
@@ -691,11 +770,16 @@ impl InputGroupByKey {
                 node,
                 property,
                 alias,
+                transform,
             } => alias.clone().unwrap_or_else(|| {
-                if is_unique_property {
+                let base = if is_unique_property {
                     property.clone()
                 } else {
                     format!("{}_{}", node, property)
+                };
+                match transform {
+                    Some(t) => format!("{}_{}", base, t.output_suffix()),
+                    None => base,
                 }
             }),
         }
@@ -745,6 +829,7 @@ pub fn property_groups(
             node,
             property,
             alias,
+            ..
         } => Some((node.as_str(), property.as_str(), alias.as_deref())),
         InputGroupByKey::Node { .. } => None,
     })

@@ -252,6 +252,15 @@ impl Context {
             return self.emit_expr(&args[0]);
         }
 
+        // ClickHouse `toStartOf<Unit>(x)` → DuckDB `date_trunc('<unit>', x)`.
+        if let Some(unit) = name.strip_prefix("toStartOf")
+            && args.len() == 1
+            && let Some(duckdb_unit) = duckdb_trunc_unit(unit)
+        {
+            let inner = self.emit_expr(&args[0]);
+            return format!("date_trunc('{duckdb_unit}', {inner})");
+        }
+
         let duckdb_name = match name {
             "startsWith" => "starts_with",
             "has" => "list_contains",
@@ -365,6 +374,19 @@ impl Context {
 /// True if the expression is a reference to `_version` or `_deleted`.
 fn is_dedup_column(expr: &Expr) -> bool {
     matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
+}
+
+fn duckdb_trunc_unit(suffix: &str) -> Option<&'static str> {
+    match suffix {
+        "Minute" => Some("minute"),
+        "Hour" => Some("hour"),
+        "Day" => Some("day"),
+        "Week" => Some("week"),
+        "Month" => Some("month"),
+        "Quarter" => Some("quarter"),
+        "Year" => Some("year"),
+        _ => None,
+    }
 }
 
 /// Strip `_deleted = false` predicates from a WHERE clause.

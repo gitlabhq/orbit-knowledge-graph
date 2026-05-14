@@ -634,10 +634,29 @@
               "$ref": "#/$defs/Identifier",
               "description": "Property name to group by"
             },
+            "transform": {
+              "$ref": "#/$defs/PropertyTransform",
+              "description": "Optional transform applied to the property before grouping (e.g. date truncation)."
+            },
             "alias": {
               "$ref": "#/$defs/Identifier",
               "description": "Output column alias for this group key"
             }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PropertyTransform": {
+      "description": "Tagged enum: add new variants by `kind`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Truncate a Date/DateTime property. minute/hour require node_ids or a filter on the property.",
+          "required": ["kind", "unit"],
+          "properties": {
+            "kind": {"const": "truncate"},
+            "unit": {"enum": ["minute", "hour", "day", "week", "month", "quarter", "year"]}
           },
           "additionalProperties": false
         }

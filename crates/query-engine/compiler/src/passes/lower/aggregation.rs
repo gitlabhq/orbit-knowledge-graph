@@ -38,8 +38,19 @@ fn build_aggregation(
     let group_by_names = group_by_output_names(group_by_keys);
     for (group, alias) in group_by_keys.iter().zip(group_by_names) {
         match group {
-            InputGroupByKey::Property { node, property, .. } => {
-                let expr = Expr::col(node, property);
+            InputGroupByKey::Property {
+                node,
+                property,
+                transform,
+                ..
+            } => {
+                let col = Expr::col(node, property);
+                let expr = match transform {
+                    Some(crate::input::PropertyTransform::Truncate { unit }) => {
+                        Expr::func(unit.ch_function(), vec![col])
+                    }
+                    None => col,
+                };
                 select.push(SelectExpr::new(expr.clone(), alias));
                 if !group_by.contains(&expr) {
                     group_by.push(expr);

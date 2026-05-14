@@ -87,6 +87,169 @@ fn aggregation_query() {
 }
 
 #[test]
+fn group_by_property_truncate_month_wraps_column() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "filters": {"confidential": {"op": "eq", "value": false}}}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}}
+        ],
+        "limit": 50
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("toStartOfMonth(u.created_at)"),
+        "expected toStartOfMonth wrapper; got:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("toStartOfMonth(u.created_at) AS created_at_month"),
+        "expected default alias `created_at_month`; got:\n{rendered}"
+    );
+}
+
+#[test]
+fn group_by_property_truncate_all_units_compile() {
+    for unit in ["minute", "hour", "day", "week", "month", "quarter", "year"] {
+        let json = format!(
+            r#"{{
+                "query_type": "aggregation",
+                "nodes": [
+                    {{"id": "u", "entity": "Note", "node_ids": [1]}}
+                ],
+                "aggregations": [{{"function": "count", "target": "u", "alias": "n"}}],
+                "group_by": [
+                    {{"kind": "property", "node": "u", "property": "created_at", "transform": {{"kind": "truncate", "unit": "{unit}"}}}}
+                ],
+                "limit": 10
+            }}"#
+        );
+        let result = compile(&json, &test_ontology(), &test_ctx())
+            .unwrap_or_else(|e| panic!("compile failed for unit {unit}: {e:?}"));
+        let rendered = result.base.render();
+        let expected = match unit {
+            "minute" => "toStartOfMinute",
+            "hour" => "toStartOfHour",
+            "day" => "toStartOfDay",
+            "week" => "toStartOfWeek",
+            "month" => "toStartOfMonth",
+            "quarter" => "toStartOfQuarter",
+            "year" => "toStartOfYear",
+            _ => unreachable!(),
+        };
+        assert!(
+            rendered.contains(expected),
+            "unit {unit}: expected {expected} in SQL; got:\n{rendered}"
+        );
+    }
+}
+
+#[test]
+fn group_by_truncate_minute_without_selectivity_rejected() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note"}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
+        ],
+        "limit": 10
+    }"#;
+    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("requires either node_ids") && msg.contains("minute"),
+        "expected cardinality-guard rejection; got: {msg}"
+    );
+}
+
+#[test]
+fn group_by_truncate_minute_with_node_ids_accepted() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1, 2]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "minute"}}
+        ],
+        "limit": 10
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    assert!(
+        result
+            .base
+            .render()
+            .contains("toStartOfMinute(u.created_at)")
+    );
+}
+
+#[test]
+fn group_by_truncate_hour_with_property_filter_accepted() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2026-04-01T00:00:00Z"}}}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "hour"}}
+        ],
+        "limit": 50
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    assert!(result.base.render().contains("toStartOfHour(u.created_at)"));
+}
+
+#[test]
+fn group_by_truncate_on_non_date_property_rejected() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "confidential", "transform": {"kind": "truncate", "unit": "month"}}
+        ],
+        "limit": 10
+    }"#;
+    let err = compile(json, &test_ontology(), &test_ctx()).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("requires a Date or DateTime property"),
+        "expected data-type rejection; got: {msg}"
+    );
+}
+
+#[test]
+fn group_by_truncate_custom_alias_preserved() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "u", "entity": "Note", "node_ids": [1]}
+        ],
+        "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+        "group_by": [
+            {"kind": "property", "node": "u", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
+        ],
+        "limit": 10
+    }"#;
+    let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("toStartOfMonth(u.created_at) AS bucket"),
+        "expected alias `bucket`; got:\n{rendered}"
+    );
+}
+
+#[test]
 fn path_finding_query() {
     let json = r#"{
         "query_type": "path_finding",

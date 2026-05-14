@@ -77,6 +77,7 @@ async fn data_correctness() {
         aggregation::aggregation_count_group_contains_projects,
         aggregation::aggregation_sort_orders_by_aggregate_value,
         aggregation::aggregation_sum_produces_correct_totals,
+        aggregation::aggregation_group_by_property_truncate_month,
         aggregation::aggregation_redaction_excludes_unauthorized_from_counts,
         aggregation::aggregation_avg_produces_correct_values,
         aggregation::aggregation_min_max_produce_correct_values,

@@ -844,6 +844,41 @@ impl<'a> Validator<'a> {
                     property
                 )));
             }
+
+            if let Some(unit) = group.truncate() {
+                let field = self
+                    .ontology
+                    .get_node(entity)
+                    .and_then(|n| n.fields.iter().find(|f| f.name == property));
+                let data_type = field.map(|f| f.data_type);
+                if !matches!(
+                    data_type,
+                    Some(ontology::DataType::Date) | Some(ontology::DataType::DateTime)
+                ) {
+                    return Err(QueryError::Validation(format!(
+                        "group_by[{i}]: truncate \"{}\" requires a Date or DateTime property; \"{}\" on {entity} is {}",
+                        unit.name(),
+                        property,
+                        data_type
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "unknown".into())
+                    )));
+                }
+
+                if unit.requires_selectivity_guard()
+                    && node.node_ids.is_empty()
+                    && !node.filters.contains_key(property)
+                {
+                    return Err(QueryError::Validation(format!(
+                        "group_by[{i}]: truncate \"{}\" on \"{}\" requires either node_ids on \"{}\" \
+                         or at least one filter on \"{}\" to bound bucket cardinality",
+                        unit.name(),
+                        property,
+                        group_node,
+                        property,
+                    )));
+                }
+            }
         }
 
         if let Some(sort) = &input.aggregation.sort {

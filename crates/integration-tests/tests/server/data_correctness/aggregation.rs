@@ -103,6 +103,73 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
     resp.assert_group_row_value_i64("g", "Group", 102, "member_count", 2);
 }
 
+pub(super) async fn aggregation_group_by_property_truncate_month(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001]},
+                {"id": "n", "entity": "Note", "filters": {"created_at": {"op": "gte", "value": "2024-01-01T00:00:00Z"}}}
+            ],
+            "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
+            "group_by": [
+                {"kind": "property", "node": "n", "property": "created_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "bucket"}
+            ],
+            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "aggregation_sort": {"column": "bucket", "direction": "ASC"},
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.skip_requirement(Requirement::Filter {
+        field: "created_at".into(),
+    });
+    resp.skip_requirement(Requirement::AggregationSort);
+    resp.skip_requirement(Requirement::Aggregation);
+
+    let buckets: Vec<(String, i64)> = resp
+        .rows()
+        .iter()
+        .map(|row| {
+            let bucket = row
+                .get("bucket")
+                .map(|v| match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                })
+                .unwrap_or_default();
+            let c = row.get("note_count").and_then(|v| v.as_i64()).unwrap_or(0);
+            (bucket, c)
+        })
+        .collect();
+    assert_eq!(
+        buckets.len(),
+        2,
+        "expected two monthly buckets; got {buckets:?}"
+    );
+    let bucket_strs: Vec<&str> = buckets.iter().map(|(b, _)| b.as_str()).collect();
+    assert!(
+        bucket_strs.iter().any(|b| b.contains("2024-01")),
+        "expected a January 2024 bucket; got {buckets:?}"
+    );
+    assert!(
+        bucket_strs.iter().any(|b| b.contains("2024-02")),
+        "expected a February 2024 bucket; got {buckets:?}"
+    );
+    for (b, c) in &buckets {
+        assert_eq!(*c, 1, "bucket {b} should have one note, got {c}");
+    }
+    assert_eq!(
+        bucket_strs,
+        vec!["2024-01-01", "2024-02-01"],
+        "buckets should be ASC-sorted Date strings"
+    );
+}
+
 pub(super) async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
     let resp = run_query(
         ctx,
