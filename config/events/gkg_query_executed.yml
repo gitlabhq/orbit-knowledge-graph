@@ -1,0 +1,21 @@
+---
+description: A query call to the webserver (query_graph and get_graph_schema) was executed
+internal_events: true
+status: active
+action: gkg_query_executed
+identifiers:
+- namespace
+- user
+product_group: knowledge_graph
+product_categories:
+- knowledge_graph
+milestone: '19.0'
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1240
+contexts:
+- orbit_common
+- orbit_query
+tiers:
+- free
+- premium
+- ultimate
+classification: duo
