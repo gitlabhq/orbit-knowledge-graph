@@ -12,7 +12,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
-use super::auth::extract_claims;
+use super::auth::extract_request_context;
 use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::cluster_health::ClusterHealthChecker;
@@ -44,6 +44,12 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
 fn record_ai_session_id(ai_session_id: &Option<String>) {
     if let Some(sid) = ai_session_id {
         tracing::Span::current().record("ai_session_id", sid.as_str());
+    }
+}
+
+fn record_coding_agent(coding_agent: Option<&str>) {
+    if let Some(agent) = coding_agent {
+        tracing::Span::current().record("coding_agent", agent);
     }
 }
 
@@ -138,15 +144,19 @@ type ExecuteQueryStream =
 impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
     for KnowledgeGraphServiceImpl
 {
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn list_tools(
         &self,
         request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         info!("Listing tools for user");
 
@@ -158,15 +168,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(ListToolsResponse { tools }))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn list_agent_commands(
         &self,
         request: Request<ListAgentCommandsRequest>,
     ) -> Result<Response<ListAgentCommandsResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         let requested = &req.command_names;
@@ -217,15 +231,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         }))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn invoke_agent_command(
         &self,
         request: Request<InvokeAgentCommandRequest>,
     ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         if req.command_name.trim().is_empty() {
@@ -268,12 +286,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     type ExecuteQueryStream = ExecuteQueryStream;
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn execute_query(
         &self,
         request: Request<Streaming<ExecuteQueryMessage>>,
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
+        let ctx = extract_request_context(&request, &self.validator)?;
+        record_coding_agent(ctx.coding_agent());
+        let claims = ctx.claims;
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
         record_ai_session_id(&claims.ai_session_id);
@@ -367,15 +390,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_graph_schema(
         &self,
         request: Request<GetGraphSchemaRequest>,
     ) -> Result<Response<GetGraphSchemaResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
@@ -398,15 +425,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_response_format(
         &self,
         request: Request<GetResponseFormatRequest>,
     ) -> Result<Response<GetResponseFormatResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query response format for user");
@@ -434,15 +465,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_query_dsl(
         &self,
         request: Request<GetQueryDslRequest>,
     ) -> Result<Response<GetQueryDslResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query DSL grammar for user");
@@ -466,15 +501,19 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_cluster_health(
         &self,
         request: Request<GetClusterHealthRequest>,
     ) -> Result<Response<GetClusterHealthResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
+        let ctx = extract_request_context(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", ctx.claims.user_id);
+        tracing::Span::current().record("source_type", &ctx.claims.source_type);
+        record_ai_session_id(&ctx.claims.ai_session_id);
+        record_coding_agent(ctx.coding_agent());
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching cluster health for user");
@@ -483,12 +522,17 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         Ok(Response::new(response))
     }
 
-    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    #[instrument(
+        skip(self, request),
+        fields(user_id, source_type, ai_session_id, coding_agent)
+    )]
     async fn get_graph_status(
         &self,
         request: Request<GetGraphStatusRequest>,
     ) -> Result<Response<GetGraphStatusResponse>, Status> {
-        let claims = extract_claims(&request, &self.validator)?;
+        let ctx = extract_request_context(&request, &self.validator)?;
+        record_coding_agent(ctx.coding_agent());
+        let claims = ctx.claims;
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
         record_ai_session_id(&claims.ai_session_id);
