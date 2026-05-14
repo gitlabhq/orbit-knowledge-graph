@@ -21,6 +21,7 @@ pub enum SupportLang {
     CSharp,
     Kotlin,
     Rust,
+    Hcl,
 }
 
 impl fmt::Display for SupportLang {
@@ -99,6 +100,11 @@ impl LanguageExt for SupportLang {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-rust"))]
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-hcl")]
+            Self::Hcl => tree_sitter_hcl::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-hcl"))]
+            Self::Hcl => panic!("tree-sitter-hcl feature not enabled"),
         }
     }
 }
