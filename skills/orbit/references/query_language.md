@@ -229,6 +229,19 @@ Fetch per-file diff content from diff snapshots:
 }
 ```
 
+`HAS_DIFF` returns every diff snapshot the merge request ever had.
+`HAS_LATEST_DIFF` returns only the most recent snapshot — useful for
+"what does the merge request look like right now", but not for
+historical questions. For "every merge request that ever touched a
+file", traverse `HAS_DIFF` over all snapshots. Using `HAS_LATEST_DIFF`
+for historical-coverage questions can undercount by 80%+ on long-lived
+files, because an MR that touched the file in an earlier revision but
+not its final diff is invisible.
+
+`MergeRequestDiffFile.new_path` differs from `old_path` only on renames.
+For stable file lookups across an MR's history (and to keep the same row
+shape when a path was unchanged), filter and group by `old_path`.
+
 Fetch source file content:
 
 ```json

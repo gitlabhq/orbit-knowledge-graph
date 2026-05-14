@@ -106,6 +106,49 @@ glab orbit remote dsl
 
 Full field reference in [`query_language.md`](query_language.md).
 
+## `invalid character '@'` (JSON parse error, not a CLI bug)
+
+**Symptom.** `glab orbit remote query /tmp/q.json` returns
+`invalid character '@' looking for beginning of value`, while
+`jq . /tmp/q.json` appears to validate the same file.
+
+**Cause.** `glab orbit remote query` does **not** preprocess the request
+body — bytes inside JSON string literals (including `@` in email
+addresses like `user@example.com`, Ruby `@instance_var` references, or
+`@version` annotations) are forwarded to the API verbatim. The error is
+a genuine JSON syntax failure from Go's `encoding/json`, almost always
+one of:
+
+- **A stray `@` outside a string literal.** Usually an unrendered
+  template placeholder — e.g. `{"query": @variable}` or
+  `{"value": @user_email}` left in the file by a shell or templating
+  step. The `@` is not in quotes, so it is not valid JSON.
+- **A UTF-8 BOM at the start of the file.** Some editors save files as
+  "UTF-8 with BOM"; the first three bytes (`EF BB BF`) make the error
+  surface as `invalid character 'ï'`, not `'@'`, but the failure mode
+  is the same. `jq` silently tolerates a leading BOM, which is why the
+  same file "validates with `jq`" but fails through `glab`.
+
+**Fix.** Inspect the body for either condition before retrying:
+
+```bash
+# Catch stray `@` outside strings — should print nothing if the file
+# is clean. Quoted `@`s inside strings are fine and will not match.
+grep -nE '(^|[^"\\])@[A-Za-z_]' /tmp/q.json
+
+# Strip a leading BOM if your editor added one.
+sed -i '1s/^\xEF\xBB\xBF//' /tmp/q.json
+```
+
+Recent `glab` builds wrap this error with a hint pointing at the
+offending byte and at `jq`, and strip a leading BOM before parsing.
+Older builds surface the bare stdlib message; the underlying fix is
+the same — clean the JSON body.
+
+**Do not** route around this with `glab api orbit/query` — the body is
+still invalid JSON and the API will reject it the same way. Fix the
+file.
+
 ## Service unavailable
 
 If `glab orbit remote status` shows any component unhealthy, retry with
