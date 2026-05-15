@@ -1,0 +1,95 @@
+name: "Ruby module composition imports"
+
+fixtures:
+  - path: app/models/base_record.rb
+    content: |
+      class BaseRecord
+      end
+
+  - path: app/models/concerns/auditable.rb
+    content: |
+      module Auditable
+        def audit_event
+          true
+        end
+      end
+
+  - path: app/models/concerns/cacheable.rb
+    content: |
+      module Cacheable
+        def cache_key
+          "cache"
+        end
+      end
+
+  - path: app/models/concerns/gitlab/tracking.rb
+    content: |
+      module Gitlab
+        module Tracking
+          def track_internal_event
+            true
+          end
+        end
+      end
+
+  - path: app/models/concerns/instrumentation.rb
+    content: |
+      module Instrumentation
+        def measure
+          true
+        end
+      end
+
+  - path: app/models/report.rb
+    content: |
+      class Report < BaseRecord
+        include Auditable, Gitlab::Tracking
+        extend Cacheable
+        prepend Instrumentation
+      end
+
+tests:
+  - name: "include emits one ImportedSymbol per module"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/models/report.rb'
+        AND s.import_type = 'Include'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Auditable", path: "" } }
+      - { row: { name: "Tracking", path: "Gitlab" } }
+
+  - name: "extend emits a module ImportedSymbol"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/models/report.rb'
+        AND s.import_type = 'Extend'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Cacheable", path: "" } }
+
+  - name: "prepend emits a module ImportedSymbol"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'app/models/report.rb'
+        AND s.import_type = 'Prepend'
+      RETURN s.name AS name, s.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Instrumentation", path: "" } }
+
+  - name: "class links to superclass and composed modules"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Report'
+        AND e.edge_kind = 'Extends'
+      RETURN parent.fqn AS parent
+    assert:
+      - { row_count: 5 }
+      - { row: { parent: "BaseRecord" } }
+      - { row: { parent: "Auditable" } }
+      - { row: { parent: "Gitlab::Tracking" } }
+      - { row: { parent: "Cacheable" } }
+      - { row: { parent: "Instrumentation" } }

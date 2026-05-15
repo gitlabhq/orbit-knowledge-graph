@@ -475,46 +475,79 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
     if node.kind().as_ref() != "call" {
         return false;
     }
-
-    let method = match node.field("method") {
-        Some(m) => m.text().to_string(),
-        None => return false,
-    };
-
-    if method != "require" && method != "require_relative" {
+    let Some(method) = node.field("method").map(|m| m.text().to_string()) else {
         return false;
+    };
+    match method.as_str() {
+        "require" | "require_relative" => {
+            let Some(args) = node.field("arguments") else {
+                return true;
+            };
+            let path = args
+                .find(Child, Kind("string"))
+                .and_then(|s| s.find(Child, Kind("string_content")))
+                .map(|c| c.text().to_string());
+            if let Some(path) = path {
+                imports.push(CanonicalImport {
+                    import_type: if method == "require_relative" {
+                        "RequireRelative"
+                    } else {
+                        "Require"
+                    },
+                    binding_kind: ImportBindingKind::SideEffect,
+                    mode: ImportMode::Runtime,
+                    path,
+                    name: None,
+                    alias: None,
+                    scope_fqn: None,
+                    range: crate::v2::types::Range::empty(),
+                    is_type_only: false,
+                    wildcard: false,
+                });
+            }
+            true
+        }
+        "include" | "extend" | "prepend" => {
+            let Some(args) = node.field("arguments") else {
+                return true;
+            };
+            let import_type = match method.as_str() {
+                "include" => "Include",
+                "extend" => "Extend",
+                _ => "Prepend",
+            };
+            for arg in args.children() {
+                if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
+                    continue;
+                }
+                push_named_import(imports, import_type, arg.text().to_string());
+            }
+            true
+        }
+        _ => false,
     }
+}
 
-    let arg = node
-        .field("arguments")
-        .and_then(|args| args.find(Child, Kind("string")))
-        .and_then(|s| s.find(Child, Kind("string_content")))
-        .map(|c| c.text().to_string());
-
-    let Some(path) = arg else {
-        return true;
-    };
-
-    let import_type = if method == "require_relative" {
-        "RequireRelative"
-    } else {
-        "Require"
-    };
-
+fn push_named_import(imports: &mut Vec<CanonicalImport>, import_type: &'static str, fqn: String) {
+    if fqn.is_empty() {
+        return;
+    }
+    let (path, leaf) = fqn
+        .rsplit_once("::")
+        .map(|(p, l)| (p.to_string(), l.to_string()))
+        .unwrap_or((String::new(), fqn));
     imports.push(CanonicalImport {
         import_type,
-        binding_kind: ImportBindingKind::SideEffect,
-        mode: ImportMode::Runtime,
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
         path,
-        name: None,
+        name: Some(leaf),
         alias: None,
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
         is_type_only: false,
         wildcard: false,
     });
-
-    true
 }
 
 fn ruby_imported_symbol_candidates(
