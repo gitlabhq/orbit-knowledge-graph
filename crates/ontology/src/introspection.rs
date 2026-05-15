@@ -23,11 +23,12 @@ pub enum IntrospectionScope {
 }
 
 /// Top-level schema response — a list of domains (each grouping its nodes)
-/// and a flat list of edges.
+/// and edge names for orientation. Expand specific nodes to see which types
+/// each edge connects.
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
     pub domains: Vec<SchemaDomain>,
-    pub edges: Vec<SchemaEdge>,
+    pub edges: Vec<String>,
 }
 
 /// One domain from the ontology (e.g. `source_code`, `ci`) plus its nodes.
@@ -51,20 +52,6 @@ pub enum SchemaNode {
     },
 }
 
-/// A relationship (edge) with its valid source→target pairs.
-#[derive(Debug, Serialize)]
-pub struct SchemaEdge {
-    pub name: String,
-    pub variants: Vec<SchemaEdgeVariant>,
-}
-
-/// A group of source node kinds that share the same reachable target kinds.
-#[derive(Debug, Serialize)]
-pub struct SchemaEdgeVariant {
-    pub from: Vec<String>,
-    pub to: Vec<String>,
-}
-
 /// Build a schema response for the given ontology and scope.
 ///
 /// `expand_nodes` controls which nodes get expanded to props/in/out; pass
@@ -77,15 +64,8 @@ pub fn build_schema_response(
 ) -> SchemaResponse {
     SchemaResponse {
         domains: build_domains(ontology, scope, expand_nodes),
-        edges: build_edges(ontology, scope),
+        edges: build_edge_names(ontology, scope),
     }
-}
-
-/// Build just the edges list for the given ontology and scope, skipping
-/// the domain/node construction.
-#[must_use]
-pub fn build_schema_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge> {
-    build_edges(ontology, scope)
 }
 
 fn build_domains(
@@ -144,7 +124,7 @@ fn build_domains(
         .collect()
 }
 
-fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge> {
+fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
     let local_names: Vec<&str> = match scope {
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
@@ -152,43 +132,11 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
 
     ontology
         .edge_names()
-        .filter_map(|edge_name| {
-            let edge_variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            let filtered = filter_variants(edge_variants, scope, &local_names);
-            if filtered.is_empty() {
-                return None;
-            }
-
-            let mut by_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
-            for e in &filtered {
-                by_source
-                    .entry(e.source_kind.clone())
-                    .or_default()
-                    .push(e.target_kind.clone());
-            }
-            for targets in by_source.values_mut() {
-                targets.sort();
-                targets.dedup();
-            }
-
-            let mut by_target_set: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
-            for (source, targets) in by_source {
-                by_target_set.entry(targets).or_default().push(source);
-            }
-
-            let variants: Vec<SchemaEdgeVariant> = by_target_set
-                .into_iter()
-                .map(|(to, mut from)| {
-                    from.sort();
-                    SchemaEdgeVariant { from, to }
-                })
-                .collect();
-
-            Some(SchemaEdge {
-                name: edge_name.to_string(),
-                variants,
-            })
+        .filter(|edge_name| {
+            let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
+            !filter_variants(variants, scope, &local_names).is_empty()
         })
+        .map(|name| name.to_string())
         .collect()
 }
 
@@ -317,35 +265,17 @@ mod tests {
     }
 
     #[test]
-    fn local_scope_edges_only_connect_local_entities() {
+    fn local_scope_edges_are_present() {
         let ont = load();
         let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
 
-        let local: Vec<&str> = ont.local_entity_names();
-        for edge in &response.edges {
-            for variant in &edge.variants {
-                for source in &variant.from {
-                    assert!(
-                        local.contains(&source.as_str()),
-                        "edge {} source {} not in local scope",
-                        edge.name,
-                        source
-                    );
-                }
-                for target in &variant.to {
-                    assert!(
-                        local.contains(&target.as_str()),
-                        "edge {} target {} not in local scope",
-                        edge.name,
-                        target
-                    );
-                }
-            }
-        }
         assert!(
             !response.edges.is_empty(),
             "expected at least one local edge"
         );
+        for edge in &response.edges {
+            assert!(!edge.is_empty(), "edge name should not be empty");
+        }
     }
 
     #[test]
@@ -385,7 +315,7 @@ mod tests {
             })
             .collect();
         assert!(names.iter().any(|n| n == "User"));
-        assert!(response.edges.iter().any(|e| e.name == "AUTHORED"));
+        assert!(response.edges.iter().any(|e| e == "AUTHORED"));
     }
 
     #[test]
