@@ -1,3 +1,33 @@
+## [0.58.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.57.0...v0.58.0) (2026-05-15)
+
+### Features
+
+* **analytics:** add event definition for gkg_query_executed ([f35f16c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f35f16c1c5882b327fb52e36a1e9029d0991413e)) by Niko Belokolodov
+* **compiler:** truncate Date/DateTime group_by keys to bucket units ([4ab65f8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ab65f85b79add7b416daa54133b6981ea7d9a8e)) by Michael Angelo Rivera
+
+### Fixes
+
+* **indexer:** capture Ruby module imports ([aee3700](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aee3700d29d583d1d56f7cd486cf7e0dd53316d0)) by Michael Angelo Rivera
+* **ontology:** add commit_sha and position fields to source_code default_columns ([be9d4bc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/be9d4bcccf9488f843b598adb64aed8e6d7d504a)) by Jean-Gabriel Doyon
+* **ontology:** use correct FK for HAS_LATEST_DIFF edge ([b052f11](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b052f11df6728dd7c89742764bc8b0d4f20f51f5)) by Jean-Gabriel Doyon
+
+### Other
+
+* **deps:** update rust crate arrow to v58.2.0 ([fdf7b7c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fdf7b7c782e5d7f519ac548a3bb2032b58c8edd8)) by GitLab Renovate Bot
+* **deps:** update rust crate arrow to v58.2.0 ([b365228](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b36522858f05ceca9bb9121e29e295bea002ccd4)) by GitLab Renovate Bot
+* **deps:** update rust crate async-nats to 0.48.0 ([4a5b556](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a5b556fecab610c6c27d8fb571360028d443f8c)) by GitLab Renovate Bot
+* **deps:** update rust crate tokio to v1.52.3 ([2373ec9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2373ec921bc961e6fa9f9538b925272b5a452122)) by GitLab Renovate Bot
+* **deps:** update rust crate tonic to v0.14.6 ([30f8e1c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/30f8e1cdff8005ccb70900b19fe913ecf13cb925)) by GitLab Renovate Bot
+* **deps:** update rust crate tonic-build to v0.14.6 ([521b67f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/521b67f700d99c4aa8822e49dd96e03f89977103)) by GitLab Renovate Bot
+* **deps:** update rust crate tonic-prost to v0.14.6 ([16ea775](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/16ea77552a56f352b42748c92d8685ce97ff8ae1)) by GitLab Renovate Bot
+* **deps:** update rust crate tonic-prost-build to v0.14.6 ([5afd66d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5afd66dc93f3b1b1cb15464d8cbed36b1850d29f)) by GitLab Renovate Bot
+* **mcp:** add opencode-specific config example ([da2d6b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da2d6b23e2144fcacbd82e4551e502d4b98fd713)) by Dmitry Gruzd
+* **mcp:** document Claude Code native HTTP transport ([bb61469](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bb6146986a715f0fb3e3554aa62b54562d396b10)) by Michael Angelo Rivera
+* **ontology:** clarify old_path vs new_path on MergeRequestDiffFile ([f537029](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5370294008fc64132085112932988751ec85f1a)) by Jean-Gabriel Doyon
+* **schema:** bump schema version to 44 ([22c6d92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/22c6d9269dd2795f9d20c39b0114e762895c8eb1)) by Jean-Gabriel Doyon
+* **skill:** add pipeline-for-MR recipe with source filter ([9612efa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9612efafafa5d4ea31332f1d36ee2c81640598ef)) by Dmitry Gruzd
+* **skill:** document glab orbit local in orbit skill ([3e106b1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e106b14faadbb2144e8548b7942932b0c2231b2)) by Dmitry Gruzd
+
 ## [0.57.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.56.1...v0.57.0) (2026-05-11)
 
 ### Features
