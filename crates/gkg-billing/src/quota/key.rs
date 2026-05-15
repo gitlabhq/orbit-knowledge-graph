@@ -12,18 +12,15 @@ pub(crate) struct CacheKey {
     pub global_user_id: String,
     pub root_namespace_id: String,
     pub unique_instance_id: String,
-    pub feature_enablement_type: String,
     pub feature_qualified_name: String,
 }
 
 impl CacheKey {
     pub(crate) fn from_inputs(inputs: &QuotaInputs, environment: &str) -> Option<Self> {
-        // Required JWT-derived fields. Missing ones are not defaulted to empty
-        // strings — that would silently collapse distinct consumers onto the
-        // same key. Caller falls back to uncached fail-open when this returns
-        // None. `feature_qualified_name` is GKG-generated and always present.
+        // `realm` is the only JWT-derived required cache-key field. Missing →
+        // None so the caller can fail open uncached rather than collapsing
+        // distinct consumers onto an empty-string slot.
         let realm = inputs.realm.clone()?;
-        let feature_enablement_type = inputs.feature_enablement_type.clone()?;
 
         Some(Self {
             environment: environment.to_string(),
@@ -35,7 +32,6 @@ impl CacheKey {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             unique_instance_id: inputs.unique_instance_id.clone().unwrap_or_default(),
-            feature_enablement_type,
             feature_qualified_name: constants::feature_qualified_name(&inputs.source_type),
         })
     }
@@ -48,7 +44,6 @@ impl CacheKey {
             ("global_user_id", &self.global_user_id),
             ("root_namespace_id", &self.root_namespace_id),
             ("unique_instance_id", &self.unique_instance_id),
-            ("feature_enablement_type", &self.feature_enablement_type),
             ("feature_qualified_name", &self.feature_qualified_name),
         ]
     }
@@ -60,7 +55,6 @@ mod tests {
 
     fn inputs_with(
         realm: Option<&str>,
-        fet: Option<&str>,
         guid: Option<&str>,
         uiid: Option<&str>,
         rnid: Option<i64>,
@@ -72,19 +66,12 @@ mod tests {
             global_user_id: guid.map(Into::into),
             root_namespace_id: rnid,
             unique_instance_id: uiid.map(Into::into),
-            feature_enablement_type: fet.map(Into::into),
         }
     }
 
     #[test]
     fn builds_key_when_required_fields_present() {
-        let inputs = inputs_with(
-            Some("SaaS"),
-            Some("duo_enterprise"),
-            Some("guid-1"),
-            Some("uid-1"),
-            Some(9970),
-        );
+        let inputs = inputs_with(Some("SaaS"), Some("guid-1"), Some("uid-1"), Some(9970));
         let key = CacheKey::from_inputs(&inputs, "production").unwrap();
 
         assert_eq!(key.environment, "production");
@@ -95,26 +82,20 @@ mod tests {
 
     #[test]
     fn feature_qualified_name_is_generated_from_source_type() {
-        let inputs = inputs_with(Some("SaaS"), Some("duo_enterprise"), None, None, None);
+        let inputs = inputs_with(Some("SaaS"), None, None, None);
         let key = CacheKey::from_inputs(&inputs, "production").unwrap();
         assert_eq!(key.feature_qualified_name, "orbit-mcp");
     }
 
     #[test]
     fn returns_none_when_realm_missing() {
-        let inputs = inputs_with(None, Some("duo_enterprise"), None, None, None);
-        assert!(CacheKey::from_inputs(&inputs, "production").is_none());
-    }
-
-    #[test]
-    fn returns_none_when_feature_enablement_type_missing() {
-        let inputs = inputs_with(Some("SaaS"), None, None, None, None);
+        let inputs = inputs_with(None, None, None, None);
         assert!(CacheKey::from_inputs(&inputs, "production").is_none());
     }
 
     #[test]
     fn empty_string_for_optional_inputs() {
-        let inputs = inputs_with(Some("SaaS"), Some("duo_enterprise"), None, None, None);
+        let inputs = inputs_with(Some("SaaS"), None, None, None);
         let key = CacheKey::from_inputs(&inputs, "production").unwrap();
         assert_eq!(key.global_user_id, "");
         assert_eq!(key.root_namespace_id, "");
@@ -125,12 +106,12 @@ mod tests {
     fn distinct_keys_hash_differently() {
         use std::collections::HashSet;
         let a = CacheKey::from_inputs(
-            &inputs_with(Some("SaaS"), Some("duo_enterprise"), None, None, Some(1)),
+            &inputs_with(Some("SaaS"), None, None, Some(1)),
             "production",
         )
         .unwrap();
         let b = CacheKey::from_inputs(
-            &inputs_with(Some("SaaS"), Some("duo_enterprise"), None, None, Some(2)),
+            &inputs_with(Some("SaaS"), None, None, Some(2)),
             "production",
         )
         .unwrap();

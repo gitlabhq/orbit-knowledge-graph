@@ -103,7 +103,6 @@ mod tests {
             root_namespace_id: Some(99i64),
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
-            feature_enablement_type: None,
         }
     }
 

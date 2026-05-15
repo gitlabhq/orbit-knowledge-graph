@@ -130,8 +130,7 @@ mod tests {
             global_user_id: String::new(),
             root_namespace_id: String::new(),
             unique_instance_id: String::new(),
-            feature_enablement_type: "duo_enterprise".into(),
-            feature_qualified_name: "orbit_query".into(),
+            feature_qualified_name: "orbit-mcp".into(),
         }
     }
 

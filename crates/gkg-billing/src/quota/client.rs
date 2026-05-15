@@ -163,8 +163,7 @@ mod tests {
             global_user_id: "g".into(),
             root_namespace_id: "9970".into(),
             unique_instance_id: "u".into(),
-            feature_enablement_type: "duo_enterprise".into(),
-            feature_qualified_name: "orbit_query".into(),
+            feature_qualified_name: "orbit-mcp".into(),
         }
     }
 

@@ -21,5 +21,4 @@ pub struct QuotaInputs {
     pub global_user_id: Option<String>,
     pub root_namespace_id: Option<i64>,
     pub unique_instance_id: Option<String>,
-    pub feature_enablement_type: Option<String>,
 }

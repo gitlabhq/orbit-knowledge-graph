@@ -141,7 +141,6 @@ mod tests {
             global_user_id: Some("g".into()),
             root_namespace_id: Some(1),
             unique_instance_id: Some("u".into()),
-            feature_enablement_type: Some("duo_enterprise".into()),
         }
     }
 
@@ -300,10 +299,9 @@ mod tests {
         let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let svc = service_for(url);
         let mut inputs = inputs_with_source("mcp");
-        // feature_enablement_type is the only remaining JWT-derived required
-        // cache-key field that can legitimately be absent (realm too, but it
-        // gates other behavior). Missing → uncached fail-open.
-        inputs.feature_enablement_type = None;
+        // `realm` is the only remaining JWT-derived required cache-key field.
+        // Missing → uncached fail-open.
+        inputs.realm = None;
 
         assert!(svc.check(&inputs).await.is_ok());
         // Should never have hit CustomersDot since we bailed before cache lookup.

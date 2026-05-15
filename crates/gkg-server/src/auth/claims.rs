@@ -57,10 +57,4 @@ pub struct Claims {
     pub deployment_type: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
-    /// Populated by Rails. Tier/SKU under which the consumer holds the
-    /// feature (e.g. `duo_enterprise`). Quota cache-key field; quota checks
-    /// fail open when missing so the GKG side can ship ahead of the Rails
-    /// claim work (`gitlab!232123`).
-    #[serde(default)]
-    pub feature_enablement_type: Option<String>,
 }

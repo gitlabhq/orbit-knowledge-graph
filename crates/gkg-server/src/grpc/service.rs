@@ -1133,7 +1133,6 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
-            feature_enablement_type: None,
         }
     }
 
