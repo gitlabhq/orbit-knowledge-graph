@@ -51,12 +51,18 @@ pub enum SchemaNode {
     },
 }
 
-/// A relationship (edge) with all source/target node kinds it connects.
+/// A relationship (edge) with its valid source→target pairs.
 #[derive(Debug, Serialize)]
 pub struct SchemaEdge {
     pub name: String,
-    pub from: Vec<String>,
-    pub to: Vec<String>,
+    pub variants: Vec<SchemaEdgeVariant>,
+}
+
+/// One valid source→target pair for an edge type.
+#[derive(Debug, Serialize)]
+pub struct SchemaEdgeVariant {
+    pub from: String,
+    pub to: String,
 }
 
 /// Build a schema response for the given ontology and scope.
@@ -147,24 +153,23 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
     ontology
         .edge_names()
         .filter_map(|edge_name| {
-            let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            let filtered = filter_variants(variants, scope, &local_names);
+            let edge_variants = ontology.get_edge(edge_name).unwrap_or(&[]);
+            let filtered = filter_variants(edge_variants, scope, &local_names);
             if filtered.is_empty() {
                 return None;
             }
 
-            let mut sources: Vec<String> = filtered.iter().map(|e| e.source_kind.clone()).collect();
-            sources.sort();
-            sources.dedup();
-
-            let mut targets: Vec<String> = filtered.iter().map(|e| e.target_kind.clone()).collect();
-            targets.sort();
-            targets.dedup();
+            let variants: Vec<SchemaEdgeVariant> = filtered
+                .iter()
+                .map(|e| SchemaEdgeVariant {
+                    from: e.source_kind.clone(),
+                    to: e.target_kind.clone(),
+                })
+                .collect();
 
             Some(SchemaEdge {
                 name: edge_name.to_string(),
-                from: sources,
-                to: targets,
+                variants,
             })
         })
         .collect()
@@ -288,20 +293,18 @@ mod tests {
 
         let local: Vec<&str> = ont.local_entity_names();
         for edge in &response.edges {
-            for s in &edge.from {
+            for variant in &edge.variants {
                 assert!(
-                    local.contains(&s.as_str()),
+                    local.contains(&variant.from.as_str()),
                     "edge {} source {} not in local scope",
                     edge.name,
-                    s
+                    variant.from
                 );
-            }
-            for t in &edge.to {
                 assert!(
-                    local.contains(&t.as_str()),
+                    local.contains(&variant.to.as_str()),
                     "edge {} target {} not in local scope",
                     edge.name,
-                    t
+                    variant.to
                 );
             }
         }

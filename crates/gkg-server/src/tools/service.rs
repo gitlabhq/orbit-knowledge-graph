@@ -336,12 +336,12 @@ mod tests {
     }
 
     #[test]
-    fn test_edges_show_source_and_target_nodes() {
+    fn test_edges_show_variants() {
         let output = get_toon_output("{}");
 
         assert!(
-            output.contains("from") && output.contains("to"),
-            "Edges should have from/to fields"
+            output.contains("variants"),
+            "Edges should have variants field"
         );
     }
 
@@ -477,12 +477,8 @@ mod tests {
         let authored = edges.iter().find(|e| e.name == "AUTHORED");
         assert!(authored.is_some(), "Should have AUTHORED edge");
         assert!(
-            !authored.unwrap().from.is_empty(),
-            "AUTHORED should have source types"
-        );
-        assert!(
-            !authored.unwrap().to.is_empty(),
-            "AUTHORED should have target types"
+            !authored.unwrap().variants.is_empty(),
+            "AUTHORED should have variants"
         );
     }
 
