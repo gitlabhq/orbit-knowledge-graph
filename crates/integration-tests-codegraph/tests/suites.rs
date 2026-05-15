@@ -272,7 +272,7 @@ yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 yaml_test!(ruby_metaprogramming, "ruby/metaprogramming.yaml");
 yaml_test!(ruby_gitlab_monolith, "ruby/gitlab_monolith.yaml");
 yaml_test!(ruby_e2e_weather_app, "ruby/e2e_weather_app.yaml");
-yaml_test!(ruby_dsl_declarations, "ruby/dsl_declarations.yaml");
+yaml_test!(ruby_module_imports, "ruby/module_imports.yaml");
 yaml_test!(
     ruby_imported_symbol_fallback_matrix,
     "ruby/imported_symbol_fallback_matrix.yaml"

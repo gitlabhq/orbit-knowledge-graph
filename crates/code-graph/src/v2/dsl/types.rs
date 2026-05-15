@@ -761,23 +761,13 @@ pub struct SsaConfig {
 
 // ── Hooks ───────────────────────────────────────────────────────
 
-/// Outcome of an `on_scope` hook invocation.
-pub enum ScopeHookOutcome {
-    NotHandled,
-    Handled,
-    /// The hook pushed a definition that should own the subtree under
-    /// `node` — refs inside attribute to this def, not the enclosing class.
-    /// Used for Ruby `condition :name { ... }`.
-    OwnsSubtree(u32),
-}
-
+/// Function type for injecting extra definitions after scope matching.
 pub type ScopeHookFn = fn(
     &N<'_>,
     &mut Vec<crate::v2::types::CanonicalDefinition>,
     &[std::sync::Arc<str>],
     &'static str,
-) -> ScopeHookOutcome;
-
+) -> bool;
 pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 
@@ -787,9 +777,7 @@ pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> 
 pub struct LanguageHooks {
     /// Derive a module scope from a file path before walking.
     pub module_scope: Option<fn(&str, &str) -> Option<String>>,
-    /// Inject extra definitions after scope matching. Return value also
-    /// controls whether the just-pushed def owns the subtree (DSL block
-    /// scope) — see [`ScopeHookOutcome`].
+    /// Inject extra definitions after scope matching (e.g. Ruby attr_reader).
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,

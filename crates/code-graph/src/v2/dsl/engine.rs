@@ -956,22 +956,11 @@ impl LanguageSpec {
             }
         }
 
-        // Custom scope handling (e.g. Ruby attr_accessor, CanCanCan DSL).
-        // `OwnsSubtree(idx)` makes the just-pushed def the enclosing scope
-        // for descendant refs — used by Ruby `condition :name { ... }` so
-        // refs inside attribute to the synthetic def, not the parent class.
-        let outcome = self
+        // Custom scope handling (e.g. Ruby attr_accessor)
+        let custom_handled = self
             .hooks
             .on_scope
-            .map(|f| f(node, &mut state.defs, &state.scope_stack, sep))
-            .unwrap_or(super::types::ScopeHookOutcome::NotHandled);
-        let custom_handled = !matches!(outcome, super::types::ScopeHookOutcome::NotHandled);
-        let pushed_dsl_def = if let super::types::ScopeHookOutcome::OwnsSubtree(idx) = outcome {
-            state.enclosing_def_stack.push(idx);
-            true
-        } else {
-            false
-        };
+            .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
 
         // Expression-bodied functions: when a node like `function_body`
         // contains `=`, treat all refs within as implicit returns.
@@ -1273,11 +1262,6 @@ impl LanguageSpec {
             || is_expression_body
         {
             state.in_return = false;
-        }
-
-        // Pop synthetic DSL block def from enclosing stack.
-        if pushed_dsl_def {
-            state.enclosing_def_stack.pop();
         }
 
         if pushed_scope {
