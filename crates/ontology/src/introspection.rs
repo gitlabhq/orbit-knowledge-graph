@@ -58,10 +58,10 @@ pub struct SchemaEdge {
     pub variants: Vec<SchemaEdgeVariant>,
 }
 
-/// One source node kind and the target kinds it can reach via this edge.
+/// A group of source node kinds that share the same reachable target kinds.
 #[derive(Debug, Serialize)]
 pub struct SchemaEdgeVariant {
-    pub from: String,
+    pub from: Vec<String>,
     pub to: Vec<String>,
 }
 
@@ -166,11 +166,20 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
                     .or_default()
                     .push(e.target_kind.clone());
             }
-            let variants: Vec<SchemaEdgeVariant> = by_source
+            for targets in by_source.values_mut() {
+                targets.sort();
+                targets.dedup();
+            }
+
+            let mut by_target_set: BTreeMap<Vec<String>, Vec<String>> = BTreeMap::new();
+            for (source, targets) in by_source {
+                by_target_set.entry(targets).or_default().push(source);
+            }
+
+            let variants: Vec<SchemaEdgeVariant> = by_target_set
                 .into_iter()
-                .map(|(from, mut to)| {
-                    to.sort();
-                    to.dedup();
+                .map(|(to, mut from)| {
+                    from.sort();
                     SchemaEdgeVariant { from, to }
                 })
                 .collect();
@@ -302,12 +311,14 @@ mod tests {
         let local: Vec<&str> = ont.local_entity_names();
         for edge in &response.edges {
             for variant in &edge.variants {
-                assert!(
-                    local.contains(&variant.from.as_str()),
-                    "edge {} source {} not in local scope",
-                    edge.name,
-                    variant.from
-                );
+                for source in &variant.from {
+                    assert!(
+                        local.contains(&source.as_str()),
+                        "edge {} source {} not in local scope",
+                        edge.name,
+                        source
+                    );
+                }
                 for target in &variant.to {
                     assert!(
                         local.contains(&target.as_str()),
