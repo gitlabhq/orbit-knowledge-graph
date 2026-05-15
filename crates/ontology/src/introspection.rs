@@ -59,7 +59,7 @@ pub struct SchemaEdge {
 }
 
 /// One valid source→target pair for an edge type.
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct SchemaEdgeVariant {
     pub from: String,
     pub to: String,
@@ -159,13 +159,15 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
                 return None;
             }
 
-            let variants: Vec<SchemaEdgeVariant> = filtered
+            let mut variants: Vec<SchemaEdgeVariant> = filtered
                 .iter()
                 .map(|e| SchemaEdgeVariant {
                     from: e.source_kind.clone(),
                     to: e.target_kind.clone(),
                 })
                 .collect();
+            variants.sort_by(|a, b| a.from.cmp(&b.from).then(a.to.cmp(&b.to)));
+            variants.dedup();
 
             Some(SchemaEdge {
                 name: edge_name.to_string(),
