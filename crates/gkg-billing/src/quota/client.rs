@@ -163,6 +163,7 @@ mod tests {
             global_user_id: "g".into(),
             root_namespace_id: "9970".into(),
             unique_instance_id: "u".into(),
+            event_type: "orbit_workflow_completion".into(),
             feature_qualified_name: "orbit-mcp".into(),
         }
     }

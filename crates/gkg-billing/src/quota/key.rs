@@ -1,9 +1,16 @@
 use super::inputs::QuotaInputs;
 use crate::constants;
 
-// Cache-key shape mirrors AIGW's CACHE_KEY_FIELDS (lib/billing_events/context.py).
-// Any divergence silently fragments or merges cache entries across services that
-// share the same CustomersDot backend, so keep the field list in sync.
+// Cache-key shape and outgoing CDot query params. The first six fields
+// identify the consumer (Rails-populated via JWT). `event_type` and
+// `feature_qualified_name` are GKG-owned identifiers for the consumed
+// surface — same strings used by the billing event constructor so the
+// quota and billing observability paths can't disagree per request.
+//
+// `event_type` is included because CDot's BillingEligibility branches on
+// it (`Billing::Usage::BillingEligibility::BaseService#track_consumption?`)
+// and `Resolver#skip_cutoff?` early-returns when it is blank — without it,
+// the resolve endpoint can never apply consumption tracking for our traffic.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CacheKey {
     pub environment: String,
@@ -12,6 +19,7 @@ pub(crate) struct CacheKey {
     pub global_user_id: String,
     pub root_namespace_id: String,
     pub unique_instance_id: String,
+    pub event_type: String,
     pub feature_qualified_name: String,
 }
 
@@ -32,6 +40,7 @@ impl CacheKey {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             unique_instance_id: inputs.unique_instance_id.clone().unwrap_or_default(),
+            event_type: constants::EVENT_TYPE.to_string(),
             feature_qualified_name: constants::feature_qualified_name(&inputs.source_type),
         })
     }
@@ -44,6 +53,7 @@ impl CacheKey {
             ("global_user_id", &self.global_user_id),
             ("root_namespace_id", &self.root_namespace_id),
             ("unique_instance_id", &self.unique_instance_id),
+            ("event_type", &self.event_type),
             ("feature_qualified_name", &self.feature_qualified_name),
         ]
     }
@@ -85,6 +95,13 @@ mod tests {
         let inputs = inputs_with(Some("SaaS"), None, None, None);
         let key = CacheKey::from_inputs(&inputs, "production").unwrap();
         assert_eq!(key.feature_qualified_name, "orbit-mcp");
+    }
+
+    #[test]
+    fn event_type_is_constant() {
+        let inputs = inputs_with(Some("SaaS"), None, None, None);
+        let key = CacheKey::from_inputs(&inputs, "production").unwrap();
+        assert_eq!(key.event_type, constants::EVENT_TYPE);
     }
 
     #[test]

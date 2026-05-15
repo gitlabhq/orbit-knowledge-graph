@@ -130,6 +130,7 @@ mod tests {
             global_user_id: String::new(),
             root_namespace_id: String::new(),
             unique_instance_id: String::new(),
+            event_type: "orbit_workflow_completion".into(),
             feature_qualified_name: "orbit-mcp".into(),
         }
     }
