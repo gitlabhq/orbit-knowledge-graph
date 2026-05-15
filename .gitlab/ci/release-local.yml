@@ -50,17 +50,13 @@ local-cli-build-linux-arm64:
 # import libraries so `-static-libstdc++ -static-libgcc` resolves only the
 # static archives, producing a self-contained orbit.exe with no extra DLL
 # dependencies (only Windows system DLLs remain, all present on Win10+).
-#
-# Currently MR-only while we validate; flip to `.local-cli-release-rules` to
-# ship on tag pipelines once we're confident.
 local-cli-build-windows-amd64:
   extends:
     - .job-template
     - .sccache-template
+    - .local-cli-release-rules
   stage: build
   needs: []
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
   tags:
     - saas-linux-xlarge-amd64
   timeout: 90m
@@ -163,6 +159,7 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
+    - local-cli-build-windows-amd64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils
