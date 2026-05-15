@@ -1,4 +1,4 @@
-name: "Ruby DSL declarations — CanCanCan conditions, mixin imports, prepend_mod_with (issue #600162)"
+name: "Ruby DSL declarations — CanCanCan conditions, mixin imports, prepend_mod_with"
 
 fixtures:
   # ── CanCanCan policy DSL (Gap 1) ──────────────────────────────
@@ -251,6 +251,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
+      - { row: { fqn: "ProjectPolicy::read_namespace" } }
 
   # ══════════════════════════════════════════════════════════════
   # GAP 1: CALLS through DSL block bodies attribute to synth def
@@ -265,6 +266,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { row: { caller: "ProjectPolicy::guest", callee: "BasePolicy::team_member?" } }
 
   - name: "condition :reporter body calls both team_member? and maintainer?"
     query: |
@@ -285,6 +287,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { row: { caller: "ProjectPolicy::admin", callee: "BasePolicy::admin?" } }
 
   # ══════════════════════════════════════════════════════════════
   # GAP 2: include Module produces ImportedSymbol
@@ -323,6 +326,7 @@ tests:
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
+      - { row: { child: "Project", parent: "EE::Project" } }
 
   - name: "Namespace.include_mod_with('Routable') creates EXTENDS to EE::Routable"
     query: |
@@ -333,6 +337,7 @@ tests:
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
+      - { row: { child: "Namespace", parent: "EE::Routable" } }
 
   - name: "prepend_mod_with also surfaces as ImportedSymbol (EE::Project)"
     query: |
@@ -357,6 +362,7 @@ tests:
       RETURN child.fqn AS child, parent.fqn AS parent
     assert:
       - { row_count: 1 }
+      - { row: { child: "Issue", parent: "EE::Issue" } }
 
   # ══════════════════════════════════════════════════════════════
   # GAP B: prepend_mod_with for a class nested inside modules
@@ -416,6 +422,7 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
+      - { row: { fqn: "GroupPolicy::owner" } }
 
   - name: "condition(:owner) body calls attribute to the synthetic def under kwargs"
     query: |
@@ -426,6 +433,7 @@ tests:
       RETURN caller.fqn AS caller
     assert:
       - { row_count: 1 }
+      - { row: { caller: "GroupPolicy::owner" } }
 
   - name: "blockless `condition :stale_token` still emits a def but does not own a subtree"
     queries:
@@ -436,6 +444,7 @@ tests:
           RETURN d.fqn AS fqn
         assert:
           - { row_count: 1 }
+          - { row: { fqn: "GroupPolicy::stale_token" } }
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'GroupPolicy::stale_token'

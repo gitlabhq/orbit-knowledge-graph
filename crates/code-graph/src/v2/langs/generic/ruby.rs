@@ -410,10 +410,9 @@ fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
     None
 }
 
-/// Extract super types from a class node: direct superclass, body-level
-/// `include`/`extend`/`prepend`, and GitLab `prepend_mod_with`-family calls
-/// (which often live at file scope, outside the class body — we walk
-/// ancestors to find them).
+/// Extract super types from a class node: direct superclass and body-level
+/// `include`/`extend`/`prepend`. Also picks up GitLab `prepend_mod_with`
+/// edges via the project-specific helper at the end of this file.
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
@@ -455,78 +454,10 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
         .map(|n| n.text().to_string())
         .unwrap_or_default();
     if !class_name.is_empty() {
-        ruby_collect_mod_with_super_types(node, &class_name, &mut types);
+        gitlab_collect_mod_with_super_types(node, &class_name, &mut types);
     }
 
     types
-}
-
-/// Walk ancestors of `class_node` collecting `EE::Arg` entries from
-/// `<Receiver>.prepend_mod_with('Arg')` / `include_mod_with` / `extend_mod_with`
-/// calls whose receiver's terminal `::` segment matches `class_name`.
-/// Walking ancestors (not just direct siblings) covers the common nested
-/// case `module Foo; class Bar; end; end; Foo::Bar.prepend_mod_with('Bar')`.
-fn ruby_collect_mod_with_super_types(
-    class_node: &N<'_>,
-    class_name: &str,
-    types: &mut Vec<String>,
-) {
-    let mut current = class_node.parent();
-    while let Some(ancestor) = current {
-        for sibling in ancestor.children() {
-            let call = if sibling.kind().as_ref() == "call" {
-                sibling
-            } else if let Some(c) = sibling.children().find(|c| c.kind().as_ref() == "call") {
-                c
-            } else {
-                continue;
-            };
-            let Some((_, names)) = parse_mod_with_call(&call) else {
-                continue;
-            };
-            // Receiver may be bare (`Project`), top-level-qualified
-            // (`::Project`), or namespace-qualified (`Foo::Project`).
-            let receiver_matches = call
-                .field("receiver")
-                .map(|r| {
-                    let t = r.text();
-                    let t = t.as_ref();
-                    t.rsplit("::").next().unwrap_or(t) == class_name
-                })
-                .unwrap_or(false);
-            if receiver_matches {
-                types.extend(names);
-            }
-        }
-        current = ancestor.parent();
-    }
-}
-
-/// Recognize `prepend_mod_with`/`include_mod_with`/`extend_mod_with` and
-/// return the matching `import_type` label + the `EE::`-qualified names
-/// derived from string literal args. Returns `None` if `call` isn't one
-/// of these macros. Skips non-literal-string args (kwargs, constants).
-fn parse_mod_with_call(call: &N<'_>) -> Option<(&'static str, Vec<String>)> {
-    let method = call.field("method")?.text().to_string();
-    let label = match method.as_str() {
-        "prepend_mod_with" => "PrependModWith",
-        "include_mod_with" => "IncludeModWith",
-        "extend_mod_with" => "ExtendModWith",
-        _ => return None,
-    };
-    let args = call.field("arguments")?;
-    let names = args
-        .children()
-        .filter_map(|arg| {
-            let raw = string_text(&arg)?;
-            Some(if raw.starts_with("EE::") {
-                raw
-            } else {
-                format!("EE::{raw}")
-            })
-        })
-        .collect();
-    Some((label, names))
 }
 
 fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
@@ -580,18 +511,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
             }
             true
         }
-        // GitLab CE/EE composition: `Project.prepend_mod_with('Project')`
-        // resolves to `EE::Project` at runtime. EXTENDS edges are emitted
-        // separately by `ruby_super_types`.
-        "prepend_mod_with" | "include_mod_with" | "extend_mod_with" => {
-            if let Some((import_type, names)) = parse_mod_with_call(node) {
-                for fqn in names {
-                    push_named_import(imports, import_type, fqn);
-                }
-            }
-            true
-        }
-        _ => false,
+        _ => gitlab_try_emit_mod_with_imports(node, &method, imports),
     }
 }
 
@@ -728,6 +648,105 @@ impl HasRules for RubyRules {
             ..Default::default()
         })
     }
+}
+
+// ── GitLab-specific Ruby macros ─────────────────────────────────
+//
+// `prepend_mod_with` / `include_mod_with` / `extend_mod_with` are defined
+// in `lib/gitlab/utils/override.rb` in gitlab-org/gitlab. They are NOT
+// standard Ruby and only appear in repos using GitLab's CE/EE composition
+// pattern. Everything in this section is isolated so it can be lifted into
+// a per-project extension layer once the indexer needs different
+// conventions for non-GitLab Ruby codebases (see knowledge-graph#578).
+
+/// Walk ancestors of `class_node` collecting `EE::Arg` entries from
+/// `<Receiver>.prepend_mod_with('Arg')` / `include_mod_with` / `extend_mod_with`
+/// calls whose receiver's terminal `::` segment matches `class_name`.
+/// Walking ancestors (not just direct siblings) covers the common nested
+/// case `module Foo; class Bar; end; end; Foo::Bar.prepend_mod_with('Bar')`.
+fn gitlab_collect_mod_with_super_types(
+    class_node: &N<'_>,
+    class_name: &str,
+    types: &mut Vec<String>,
+) {
+    let mut current = class_node.parent();
+    while let Some(ancestor) = current {
+        for sibling in ancestor.children() {
+            let call = if sibling.kind().as_ref() == "call" {
+                sibling
+            } else if let Some(c) = sibling.children().find(|c| c.kind().as_ref() == "call") {
+                c
+            } else {
+                continue;
+            };
+            let Some((_, names)) = gitlab_parse_mod_with_call(&call) else {
+                continue;
+            };
+            // Receiver may be bare (`Project`), top-level-qualified
+            // (`::Project`), or namespace-qualified (`Foo::Project`).
+            let receiver_matches = call
+                .field("receiver")
+                .map(|r| {
+                    let t = r.text();
+                    let t = t.as_ref();
+                    t.rsplit("::").next().unwrap_or(t) == class_name
+                })
+                .unwrap_or(false);
+            if receiver_matches {
+                types.extend(names);
+            }
+        }
+        current = ancestor.parent();
+    }
+}
+
+/// Recognize the `*_mod_with` macros and emit one `ImportedSymbol` per
+/// `EE::`-qualified string-literal arg. Returns `true` if `method` matched
+/// (so the generic `ruby_extract_imports` knows to stop).
+fn gitlab_try_emit_mod_with_imports(
+    node: &N<'_>,
+    method: &str,
+    imports: &mut Vec<CanonicalImport>,
+) -> bool {
+    if !matches!(
+        method,
+        "prepend_mod_with" | "include_mod_with" | "extend_mod_with"
+    ) {
+        return false;
+    }
+    if let Some((import_type, names)) = gitlab_parse_mod_with_call(node) {
+        for fqn in names {
+            push_named_import(imports, import_type, fqn);
+        }
+    }
+    true
+}
+
+/// Recognize `prepend_mod_with`/`include_mod_with`/`extend_mod_with` and
+/// return the matching `import_type` label + the `EE::`-qualified names
+/// derived from string literal args. Returns `None` if `call` isn't one
+/// of these macros. Skips non-literal-string args (kwargs, constants).
+fn gitlab_parse_mod_with_call(call: &N<'_>) -> Option<(&'static str, Vec<String>)> {
+    let method = call.field("method")?.text().to_string();
+    let label = match method.as_str() {
+        "prepend_mod_with" => "PrependModWith",
+        "include_mod_with" => "IncludeModWith",
+        "extend_mod_with" => "ExtendModWith",
+        _ => return None,
+    };
+    let args = call.field("arguments")?;
+    let names = args
+        .children()
+        .filter_map(|arg| {
+            let raw = string_text(&arg)?;
+            Some(if raw.starts_with("EE::") {
+                raw
+            } else {
+                format!("EE::{raw}")
+            })
+        })
+        .collect();
+    Some((label, names))
 }
 
 #[cfg(test)]
