@@ -467,7 +467,7 @@ fn schema_raw_is_parseable_json() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|e| e["name"].as_str().unwrap())
+        .map(|e| e.as_str().unwrap())
         .collect();
     for want in ["CONTAINS", "DEFINES", "IMPORTS"] {
         assert!(edges.contains(&want), "missing {want} edge in {edges:?}");
