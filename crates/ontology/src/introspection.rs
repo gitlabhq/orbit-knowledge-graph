@@ -228,14 +228,27 @@ fn node_relationships(
         };
         let filtered = filter_variants(variants, scope, &local_names);
 
-        let has_outgoing = filtered.iter().any(|e| e.source_kind == node_name);
-        let has_incoming = filtered.iter().any(|e| e.target_kind == node_name);
+        let mut out_targets: Vec<&str> = filtered
+            .iter()
+            .filter(|e| e.source_kind == node_name)
+            .map(|e| e.target_kind.as_str())
+            .collect();
+        out_targets.sort();
+        out_targets.dedup();
 
-        if has_outgoing {
-            outgoing.push(edge_name.to_string());
+        let mut in_sources: Vec<&str> = filtered
+            .iter()
+            .filter(|e| e.target_kind == node_name)
+            .map(|e| e.source_kind.as_str())
+            .collect();
+        in_sources.sort();
+        in_sources.dedup();
+
+        if !out_targets.is_empty() {
+            outgoing.push(format!("{} → [{}]", edge_name, out_targets.join(", ")));
         }
-        if has_incoming {
-            incoming.push(edge_name.to_string());
+        if !in_sources.is_empty() {
+            incoming.push(format!("{} ← [{}]", edge_name, in_sources.join(", ")));
         }
     }
 
@@ -411,8 +424,18 @@ mod tests {
             .expect("File should be expanded");
 
         assert!(!file.2.is_empty(), "File should have props");
-        assert!(file.0.contains(&"DEFINES".to_string()) || file.0.contains(&"IMPORTS".to_string()));
-        assert!(file.1.contains(&"CONTAINS".to_string()));
+        assert!(
+            file.0
+                .iter()
+                .any(|e| e.starts_with("DEFINES") || e.starts_with("IMPORTS")),
+            "File should have outgoing DEFINES or IMPORTS: {:?}",
+            file.0
+        );
+        assert!(
+            file.1.iter().any(|e| e.starts_with("CONTAINS")),
+            "File should have incoming CONTAINS: {:?}",
+            file.1
+        );
     }
 
     #[test]
