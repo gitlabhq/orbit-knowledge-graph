@@ -58,11 +58,11 @@ pub struct SchemaEdge {
     pub variants: Vec<SchemaEdgeVariant>,
 }
 
-/// One valid source→target pair for an edge type.
-#[derive(Debug, PartialEq, Eq, Serialize)]
+/// One source node kind and the target kinds it can reach via this edge.
+#[derive(Debug, Serialize)]
 pub struct SchemaEdgeVariant {
     pub from: String,
-    pub to: String,
+    pub to: Vec<String>,
 }
 
 /// Build a schema response for the given ontology and scope.
@@ -159,15 +159,21 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
                 return None;
             }
 
-            let mut variants: Vec<SchemaEdgeVariant> = filtered
-                .iter()
-                .map(|e| SchemaEdgeVariant {
-                    from: e.source_kind.clone(),
-                    to: e.target_kind.clone(),
+            let mut by_source: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for e in &filtered {
+                by_source
+                    .entry(e.source_kind.clone())
+                    .or_default()
+                    .push(e.target_kind.clone());
+            }
+            let variants: Vec<SchemaEdgeVariant> = by_source
+                .into_iter()
+                .map(|(from, mut to)| {
+                    to.sort();
+                    to.dedup();
+                    SchemaEdgeVariant { from, to }
                 })
                 .collect();
-            variants.sort_by(|a, b| a.from.cmp(&b.from).then(a.to.cmp(&b.to)));
-            variants.dedup();
 
             Some(SchemaEdge {
                 name: edge_name.to_string(),
@@ -302,12 +308,14 @@ mod tests {
                     edge.name,
                     variant.from
                 );
-                assert!(
-                    local.contains(&variant.to.as_str()),
-                    "edge {} target {} not in local scope",
-                    edge.name,
-                    variant.to
-                );
+                for target in &variant.to {
+                    assert!(
+                        local.contains(&target.as_str()),
+                        "edge {} target {} not in local scope",
+                        edge.name,
+                        target
+                    );
+                }
             }
         }
         assert!(
