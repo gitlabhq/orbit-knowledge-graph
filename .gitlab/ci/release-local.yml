@@ -125,12 +125,17 @@ local-cli-code-sign:
   needs:
     - local-cli-build-darwin-amd64
     - local-cli-build-darwin-arm64
+    - local-cli-build-windows-amd64
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip unzip
   script:
     - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-x86_64.tar.gz macos orbit
     - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-aarch64.tar.gz macos orbit
+    - ./scripts/sign-and-repackage.sh ./orbit-local-windows-x86_64.zip windows orbit.exe
   artifacts:
     paths:
       - orbit-local-darwin-*.tar.gz
+      - orbit-local-windows-*.zip
     expire_in: 7 days
 
 local-cli-publish:
@@ -143,7 +148,6 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
-    - local-cli-build-windows-amd64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils
