@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
-#
-# Install the llvm-mingw cross toolchain (UCRT, libc++) under /opt/llvm-mingw
-# so a Linux runner can build Windows x86_64 binaries with Rust's
-# `x86_64-pc-windows-gnullvm` target. Pin the upstream release with
-# LLVM_MINGW_VERSION; defaults to the most recent release we've validated.
-#
-# We delete libc++ / libunwind import libs and DLLs after extraction. The
-# reason is subtle: clang++ (the linker driver) and `cc-rs` (used by
-# libduckdb-sys to compile the bundled C++ amalgamation) both inject
-# `-lc++` / `-lstdc++` / `-lunwind` near the end of the link line, after any
-# `-static-libstdc++` / `-static-libgcc` scope has already closed. With the
-# shared `.dll.a` import libs on disk the linker resolves the late `-l*`
-# references to those, producing duplicate symbols against the static
-# archives `-static-libstdc++` requested — and an orbit.exe that needs
-# libc++.dll / libunwind.dll alongside it at runtime.
-#
-# Removing the dynamic forms leaves the linker no choice but `libc++.a` and
-# `libunwind.a`, yielding a fully self-contained binary (only Windows system
-# DLLs imported).
+# Install llvm-mingw under /opt/llvm-mingw. We delete libc++/libunwind
+# import libs so the linker can't pick them up alongside the static
+# archives `-static-libstdc++` requested — without this the build links
+# both and orbit.exe ends up needing libc++.dll/libunwind.dll at runtime.
 set -euo pipefail
 
 VERSION="${LLVM_MINGW_VERSION:-20260505}"

@@ -44,24 +44,11 @@ local-cli-build-linux-arm64:
   variables:
     ARCH: aarch64
 
-# Cross-compile orbit.exe for Windows x86_64 from a Linux runner using
-# llvm-mingw + Rust's gnullvm target. See scripts/ci/install-llvm-mingw.sh
-# for the toolchain install and the libc++/libunwind import-lib trimming
-# that makes the resulting binary self-contained.
 local-cli-build-windows-amd64:
   extends:
     - .job-template
     - .sccache-template
     - .local-cli-release-rules
-  # SPIKE: temporarily run on MR pipelines so we can verify the install
-  # script produces a working build without waiting for a tag. Revert this
-  # `rules:` block before merge — `.local-cli-release-rules` will then
-  # restore the tag-only behaviour.
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
   stage: build
   needs: []
   tags:
