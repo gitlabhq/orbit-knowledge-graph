@@ -44,6 +44,38 @@ local-cli-build-linux-arm64:
   variables:
     ARCH: aarch64
 
+local-cli-build-windows-amd64:
+  extends:
+    - .job-template
+    - .sccache-template
+    - .local-cli-release-rules
+  stage: build
+  needs: []
+  tags:
+    - saas-linux-xlarge-amd64
+  timeout: 90m
+  variables:
+    PLATFORM: windows
+    ARCH: x86_64
+    LLVM_MINGW_VERSION: "20260505"
+    CC_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang
+    CXX_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-clang++
+    AR_x86_64_pc_windows_gnullvm: x86_64-w64-mingw32-ar
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER: x86_64-w64-mingw32-clang++
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+  artifacts:
+    paths:
+      - orbit-local-windows-x86_64.zip
+    expire_in: 7 days
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file xz-utils zip
+    - ./scripts/ci/install-llvm-mingw.sh
+    - export PATH="/opt/llvm-mingw/bin:$PATH"
+  script:
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+
 .local-cli-build-darwin:
   extends:
     - .local-cli-release-rules
@@ -111,6 +143,7 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
+    - local-cli-build-windows-amd64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils

@@ -20,6 +20,7 @@ ARTIFACTS=(
   "orbit-local-linux-aarch64.tar.gz"
   "orbit-local-darwin-x86_64.tar.gz"
   "orbit-local-darwin-aarch64.tar.gz"
+  "orbit-local-windows-x86_64.zip"
 )
 
 for artifact in "${ARTIFACTS[@]}"; do
