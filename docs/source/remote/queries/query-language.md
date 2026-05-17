@@ -161,6 +161,58 @@ Or they can use an operator:
 
 Token operators work only on properties with text indexes.
 
+## Recursive namespace queries
+
+To scope a query to all entities under a namespace (for example, all
+projects in a group, including projects in every subgroup), filter on the
+entity's `traversal_path` property with `starts_with`. Do not use the
+`CONTAINS` edge for recursion.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "traversal_path": {"op": "starts_with", "value": "1/9970/"}
+      }
+    }
+  ],
+  "aggregations": [
+    {"function": "count", "target": "p", "alias": "project_count"}
+  ]
+}
+```
+
+The `traversal_path` value is the slash-separated chain of ancestor
+namespace IDs ending with the group's own ID, terminated by a slash. Find
+it by running a single-node `traversal` query that filters on `full_path`:
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "g",
+    "entity": "Group",
+    "filters": {"full_path": "gitlab-org"},
+    "columns": ["id", "full_path", "traversal_path"]
+  }
+}
+```
+
+The `Group --CONTAINS--> Project` edge is one hop only: it returns
+projects whose direct parent is the named group, not projects in
+subgroups. Multi-hop `CONTAINS` is capped at `max_hops: 3` and cannot
+recurse deeply nested namespace trees. Compare:
+
+| Approach | What it returns for `gitlab-org` |
+|----------|----------------------------------|
+| `Group --CONTAINS--> Project`, `max_hops: 1` (default) | Projects whose direct parent is the `gitlab-org` group. |
+| `Group --CONTAINS--> Project`, `max_hops: 3` | Projects up to three levels of subgroup nesting. Misses projects in deeper subgroup chains. |
+| `Project.traversal_path starts_with "1/9970/"` | Every project under `gitlab-org`, including all subgroups at any depth. |
+
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are

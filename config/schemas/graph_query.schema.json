@@ -475,7 +475,7 @@
     },
     "RelationshipSelector": {
       "type": "object",
-      "description": "Selector for relationship traversal between nodes",
+      "description": "Selector for relationship traversal between nodes. Note: the `CONTAINS` edge is direct parent → direct child only, and `max_hops` is capped at 3, so multi-hop `CONTAINS` cannot recurse deeply nested namespace trees. For 'all entities under namespace X' questions (recursive group membership), prefer a single-node filter on the entity's `traversal_path` property with `starts_with` instead of a `CONTAINS` traversal.",
       "required": ["type", "from", "to"],
       "properties": {
         "type": {
@@ -499,7 +499,7 @@
         },
         "max_hops": {
           "type": "integer",
-          "description": "Maximum number of relationship hops. Limited to prevent resource exhaustion.",
+          "description": "Maximum number of relationship hops. Capped at 3 to prevent resource exhaustion; this is insufficient to recurse deeply nested namespace trees via `CONTAINS`. For recursive namespace membership, filter on `traversal_path` with `starts_with` instead.",
           "minimum": 1,
           "maximum": 3,
           "default": 1

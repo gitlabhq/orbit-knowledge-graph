@@ -96,7 +96,7 @@ properties:
     source: traversal_path
     filterable: false
     nullable: false
-    description: "Namespace path for authz."
+    description: "Namespace traversal path used for authorization scoping. Filter with `starts_with` to scope a query to all entities under a namespace (for example, all projects in a group, including all subgroups)."
 
 etl:
   type: query
