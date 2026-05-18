@@ -5,6 +5,7 @@ mod dashboards;
 mod metrics_catalog;
 mod schema;
 mod synth;
+mod system_notes_bench;
 
 /// GKG development task runner.
 ///
@@ -50,6 +51,10 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// POC harness for system-notes edge materialization (kg#499). Throwaway
+    /// code that produces the benchmark numbers gating ADR 013. See
+    /// `crates/xtask/src/system_notes_bench/README.md`.
+    SystemNotesBench(system_notes_bench::BenchArgs),
 }
 
 #[derive(Subcommand)]
@@ -142,5 +147,6 @@ async fn main() -> Result<()> {
         Command::Schema { output } => schema::run(output),
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
+        Command::SystemNotesBench(args) => system_notes_bench::run(args).await,
     }
 }

@@ -39,3 +39,4 @@ clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }
+regex = { workspace = true }

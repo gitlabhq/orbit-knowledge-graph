@@ -14594,6 +14594,7 @@ dependencies = [
  "parquet 58.2.0",
  "query-engine",
  "rand 0.10.1",
+ "regex",
  "schemars 1.2.1",
  "serde",
  "serde_json",
