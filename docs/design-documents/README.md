@@ -240,6 +240,7 @@ Please see the following design documents for more details on the Knowledge Grap
 - [Knowledge Graph Schema Management](schema_management.md)
 - [Knowledge Graph Security](security.md)
 - [Knowledge Graph Observability](observability.md)
+- [Duo / Orbit Prompt Routing Architecture](duo_orbit_prompt_routing.md)
 - [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md)
 - [ADR: Rust Core Runtime](decisions/002_rust_core_runtime.md)
 - [ADR: API Design — Unified REST + GraphQL](decisions/003_api_design.md)

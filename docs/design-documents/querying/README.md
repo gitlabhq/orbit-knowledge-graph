@@ -32,6 +32,8 @@ The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`,
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version lives in `config/QUERY_DSL_VERSION` and is tied to the `graph_query` schema `$id` major version; the query response format version lives in `config/RAW_OUTPUT_FORMAT_VERSION`.
 
+Whether a given Duo agent actually receives these commands depends on routing decisions that live in GitLab Rails: which Duo surface invoked the prompt, which Orbit subsetting applies to the user, and which feature flags are on. See [Duo / Orbit prompt routing architecture](../duo_orbit_prompt_routing.md) for the full picture of when prompts reach the Orbit MCP server.
+
 ## Web Server Architecture
 
 The web server will expose endpoints for GitLab Rails to consume. This will power the following features:
