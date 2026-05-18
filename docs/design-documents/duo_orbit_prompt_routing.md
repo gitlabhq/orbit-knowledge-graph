@@ -232,7 +232,7 @@ preference UI to decide whether to render subsetting checkboxes as live or
 greyed out. **It is *not* the same gate as the four `_enabled?` predicates** —
 they wrap the same boolean plus the platform flags — and it has a separate
 caller on the routing path that is the focus of
-[Seam B](#seam-b--flow-version-override-foundational-flows).
+[Seam B](#seam-b-flow-version-override-foundational-flows).
 
 ## The two routing seams
 
@@ -621,7 +621,7 @@ For a true custom agent, the gate is `custom_agents_enabled?`; for a
 foundational agent launched from the catalog UI, `custom_agent?` is `false`
 and the catch-all `foundational_enabled?` branch applies instead — even
 though the workflow definition is `ai_catalog_agent`. The
-[Workflow → subsetting mapping](#workflow--subsetting-mapping) in Seam A is
+[Workflow → subsetting mapping](#workflow-subsetting-mapping) in Seam A is
 keyed off the catalog item's classification, not just the workflow
 definition string.
 
@@ -711,17 +711,17 @@ subsetting). They differ only in which subsetting key they read.
 
 ## Where to look in code
 
-| Question | File |
+| Question | Where |
 |---|---|
-| Which subsettings exist? Which user preference fields back them? | `ee/app/models/ai/orbit/settings.rb` |
+| Which subsettings exist? Which user preference fields back them? | `ee/app/models/ai/orbit/` |
 | Which Orbit gate applies to which workflow? | `ee/app/services/ai/duo_workflows/mcp_config_service.rb` (`orbit_enabled_for_flow?`) |
-| What tools land in the `orbit:` MCP server? | `ee/lib/api/orbit/mcp_handlers/tool_catalog.rb` (`TRUSTED_TOOL_NAMES`, `visible_tool_names`) |
-| What tools are picked for custom agents? | `ee/lib/ai/catalog/duo_workflow_payload_builder/v1.rb`; `McpConfigService#agent_orbit_tools` |
+| What tools land in the `orbit:` MCP server? | `ee/lib/api/orbit/mcp_handlers/` (`TRUSTED_TOOL_NAMES`, `visible_tool_names`) |
+| What tools are picked for custom agents? | `ee/lib/ai/catalog/duo_workflow_payload_builder/`; `McpConfigService#agent_orbit_tools` |
 | How is the developer flow version chosen? | `ee/lib/ai/duo_workflows/foundational_flow_start_params_resolver.rb` |
-| Which foundational agents exist? | `ee/lib/ai/foundational_chat_agents_definitions.rb` |
-| How is the Orbit agent hidden in the picker? | `ee/app/graphql/resolvers/ai/foundational_chat_agents_resolver.rb` |
+| Which foundational agents exist? | `ee/lib/ai/` (search for `FoundationalChatAgentsDefinitions`) |
+| How is the Orbit agent hidden in the picker? | `ee/app/graphql/resolvers/ai/` (search for `FoundationalChatAgentsResolver`) |
 | User preference shape | `ee/spec/models/user_preference_spec.rb` (`orbit_settings` examples) |
-| Resolver callers (where Orbit branching gets evaluated) | `ee/app/services/ai/duo_workflows/create_and_start_workflow_service.rb`, `ee/app/services/ai/catalog/execute_workflow_service.rb`, `ee/lib/api/helpers/duo_workflow_helpers.rb` |
+| Resolver callers (where Orbit branching gets evaluated) | `ee/app/services/ai/duo_workflows/`, `ee/app/services/ai/catalog/`, `ee/lib/api/helpers/` |
 
 ## Implications and recommendations
 
