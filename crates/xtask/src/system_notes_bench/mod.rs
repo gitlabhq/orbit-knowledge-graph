@@ -22,10 +22,12 @@ pub mod golden;
 pub mod parser;
 pub mod resolver;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use arrow::array::{Array, Int64Array, StringArray};
 use clap::{Args, Subcommand};
 use tracing::info;
 
@@ -86,6 +88,18 @@ pub struct ClickhouseArgs {
     /// routes lookup and two entity lookups.
     #[arg(long, default_value_t = 1000)]
     pub batch_size: usize,
+    /// Default project path used as the owning project for same-project
+    /// references (e.g. `#123` with no explicit `group/project` prefix).
+    /// Must exist in `siphon_routes`. Defaults to `toolbox/gitlab-smoke-tests`
+    /// which is present in a stock GDK seed.
+    #[arg(long, default_value = "toolbox/gitlab-smoke-tests")]
+    pub default_project: String,
+    /// Path to a newline-delimited JSON dump. Each line:
+    /// `{"action": "<action>", "body": "<note body>"}`.
+    /// When omitted, the golden corpus is used to build the synthetic batch.
+    /// When provided, the first `--batch-size` parsed refs drive the resolver.
+    #[arg(short, long)]
+    pub input: Option<PathBuf>,
 }
 
 pub async fn run(args: BenchArgs) -> Result<()> {
@@ -247,18 +261,38 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
         &std::collections::HashMap::new(),
     );
 
-    // Build a synthetic batch from the golden corpus, repeated to reach
-    // `batch_size`. Real benchmarks against staging would replace this with
-    // a streamed read from `siphon_notes`.
-    let mut all_refs = Vec::new();
-    while all_refs.len() < args.batch_size {
-        for sample in golden::SAMPLES {
-            let refs = extract(sample.action, sample.body);
-            for r in refs {
-                all_refs.push(("gitlab-org/gitlab".to_string(), r));
+    // Build a batch of refs from either the input dump or the golden corpus.
+    let mut all_refs: Vec<(String, parser::Reference)> = Vec::new();
+    if let Some(ref input_path) = args.input {
+        // Real dump: parse all notes, extract refs, up to batch_size.
+        let corpus = load_corpus(Some(input_path.clone()))?;
+        for entry in &corpus {
+            for r in extract(entry.action, &entry.body) {
+                all_refs.push((args.default_project.clone(), r));
+                if all_refs.len() >= args.batch_size {
+                    break;
+                }
             }
             if all_refs.len() >= args.batch_size {
                 break;
+            }
+        }
+        info!(
+            corpus_notes = corpus.len(),
+            refs_extracted = all_refs.len(),
+            "loaded refs from input dump"
+        );
+    } else {
+        // Synthetic: repeat the golden corpus to fill batch_size.
+        while all_refs.len() < args.batch_size {
+            for sample in golden::SAMPLES {
+                let refs = extract(sample.action, sample.body);
+                for r in refs {
+                    all_refs.push((args.default_project.clone(), r));
+                }
+                if all_refs.len() >= args.batch_size {
+                    break;
+                }
             }
         }
     }
@@ -275,7 +309,8 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
         "resolution plan"
     );
 
-    let paths: Vec<String> = plan.paths.into_iter().collect();
+    // Stage 1: routes lookup — map project paths → (source_id, traversal_path).
+    let paths: Vec<String> = plan.paths.iter().cloned().collect();
     let start = Instant::now();
     let routes_batches = client
         .query(resolver::ROUTES_SQL)
@@ -293,16 +328,50 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
         "routes lookup"
     );
 
-    let mr_pairs_json: Vec<serde_json::Value> = plan
+    // Build path → source_id map from the routes Arrow result so we can
+    // assemble real (project_id, iid) pairs for the entity lookups.
+    // Columns: source_type, source_id, path, traversal_path
+    let mut path_to_source_id: HashMap<String, i64> = HashMap::new();
+    for batch in &routes_batches {
+        let source_type_col = batch
+            .column_by_name("source_type")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+        let source_id_col = batch
+            .column_by_name("source_id")
+            .and_then(|c| c.as_any().downcast_ref::<Int64Array>());
+        let path_col = batch
+            .column_by_name("path")
+            .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+        if let (Some(st), Some(sid), Some(p)) = (source_type_col, source_id_col, path_col) {
+            for i in 0..batch.num_rows() {
+                if st.value(i) == "Project" {
+                    path_to_source_id.insert(p.value(i).to_owned(), sid.value(i));
+                }
+            }
+        }
+    }
+    info!(
+        resolved_projects = path_to_source_id.len(),
+        "path→source_id map built from routes result"
+    );
+
+    // Stage 2: merge_requests lookup.
+    // Build (project_id, iid) tuples using resolved project IDs where available,
+    // falling back to 0 for paths not found in routes (will produce 0 result rows,
+    // which is the correct behaviour — unresolvable refs yield no edge).
+    let mr_pairs: Vec<(i64, i64)> = plan
         .mr_pairs
         .iter()
-        .map(|(_, iid)| serde_json::json!([0_i64, *iid]))
+        .map(|(path, iid)| {
+            let pid = path_to_source_id.get(path.as_str()).copied().unwrap_or(0);
+            (pid, *iid)
+        })
         .collect();
     let start = Instant::now();
     let mr_batches = client
         .query(resolver::MERGE_REQUESTS_SQL)
         .param("traversal_path", args.traversal_path.as_str())
-        .param("pairs", mr_pairs_json.clone())
+        .param("pairs", mr_pairs.clone())
         .fetch_arrow()
         .await
         .context("merge_requests lookup failed")?;
@@ -311,20 +380,24 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
     info!(
         elapsed_ms = mr_elapsed.as_millis() as u64,
         rows = mr_rows,
-        pairs_in = mr_pairs_json.len(),
+        pairs_in = mr_pairs.len(),
         "merge_requests lookup"
     );
 
-    let issue_pairs_json: Vec<serde_json::Value> = plan
+    // Stage 3: work_items (issues) lookup.
+    let issue_pairs: Vec<(i64, i64)> = plan
         .issue_pairs
         .iter()
-        .map(|(_, iid)| serde_json::json!([0_i64, *iid]))
+        .map(|(path, iid)| {
+            let pid = path_to_source_id.get(path.as_str()).copied().unwrap_or(0);
+            (pid, *iid)
+        })
         .collect();
     let start = Instant::now();
     let wi_batches = client
         .query(resolver::WORK_ITEMS_SQL)
         .param("traversal_path", args.traversal_path.as_str())
-        .param("pairs", issue_pairs_json.clone())
+        .param("pairs", issue_pairs.clone())
         .fetch_arrow()
         .await
         .context("work_items lookup failed")?;
@@ -333,13 +406,15 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
     info!(
         elapsed_ms = wi_elapsed.as_millis() as u64,
         rows = wi_rows,
-        pairs_in = issue_pairs_json.len(),
+        pairs_in = issue_pairs.len(),
         "work_items lookup"
     );
 
     println!("=== ClickHouse resolver benchmark ===");
     println!("batch size:            {}", args.batch_size);
-    println!("traversal_path:        {}", args.traversal_path);
+    println!("default project:       {}", args.default_project);
+    println!("traversal_path:        {:?}", args.traversal_path);
+    println!("resolved projects:     {}", path_to_source_id.len());
     println!(
         "routes:        {:>6} ms  ({} rows from {} paths)",
         routes_elapsed.as_millis(),
@@ -350,13 +425,13 @@ async fn run_clickhouse_bench(args: ClickhouseArgs) -> Result<()> {
         "merge_requests:{:>6} ms  ({} rows from {} pairs)",
         mr_elapsed.as_millis(),
         mr_rows,
-        mr_pairs_json.len()
+        mr_pairs.len()
     );
     println!(
         "work_items:    {:>6} ms  ({} rows from {} pairs)",
         wi_elapsed.as_millis(),
         wi_rows,
-        issue_pairs_json.len()
+        issue_pairs.len()
     );
 
     Ok(())
