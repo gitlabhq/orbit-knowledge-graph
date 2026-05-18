@@ -8,12 +8,11 @@
 
 This document describes how a user prompt is routed from a GitLab Duo surface
 through GitLab Rails to the GitLab Duo Workflow Service (DWS) and the AI Gateway,
-and where the Knowledge Graph (Orbit) attaches to that flow. It enumerates the
-seven Duo / Orbit routing combinations the platform supports today — the
-{Duo surface} × {Orbit on/off} cross product for chat, developer, and
-foundational-agent surfaces, plus custom AI Catalog agents — and identifies
-the precise Rails seams that decide whether an in-flight prompt sees Orbit
-tooling.
+and where the Knowledge Graph (Orbit) attaches to that flow. It describes
+the three independent routing *patterns* that decide whether an in-flight
+prompt sees Orbit tooling — one per Rails seam — and shows how each pattern
+behaves with Orbit on vs. off across the affected surfaces (Duo Chat, Duo
+Developer, foundational agents, custom AI Catalog agents).
 
 The Knowledge Graph repository owns the service that backs the Orbit MCP tools
 (`query_graph`, `get_graph_schema`, `list_commands`, `invoke_command`). The
@@ -27,10 +26,11 @@ overall surface.
 
 In scope:
 
-- The seven routing combinations across Duo Chat, Duo Developer, Foundational
-  Agents (with Orbit on and off for each), and custom AI Catalog agents.
-- The Rails gating facade (`Ai::Orbit::Settings`) and the two routing seams that
-  decide whether Orbit tools reach DWS.
+- The three routing patterns (MCP server injection, flow-version override,
+  agent picker filter) and how they behave with Orbit on/off across Duo
+  Chat, Duo Developer, foundational agents, and custom AI Catalog agents.
+- The Rails gating facade (`Ai::Orbit::Settings`) and the three routing
+  seams that decide whether Orbit tools reach DWS.
 - The feature flags involved in turning Orbit on or off.
 
 Out of scope:
@@ -161,10 +161,12 @@ flowchart LR
     OrbitMCP -->|gRPC| GKG[Knowledge Graph<br/>gkg-server]
 ```
 
-The two seams that decide Orbit's involvement are `McpConfigService`
-(adds/omits the `orbit:` server) and `FoundationalFlowStartParamsResolver`
-(picks the flow version, including Orbit-aware variants). They are described
-in [The two routing seams](#the-two-routing-seams) below.
+The three seams that decide Orbit's involvement are `McpConfigService`
+(adds/omits the `orbit:` server), `FoundationalFlowStartParamsResolver`
+(picks the flow version, including Orbit-aware variants), and
+`FoundationalChatAgentsResolver` (hides the dedicated Orbit agent from the
+chat picker). They are described in
+[The three routing seams](#the-three-routing-seams) below.
 
 </details>
 
@@ -172,8 +174,8 @@ in [The two routing seams](#the-two-routing-seams) below.
 
 A foundational agent and a custom AI Catalog agent are not two different
 *kinds of object*. They are two different *provenance + execution-path* labels
-on the same underlying catalog row. Once you accept that, the seven
-combinations below stop looking redundant.
+on the same underlying catalog row. Once you accept that, the catalog-vs.-
+picker split inside Pattern 1 below stops looking redundant.
 
 In plain English: an agent like the Planner is both a "foundational agent"
 (it ships with GitLab, it has a known reference like `duo_planner/v1`, the
@@ -348,7 +350,7 @@ caller on the routing path that is the focus of
 
 </details>
 
-## The two routing seams
+## The three routing seams
 
 ### Seam A — MCP server injection
 
@@ -598,397 +600,256 @@ flowchart TD
 
 </details>
 
-## The seven combinations
+## Routing patterns
 
-The platform supports seven distinct Duo / Orbit routing combinations. Six of
-them are the {Duo surface} × {Orbit on/off} cross product across the three
-main surfaces (Duo Chat, Duo Developer, Foundational Agents). The seventh
-covers the *catalog execution path* — the path used both by truly custom
-(user-built) catalog agents and by foundational agents launched from the
-catalog UI rather than the Duo Chat picker.
+Instead of enumerating every `{surface} × {Orbit on/off}` cell (which
+duplicates the seam description), this section describes the three routing
+*patterns* the system supports. Each pattern corresponds to one seam, lists
+which surfaces it applies to, and shows side-by-side what Orbit on vs. off
+produces for the LLM (or the user) on those surfaces.
 
-Combination 7 does not fit cleanly into the {surface} × {Orbit on/off} cross
-product because Orbit on/off for custom items is controlled by a separate
-subsetting and a separate service entry point. It is included here for
-completeness because the routing plumbing is shared with the other six.
+The three patterns are independent dials: a single prompt can be affected by
+all three (developer flow with Orbit on), by one or two (agentic chat: only
+Pattern 1), or by none (classic chat: outside every seam).
 
-Each subsection below describes, in plain English, the user-visible surface,
-how the prompt reaches DWS, and what Orbit adds (or does not add). The
-file-level details live in the seams above; in the per-combination
-subsections, `<details>` blocks carry the code-level callouts you need only
-when reproducing a specific case.
+Two non-routing details are worth keeping in mind while reading the
+patterns:
 
-<details>
-<summary>Reference table — all seven combinations at a glance</summary>
+- The same agent can take two different code paths to DWS depending on the
+  launch surface (Duo Chat picker vs. AI Catalog "Run" UI). See
+  [Foundational agents are also AI Catalog items](#foundational-agents-are-also-ai-catalog-items)
+  above. Within Pattern 1 below, that distinction picks which Seam A bucket
+  the workflow falls into (`foundational_enabled?` for the picker path,
+  `custom_agents_enabled?` for the catalog path on a custom item).
+- Classic Duo Chat (`Llm::ChatService`) never reaches `McpConfigService`, so
+  it is invisible to every pattern below. The Orbit toggle has no effect on
+  classic chat; it is being deprecated in favor of agentic chat. The
+  patterns below describe what happens once a prompt is on the agentic /
+  DWS path.
 
-| # | Combination | Rails entry | `workflow_definition` | Orbit gate (Settings) | What Orbit adds |
-|---|---|---|---|---|---|
-| 1 | Duo Chat — Orbit off | `aiAction(chat:)` → `Llm::ChatService` (classic) or DAP `chat` (agentic) | `chat` (agentic only) | n/a | Nothing |
-| 2 | Duo Chat — Orbit on | same | `chat` | `chat_enabled?` | `orbit:` MCP server with `query_graph` + `get_graph_schema` (+ `list_commands` / `invoke_command`) |
-| 3 | Duo Developer — Orbit off | `Ai::DuoWorkflows::CreateAndStartWorkflowService` | `software_development` (DWS-side ID for `developer/v1`) | n/a | Nothing |
-| 4 | Duo Developer — Orbit on | same | `software_development` | Seam A: `foundational_enabled?` <br/> Seam B: `duo_developer_orbit` + `killswitch_on?` | Orbit MCP server *and* flow version pinned to `2.0.0-orbit` |
-| 5 | Foundation agent — Orbit off | DAP agent picker → `CreateAndStartWorkflowService` | `analytics_agent/v1`, `security_analyst_agent/v1`, `ci_expert_agent/v1`, `duo_planner/v1`, `duo_permissions_assistant/v1` | n/a | Nothing |
-| 6 | Foundation agent — Orbit on | same; plus `orbit_agent/v1` becomes visible | same | `foundational_enabled?` (general agents) or `agent_enabled?` (`orbit_agent`) | Orbit MCP server injected by `McpConfigService` |
-| 7 | AI Catalog agent via catalog UI (custom *or* foundational agent launched from `/explore/ai-catalog/agents/<id>/`) | `Ai::Catalog::ExecuteWorkflowService` | `ai_catalog_agent` | Custom items: `custom_agents_enabled?` (additionally gated by `mcp_catalog_agent_tools`). Foundational items launched via this path: `foundational_enabled?` (catch-all). | Custom: `orbit:` MCP server with the *intersection* of the catalog item's selected MCP tools and `ORBIT_PREAPPROVED_TOOLS` (see Known gap below). Foundational-via-catalog: full `ORBIT_PREAPPROVED_TOOLS` like other foundational paths. |
+### Pattern 1: MCP server injection (Seam A)
 
-</details>
+**What it does.** Decides whether the `orbit:` MCP server is added to the
+payload Rails sends to DWS. With Orbit on, DWS receives an `orbit:` entry
+and the LLM sees `query_graph`, `get_graph_schema`, `list_commands`, and
+`invoke_command` as available tools. With Orbit off, the `orbit:` entry is
+simply absent and the LLM has no way to know Orbit exists for this run.
 
-### 1. Duo Chat — Orbit off
+**Where it applies.** Every workflow that reaches `McpConfigService`:
+agentic chat, the developer flow, foundational agents launched through the
+picker, the dedicated Orbit agent, and any catalog agent launched through
+the "Run" UI. The pattern itself is universal; what differs across surfaces
+is which `Ai::Orbit::Settings` predicate is consulted (see
+[Seam A](#seam-a--mcp-server-injection) for the bucket logic and the
+ordering rule).
 
-A user is in Duo Chat (web or IDE) and the platform has Orbit off for them
-on the chat surface. There are two sub-paths inside Duo Chat: a legacy
-classic chat path that goes straight to AI Gateway, and an agentic chat path
-that goes through DWS. Classic chat **cannot** ever reach Orbit — it never
-talks to `McpConfigService`. Agentic chat falls into the `chat_enabled?`
-bucket of Seam A, which returns false, so the Orbit MCP server is simply
-omitted from the payload sent to DWS. The LLM sees only the built-in chat
-tools and the GitLab MCP tools; it has no idea Orbit exists for this user.
+**Surface comparison.** The table below shows what the LLM sees on each
+surface with Orbit on vs. off. Every row is additionally gated by
+`:mcp_client` — when that flag is off, *no* MCP server is sent regardless of
+the per-surface predicate.
 
-<details>
-<summary>Path through Rails and what the LLM sees</summary>
-
-**Surface**: Duo Chat in any UI (web, IDE).
-
-**Path**:
-
-- *Classic chat* (`Llm::ChatService`): `aiAction(chat:)` →
-  `Llm::ExecuteMethodService#execute` → `Llm::ChatService#execute` →
-  `Llm::CompletionWorker` → `Llm::Completions::Chat` →
-  `Gitlab::Duo::Chat::ReactExecutor` → AI Gateway `/v2/chat/agent`. The ReAct
-  agent in AI Gateway builds the system prompt from its built-in chat tools
-  (`issue_reader`, `epic_reader`, `gitlab_docs`, …) only. **`McpConfigService`
-  is not on this path.** Orbit cannot attach here regardless of preferences.
-- *Agentic chat* (`workflow_definition: 'chat'`): the same `aiAction` mutation
-  with conversation type `DUO_CHAT` and the agentic-chat thread reaches DAP and
-  DWS. `McpConfigService` runs and falls into the `agentic_chat?` branch, which
-  delegates to `chat_enabled?(user)`. With Orbit off the gate returns `false`
-  and the `orbit:` server is omitted. DWS sees only the `gitlab:` server.
-
-**What the LLM sees**: the classic / agentic chat system prompt; tool list is
-the static set of built-in chat tools plus the `gitlab:` MCP tools. No graph
-tools.
-
-</details>
-
-### 2. Duo Chat — Orbit on ("Duo + Orbit only")
-
-Same surface as combination 1, with the chat subsetting on for the user. On
-the agentic chat path, Seam A's `chat_enabled?` predicate returns true and
-Rails attaches the `orbit:` MCP server to the DWS payload alongside the
-`gitlab:` server. DWS exposes the Orbit tools to the agentic chat agent, and
-the LLM can call them when a question is best answered by a graph traversal
-(for example, "which merge requests touched this file in the last 30
-days?"). Responses stream back through the agentic chat subscription. Classic
-chat still cannot reach Orbit regardless of the preference.
+| Surface | `workflow_definition` | Seam A bucket / predicate | Orbit OFF | Orbit ON |
+|---|---|---|---|---|
+| Agentic Duo Chat | `chat` | `agentic_chat?` → `chat_enabled?` | `gitlab:` MCP server only; chat ReAct tools | `gitlab:` + `orbit:` MCP servers; chat ReAct tools + 4 Orbit tools |
+| Duo Developer | `software_development` (DWS-side ID for `developer/v1`) | catch-all → `foundational_enabled?` | `gitlab:` MCP server only; developer toolset (GitLab read, Git, file-edit, run-commands) | `gitlab:` + `orbit:` MCP servers; developer toolset + Orbit tools. Combine with Pattern 2 for the Orbit-aware system prompt. |
+| Dedicated Orbit agent | `orbit_agent/v1` | `orbit_agent?` → `agent_enabled?` | Agent hidden from picker by Pattern 3; never reaches Seam A | `gitlab:` + `orbit:` MCP servers; the Orbit agent's "intelligence analyst with KG access" system prompt already references the tools |
+| Other foundational agents (Planner, Security Analyst, Data Analyst, CI Expert, Permissions Assistant) launched via the chat picker | `<agent_reference>/v1` (e.g. `analytics_agent/v1`) | catch-all → `foundational_enabled?` | `gitlab:` MCP server only; agent's curated toolset (e.g. Data Analyst has `run_glql_query` natively) | `gitlab:` + `orbit:` MCP servers. **Caveat:** the LLM only actually calls the Orbit tools when the agent's `toolset:` in its `ai-assist` flow YAML lists them; today only the Orbit agent itself does. The Data Analyst is in flight under [`gitlab-org/gitlab#598823`](https://gitlab.com/gitlab-org/gitlab/-/issues/598823). |
+| Custom AI Catalog agent (catalog "Run" UI) | `ai_catalog_agent` | `custom_agent?` → `custom_agents_enabled?` | `gitlab:` MCP server only; whatever the catalog item selected, minus any Orbit tools | `gitlab:` + `orbit:` MCP servers with the `orbit:` toolset *intersected* with the catalog item's `def_mcp_tools` and `ORBIT_PREAPPROVED_TOOLS`. **Known gap:** the catalog payload builder ignores `def_mcp_tools`, so the LLM's `toolset` does not list the Orbit tools even though the server is reachable. See `<details>` below. |
+| Foundational agent launched via the catalog UI (`/explore/ai-catalog/agents/<id>/` Run) | `ai_catalog_agent` | catch-all → `foundational_enabled?` (`custom_agent?` is false because a `FoundationalChatAgent` row points at the catalog item) | `gitlab:` MCP server only | `gitlab:` + `orbit:` MCP servers with the full `ORBIT_PREAPPROVED_TOOLS`. The toolset hits the same `ai-assist` advertisement caveat as the picker path. |
+| Code review (`code_review/*`) | `code_review/<sub-flow>` | hard-coded `false` (since [`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)) | `gitlab:` MCP server only | Same as OFF. The catch-all is bypassed; this carve-out holds until Duo Code Review integrates Orbit deliberately and is benchmarked. |
+| Classic Duo Chat (`Llm::ChatService`) | n/a | `McpConfigService` not called | Built-in chat ReAct tools only | Same as OFF — pattern does not apply. |
 
 <details>
-<summary>Concrete payload and tool list</summary>
+<summary>Concrete <code>orbit:</code> payload, the tools selected for custom vs. non-custom agents, and the <code>.except(:orbit)</code> invariant</summary>
 
-**Surface**: same.
-
-**Path**: identical to (1) until `McpConfigService`. With `chat_enabled?`
-returning `true`, the `orbit:` MCP server is added:
+When the gate passes, the `orbit:` entry added to the payload is:
 
 ```ruby
 {
-  gitlab: { … built-in GitLab tools … },
-  orbit:  {
-    Headers: { Authorization: "Bearer …" },
-    PreApprovedTools: %w[query_graph get_graph_schema list_commands invoke_command],
+  orbit: {
+    Headers: { Authorization: "Bearer <gitlab_token>" },
+    PreApprovedTools: tools,
+    Tools: tools,        # only set for custom agents
     Trusted: true
   }
 }
 ```
 
-DWS exposes those tools to the agentic chat agent. The LLM can choose to call
-them when a question is best answered by a graph traversal (for example,
-"which merge requests touched this file in the last 30 days?"). Responses
-stream back through the agentic chat subscription.
+`tools` is computed by `McpConfigService#orbit_tools_to_inject`:
 
-Classic `Llm::ChatService` still does not call `McpConfigService`, so Orbit
-tools are not surfaced in classic chat regardless of the preference. That path
-is being deprecated in favor of agentic chat.
+- **Non-custom agents** (agentic chat, dedicated Orbit agent, picker-launched
+  foundational agents, foundational agents launched via the catalog UI): the
+  full `ORBIT_PREAPPROVED_TOOLS`, sourced from
+  `API::Orbit::McpHandlers::ToolCatalog::TRUSTED_TOOL_NAMES`:
+  `["query_graph", "get_graph_schema", "list_commands", "invoke_command"]`.
+  The `Tools` field is **omitted**, so DWS lists every tool the server
+  exposes.
+- **Custom agents**: only the intersection of the catalog item's
+  `def_mcp_tools` with `ORBIT_PREAPPROVED_TOOLS`. The `Tools` field is
+  **set** so DWS surfaces only the selected subset.
 
-**What the LLM sees**: the agentic chat system prompt; tool list is the GitLab
-built-ins plus the four Orbit tools.
+When the gate returns `false`, the `orbit:` key is simply absent. DWS does
+not know Orbit exists, the agent's tool list contains neither `query_graph`
+nor `get_graph_schema`, and the prompt is constructed without any Orbit
+references.
 
-</details>
-
-### 3. Duo Developer — Orbit off
-
-The user has selected the Developer foundational flow from the Automate UI,
-the IDE, or the CLI. With Orbit off for the user, Seam B keeps the flow on
-the default `developer/v1@2.0.0` version (no Orbit-aware override) and Seam A
-falls into the catch-all `foundational_enabled?` branch, which is false. DWS
-loads `developer/v1@2.0.0` and runs the supervisor + executor agents with
-the standard developer toolset (GitLab read tools, Git tools, file-edit
-tools, run-commands). No graph tools are reachable.
-
-<details>
-<summary>Concrete resolver behaviour and what the LLM sees</summary>
-
-**Surface**: Automate → Sessions UI in the web app, or the IDE / CLI extension,
-with the **Developer** foundational flow selected.
-
-**Path**:
-
-- `Ai::DuoWorkflows::CreateAndStartWorkflowService` (or `/api/v4/ai/duo_workflows`)
-  is called with the `developer/v1` foundational flow reference and a goal.
-- `FoundationalFlowStartParamsResolver.call('developer/v1', container, user: current_user)`:
-  - `duo_developer_orbit` is off (or `killswitch_on?` is false) → no Orbit
-    branch.
-  - `duo_developer_next_unstable` is off → no experimental branch.
-  - Returns `['developer/v1', '2.0.0']`.
-- `McpConfigService` runs with `workflow_definition: 'software_development'`
-  (DWS-side ID for `developer/v1`). The workflow does not match `custom_agent?`,
-  `orbit_agent?`, or `agentic_chat?`, so the gate evaluates
-  `foundational_enabled?(user)` → `false`. Orbit MCP server omitted.
-- DWS loads `developer/v1@2.0.0`, executes the supervisor + executor agents on
-  a runner job, returns results.
-
-**What the LLM sees**: `developer/v1@2.0.0`'s system prompts and toolset
-(GitLab read tools, Git tools, file-edit tools, run-commands). No graph tools.
-
-</details>
-
-### 4. Duo Developer — Orbit on
-
-The Orbit-aware variant of (3). Two things happen at once. Seam B sees that
-`duo_developer_orbit` is on for the user *and* the saved Orbit killswitch
-is on, so it returns `developer/v1@2.0.0-orbit` (an Orbit-aware system prompt
-tuned to use graph tools for impact analysis, caller discovery, and similar
-tasks). Seam A falls into the foundational catch-all branch and, with
-`foundational_enabled?` true, adds the `orbit:` MCP server to the payload.
-DWS therefore loads the Orbit-aware variant of the flow with two MCP
-servers: `gitlab:` and `orbit:`.
-
-This is also the combination where the two seams' different predicates
-matter most: a user could in principle land on `2.0.0-orbit` while the MCP
-server is omitted, or vice versa. See
-[Implications](#implications-and-recommendations).
-
-<details>
-<summary>Concrete resolver behaviour, dual-gate note, and what the LLM sees</summary>
-
-**Surface**: same.
-
-**Path**: the Orbit-aware variant of (3).
-
-- `FoundationalFlowStartParamsResolver`:
-  - `Feature.enabled?(:duo_developer_orbit, user) && Ai::Orbit::Settings.killswitch_on?(user)` →
-    returns `['developer/v1', '2.0.0-orbit']`. This is Seam B.
-- `McpConfigService` falls into the catch-all `foundational_enabled?` branch
-  (since `software_development` is neither `chat`, nor an `orbit_agent`, nor a
-  custom agent). With Orbit on for foundational use, the `orbit:` server is
-  injected. This is Seam A.
-- DWS loads `developer/v1@2.0.0-orbit` and starts it with two MCP servers:
-  `gitlab:` and `orbit:`.
-
-**What the LLM sees**: the *Orbit-aware* `developer/v1@2.0.0-orbit` system
-prompt, which is tuned to use graph tools for impact analysis, caller
-discovery, and similar tasks. Tool list = the `2.0.0-orbit` toolset plus
-`query_graph` and `get_graph_schema` (plus `list_commands` / `invoke_command`
-on the same MCP server).
-
-> **Note on the dual gate.** Seam A checks `foundational_enabled?(user)` and
-> Seam B checks `duo_developer_orbit + killswitch_on?(user)`. These are
-> different predicates: a user could in principle land on `2.0.0-orbit` while
-> the MCP server is omitted, or vice versa. See [Implications](#implications-and-recommendations)
-> for the consistency considerations this raises.
-
-</details>
-
-### 5. Foundation agent — Orbit off
-
-The user is in the Duo Chat panel with one of the foundational agents
-selected: GitLab Duo, Planner, Security Analyst (Ultimate-only), Data
-Analyst, CI Expert, or Permissions Assistant. With Orbit off, the dedicated
-Orbit agent itself is hidden from the picker by Seam C, and Seam A's
-catch-all `foundational_enabled?` predicate returns false for every other
-foundational agent. No Orbit MCP server is sent to DWS, and the LLM sees the
-agent's own curated system prompt and toolset (Data Analyst has GLQL
-natively, Security Analyst has vulnerability tools, and so on) with no graph
-tools.
-
-Note that this combination describes the *picker* path. The same agent, if
-it has a `global_catalog_id`, can also be launched from the catalog UI,
-which is combination 7 and a different code path.
-
-<details>
-<summary>Path, agent inventory, and picker-vs-catalog clarification</summary>
-
-**Surface**: Duo Chat panel with a foundational agent selected — GitLab Duo
-(`chat`), Planner (`duo_planner/v1`), Security Analyst
-(`security_analyst_agent/v1`, Ultimate-only), Data Analyst (`analytics_agent/v1`),
-CI Expert (`ci_expert_agent/v1`), Permissions Assistant
-(`duo_permissions_assistant/v1`). With Orbit off, Seam C hides the dedicated
-Orbit agent from the picker.
-
-**Path**:
-
-- `aiAction(chat:)` with the selected agent → `CreateAndStartWorkflowService` →
-  DAP → `McpConfigService` with `workflow_definition` equal to the agent's
-  reference + version (e.g. `analytics_agent/v1`). The "GitLab Duo" default
-  uses reference `chat`, which is the agentic-chat path above.
-- `orbit_enabled_for_flow?` falls into the catch-all `foundational_enabled?`
-  branch and returns `false`. Orbit MCP server omitted.
-- DWS loads the agent's flow config, which is shipped in the DWS image. The
-  Dockerfile pulls agent YAML from the AI Catalog at build time via
-  `fetch-foundational-agents`, keyed by each agent's `global_catalog_id`
-  (for example, `duo_planner.yml` is fetched from catalog item `348`).
-
-> **Note: the picker path vs. the catalog-UI path.** This combination
-> describes the *foundational* execution path — the one the Duo Chat
-> foundational agent picker takes. The same agent (when it has a
-> `global_catalog_id`, as Planner, Security Analyst, Data Analyst, and CI
-> Expert do) can also be launched from `/explore/ai-catalog/agents/<id>/`,
-> which goes through `Ai::Catalog::ExecuteWorkflowService` and sends
-> `workflow_definition: 'ai_catalog_agent'` to DWS — that is combination 7
-> below, not this one. The choice of seam, the choice of Orbit subsetting,
-> and the choice of DWS flow YAML all depend on which surface invoked the
-> agent.
-
-**What the LLM sees**: the agent's curated system prompt and toolset (Data
-Analyst has `run_glql_query` natively, Security Analyst has vulnerability
-tools, and so on). No graph tools.
-
-</details>
-
-### 6. Foundation agent — Orbit on
-
-Same surface as (5), with the foundational subsetting on. There are two
-sub-cases: the dedicated Orbit agent and everything else.
-
-The **dedicated Orbit agent** (`orbit_agent/v1`) becomes visible in the
-picker (Seam C, `agent_enabled?` true) and Seam A matches the `orbit_agent?`
-bucket so it uses `agent_enabled?` to gate MCP injection (Seam A). The
-agent's own DWS flow config references the Orbit tools natively — it is the
-"intelligence analyst with Knowledge Graph access" agent.
-
-**Other foundational agents** are always visible (only the Orbit agent is
-filtered on Orbit settings). Seam A uses the catch-all `foundational_enabled?`
-predicate, which is true, so the Orbit MCP server is injected. However: each
-agent's flow YAML in `ai-assist` must list the Orbit tools in its `toolset:`
-for the LLM to actually call them. If it does not, DWS accepts the MCP server
-but the LLM never sees the tools. Today only the Orbit agent itself
-advertises the tools by default; the Data Analyst is being updated in
-[`gitlab-org/gitlab#598823`](https://gitlab.com/gitlab-org/gitlab/-/issues/598823),
-and the others (Planner, Security Analyst, CI Expert, Permissions Assistant)
-do not list graph tools.
-
-<details>
-<summary>Two sub-cases, prompt advertisement details, and what the LLM sees</summary>
-
-**Surface**: same. Two sub-cases:
-
-**6a. The dedicated Orbit foundational agent (`orbit_agent/v1`).**
-
-- Picker visibility gated by `agent_enabled?` (Seam C). With Orbit on for the
-  user, the agent appears.
-- Routing same as 6b except `McpConfigService` matches `orbit_agent?` first and
-  uses `Ai::Orbit::Settings.agent_enabled?(user)`. Gate passes → Orbit MCP
-  server injected.
-- The agent's flow config (`orbit_agent/v1`, shipped in DWS) already references
-  `query_graph` and `get_graph_schema` in its system prompt — it is the
-  "intelligence analyst with Knowledge Graph access" agent.
-
-**6b. Any other foundational agent.**
-
-- Picker always shows them; only the Orbit agent is filtered on the Orbit
-  setting.
-- `McpConfigService` uses the catch-all `foundational_enabled?(user)`. Gate
-  passes → Orbit MCP server injected.
-- The agent's existing flow config in DWS may or may not advertise graph
-  tools. If it does (for example, the Data Analyst path being added in
-  `gitlab-org/gitlab#598823`, with the prompt change living in `ai-assist`),
-  the agent can call them. If it does not, DWS accepts the MCP server but the
-  LLM never invokes the tools because they are not in the agent's `toolset:`.
-
-**What the LLM sees**: for the Orbit agent, an Orbit-centric system prompt with
-graph tools listed and tuned-for. For other foundational agents, the agent's
-existing prompt; graph tools are only visible if the agent's flow YAML lists
-them under `toolset:`.
-
-</details>
-
-### 7. AI Catalog agents via the catalog execution path (with and without Orbit)
-
-This is the *catalog execution path*: anything launched through
-`Ai::Catalog::ExecuteWorkflowService` rather than through the foundational
-agent picker. Two populations of catalog items end up here:
-
-1. **Custom (user-built) catalog agents.** Created in the AI Catalog UI by a
-   user, with their own prompt and selected MCP tools. These are
-   `custom_agent?` (no `FoundationalChatAgent` row points at them).
-2. **Foundational agents launched from the catalog UI** — Planner, Security
-   Analyst, Data Analyst, or CI Expert opened at
-   `/explore/ai-catalog/agents/<id>/` and Run. The underlying item is
-   `foundational_chat_agent?` (`custom_agent? == false`), but the launch
-   surface is `ExecuteWorkflowService`, so the path through Rails is the
-   same and DWS receives the same `workflow_definition: 'ai_catalog_agent'`.
-
-In both populations, the Orbit subsetting that applies depends on whether
-`McpConfigService#custom_agent?` returns true for the specific catalog item.
-For a true custom agent, the gate is `custom_agents_enabled?` and the tool
-list is the *intersection* of the catalog item's selected MCP tools and the
-Orbit pre-approved tool set. For a foundational agent launched through the
-catalog UI, `custom_agent?` is false and the catch-all `foundational_enabled?`
-applies — even though `workflow_definition` is `ai_catalog_agent`. The
-Seam A bucket is keyed off the catalog item's classification, not just the
-workflow definition string.
-
-There is also a small invariant worth noting: Rails ensures a catalog item
-cannot register an MCP server named `orbit:` of its own. The only `orbit:`
-entry in the final payload is the one Rails owns. The Orbit MCP server is a
-Rails-owned identity, not a user-configurable one.
-
-There is also a known gap on the custom-agent side that makes the
-"custom agent + Orbit" combination non-functional in production today even
-when all gates pass; see the details block below.
-
-<details>
-<summary>Service path, the <code>.except(:orbit)</code> invariant, and the known toolset-assembly gap</summary>
-
-**Surface**: Duo Chat or the AI Catalog "Run" UI, with any catalog agent
-selected (custom or foundational).
-
-**Path**:
-
-- `Ai::Catalog::ExecuteWorkflowService` resolves the catalog item version and
-  passes its ID and the flow definition to `McpConfigService`.
-- `McpConfigService#custom_agent?` evaluates as
-  `ai_catalog_item_version_id.present? && agent_has_tools?`, where
-  `agent_has_tools?` requires either built-in tool IDs or
-  `agent_mcp_tools_enabled?` (which itself requires
-  `:mcp_catalog_agent_tools` to be on and the agent to have MCP tools
-  selected).
-- For custom agents the Orbit gate is `custom_agents_enabled?(user)`. With
-  Orbit off for custom agents, the `orbit:` key is absent and the agent runs
-  without graph tools regardless of what the catalog item selected.
-- If the user has selected `query_graph` or `get_graph_schema` on the catalog
-  agent, those names land in the *intersection* `agent_orbit_tools`, which is
-  what flows into both `Tools` and `PreApprovedTools` for the `orbit:` server.
-  Other Orbit tools are excluded.
-
-**The `.except(:orbit)` invariant.** `McpConfigService#execute` assembles its
-output as `gitlab_mcp_server.merge(orbit_mcp_server).merge(ai_catalog_mcp_servers.except(:orbit))`.
-The trailing `.except(:orbit)` ensures that a catalog item cannot register a
+**The `.except(:orbit)` invariant.** `McpConfigService#execute` assembles
+its output as
+`gitlab_mcp_server.merge(orbit_mcp_server).merge(ai_catalog_mcp_servers.except(:orbit))`.
+The trailing `.except(:orbit)` ensures a catalog item cannot register a
 server named `orbit:` of its own — the only `orbit:` entry in the final
-payload is the one produced by `McpConfigService#orbit_mcp_server`. The Orbit
-MCP server is a Rails-owned identity, not a user-configurable one.
+payload is the one produced by `McpConfigService#orbit_mcp_server`. The
+Orbit MCP server is a Rails-owned identity, not a user-configurable one.
 
-#### Known gap: custom-agent toolset assembly
+**Known gap: custom-agent toolset assembly.**
+`Ai::Catalog::DuoWorkflowPayloadBuilder::V1#agent_toolset` builds the
+per-step `toolset` that the system prompt sees from `BuiltInTool` records
+only — it does **not** read `version.def_mcp_tools`. Even when the Orbit
+MCP server is correctly injected by Seam A, the system prompt the LLM sees
+does not list `query_graph` and `get_graph_schema`. The model correctly
+reports "I don't have a graph tool" because, from its point of view, it
+does not. The MCP plumbing is fine; the catalog-agent toolset assembly is
+the bug. The fix lives outside this repository in `gitlab-org/gitlab` and
+is tracked separately.
 
-`Ai::Catalog::DuoWorkflowPayloadBuilder::V1#agent_toolset` builds the per-step
-`toolset` that the system prompt sees from `BuiltInTool` records only — it does
-**not** read `version.def_mcp_tools`. Even when the Orbit MCP server is
-correctly injected by Seam A, the system prompt the LLM sees does not list
-`query_graph` and `get_graph_schema`. The model correctly reports "I don't
-have a graph tool" because, from its point of view, it does not. The MCP
-plumbing is fine; the catalog-agent toolset assembly is the bug.
+**Cross-cutting requirements**:
 
-This gap was identified during internal review; a fix lives outside this
-repository in `gitlab-org/gitlab` and is tracked separately.
+- `Feature.enabled?(:mcp_client, current_user)` (`gitlab_com_derisk`). If
+  off, `execute` returns `nil` before any other gate is evaluated and no
+  MCP servers are sent, Orbit or otherwise.
+- For custom agents, `:mcp_catalog_agent_tools` must be on for
+  `agent_mcp_tools_enabled?` to return `true`. Without it, `custom_agent?`
+  is false and the user's selection of Orbit tools on the catalog item has
+  no effect on routing.
+- `Feature.enabled?(:orbit_mcp_command_tools, user)` switches the *visible*
+  Orbit tools surfaced by
+  `API::Orbit::McpHandlers::ToolCatalog::visible_tool_names` between the
+  legacy `[query_graph, get_graph_schema]` and the command-pair
+  `[list_commands, invoke_command]`. It does not change
+  `TRUSTED_TOOL_NAMES`, which is always all four; DWS receives all four in
+  `PreApprovedTools`. The command-pair surface itself is designed in
+  [ADR 011 — Agent command surface](decisions/011_agent_command_surface.md).
+
+</details>
+
+### Pattern 2: Flow version override (Seam B)
+
+**What it does.** For the developer flow, swaps the DWS-side flow version
+from the default `developer/v1@2.0.0` to the Orbit-aware variant
+`developer/v1@2.0.0-orbit`. The variant has a different system prompt — one
+tuned to use graph tools for impact analysis, caller discovery, and similar
+tasks. The toolset listed by the prompt assumes the Orbit MCP server is
+present (Pattern 1).
+
+**Where it applies.** Only `developer/v1` today. `fix_pipeline/v1` has its
+own (non-Orbit) override in the same resolver, but no `*-orbit` variant
+exists. Every other foundational flow uses its default version regardless
+of the Orbit setting; those flows reach Orbit through Pattern 1 only.
+
+**Surface comparison.** The on/off behavior for the developer flow:
+
+| Aspect | Orbit OFF (`duo_developer_orbit` off OR `killswitch_on?` false) | Orbit ON (`duo_developer_orbit` on AND `killswitch_on?` true) |
+|---|---|---|
+| Resolver returns | `['developer/v1', '2.0.0']` | `['developer/v1', '2.0.0-orbit']` |
+| DWS loads | Default developer system prompt and toolset | Orbit-aware system prompt; toolset lists graph tools |
+| What the LLM sees | Standard developer toolset (GitLab read, Git, file-edit, run-commands). No graph tools mentioned. | Same base toolset + `query_graph` and `get_graph_schema` advertised in the prompt. Whether they are *callable* depends on Pattern 1. |
+| Interaction with `duo_developer_next_unstable` | The unstable flag can flip the flow to `developer_unstable/experimental`. | The Orbit branch is checked first, so the Orbit variant wins when both flags are on for the same user. |
+
+**Dual-gate caveat.** Pattern 1 (for the developer flow) checks
+`foundational_enabled?`, but Pattern 2 checks `duo_developer_orbit` AND
+`killswitch_on?`. These are different predicates that can disagree, with
+two notable states:
+
+- *Pattern 1 fires, Pattern 2 does not:* The MCP server is injected, but
+  the flow stays on `2.0.0`. The agent has Orbit tools available but its
+  system prompt does not encourage their use. This is the expected state
+  during the `duo_developer_orbit` rollout.
+- *Pattern 2 fires, Pattern 1 does not:* The flow flips to `2.0.0-orbit`
+  but the `orbit:` MCP server is omitted. The agent's system prompt
+  advertises graph tools that are not reachable. This is the failure mode
+  flagged during the review of `!235544`.
+
+See [Implication 1](#1-seams-a-and-b-use-different-gates-for-the-developer-flow)
+for the recommended consolidation.
+
+<details>
+<summary>Resolver code, version-selection order, and rationale for the separate flag</summary>
+
+`Ai::DuoWorkflows::FoundationalFlowStartParamsResolver.resolve_with_overrides`
+encodes the override:
+
+```ruby
+def self.resolve_with_overrides(flow, container, user)
+  case flow.foundational_flow_reference
+  when 'developer/v1'
+    if Feature.enabled?(:duo_developer_orbit, user) && ::Ai::Orbit::Settings.killswitch_on?(user)
+      return ['developer/v1', '2.0.0-orbit']
+    end
+
+    if Feature.enabled?(:duo_developer_next_unstable, container) ||
+        Feature.enabled?(:duo_developer_next_unstable, container.root_ancestor)
+      return ['developer_unstable/experimental', ::Ai::Catalog::FoundationalFlow::DEFAULT_FLOW_VERSION]
+    end
+  when 'fix_pipeline/v1'
+    if Feature.enabled?(:fix_pipeline_next, container) ||
+        Feature.enabled?(:fix_pipeline_next, container.root_ancestor)
+      return ['fix_pipeline_next/v1', ::Ai::Catalog::FoundationalFlow::DEFAULT_FLOW_VERSION]
+    end
+  end
+
+  [flow.foundational_flow_reference, flow.flow_version]
+end
+```
+
+`duo_developer_orbit` (`gitlab_com_derisk`) is a separate de-risking flag
+that exists so the `2.0.0-orbit` variant can be rolled out independently of
+the broader Orbit foundational gate. `killswitch_on?` reads only the saved
+`orbit_enabled` boolean and bypasses the `orbit_user_preference` flag and
+the platform-availability flags.
+
+`fix_pipeline/v1` and the other foundational flows have no Orbit-specific
+version yet. They reach Orbit through Pattern 1 only; the system prompt and
+toolset they receive is the same with Orbit on or off.
+
+</details>
+
+### Pattern 3: Foundational agent picker filter (Seam C)
+
+**What it does.** Hides or shows the dedicated Orbit foundational agent in
+the Duo Chat agent picker. This is pre-flight visibility, not in-flight
+routing — there is no prompt to route yet at this point — but it is the
+third observable effect of the Orbit settings.
+
+**Where it applies.** Only the dedicated Orbit foundational agent
+(`reference: 'orbit_agent'`, name "Orbit", ID `2` in
+`Ai::FoundationalChatAgentsDefinitions`). All other foundational agents are
+always visible regardless of the Orbit setting.
+
+**Surface comparison.**
+
+| Aspect | Orbit OFF (`agent_enabled?` false) | Orbit ON (`agent_enabled?` true) |
+|---|---|---|
+| Orbit agent visible in the chat agent picker | No — filtered out by `FoundationalChatAgentsResolver` | Yes — picker offers "Orbit" as a selectable agent |
+| Other foundational agents (GitLab Duo, Planner, Data Analyst, …) | Visible | Visible |
+| What happens when the agent is selected | n/a (not visible) | Pattern 1 fires with the `orbit_agent?` bucket → `agent_enabled?` (which is already true here, so the MCP server is injected) |
+
+The picker is filtered by user, not by query parameter. A user who lacks
+`agent_enabled?` cannot manually navigate to "select Orbit agent" — the
+agent is removed from the GraphQL response that backs the picker. There is
+no equivalent filtering on the AI Catalog UI side; a catalog agent's
+visibility is controlled by catalog ACLs, not by the Orbit settings.
+
+<details>
+<summary>File and GraphQL resolver</summary>
+
+**File**: `ee/app/graphql/resolvers/ai/foundational_chat_agents_resolver.rb`.
+
+The resolver filters the list returned by
+`Ai::FoundationalChatAgentsDefinitions::DEFINITIONS` by calling
+`Ai::Orbit::Settings.agent_enabled?(user)` for the `orbit_agent` entry and
+omitting it when the predicate is false. See the mermaid diagram inside
+[Seam C](#seam-c--foundational-agent-picker-pre-flight) for the
+`Ai::Orbit::Settings` → seam fan-out across all three seams / patterns.
 
 </details>
 
@@ -1026,11 +887,12 @@ specific flows to experimental variants.
 ## Decision table — "is Orbit on for this prompt?"
 
 Rather than reason through the three layers of `Ai::Orbit::Settings` every
-time, the table below collapses "is Orbit on for this prompt?" into a single
-row per surface. Each row is *additionally* gated by `:mcp_client`: when
-`mcp_client` is off, `McpConfigService#execute` returns `nil` before any
-Orbit (or GitLab MCP) server is assembled, so Seam A is short-circuited
-regardless of the per-surface predicate. Seam B and Seam C are not gated by
+time, the table below collapses "is Orbit on for this prompt?" into a
+single row per surface, one column per routing pattern. Each Pattern 1
+cell is *additionally* gated by `:mcp_client`: when `mcp_client` is off,
+`McpConfigService#execute` returns `nil` before any Orbit (or GitLab MCP)
+server is assembled, so Pattern 1 is short-circuited regardless of the
+per-surface predicate. Pattern 2 and Pattern 3 are not gated by
 `mcp_client`. The team-member carve-out described in
 [the gating facade](#the-orbit-gating-facade) affects the `agent_enabled?`
 rows specifically.
@@ -1038,19 +900,21 @@ rows specifically.
 <details>
 <summary>Decision table per surface</summary>
 
-| Surface | Seam A (MCP injection) | Seam B (flow version) | Seam C (picker) |
+| Surface | Pattern 1 (MCP injection, Seam A) | Pattern 2 (flow version, Seam B) | Pattern 3 (picker, Seam C) |
 |---|---|---|---|
 | Agentic chat (`workflow_definition: 'chat'`) | `chat_enabled?` | n/a | n/a |
 | Dedicated Orbit agent (`orbit_agent/v1`) | `agent_enabled?` | n/a | `agent_enabled?` |
 | Duo Developer (`software_development` / `developer/v1`) | `foundational_enabled?` | `duo_developer_orbit` + `killswitch_on?` | n/a |
-| Other foundational agents | `foundational_enabled?` | n/a (today) | n/a |
+| Other foundational agents (picker path) | `foundational_enabled?` | n/a (today) | n/a |
+| Custom AI Catalog agent (catalog path) | `custom_agents_enabled?` | n/a | n/a |
+| Foundational agent launched via catalog UI | `foundational_enabled?` | n/a | n/a |
 | Code review (`code_review/*`) | hard-coded `false` (since `ddb26ef4`) | n/a | n/a |
-| Custom AI Catalog agent | `custom_agents_enabled?` | n/a | n/a |
-| Other foundational flows | `foundational_enabled?` | n/a (today) | n/a |
+| Classic Duo Chat | path bypasses `McpConfigService` | n/a | n/a |
 
-`<predicate>_enabled?` predicates all evaluate the same three layers internally
-(platform flags → `orbit_user_preference` → killswitch + per-surface
-subsetting). They differ only in which subsetting key they read.
+`<predicate>_enabled?` predicates all evaluate the same three layers
+internally (platform flags → `orbit_user_preference` → killswitch +
+per-surface subsetting). They differ only in which subsetting key they
+read.
 
 </details>
 
