@@ -242,7 +242,7 @@ dependencies = [
  "arrow-cast 58.3.0",
  "arrow-csv 58.3.0",
  "arrow-data 58.3.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "arrow-json 58.3.0",
  "arrow-ord 58.3.0",
  "arrow-row 58.3.0",
@@ -454,9 +454,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-ipc"
-version = "58.2.0"
+version = "58.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd8907ddd8f9fbabf91ec2c85c1d81fe2874e336d2443eb36373595e28b98dd5"
+checksum = "238438f0834483703d88896db6fe5a7138b2230debc31b34c0336c2996e3c64f"
 dependencies = [
  "arrow-array 58.3.0",
  "arrow-buffer 58.3.0",
@@ -2100,7 +2100,7 @@ name = "clickhouse-client"
 version = "0.1.0"
 dependencies = [
  "arrow 58.2.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "bytes",
  "circuit-breaker",
  "clickhouse",
@@ -3029,7 +3029,7 @@ checksum = "d72a11ca44a95e1081870d3abb80c717496e8a7acb467a1d3e932bb636af5cc2"
 dependencies = [
  "ahash 0.8.12",
  "arrow 58.2.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "chrono",
  "half",
  "hashbrown 0.16.1",
@@ -3139,7 +3139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffa6c52cfed0734c5f93754d1c0175f558175248bf686c944fb05c373e5fc096"
 dependencies = [
  "arrow 58.2.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "async-trait",
  "bytes",
  "datafusion-common 53.1.0",
@@ -6240,7 +6240,7 @@ dependencies = [
  "anyhow",
  "arrow 56.2.1",
  "arrow 58.2.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "code-graph",
  "crossbeam-channel",
  "globset",
@@ -9008,7 +9008,7 @@ dependencies = [
  "arrow-array 58.3.0",
  "arrow-buffer 58.3.0",
  "arrow-data 58.3.0",
- "arrow-ipc 58.2.0",
+ "arrow-ipc 58.3.0",
  "arrow-schema 58.3.0",
  "arrow-select 58.3.0",
  "base64 0.22.1",
