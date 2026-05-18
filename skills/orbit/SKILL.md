@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.7.0
+version: 0.7.1
 license: MIT
 metadata:
   audience: developers
@@ -32,8 +32,10 @@ glab orbit remote tools                         # full DSL JSON Schema
 ## Running a query
 
 Write the request body to a file and pass it to `glab orbit remote query`.
-Default output is `llm` (compact, agent-friendly); pass `--format raw` to
-pipe into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
+Always pass `--format raw` — the default `llm` formatter has a parser bug
+(glab ≤ v1.97.0, tracked in gitlab-org/cli#8298) that returns exit code 1
+with `Invalid character '@'` regardless of query correctness.
+Endpoints are user-scoped — do **not** pass `-R owner/repo`.
 
 ```bash
 cat > /tmp/q.json <<'JSON'
@@ -54,7 +56,8 @@ cat > /tmp/q.json <<'JSON'
   }
 }
 JSON
-glab orbit remote query /tmp/q.json
+glab orbit remote query --format raw /tmp/q.json
+glab orbit remote query --format raw /tmp/q.json | jq '.'
 ```
 
 `filters` is an **object keyed by property name** — not an array. Use either
@@ -72,7 +75,13 @@ and `max_hops` are capped at 3 server-side.
 
 Read [`references/recipes.md`](references/recipes.md) before constructing a
 query — the same question often has one canonical paste-ready shape and
-several wrong-looking-correct shapes. Two traps come up often:
+several wrong-looking-correct shapes. Three traps come up often:
+
+- **Always pass `--format raw` to `glab orbit remote query`.** The default
+  `llm` output formatter fails with exit code 1 and `Invalid character '@'`
+  on every query in glab ≤ v1.97.0 (gitlab-org/cli#8298). This error is
+  misleading — it is not caused by a bad query or stdin piping; it is a
+  formatter bug. Use `--format raw` unconditionally until the fix ships.
 
 - **"Pipelines for a merge request" requires `Pipeline.source =
   "merge_request_event"`.** The graph links every CI pipeline spawned in the
@@ -85,6 +94,7 @@ several wrong-looking-correct shapes. Two traps come up often:
   to match what the MR **Pipelines** tab, the REST
   `/merge_requests/:iid/pipelines` endpoint, and the GraphQL
   `mergeRequest.pipelines` connection return.
+
 - **Prefer single-node queries when you can bound the target entity
   directly.** Adding extra nodes/relationships only to "anchor" the query
   (for example, joining `Project` + `MergeRequest` + `Pipeline` when you
