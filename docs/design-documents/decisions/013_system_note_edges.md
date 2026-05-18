@@ -33,7 +33,7 @@ Three things the MR exposed are inputs to this ADR: (a) standalone edge ETL has 
 
 The constraints in play: Rails owns authorization and is the source of system note bodies, so we do not control templates and must accept Rails-side phrasing changes as a maintenance cost. The Analytics team owns Siphon, so the new source-table replication is cross-team coordination on the critical path. The v0.5 migration framework from kg#443 is complete and validated on staging, so adding new edge kinds is a `SCHEMA_VERSION` bump, not a table rebuild.
 
-This ADR proposes a Rust extraction handler running inside the SDLC indexer, with two batched ClickHouse lookups for entity resolution, gated on a one-time Siphon-side replication of `system_note_metadata`. The recommendation is anchored by a POC harness ([!1335][poc-mr]) that produced real parser-throughput numbers and locked in the parser/resolver shape the production handler will reuse verbatim.
+This ADR proposes a Rust extraction handler running inside the SDLC indexer, with two batched ClickHouse lookups for entity resolution, gated on a one-time Siphon-side replication of `system_note_metadata`. The recommendation is anchored by a POC harness ([!1335][poc-mr]) that produced parser-throughput numbers on both a 21-entry synthetic golden corpus and a 74,125-note GDK-seeded real corpus, plus an end-to-end ClickHouse resolver pass against a local GDK instance. The parser/resolver shape the production handler will reuse verbatim is the same code that produced those numbers.
 
 [poc-mr]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335
 
@@ -163,35 +163,58 @@ The POC harness ([!1335][poc-mr]) lives under `crates/xtask/src/system_notes_ben
 | In-memory join semantics (path → `source_id` → entity, namespace rows filtered) | 2 unit tests, all green |
 | Golden corpus end-to-end through the parser (real Rails-template bodies vendored from `app/services/system_notes/*.rb`) | 3 corpus-level tests, all green |
 | `xtask system-notes-bench inspect` smoke against the corpus | Output verified against Rails templates |
+| End-to-end against a 74,125-note GDK-seeded real corpus, parser + ClickHouse resolver | All 16 action types round-tripped, zero panics, zero incorrect parses over 75,125 × 100 iterations; CH resolver 3-query batch ≤15 ms at batch=5,000. See [Benchmark 1 (real data)](#benchmark-1--parser-throughput-poc-measured) and [Benchmarks 2–3 (early E2E numbers)](#benchmarks-23--early-e2e-numbers-against-gdk) below. |
 
 ### Benchmark 1 — parser throughput (POC measured)
 
-Pure-CPU, single core, release build, golden corpus of 21 entries, 5000 iterations:
+Pure-CPU, single core, release build. The parser was measured against two corpora: the original 21-entry synthetic golden corpus, and a 74,125-note GDK-seeded real corpus covering all 16 action types in production-realistic proportions (full E2E report posted on [!1335 (note 3360033462)][e2e-note]).
 
-```text
-=== Parser benchmark ===
-corpus size:           21
-iterations:            5000
-min   per-pass:        13750 ns
-median per-pass:       13990 ns
-max   per-pass:        12676930 ns
-median per-note:       666 ns
-median notes/sec:      1501501
-refs/pass:             20
-```
+| Corpus | Notes | Iterations | Median ns/note | Median notes/sec | Refs/pass |
+|---|---|---|---|---|---|
+| Golden (synthetic) | 21 | 5,000 | 666 | **1,501,501** | 20 |
+| Real GDK (seeded) | 75,125 | 100 | 575 | **1,739,130** | 42,155 |
 
-**~1.5M notes/sec/core**, roughly **3× above the 500k/sec/core pass criterion** from the POC plan. At `gitlab-org`'s ~6.7M system notes (per kg#499 comment dated 2026-04-27) this puts pure-CPU parse time at **~5 seconds per indexing pass on a single core**, with comfortable headroom for the multi-core production handler.
+[e2e-note]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335#note_3360033462
 
-### Benchmarks 2–5 — deferred to staging
+The real corpus runs **~16% faster** than the synthetic baseline. The cause is the action mix: about 40% of real GDK notes are lifecycle actions (`closed`, `merged`, `reopened`, `opened`) that short-circuit before any regex work; the golden corpus over-represents multi-ref `relate`/`commit` patterns where the regex actually fires. Real-corpus body length distribution: min 6 chars, median 15, p95 53, max 121 — short enough that the regex engine's startup dominates per-note cost.
 
-The remaining four benchmarks need staging ClickHouse access and (for Mode A) the in-progress Siphon replication:
+**Correctness on the real corpus:** 75,125 notes × 100 iterations produced zero panics, zero incorrect parses, and zero false positives across all 16 action types. Unknown actions seeded into the GDK data (`work_item_status`, `assignee`, `start_date_or_due_date`) were silently dropped with a `WARN` log, validating the `log_and_drop` design from the action-coverage drift mitigation section.
 
-- **Benchmark 2 — `siphon_routes` IN-list latency.** Harness ready (`xtask system-notes-bench clickhouse --url … --traversal-path 1/100/`). Pass criteria: ≤100 ms p95 at 1000-path batch warm; ≤500 ms p95 at 10000-path batch cold. If either fails, a `set(N)` or `bloom_filter` skip index on `siphon_routes.path` is the prepared mitigation (currently the table has only a `pg_pkey_ordered` projection on `id`, no index on `path`).
-- **Benchmark 3 — entity (project_id, iid) tuple IN-list latency.** Same harness, same shape; expected to be fast because the entity tables' primary keys already include `target_project_id` / `project_id`.
-- **Benchmark 4 — end-to-end pass against `gitlab-org`.** Pass criterion: ≤10 min wall-clock for the full namespace.
+Both numbers are far above the 500k/sec/core pass criterion from the POC plan: the synthetic figure is ~3× over, and the real-data figure is ~3.5× over. At `gitlab-org`'s ~6.7M system notes (per kg#499 comment dated 2026-04-27) this puts pure-CPU parse time at **~4 seconds per indexing pass on a single core**, with comfortable headroom for the multi-core production handler.
+
+### Benchmarks 2–3 — early E2E numbers against GDK
+
+Benchmarks 2 (`siphon_routes` IN-list latency) and 3 (entity tuple IN-list latency) were originally scoped to staging ClickHouse only. The E2E validation pass ran them against a local GDK instance (Docker CH 25.12.11.4, 93 routes, 120 MRs, 609 issues, traversal_path `""`) using the real 75k corpus, which gives an early read on shape and latency. Staging measurements are still required for the staging-data-size verdict, but the GDK numbers are well inside budget and validate the query plan.
+
+| batch_size | distinct paths | routes lookup | MR tuple lookup | WorkItem tuple lookup | **3-query total** | MR hits | WI hits |
+|---|---|---|---|---|---|---|---|
+| 100 (synthetic) | 3 | 3 ms | 2 ms | 2 ms | **7 ms** | — | — |
+| 1,000 (real GDK) | 18 | 3 ms | 2 ms | 3 ms | **8 ms** | 11 / 247 pairs | 33 / 337 pairs |
+| 5,000 (real GDK) | 18 | 4 ms | 5 ms | 6 ms | **15 ms** | 48 / 761 pairs | 119 / 1,217 pairs |
+
+At batch=1,000 (the configured per-batch resolution size) the full 3-query plan resolves in **8 ms** against real GDK data — well under the ≤50 ms total budget for resolution per batch and an order of magnitude under the ≤100 ms p95 routes-only criterion. Combined with the 575 ns/note parse cost this implies an end-to-end throughput (parse + resolve) of **~125k notes/sec** on a single core against a real ClickHouse instance.
+
+Hit rates of 6–10% are realistic for the GDK seed: the seeder references random IIDs up to 500, but GDK only has 120 MRs and 609 issues, so most synthetic references are unresolvable. Unresolvable refs produced zero rows from the entity-lookup queries — correct behaviour; the edge writer drops them.
+
+**What these early numbers do not yet show.** They do not exercise (a) the `gitlab-org`-scale ~6.7M-note corpus, (b) a non-empty `traversal_path` filter, or (c) the `siphon_routes.path` IN-list against millions of rows where a skip index would matter. Benchmarks 2 (staging-scale routes IN-list) and 3 (staging-scale entity IN-list) still need staging runs for the production-go verdict — but the per-query shape is now known-good, and the 50 ms budget has a ~6× safety margin at the batch size the production handler will actually use.
+
+### Benchmarks 4–5 — deferred to staging
+
+The two remaining benchmarks need staging ClickHouse access and (for Mode A) the in-progress Siphon replication:
+
+- **Benchmark 4 — end-to-end pass against `gitlab-org`.** Pass criterion: ≤10 min wall-clock for the full namespace. The 125k notes/sec end-to-end figure from the GDK E2E run extrapolates to ~54 s of pure compute for 6.7M notes; the 10-minute budget is dominated by ClickHouse scan time, not by parse + resolve.
 - **Benchmark 5 — edge density gain (the kg#499 acceptance criterion).** Pass criteria: **≥3× MR↔WorkItem edges**, **≥10× MR↔MR edges**, both vs. current `gl_edge` state for `gitlab-org`. Proposed as the concrete numeric form of "a material increase in edge density" from the upstream issue; to be agreed at ADR review.
 
-The handler implementation MR will not merge to behind-flag-on until Benchmarks 2–5 have produced numbers and the report is attached.
+The handler implementation MR will not merge to behind-flag-on until Benchmarks 4 and 5 have produced numbers and the report is attached.
+
+### E2E bugs found and fixed
+
+The GDK E2E pass uncovered two bugs in the POC bench harness; **both were in the bench harness, not in the parser or resolver logic** that the production handler will lift. Both are fixed in [!1335 commit `be315e04`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335).
+
+1. **`Array(Tuple)` parameter serialization** (blocked all CH benchmark runs). The bench built the `(project_id, iid)` pairs as `serde_json::json!([0_i64, *iid])`; the `clickhouse` crate v0.15.0 serialises `Value::Array` as `[0,123]`, but ClickHouse requires tuple syntax `(0,123)` for `Array(Tuple(Int64,Int64))`. Every CH bench run failed with `CANNOT_PARSE_INPUT_ASSERTION_FAILED`. Fix: use Rust `(i64, i64)` tuples directly so the serde serialiser produces the correct `(pid,iid)` form. This is a bench-harness call-site issue; the resolver SQL template and parameter typing in `resolver.rs` were already correct.
+2. **Hardcoded `gitlab-org/gitlab` default project** (zero entity hits). The bench used `"gitlab-org/gitlab"` as the default project path for un-namespaced refs. That path does not exist outside GitLab.com, so on GDK the routes lookup returned 0 rows and all `(project_id, iid)` pairs collapsed to `(0, iid)`, matching no entity. Fix: added a `--default-project` flag (default `toolbox/gitlab-smoke-tests`, present in every GDK seed) and an `--input` flag so the CH bench consumes the same JSONL dump as the parser bench. Again, a bench-harness configuration issue; the production handler will receive the default project path from indexer config, not from a hard-coded string.
+
+Both fixes are localised to `crates/xtask/src/system_notes_bench/`; the parser and resolver modules that will be lifted verbatim into `crates/indexer/src/modules/sdlc/handler/system_notes/` did not require changes.
 
 ## Test coverage
 
@@ -223,7 +246,7 @@ What improves:
 
 - Closes the MR↔MR / MR↔WorkItem / MR↔Commit edge gap that motivates the graph-completeness epic.
 - One end-to-end story for system-note edges: one handler, one CI drift check, one new metric family, one feature flag. Future cross-reference actions (Rails ships a new action; agent training surfaces a new edge need) become a regex / match-arm change, not a YAML + fixture + ETL change.
-- The POC harness output is reusable as a regression baseline: any throughput regression in the production handler can be checked against the 1.5M notes/sec/core POC number.
+- The POC harness output is reusable as a regression baseline: any throughput regression in the production handler can be checked against the 1.5M notes/sec/core synthetic POC number and the 1.74M notes/sec/core real-GDK E2E number, plus the 8 ms 3-query CH resolver budget at batch=1,000.
 
 What gets harder:
 
@@ -244,15 +267,16 @@ What gets harder:
 ## Key risks
 
 1. **`system_note_metadata` Siphon replication slip.** This is the single longest-lead-time item. The Siphon-side MR is filed in parallel with this ADR; if it slips materially past the implementation MR review, the handler ships in Mode B with a documented degradation note and flips to Mode A when replication lands. The handler is designed to make the mode switch a single config change with no schema impact.
-2. **Parser drift against Rails' `ICON_TYPES` and body templates.** `ICON_TYPES` has grown across releases (now 61 values; prior captures show ~50) and Rails has moved system-note phrasing more than once. Mitigation: vendored constant + CI drift check + `log_and_drop` on unknown actions + regex anchored on the GFM-reference token rather than on the verb phrase (so phrasing changes do not break extraction).
+2. **Parser drift against Rails' `ICON_TYPES` and body templates.** `ICON_TYPES` has grown across releases (now 61 values; prior captures show ~50) and Rails has moved system-note phrasing more than once. Mitigation: vendored constant + CI drift check + `log_and_drop` on unknown actions + regex anchored on the GFM-reference token rather than on the verb phrase (so phrasing changes do not break extraction). E2E validation against a real 75k-note GDK corpus seeded with unknown actions confirmed the `log_and_drop` path silently absorbs unrecognised values without breaking the pass (see [POC results](#poc-results)).
 3. **Custom-handler maintenance cost.** This is the first cross-reference-oriented handler departing from the ontology-first convention. Mitigation: confine the deviation to the *materialization logic* only — edge **kinds** still declare in YAML — and document the rationale in `AGENTS.md` so future ADRs do not treat this as precedent for arbitrary custom handlers.
-4. **`siphon_routes.path` IN-list scan cost.** No skip index on `path` today (only a `pg_pkey_ordered` projection on `id`). Benchmark 2 will produce the number; if it fails the threshold, a `set(N)` or `bloom_filter` skip index on `path` is the prepared mitigation, and Adam's guidance (skip indexes over projections) aligns with the Siphon team's review preferences.
+4. **`siphon_routes.path` IN-list scan cost.** No skip index on `path` today (only a `pg_pkey_ordered` projection on `id`). The GDK E2E pass showed the 3-query batch resolving in 8 ms at batch=1,000 against 93 routes — well inside budget — but that does not stress the path-index dimension; the staging run at production scale still needs to confirm. If it fails the threshold, a `set(N)` or `bloom_filter` skip index on `path` is the prepared mitigation, and Adam's guidance (skip indexes over projections) aligns with the Siphon team's review preferences.
 5. **Acceptance threshold vagueness.** kg#499 says "a material increase in edge density (numeric target to be set after initial measurement)". This ADR proposes ≥3× MR↔WorkItem and ≥10× MR↔MR as concrete numeric forms. If review prefers different thresholds, the POC harness (`xtask system-notes-bench`) can re-run cheaply.
 
 ## References
 
 - Upstream issue: [kg#499](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499)
 - POC MR: [!1335](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335)
+- POC E2E validation report against GDK: [!1335 note 3360033462](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335#note_3360033462) (74,125-note seeded corpus, parser + ClickHouse resolver, bench-harness bug fixes)
 - Closed prior MR: [!1109](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1109)
 - Related: kg#482 (MR ingestion gaps), kg#443 (migration framework, complete), graph-completeness epic
 - Prior research and POC plan: [dgruzd/droid-workspace/task/2685](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/)
