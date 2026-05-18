@@ -208,7 +208,9 @@ install_orbit() {
     mkdir -p "$INSTALL_DIR"
 
     local project_id="77960826"
-    local artifact_name="orbit-local-${platform}-${arch}.tar.gz"
+    local artifact_ext="tar.gz"
+    [ "$platform" = "windows" ] && artifact_ext="zip"
+    local artifact_name="orbit-local-${platform}-${arch}.${artifact_ext}"
     local resolved_tag
 
     if [ -z "$VERSION" ]; then
@@ -245,8 +247,21 @@ install_orbit() {
     verify_checksum "$tarball" "$checksum_url"
 
     echo "Extracting orbit..."
-    if ! tar -xzf "$tarball" -C "$TEMP_DIR"; then
-        error "Failed to extract the tarball."
+    if [ "$platform" = "windows" ]; then
+        # PowerShell's Expand-Archive ships with every supported Windows
+        # version, so we don't add an `unzip` install requirement for Git Bash
+        # users. Paths must be in Windows form (cygpath) for PowerShell.
+        local win_tarball win_temp
+        win_tarball=$(cygpath -w "$tarball")
+        win_temp=$(cygpath -w "$TEMP_DIR")
+        if ! powershell.exe -NoProfile -NonInteractive -Command \
+            "Expand-Archive -LiteralPath '${win_tarball}' -DestinationPath '${win_temp}' -Force"; then
+            error "Failed to extract the zip archive."
+        fi
+    else
+        if ! tar -xzf "$tarball" -C "$TEMP_DIR"; then
+            error "Failed to extract the tarball."
+        fi
     fi
 
     local orbit_binary="${TEMP_DIR}/${binary_name}"
