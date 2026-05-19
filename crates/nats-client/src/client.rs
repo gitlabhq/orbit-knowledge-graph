@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use async_nats::HeaderMap;
+use async_nats::header::{HeaderValue, NATS_EXPECTED_LAST_SUBJECT_SEQUENCE, NATS_MESSAGE_TTL};
 use async_nats::jetstream::Context;
-use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
+use async_nats::jetstream::context::PublishErrorKind;
+use async_nats::jetstream::kv::{CreateErrorKind, Operation, Store as KvStore, UpdateErrorKind};
 use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -248,13 +251,12 @@ impl NatsClient {
         let store = self.get_kv_store(bucket).await?;
 
         if options.create_only {
-            let result = if let Some(ttl) = options.ttl {
-                store.create_with_ttl(key, value, ttl).await
-            } else {
-                store.create(key, value).await
-            };
-
-            return match result {
+            if let Some(ttl) = options.ttl {
+                return self
+                    .create_with_ttl_header(bucket, key, value, ttl, &store)
+                    .await;
+            }
+            return match store.create(key, value).await {
                 Ok(revision) => Ok(KvPutResult::Success(revision)),
                 Err(e) if e.kind() == CreateErrorKind::AlreadyExists => {
                     Ok(KvPutResult::AlreadyExists)
@@ -284,6 +286,69 @@ impl NatsClient {
         let result = store.put(key, value).await;
         match result {
             Ok(revision) => Ok(KvPutResult::Success(revision)),
+            Err(e) => Err(NatsError::KvPut {
+                bucket: bucket.to_string(),
+                key: key.to_string(),
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    // async-nats 0.48's `Store::create_with_ttl` re-creates over a delete
+    // marker by calling `update()`, which drops the per-message TTL header
+    // (see jetstream::kv::Store::create_maybe_ttl). The result is a lock
+    // that lives forever. Publish directly so the `Nats-TTL` header is
+    // attached on both first-create and re-create-over-tombstone.
+    async fn create_with_ttl_header(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        ttl: Duration,
+        store: &KvStore,
+    ) -> Result<KvPutResult, NatsError> {
+        let expected_seq = match store.entry(key).await {
+            Ok(None) => 0,
+            Ok(Some(entry)) if matches!(entry.operation, Operation::Delete | Operation::Purge) => {
+                entry.revision
+            }
+            Ok(Some(_)) => return Ok(KvPutResult::AlreadyExists),
+            Err(e) => {
+                return Err(NatsError::KvPut {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    message: format!("entry lookup failed: {e}"),
+                });
+            }
+        };
+
+        let subject = format!("$KV.{bucket}.{key}");
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            NATS_EXPECTED_LAST_SUBJECT_SEQUENCE,
+            HeaderValue::from(expected_seq),
+        );
+        headers.insert(NATS_MESSAGE_TTL, HeaderValue::from(ttl.as_secs()));
+
+        let ack = match self
+            .jetstream
+            .publish_with_headers(subject, headers, value)
+            .await
+        {
+            Ok(fut) => fut,
+            Err(e) => {
+                return Err(NatsError::KvPut {
+                    bucket: bucket.to_string(),
+                    key: key.to_string(),
+                    message: e.to_string(),
+                });
+            }
+        };
+        match ack.await {
+            Ok(ack) => Ok(KvPutResult::Success(ack.sequence)),
+            Err(e) if matches!(e.kind(), PublishErrorKind::WrongLastSequence) => {
+                Ok(KvPutResult::AlreadyExists)
+            }
             Err(e) => Err(NatsError::KvPut {
                 bucket: bucket.to_string(),
                 key: key.to_string(),

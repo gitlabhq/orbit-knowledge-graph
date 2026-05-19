@@ -197,6 +197,48 @@ async fn get_kv_store_reapplies_config_when_bucket_externally_drifts() {
 }
 
 #[tokio::test]
+async fn create_with_ttl_preserves_ttl_when_reacquiring_over_delete_marker() {
+    let (_container, url) = start_nats().await;
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    client
+        .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::with_per_message_ttl())
+        .await
+        .expect("ensure");
+
+    let ttl = Duration::from_secs(3);
+
+    client
+        .kv_put(
+            BUCKET,
+            "lock_k",
+            Bytes::new(),
+            KvPutOptions::create_with_ttl(ttl),
+        )
+        .await
+        .expect("first acquire");
+    client.kv_delete(BUCKET, "lock_k").await.expect("release");
+    client
+        .kv_put(
+            BUCKET,
+            "lock_k",
+            Bytes::new(),
+            KvPutOptions::create_with_ttl(ttl),
+        )
+        .await
+        .expect("second acquire over delete marker");
+
+    tokio::time::sleep(ttl + Duration::from_secs(3)).await;
+
+    let key = client.kv_get(BUCKET, "lock_k").await.expect("kv_get");
+    assert!(
+        key.is_none(),
+        "re-acquire over a delete marker must still carry per-key TTL; \
+         async-nats 0.48 Store::create_with_ttl drops the header on this path, \
+         so kv_put bypasses it via direct publish_with_headers",
+    );
+}
+
+#[tokio::test]
 async fn create_or_update_stream_max_age_override_isolates_dlq() {
     let (_container, url) = start_nats().await;
 
