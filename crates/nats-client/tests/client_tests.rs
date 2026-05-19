@@ -120,6 +120,29 @@ async fn ensure_kv_bucket_exists_migrates_existing_bucket_to_enable_per_key_ttl(
 }
 
 #[tokio::test]
+async fn kv_put_errors_when_bucket_not_ensured() {
+    let (_container, url) = start_nats().await;
+
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+
+    let result = client
+        .kv_put(
+            "never_ensured",
+            "k",
+            Bytes::new(),
+            KvPutOptions::create_with_ttl(Duration::from_secs(1)),
+        )
+        .await;
+
+    let err = result.expect_err("kv_put must not implicitly create the bucket");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("ensure_kv_bucket_exists"),
+        "error must point operators at the explicit-create path, got: {msg}",
+    );
+}
+
+#[tokio::test]
 async fn create_or_update_stream_max_age_override_isolates_dlq() {
     let (_container, url) = start_nats().await;
 
