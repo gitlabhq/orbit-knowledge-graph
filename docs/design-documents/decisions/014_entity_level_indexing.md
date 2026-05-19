@@ -15,8 +15,8 @@ Proposed
 
 ## Context
 
-Today, `GlobalHandler` processes all global entities (User, Runner) per
-message, and `NamespaceHandler` processes all namespaced entities
+Today, `GlobalHandler` processes global entities (currently just User)
+per message, and `NamespaceHandler` processes all namespaced entities
 (MergeRequest, Issue, Pipeline, Job, ...) per namespace per message. Both
 run entity pipelines concurrently behind `max_concurrent_entities`, but the
 work is bound to a single NATS message and a single engine worker slot.
@@ -171,10 +171,9 @@ and keyset cursor as a conjunct and does not affect sort order.
 
 Benchmarks on `siphon_p_ci_builds` (100M rows, PRIMARY KEY
 `(traversal_path, id, partition_id)`, ClickHouse Cloud dev instance,
-2026-05-08) confirm that range filtering on a primary key column reads
-significantly less data than hash, because ClickHouse evaluates the
-range condition via PREWHERE and skips decompressing non-matching
-columns:
+2026-05-08) show range filtering on a primary key column reads 3.9×
+less data than hash. ClickHouse evaluates the range condition via
+PREWHERE and skips decompressing non-matching columns:
 
 | Filter (4 partitions, `startsWith(traversal_path, '158/')`) | read_rows | read_bytes | duration |
 |---|---|---|---|
@@ -195,7 +194,7 @@ for why hash was considered and rejected.
 
 The dispatcher computes quantile boundaries using `quantilesTDigest`
 each time it plans partition jobs. Boundaries are not persisted — they
-are recomputed from the source table. This is acceptable because:
+are recomputed from the source table. This works because:
 
 - Boundary drift between runs does not cause data gaps. Each partition
   has its own cursor-based checkpoint, so rows near a shifted boundary
@@ -361,7 +360,7 @@ redelivery of all entities.
 ### Hash partitioning from day 1
 
 `cityHash64(column) % N = i` needs no boundary computation and is
-completely stable across retries. Benchmarks show it reads **3.9× more
+stable across retries. Benchmarks show it reads **3.9× more
 data** than range for the same scope (50.62 MiB vs 13.05 MiB on
 `siphon_p_ci_builds`, 100K row scope, 4 partitions). Hash cannot
 benefit from ClickHouse's primary key index — `EXPLAIN indexes = 1`
