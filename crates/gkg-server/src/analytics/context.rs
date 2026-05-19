@@ -32,8 +32,15 @@ pub(crate) fn build_common(
         .ok()
 }
 
-pub(crate) fn build_query(claims: &Claims, tool_name: &str) -> Option<OrbitQueryContext> {
+pub(crate) fn build_query(
+    claims: &Claims,
+    tool_name: &str,
+    coding_agent: Option<&str>,
+) -> Option<OrbitQueryContext> {
     let mut b = OrbitQueryContext::builder(map_source(&claims.source_type)).tool_name(tool_name);
+    if let Some(agent) = coding_agent {
+        b = b.coding_agent(agent);
+    }
     if let Some(ref id) = claims.global_user_id {
         b = b.global_user_id(id);
     }
@@ -127,7 +134,7 @@ mod tests {
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         use labkit_events::gkg::GkgEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool).unwrap();
+        let query = build_query(claims, tool, None).unwrap();
         let event = GkgEvent::query_executed(common, query);
         event.contexts()[1].data.clone()
     }
@@ -135,7 +142,7 @@ mod tests {
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         use labkit_events::gkg::GkgEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph").unwrap();
+        let query = build_query(claims, "query_graph", None).unwrap();
         let event = GkgEvent::query_executed(common, query);
         event.contexts()[0].data.clone()
     }
@@ -161,6 +168,24 @@ mod tests {
         let claims = claims_with_paths(vec![]);
         let data = query_data(&claims, "get_graph_schema");
         assert_eq!(data["tool_name"], "get_graph_schema");
+    }
+
+    #[test]
+    fn build_query_passes_through_coding_agent() {
+        use labkit_events::gkg::GkgEvent;
+        let claims = claims_with_paths(vec![]);
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
+        let event = GkgEvent::query_executed(common, query);
+        let data = event.contexts()[1].data.clone();
+        assert_eq!(data["coding_agent"], "claude-code");
+    }
+
+    #[test]
+    fn build_query_omits_coding_agent_when_none() {
+        let claims = claims_with_paths(vec![]);
+        let data = query_data(&claims, "query_graph");
+        assert!(data.get("coding_agent").is_none());
     }
 
     #[test]

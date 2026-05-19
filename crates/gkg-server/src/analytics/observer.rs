@@ -17,6 +17,7 @@ pub(crate) struct AnalyticsObserver {
     config: Arc<AnalyticsConfig>,
     claims: Claims,
     tool_name: String,
+    coding_agent: Option<String>,
     schema_version: String,
     errored: Cell<bool>,
 }
@@ -27,6 +28,7 @@ impl AnalyticsObserver {
         config: Arc<AnalyticsConfig>,
         claims: Claims,
         tool_name: impl Into<String>,
+        coding_agent: Option<String>,
         schema_version: String,
     ) -> Self {
         Self {
@@ -34,6 +36,7 @@ impl AnalyticsObserver {
             config,
             claims,
             tool_name: tool_name.into(),
+            coding_agent,
             schema_version,
             errored: Cell::new(false),
         }
@@ -62,7 +65,8 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
             return;
         };
-        let Some(query) = build_query(&self.claims, &self.tool_name) else {
+        let Some(query) = build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref())
+        else {
             return;
         };
         tracker.track(GkgEvent::query_executed(common, query));
@@ -114,6 +118,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
             "query_graph",
+            None,
             "33".to_string(),
         );
         obs.finish(10, 0);
@@ -128,6 +133,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
             "query_graph",
+            None,
             "33".to_string(),
         );
         obs.record_error(&PipelineError::Execution("x".into()));
@@ -142,6 +148,7 @@ mod tests {
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
             "query_graph",
+            None,
             "33".to_string(),
         );
         obs.finish(1, 0);

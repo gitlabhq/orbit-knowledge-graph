@@ -77,6 +77,7 @@ impl QueryPipelineService {
     pub async fn run_query(
         &self,
         claims: Claims,
+        coding_agent: Option<String>,
         query_json: &str,
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
@@ -93,6 +94,7 @@ impl QueryPipelineService {
                 Arc::clone(&self.analytics_config),
                 claims.clone(),
                 "query_graph",
+                coding_agent,
                 SCHEMA_VERSION.to_string(),
             )),
         ]);
