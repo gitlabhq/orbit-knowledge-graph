@@ -87,7 +87,6 @@ impl KnowledgeGraphServiceImpl {
         let pipeline = QueryPipelineService::new(
             Arc::clone(&ontology),
             Arc::clone(&client),
-            clickhouse_config.profiling.clone(),
             analytics_config,
         );
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clickhouse_client::ArrowClickHouseClient;
-use gkg_server_config::ProfilingConfig;
 use query_engine::compiler::{HydrationPlan, InputNode, QueryType, compile_input};
 
 use query_engine::pipeline::{
@@ -77,11 +76,6 @@ impl HydrationStage {
         }
 
         let client = Self::client(ctx)?;
-        let profiling = ctx
-            .server_extensions
-            .get::<ProfilingConfig>()
-            .cloned()
-            .unwrap_or_default();
 
         let mut hydration_input = hydration_helpers::build_hydration_input(nodes, total_ids);
         hydration_input.hydration_dynamic = matches!(
@@ -101,22 +95,13 @@ impl HydrationStage {
             rendered: rendered_sql.clone(),
         };
 
-        let profiling_id = if profiling.enabled {
-            Some(uuid::Uuid::new_v4().to_string())
-        } else {
-            None
-        };
-
         let start = Instant::now();
         let mut query = client.query(&compiled.base.sql);
 
-        let mut log_comment = match labkit::correlation::current() {
+        let log_comment = match labkit::correlation::current() {
             Some(id) => format!("gkg;hydration:{kind};correlation_id={id}"),
             None => format!("gkg;hydration:{kind}"),
         };
-        if let Some(ref pid) = profiling_id {
-            log_comment.push_str(&format!(";profiling_id={pid}"));
-        }
         query = query.with_setting("log_comment", log_comment);
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
@@ -137,7 +122,7 @@ impl HydrationStage {
             summary.as_ref(),
         );
 
-        let mut execution = QueryExecution {
+        let execution = QueryExecution {
             label: format!("hydration:{kind}"),
             rendered_sql,
             query_id: String::new(),
@@ -148,20 +133,6 @@ impl HydrationStage {
             query_log: None,
             processors: None,
         };
-
-        if let Some(ref pid) = profiling_id {
-            if profiling.explain {
-                execution.explain_plan = client.explain_plan(&debug.rendered).await.ok();
-            }
-            if let Ok(Some(entry)) = client.fetch_query_log(pid).await {
-                execution.query_id = entry.query_id.clone();
-                execution.stats.read_rows = entry.read_rows;
-                execution.stats.read_bytes = entry.read_bytes;
-                execution.stats.result_rows = entry.result_rows;
-                execution.stats.result_bytes = entry.result_bytes;
-                execution.stats.memory_usage = entry.memory_usage as i64;
-            }
-        }
 
         let props = hydration_helpers::parse_hydration_batches(&batches)?;
         Ok((props, vec![debug], vec![execution]))

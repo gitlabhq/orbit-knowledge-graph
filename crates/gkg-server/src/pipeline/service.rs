@@ -5,7 +5,7 @@ use crate::auth::Claims;
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_billing::{BillingInputs, BillingObserver, BillingTracker};
-use gkg_server_config::{AnalyticsConfig, ProfilingConfig};
+use gkg_server_config::AnalyticsConfig;
 use indexer::schema::version::SCHEMA_VERSION;
 use nats_client::NatsClient;
 use ontology::Ontology;
@@ -27,7 +27,6 @@ use super::stages::{
 pub struct QueryPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
-    profiling: ProfilingConfig,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
@@ -39,13 +38,11 @@ impl QueryPipelineService {
     pub fn new(
         ontology: Arc<Ontology>,
         client: Arc<ArrowClickHouseClient>,
-        profiling: ProfilingConfig,
         analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         Self {
             ontology,
             client,
-            profiling,
             resolver_registry: None,
             cache_broker: None,
             billing_tracker: None,
@@ -99,7 +96,6 @@ impl QueryPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
-        server_extensions.insert(self.profiling.clone());
         server_extensions.insert(claims);
         server_extensions.insert(tx);
         server_extensions.insert(stream);
