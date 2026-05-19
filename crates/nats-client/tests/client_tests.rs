@@ -120,7 +120,7 @@ async fn ensure_kv_bucket_exists_migrates_existing_bucket_to_enable_per_key_ttl(
 }
 
 #[tokio::test]
-async fn kv_put_errors_when_bucket_not_ensured() {
+async fn kv_put_errors_when_bucket_not_registered() {
     let (_container, url) = start_nats().await;
 
     let client = NatsClient::connect(&config(&url)).await.expect("connect");
@@ -134,11 +134,65 @@ async fn kv_put_errors_when_bucket_not_ensured() {
         )
         .await;
 
-    let err = result.expect_err("kv_put must not implicitly create the bucket");
+    let err = result.expect_err("kv_put must not target an unregistered bucket");
     let msg = format!("{err}");
     assert!(
         msg.contains("ensure_kv_bucket_exists"),
         "error must point operators at the explicit-create path, got: {msg}",
+    );
+}
+
+#[tokio::test]
+async fn get_kv_store_reapplies_config_when_bucket_externally_drifts() {
+    let (_container, url) = start_nats().await;
+
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    client
+        .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::with_per_message_ttl())
+        .await
+        .expect("ensure");
+
+    let raw = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("nats connect");
+    let js = async_nats::jetstream::new(raw);
+    js.delete_key_value(BUCKET).await.expect("delete bucket");
+    js.create_key_value(async_nats::jetstream::kv::Config {
+        bucket: BUCKET.to_string(),
+        ..Default::default()
+    })
+    .await
+    .expect("recreate without ttl");
+    assert!(
+        !stream_allow_message_ttl(&url, BUCKET).await,
+        "precondition: externally recreated bucket has no per-key TTL",
+    );
+
+    let other = NatsClient::connect(&config(&url)).await.expect("connect");
+    other
+        .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::with_per_message_ttl())
+        .await
+        .expect("re-ensure");
+    let ttl = Duration::from_secs(2);
+    other
+        .kv_put(
+            BUCKET,
+            "self_healing_key",
+            Bytes::new(),
+            KvPutOptions::create_with_ttl(ttl),
+        )
+        .await
+        .expect("kv_put");
+
+    tokio::time::sleep(ttl + Duration::from_secs(2)).await;
+
+    let key = other
+        .kv_get(BUCKET, "self_healing_key")
+        .await
+        .expect("kv_get");
+    assert!(
+        key.is_none(),
+        "bucket must self-heal back to per-key TTL after external drift",
     );
 }
 
