@@ -248,6 +248,7 @@ pub async fn run_dispatcher(
             checkpoint_store.clone(),
             Arc::new(DatalakePartitionStrategy::new(
                 config.datalake.build_client(),
+                ontology,
             )),
             ontology,
             metrics.clone(),

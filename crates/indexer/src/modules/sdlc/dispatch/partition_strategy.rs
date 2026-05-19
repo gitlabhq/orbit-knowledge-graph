@@ -4,26 +4,57 @@ use clickhouse_client::FromArrowColumn;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::scheduler::TaskError;
 use crate::topic::{IndexingScope, PartitionBounds};
-use ontology::EtlScope;
+use ontology::{EtlConfig, EtlScope, Ontology};
+
+pub struct PartitionPlan {
+    pub column: String,
+    pub boundaries: Vec<PartitionBounds>,
+}
 
 #[async_trait]
 pub trait PartitionStrategy: Send + Sync {
     async fn compute_boundaries(
         &self,
-        source_table: &str,
-        partition_column: &str,
+        entity_name: &str,
         num_partitions: u32,
         scope: &IndexingScope,
-    ) -> Result<Vec<PartitionBounds>, TaskError>;
+    ) -> Result<PartitionPlan, TaskError>;
 }
 
 pub struct DatalakePartitionStrategy {
     datalake: ArrowClickHouseClient,
+    ontology: Ontology,
 }
 
 impl DatalakePartitionStrategy {
-    pub fn new(datalake: ArrowClickHouseClient) -> Self {
-        Self { datalake }
+    pub fn new(datalake: ArrowClickHouseClient, ontology: &Ontology) -> Self {
+        Self {
+            datalake,
+            ontology: ontology.clone(),
+        }
+    }
+
+    fn resolve_entity(&self, entity_name: &str) -> Result<(&str, &str), TaskError> {
+        let node = self
+            .ontology
+            .get_node(entity_name)
+            .ok_or_else(|| TaskError::new(format!("unknown entity: {entity_name}")))?;
+        let etl = node
+            .etl
+            .as_ref()
+            .ok_or_else(|| TaskError::new(format!("entity {entity_name} has no ETL config")))?;
+        let source_table = match etl {
+            EtlConfig::Table { source, .. } => source.as_str(),
+            EtlConfig::Query { .. } => {
+                return Err(TaskError::new(format!(
+                    "cannot partition {entity_name} (Query-type ETL)"
+                )));
+            }
+        };
+        let partition_column = partition_column(etl.order_by(), etl.scope()).ok_or_else(|| {
+            TaskError::new(format!("cannot derive partition column for {entity_name}"))
+        })?;
+        Ok((source_table, partition_column))
     }
 }
 
@@ -31,11 +62,12 @@ impl DatalakePartitionStrategy {
 impl PartitionStrategy for DatalakePartitionStrategy {
     async fn compute_boundaries(
         &self,
-        source_table: &str,
-        partition_column: &str,
+        entity_name: &str,
         num_partitions: u32,
         scope: &IndexingScope,
-    ) -> Result<Vec<PartitionBounds>, TaskError> {
+    ) -> Result<PartitionPlan, TaskError> {
+        let (source_table, partition_column) = self.resolve_entity(entity_name)?;
+        let column = partition_column.to_string();
         let sql = build_quantile_query(source_table, partition_column, num_partitions, scope);
 
         let batches = self
@@ -65,7 +97,10 @@ impl PartitionStrategy for DatalakePartitionStrategy {
             quantile_splits.push(val.clone());
         }
 
-        Ok(boundaries_from_splits(min_val, &quantile_splits, max_val))
+        Ok(PartitionPlan {
+            column,
+            boundaries: boundaries_from_splits(min_val, &quantile_splits, max_val),
+        })
     }
 }
 

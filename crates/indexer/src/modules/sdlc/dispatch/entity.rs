@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use tracing::{debug, info, warn};
 
-use super::partition_strategy::{self, PartitionStrategy};
+use super::partition_strategy::{PartitionPlan, PartitionStrategy};
 use crate::checkpoint::{Checkpoint, CheckpointStore, entity_checkpoint_prefix};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -16,7 +16,7 @@ use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionAssignment};
 use crate::types::{Envelope, Subscription};
 use gkg_server_config::{EntityDispatcherConfig, ScheduleConfiguration};
-use ontology::{EtlConfig, EtlScope, Ontology};
+use ontology::{EtlScope, Ontology};
 
 const INDEXER_STREAM: &str = crate::topic::INDEXER_STREAM;
 
@@ -31,14 +31,6 @@ WHERE _siphon_deleted = false
 struct DispatchableEntity {
     name: String,
     scope: EtlScope,
-    source_table: Option<String>,
-    order_by: Vec<String>,
-}
-
-impl DispatchableEntity {
-    fn partition_column(&self) -> Option<&str> {
-        partition_strategy::partition_column(&self.order_by, self.scope)
-    }
 }
 
 fn collect_dispatchable_entities(ontology: &Ontology) -> Vec<DispatchableEntity> {
@@ -46,15 +38,9 @@ fn collect_dispatchable_entities(ontology: &Ontology) -> Vec<DispatchableEntity>
         .nodes()
         .filter_map(|node| {
             let etl = node.etl.as_ref()?;
-            let source_table = match etl {
-                EtlConfig::Table { source, .. } => Some(source.clone()),
-                EtlConfig::Query { .. } => None,
-            };
             Some(DispatchableEntity {
                 name: node.name.clone(),
                 scope: etl.scope(),
-                source_table,
-                order_by: etl.order_by().to_vec(),
             })
         })
         .collect()
@@ -232,15 +218,10 @@ impl EntityDispatcher {
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
     ) -> Result<(u64, u64), TaskError> {
-        let partition_count = self.partition_overrides.get(&entity.name).copied();
-        let is_partitioned =
-            partition_count.is_some_and(|n| n > 1) && entity.partition_column().is_some();
-
-        if !is_partitioned {
-            return self.publish_single(entity, scope, watermark).await;
-        }
-
-        let partition_count = partition_count.unwrap();
+        let partition_count = match self.partition_overrides.get(&entity.name).copied() {
+            Some(n) if n > 1 => n,
+            _ => return self.publish_single(entity, scope, watermark).await,
+        };
         let prefix = entity_checkpoint_prefix(scope, &entity.name);
         let checkpoints = self
             .checkpoint_store
@@ -295,23 +276,10 @@ impl EntityDispatcher {
     ) -> Result<(u64, u64), TaskError> {
         let partition_count = self.partition_overrides[&entity.name];
 
-        let source_table = entity.source_table.as_deref().ok_or_else(|| {
-            TaskError::new(format!(
-                "cannot compute partition boundaries for {} (Query-type ETL)",
-                entity.name
-            ))
-        })?;
-        let partition_column = entity.partition_column().ok_or_else(|| {
-            TaskError::new(format!(
-                "cannot derive partition column for {}",
-                entity.name
-            ))
-        })?;
-
         let query_start = Instant::now();
-        let boundaries = self
+        let PartitionPlan { column, boundaries } = self
             .partition_strategy
-            .compute_boundaries(source_table, partition_column, partition_count, scope)
+            .compute_boundaries(&entity.name, partition_count, scope)
             .await
             .inspect_err(|_| {
                 self.metrics
@@ -343,7 +311,7 @@ impl EntityDispatcher {
                 partition: Some(PartitionAssignment {
                     index: idx,
                     total: partition_count,
-                    column: partition_column.to_string(),
+                    column: column.clone(),
                     bounds: bounds.clone(),
                 }),
             };
@@ -578,13 +546,5 @@ mod tests {
             namespaced.contains(&"MergeRequest"),
             "should include MergeRequest"
         );
-
-        for entity in &entities {
-            assert!(
-                !entity.order_by.is_empty(),
-                "{} should have non-empty order_by",
-                entity.name
-            );
-        }
     }
 }
