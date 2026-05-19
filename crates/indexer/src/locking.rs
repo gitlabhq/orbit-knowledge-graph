@@ -49,10 +49,6 @@ impl LockGuard {
             Ok(())
         }
     }
-
-    pub fn disarm(mut self) {
-        self.service.take();
-    }
 }
 
 impl Drop for LockGuard {
@@ -151,49 +147,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lock_guard_disarm_leaves_lock_held() {
+    async fn lock_guard_drop_releases_on_cancellation() {
         let svc = Arc::new(MockLockService::new());
-        {
-            let guard = LockGuard::acquire(svc.clone(), "k3", Duration::from_secs(1))
-                .await
-                .expect("acquire ok")
-                .expect("acquired");
-            guard.disarm();
-        }
-        settle().await;
-        assert!(
-            svc.is_held("k3"),
-            "disarm must not release; cooldown callers rely on this",
-        );
-    }
+        let (acquired_tx, acquired_rx) = tokio::sync::oneshot::channel();
 
-    #[tokio::test]
-    async fn lock_guard_drop_releases_on_simulated_cancellation() {
-        let svc = Arc::new(MockLockService::new());
-        let svc_clone = svc.clone();
-
-        let work = tokio::spawn(async move {
-            let _guard = LockGuard::acquire(svc_clone, "k4", Duration::from_secs(1))
-                .await
-                .expect("acquire ok")
-                .expect("acquired");
-            tokio::time::sleep(Duration::from_secs(60)).await;
+        let work = tokio::spawn({
+            let svc = svc.clone();
+            async move {
+                let _guard = LockGuard::acquire(svc, "k3", Duration::from_secs(1))
+                    .await
+                    .expect("acquire ok")
+                    .expect("acquired");
+                acquired_tx.send(()).unwrap();
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
         });
 
-        for _ in 0..50 {
-            if svc.is_held("k4") {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        assert!(svc.is_held("k4"));
+        acquired_rx.await.unwrap();
+        assert!(svc.is_held("k3"));
 
         work.abort();
         let _ = work.await;
         settle().await;
 
         assert!(
-            !svc.is_held("k4"),
+            !svc.is_held("k3"),
             "cancelling the holding task must release the lock via Drop",
         );
     }
