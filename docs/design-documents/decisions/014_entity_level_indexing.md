@@ -34,15 +34,15 @@ Problems:
 
 Replace `GlobalHandler` and `NamespaceHandler` with a single handler type,
 `EntityIndexingHandler`, where one NATS message = one entity kind, optionally
-scoped to a namespace. The dispatcher is stateless — it publishes one
-message per (entity, scope) pair with no partition awareness. The
-pipeline (`BasePipeline`) owns all partition orchestration internally:
-it reads checkpoint state, computes quantile boundaries, runs partitions
-concurrently, and consolidates to a unified checkpoint on completion.
+scoped to a namespace. The dispatcher owns partition orchestration: it
+reads checkpoint state, computes quantile boundaries, and publishes one
+message per (entity, scope, partition) combination. Each message carries
+an optional `PartitionAssignment` so the handler applies the range filter
+without needing checkpoint or quantile awareness.
 
-Incremental indexing (where a completed checkpoint already exists) always
-runs as a single pipeline — it processes only the delta since the last
-watermark and is already fast.
+Incremental indexing (where a completed unified checkpoint already exists)
+runs as a single non-partitioned message — it processes only the delta
+since the last watermark and is already fast.
 
 ### Message type
 
@@ -51,17 +51,26 @@ pub struct EntityIndexingRequest {
     pub entity_kind: String,
     pub watermark: DateTime<Utc>,
     pub scope: IndexingScope,
+    pub partition: Option<PartitionAssignment>,
 }
 
 pub enum IndexingScope {
     Global,
     Namespace { namespace_id: i64, traversal_path: String },
 }
+
+pub struct PartitionAssignment {
+    pub index: u32,
+    pub total: u32,
+    pub column: String,
+    pub bounds: PartitionBounds,
+}
 ```
 
-`PartitionSpec` and `PartitionStrategy` exist as internal types used by
-the pipeline for checkpoint keys and SQL range filters, but they are not
-part of the NATS message.
+The dispatcher attaches a `PartitionAssignment` when it decides to split
+work. The handler applies the range filter from the assignment to its
+extract query. `PartitionSpec` and `PartitionStrategy` are internal
+dispatcher types used for checkpoint keys and quantile computation.
 
 ### NATS subject hierarchy
 
@@ -88,53 +97,32 @@ A single `EntityIndexingHandler` holds a
 `HashMap<String, Arc<dyn EntityPipeline>>`, keyed by entity kind. On
 each message it deserializes the `EntityIndexingRequest`, looks up the
 pipeline by `entity_kind`, and delegates. Unknown entity kinds log a
-warning and return `Ok(())`. All current entities use `BasePipeline`,
-which owns partition orchestration and delegates to `Pipeline::run`:
+warning and return `Ok(())`.
 
-```rust
-pub struct BasePipeline {
-    plan: PipelinePlan,
-    partition_column: Option<String>,
-    source_table: Option<String>,
-    partition_count: u32,
-    pipeline: Arc<Pipeline>,
-}
-```
-
-`BasePipeline::execute` implements the following logic tree:
-
-1. `partition_count <= 1` → run single (unified checkpoint key).
-2. Unified checkpoint exists with `watermark > 0` → already bootstrapped,
-   run single incremental.
-3. No unified checkpoint. Scan partition checkpoints (`p0of4`, `p1of4`, ...):
-   - None exist → first run. Compute boundaries, run all N partitions
-     concurrently, consolidate.
-   - All completed → consolidate (write unified checkpoint with min
-     watermark), then run single incremental.
-   - Some incomplete → recompute boundaries, run only incomplete
-     partitions, consolidate.
-
-Consolidation writes a unified checkpoint with `watermark = min(partition
-watermarks)`. After consolidation, subsequent runs enter step 2
-(incremental).
+All current entities use `SimpleEntityPipeline`, which runs a single
+`PipelinePlan` against the existing `Pipeline::run_plan`. If the request
+carries a `PartitionAssignment`, the pipeline applies the range filter
+to its extract query and uses a partition-specific checkpoint key.
+Otherwise it uses the unified key. The pipeline has no partition
+orchestration logic — it runs exactly what the dispatcher told it to.
 
 Future entities (e.g., SystemNotes) can implement `EntityPipeline` with
-custom logic instead of using `BasePipeline`.
+custom logic instead of using `SimpleEntityPipeline`.
 
 ### Partitioning (initial indexing only)
 
 Partitioning applies only during initial indexing (no unified checkpoint
 for the entity+scope). Incremental indexing processes only the delta since
 the last watermark and completes in seconds; partitioning it would add
-overhead for no gain. The pipeline checks the checkpoint store to decide
-(see [Handler and pipeline](#handler-and-pipeline)).
+overhead for no gain. The dispatcher checks the checkpoint store to
+decide (see [Dispatcher](#dispatcher)).
 
 #### Partition column: first non-scope sort key column
 
-When `partition` is present, the pipeline applies a range filter on the
-**first non-scope column** of the entity's source `order_by`. For
-namespaced entities, the scope column is `traversal_path`. For global
-entities, there is no scope column.
+When a `PartitionAssignment` is present, the handler applies a range
+filter on the **first non-scope column** of the entity's source
+`order_by`. For namespaced entities, the scope column is
+`traversal_path`. For global entities, there is no scope column.
 
 ```sql
 AND {partition_column} >= '{lower_bound}' AND {partition_column} < '{upper_bound}'
@@ -174,10 +162,10 @@ fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
 }
 ```
 
-`partition_column` runs once at registration; `partition_filter_sql` runs
-at execution time when the pipeline decides to partition. The range
-filter composes with the existing `WHERE` and keyset cursor as a
-conjunct and does not affect sort order.
+`partition_column` runs once at dispatcher startup; `partition_filter_sql`
+runs at handler execution time using the bounds from the
+`PartitionAssignment`. The range filter composes with the existing `WHERE`
+and keyset cursor as a conjunct and does not affect sort order.
 
 #### Why range over hash
 
@@ -205,9 +193,9 @@ for why hash was considered and rejected.
 
 #### Boundary computation
 
-The pipeline computes quantile boundaries using `quantilesTDigest` each
-time it needs to run partitions. Boundaries are not persisted — they are
-recomputed from the source table. This is acceptable because:
+The dispatcher computes quantile boundaries using `quantilesTDigest`
+each time it plans partition jobs. Boundaries are not persisted — they
+are recomputed from the source table. This is acceptable because:
 
 - Boundary drift between runs does not cause data gaps. Each partition
   has its own cursor-based checkpoint, so rows near a shifted boundary
@@ -263,12 +251,23 @@ and `"global"` constants (e.g., `ns.100.MergeRequest`,
 
 ### Dispatcher
 
-`EntityDispatcher` is stateless. It loads enabled namespaces from the
-datalake, then publishes one `EntityIndexingRequest` per (entity, scope)
-pair. It has no checkpoint awareness and no partition logic.
+`EntityDispatcher` owns partition orchestration. On each scheduled run it:
 
-`PublishDuplicate` is handled silently (NATS dedup). The pipeline owns
-all partition orchestration (see [Handler and pipeline](#handler-and-pipeline)).
+1. Loads enabled namespaces from the datalake.
+2. For each (entity, scope) pair, calls `plan_dispatch` which reads the
+   checkpoint store to decide what to publish:
+   - Unified checkpoint already completed → publish one non-partitioned
+     message (incremental delta).
+   - All partition checkpoints completed → consolidate (write unified
+     checkpoint with min watermark), then publish non-partitioned.
+   - Some partitions incomplete or none started → compute quantile
+     boundaries via `PartitionStrategy`, publish one message per
+     pending partition with a `PartitionAssignment`.
+3. `PublishDuplicate` is handled silently (NATS dedup).
+
+Consolidation writes a unified checkpoint with `watermark = min(partition
+watermarks)`. After consolidation, subsequent runs publish non-partitioned
+messages (incremental).
 
 ### Configuration
 
@@ -276,8 +275,8 @@ All entity handlers share a single concurrency group (`"sdlc"`). The
 engine's worker pool caps total concurrent SDLC handlers via the group
 semaphore. Per-entity groups can be added later without code changes.
 
-`partition-overrides` lives on the handler config, not the dispatcher.
-The pipeline reads it at startup to set the partition count per entity.
+`partition-overrides` lives on the handler config. The dispatcher reads
+it at startup to build `PartitionStrategy` instances per entity.
 
 ```yaml
 handlers:
@@ -399,8 +398,9 @@ until empirical data shows a specific entity needs throttling.
 - Indexing status: one key per (entity, namespace) instead of per
   namespace. `GraphStatusService` aggregates with worst-state-wins.
   Old and new key formats coexist during rollout.
-- Pipeline complexity: `BasePipeline` owns a partition state machine
-  (scan checkpoints, compute boundaries, run concurrently, consolidate).
+- Dispatcher complexity: `EntityDispatcher` owns a partition state
+  machine (scan checkpoints, compute boundaries, consolidate). The
+  handler pipeline is simpler in exchange.
 
 ## References
 
