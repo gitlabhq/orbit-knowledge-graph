@@ -68,7 +68,7 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::sdlc::dispatch::{EntityDispatcher, GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -129,6 +129,7 @@ pub async fn run(
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
         modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        modules::sdlc::register_entity_handlers(&registry, config, &ontology).await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
@@ -240,6 +241,10 @@ pub async fn run_dispatcher(
             datalake,
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
+        )),
+        Box::new(EntityDispatcher::new(
+            metrics.clone(),
+            config.schedule.tasks.entity.clone(),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),

@@ -12,6 +12,7 @@ use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
+use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
 use metrics::SdlcMetrics;
@@ -80,6 +81,22 @@ pub async fn register_handlers(
             namespace_handler_config,
         )));
     }
+
+    Ok(())
+}
+
+pub async fn register_entity_handlers(
+    registry: &HandlerRegistry,
+    config: &IndexerConfig,
+    _ontology: &ontology::Ontology,
+) -> Result<(), HandlerInitError> {
+    let entity_config = &config.engine.handlers.entity_handler;
+
+    info!("registering entity indexing handler (no pipelines yet)");
+
+    registry.register_handler(Box::new(EntityIndexingHandler::new(
+        entity_config.engine.clone(),
+    )));
 
     Ok(())
 }

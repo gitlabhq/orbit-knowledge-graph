@@ -67,6 +67,14 @@
             },
             "retry_interval_secs": null
           },
+          "entity-handler": {
+            "batch_size_overrides": {},
+            "concurrency_group": null,
+            "datalake_batch_size": 500000,
+            "max_attempts": null,
+            "partition_overrides": {},
+            "retry_interval_secs": null
+          },
           "global-handler": {
             "batch_size_overrides": {},
             "concurrency_group": null,
@@ -221,6 +229,9 @@
             "batch_size": 100,
             "cron": null,
             "events_stream_name": "siphon_stream_main_db"
+          },
+          "entity": {
+            "cron": null
           },
           "global": {
             "cron": null
@@ -511,6 +522,14 @@
               },
               "retry_interval_secs": null
             },
+            "entity-handler": {
+              "batch_size_overrides": {},
+              "concurrency_group": null,
+              "datalake_batch_size": 500000,
+              "max_attempts": null,
+              "partition_overrides": {},
+              "retry_interval_secs": null
+            },
             "global-handler": {
               "batch_size_overrides": {},
               "concurrency_group": null,
@@ -554,6 +573,78 @@
         }
       },
       "additionalProperties": false
+    },
+    "EntityDispatcherConfig": {
+      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "EntityHandlerConfig": {
+      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "batch_size_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "default": {}
+        },
+        "concurrency_group": {
+          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "datalake_batch_size": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 500000,
+          "minimum": 0
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "partition_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "default": {}
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      }
     },
     "GitlabConfig": {
       "type": "object",
@@ -721,6 +812,17 @@
               "per_file_timeout_ms": 5000,
               "worker_threads": 0
             },
+            "retry_interval_secs": null
+          }
+        },
+        "entity-handler": {
+          "$ref": "#/$defs/EntityHandlerConfig",
+          "default": {
+            "batch_size_overrides": {},
+            "concurrency_group": null,
+            "datalake_batch_size": 500000,
+            "max_attempts": null,
+            "partition_overrides": {},
             "retry_interval_secs": null
           }
         },
@@ -1349,6 +1451,9 @@
               "cron": null,
               "events_stream_name": "siphon_stream_main_db"
             },
+            "entity": {
+              "cron": null
+            },
             "global": {
               "cron": null
             },
@@ -1384,6 +1489,12 @@
             "batch_size": 100,
             "cron": null,
             "events_stream_name": "siphon_stream_main_db"
+          }
+        },
+        "entity": {
+          "$ref": "#/$defs/EntityDispatcherConfig",
+          "default": {
+            "cron": null
           }
         },
         "global": {
