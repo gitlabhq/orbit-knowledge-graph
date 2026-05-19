@@ -15,6 +15,18 @@ impl RequestContext {
                 .find_map(|token| token.strip_prefix("Coding-Agent/"))
         })
     }
+
+    pub fn record_in_current_span(&self) {
+        let span = tracing::Span::current();
+        span.record("user_id", self.claims.user_id);
+        span.record("source_type", &self.claims.source_type);
+        if let Some(sid) = &self.claims.ai_session_id {
+            span.record("ai_session_id", sid.as_str());
+        }
+        if let Some(agent) = self.coding_agent() {
+            span.record("coding_agent", agent);
+        }
+    }
 }
 
 pub fn extract_request_context<T>(

@@ -41,18 +41,6 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
     }
 }
 
-fn record_ai_session_id(ai_session_id: &Option<String>) {
-    if let Some(sid) = ai_session_id {
-        tracing::Span::current().record("ai_session_id", sid.as_str());
-    }
-}
-
-fn record_coding_agent(coding_agent: Option<&str>) {
-    if let Some(agent) = coding_agent {
-        tracing::Span::current().record("coding_agent", agent);
-    }
-}
-
 fn proto_tool_definition(t: crate::tools::ToolDefinition) -> ProtoToolDefinition {
     ProtoToolDefinition {
         name: t.name,
@@ -153,10 +141,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<ListToolsRequest>,
     ) -> Result<Response<ListToolsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         info!("Listing tools for user");
 
@@ -177,10 +162,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<ListAgentCommandsRequest>,
     ) -> Result<Response<ListAgentCommandsResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         let requested = &req.command_names;
@@ -240,10 +222,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<InvokeAgentCommandRequest>,
     ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         if req.command_name.trim().is_empty() {
@@ -295,12 +274,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<Streaming<ExecuteQueryMessage>>,
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
         let coding_agent = ctx.coding_agent().map(String::from);
         let claims = ctx.claims;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
@@ -407,10 +383,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<GetGraphSchemaRequest>,
     ) -> Result<Response<GetGraphSchemaResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching graph schema for user");
@@ -442,10 +415,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<GetResponseFormatRequest>,
     ) -> Result<Response<GetResponseFormatResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query response format for user");
@@ -482,10 +452,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<GetQueryDslRequest>,
     ) -> Result<Response<GetQueryDslResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching query DSL grammar for user");
@@ -518,10 +485,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<GetClusterHealthRequest>,
     ) -> Result<Response<GetClusterHealthResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        tracing::Span::current().record("user_id", ctx.claims.user_id);
-        tracing::Span::current().record("source_type", &ctx.claims.source_type);
-        record_ai_session_id(&ctx.claims.ai_session_id);
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
 
         let req = request.get_ref();
         info!(format = ?req.format, "Fetching cluster health for user");
@@ -539,11 +503,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         request: Request<GetGraphStatusRequest>,
     ) -> Result<Response<GetGraphStatusResponse>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
-        record_coding_agent(ctx.coding_agent());
+        ctx.record_in_current_span();
         let claims = ctx.claims;
-        tracing::Span::current().record("user_id", claims.user_id);
-        tracing::Span::current().record("source_type", &claims.source_type);
-        record_ai_session_id(&claims.ai_session_id);
 
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
