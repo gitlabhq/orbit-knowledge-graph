@@ -1,12 +1,12 @@
 //! Shared types used across the compiler and downstream crates.
 
 use crate::error::{QueryError, Result};
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Matches paths like "1/", "1/2/", "123/456/789/"
-static TRAVERSAL_PATH_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
+static TRAVERSAL_PATH_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
 
 /// Default role assumed for a traversal path when the JWT does not supply an
 /// explicit per-path role. Matches the historical behavior where Rails only

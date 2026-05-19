@@ -21,7 +21,7 @@ pub fn emit_aggregation(
 }
 
 /// Default alias for an aggregation function when the user doesn't supply one.
-/// Matches v1 behavior: lowercase function name (e.g. "count", "sum", "avg").
+/// Lowercase function name (e.g. "count", "sum", "avg").
 fn default_alias(func: AggFunction) -> String {
     func.as_sql().to_lowercase()
 }

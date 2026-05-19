@@ -3,7 +3,6 @@
 //! Intermediate representation between JSON input and SQL output.
 //! Each node maps directly to ClickHouse SQL constructs.
 
-use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -457,23 +456,6 @@ impl Expr {
         Expr::binary(Op::And, left, right)
     }
 
-    /// Flatten an AND tree into a list of conjuncts.
-    /// `(A AND B) AND C` becomes `[A, B, C]`.
-    pub fn flatten_and(self) -> Vec<Expr> {
-        match self {
-            Expr::BinaryOp {
-                op: Op::And,
-                left,
-                right,
-            } => {
-                let mut out = left.flatten_and();
-                out.extend(right.flatten_and());
-                out
-            }
-            other => vec![other],
-        }
-    }
-
     /// Rebuild an AND chain from conjuncts. Returns None if empty.
     pub fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
         exprs.into_iter().reduce(Expr::and)
@@ -482,99 +464,6 @@ impl Expr {
     /// Combine two expressions with OR.
     pub fn or(left: Expr, right: Expr) -> Expr {
         Expr::binary(Op::Or, left, right)
-    }
-
-    /// Collect all unique table aliases referenced by column expressions.
-    pub fn column_aliases(&self) -> HashSet<String> {
-        let mut aliases = HashSet::new();
-        self.collect_aliases(&mut aliases);
-        aliases
-    }
-
-    fn collect_aliases(&self, out: &mut HashSet<String>) {
-        match self {
-            Expr::Column { table, .. } => {
-                out.insert(table.clone());
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                left.collect_aliases(out);
-                right.collect_aliases(out);
-            }
-            Expr::FuncCall { args, .. } => {
-                for a in args {
-                    a.collect_aliases(out);
-                }
-            }
-            Expr::Lambda { body, .. } => body.collect_aliases(out),
-            Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
-            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
-                expr.collect_aliases(out)
-            }
-            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
-        }
-    }
-
-    /// Returns true if this expression tree contains an `InSubquery` or
-    /// `InSelect` node.
-    pub fn contains_in_subquery(&self) -> bool {
-        match self {
-            Expr::InSubquery { .. } | Expr::InSelect { .. } => true,
-            Expr::BinaryOp { left, right, .. } => {
-                left.contains_in_subquery() || right.contains_in_subquery()
-            }
-            Expr::FuncCall { args, .. } => args.iter().any(|a| a.contains_in_subquery()),
-            Expr::Lambda { body, .. } => body.contains_in_subquery(),
-            Expr::UnaryOp { expr, .. } => expr.contains_in_subquery(),
-            _ => false,
-        }
-    }
-
-    /// Collect all column names (not aliases) referenced by this expression.
-    pub fn referenced_columns(&self) -> HashSet<String> {
-        let mut cols = HashSet::new();
-        self.collect_columns(&mut cols);
-        cols
-    }
-
-    fn collect_columns(&self, out: &mut HashSet<String>) {
-        match self {
-            Expr::Column { column, .. } => {
-                out.insert(column.clone());
-            }
-            Expr::BinaryOp { left, right, .. } => {
-                left.collect_columns(out);
-                right.collect_columns(out);
-            }
-            Expr::FuncCall { args, .. } => {
-                for a in args {
-                    a.collect_columns(out);
-                }
-            }
-            Expr::Lambda { body, .. } => body.collect_columns(out),
-            Expr::UnaryOp { expr, .. } => expr.collect_columns(out),
-            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
-                expr.collect_columns(out)
-            }
-            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
-        }
-    }
-
-    /// Check if this expression only references columns from `alias`
-    /// (or is a constant/literal).
-    pub fn references_only(&self, alias: &str) -> bool {
-        match self {
-            Expr::Column { table, .. } => table == alias,
-            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
-            Expr::FuncCall { args, .. } => args.iter().all(|a| a.references_only(alias)),
-            Expr::Lambda { body, .. } => body.references_only(alias),
-            Expr::BinaryOp { left, right, .. } => {
-                left.references_only(alias) && right.references_only(alias)
-            }
-            Expr::UnaryOp { expr, .. } => expr.references_only(alias),
-            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
-                expr.references_only(alias)
-            }
-        }
     }
 }
 

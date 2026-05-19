@@ -578,15 +578,6 @@ impl Direction {
             Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         }
     }
-
-    /// Returns (from_col, to_col) for union subquery joins.
-    pub fn union_columns(self) -> (&'static str, &'static str) {
-        use crate::constants::{END_ID_COLUMN, START_ID_COLUMN};
-        match self {
-            Direction::Outgoing | Direction::Both => (START_ID_COLUMN, END_ID_COLUMN),
-            Direction::Incoming => (END_ID_COLUMN, START_ID_COLUMN),
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -642,12 +633,6 @@ pub enum PropertyTransform {
 }
 
 impl PropertyTransform {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Truncate { .. } => "truncate",
-        }
-    }
-
     pub fn output_suffix(&self) -> String {
         match self {
             Self::Truncate { unit } => unit.name().to_string(),
@@ -706,12 +691,6 @@ impl InputGroupByKey {
         }
     }
 
-    pub fn alias(&self) -> Option<&str> {
-        match self {
-            Self::Node { alias, .. } | Self::Property { alias, .. } => alias.as_deref(),
-        }
-    }
-
     pub fn property(&self) -> Option<&str> {
         match self {
             Self::Node { .. } => None,
@@ -751,14 +730,6 @@ impl InputGroupByKey {
                 }
             }),
         }
-    }
-
-    pub fn is_node_group(&self) -> bool {
-        matches!(self, Self::Node { .. })
-    }
-
-    pub fn is_property_group(&self) -> bool {
-        matches!(self, Self::Property { .. })
     }
 }
 
@@ -831,19 +802,6 @@ impl AggFunction {
             Self::Min => "MIN",
             Self::Max => "MAX",
             Self::Collect => "groupArray",
-        }
-    }
-
-    /// ClickHouse `-If` combinator variant (e.g. `countIf`, `sumIf`).
-    /// Returns `None` for functions that don't support the combinator.
-    pub fn as_sql_if(&self) -> Option<&'static str> {
-        match self {
-            Self::Count => Some("countIf"),
-            Self::Sum => Some("sumIf"),
-            Self::Avg => Some("avgIf"),
-            Self::Min => Some("minIf"),
-            Self::Max => Some("maxIf"),
-            Self::Collect => None,
         }
     }
 }

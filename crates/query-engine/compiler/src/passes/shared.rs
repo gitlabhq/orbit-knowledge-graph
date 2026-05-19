@@ -276,7 +276,6 @@ pub fn dedup_query(
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
-    _pk: &str,
 ) -> Query {
     Query {
         select,
@@ -292,9 +291,8 @@ pub fn dedup_subquery(
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
-    pk: &str,
 ) -> (TableRef, Expr) {
-    let query = dedup_query(alias, table, select, scan_where, pk);
+    let query = dedup_query(alias, table, select, scan_where);
     (
         TableRef::Subquery {
             query: Box::new(query),

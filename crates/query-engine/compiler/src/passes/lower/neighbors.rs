@@ -65,7 +65,7 @@ pub fn emit_neighbors(
         for col in extra_select {
             select.push(SelectExpr::col(alias, *col));
         }
-        dedup_subquery(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY)
+        dedup_subquery(alias, table, select, scan_where)
     }
 
     let edge_tiebreakers = || -> Vec<OrderExpr> {
