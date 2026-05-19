@@ -78,12 +78,8 @@ impl KnowledgeGraphServiceImpl {
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
-        let pipeline = QueryPipelineService::new(
-            Arc::clone(&ontology),
-            Arc::clone(&client),
-            clickhouse_config.profiling.clone(),
-            analytics_config,
-        );
+        let pipeline =
+            QueryPipelineService::new(Arc::clone(&ontology), Arc::clone(&client), analytics_config);
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
         Self {
             validator,
