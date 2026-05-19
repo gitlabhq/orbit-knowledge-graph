@@ -473,7 +473,7 @@ mod tests {
     // consulting the security context (RestrictPass only runs on
     // `node.columns`).
 
-    use crate::input::{DynamicColumnMode, Input, InputNode, QueryOptions, QueryType};
+    use crate::input::{DynamicColumnMode, Input, InputNode, QueryType};
     use crate::types::SecurityContext;
     use ontology::{DataType, Ontology};
 
@@ -516,7 +516,7 @@ mod tests {
                 entity: Some("User".into()),
                 ..Default::default()
             }],
-            options: QueryOptions {
+            options: crate::input::QueryOptions {
                 dynamic_columns: mode,
                 ..Default::default()
             },

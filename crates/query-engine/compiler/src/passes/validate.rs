@@ -19,12 +19,6 @@ use ontology::{DataType, Ontology, TRAVERSAL_PATH_COLUMN};
 pub(crate) const BASE_SCHEMA_JSON: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
-/// Compiler performance options injected into `QueryOptions` at runtime.
-/// Kept in a separate fragment file to reduce token usage in the base schema
-/// for LLM consumers that only need the structural query surface.
-const COMPILER_OPTIONS_JSON: &str =
-    include_str!(concat!(env!("SCHEMA_DIR"), "/compiler_query_options.json"));
-
 static BASE_SCHEMA_VALIDATOR: OnceLock<jsonschema::Validator> = OnceLock::new();
 
 fn base_validator() -> &'static jsonschema::Validator {
@@ -33,38 +27,6 @@ fn base_validator() -> &'static jsonschema::Validator {
             serde_json::from_str(BASE_SCHEMA_JSON).expect("schema.json must be valid JSON");
         jsonschema::validator_for(&schema).expect("schema.json must be a valid JSON Schema")
     })
-}
-
-/// Inject compiler performance options from `compiler_query_options.json`
-/// into the `QueryOptions` definition of the derived schema, then seal it
-/// with `additionalProperties: false`.
-fn inject_compiler_query_options(schema: &mut serde_json::Value) {
-    let options: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(COMPILER_OPTIONS_JSON)
-            .expect("compiler_query_options.json must be valid JSON");
-
-    let props = schema
-        .pointer_mut("/$defs/QueryOptions/properties")
-        .and_then(serde_json::Value::as_object_mut);
-
-    if let Some(props) = props {
-        for (key, value) in options {
-            if key == "$comment" {
-                continue;
-            }
-            props.insert(key, value);
-        }
-    }
-
-    if let Some(qo) = schema
-        .pointer_mut("/$defs/QueryOptions")
-        .and_then(serde_json::Value::as_object_mut)
-    {
-        qo.insert(
-            "additionalProperties".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
 }
 
 fn collect_schema_errors(
@@ -207,12 +169,10 @@ impl<'a> Validator<'a> {
 
     /// Validate against the ontology-derived schema (entity types, columns, relationship types).
     pub fn check_ontology(&self, value: &serde_json::Value) -> Result<()> {
-        let mut schema = self
+        let schema = self
             .ontology
             .derive_json_schema(BASE_SCHEMA_JSON)
             .map_err(|e| QueryError::Validation(format!("failed to derive schema: {e}")))?;
-
-        inject_compiler_query_options(&mut schema);
 
         let validator = jsonschema::validator_for(&schema)
             .map_err(|e| QueryError::Validation(format!("invalid derived schema: {e}")))?;
@@ -235,7 +195,6 @@ impl<'a> Validator<'a> {
         self.check_depth(input)?;
         self.check_selectivity(input)?;
         self.check_filter_types(input)?;
-        self.check_skip_dedup(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
@@ -1048,10 +1007,6 @@ impl<'a> Validator<'a> {
                 )));
             }
         }
-        Ok(())
-    }
-
-    fn check_skip_dedup(&self, _input: &Input) -> Result<()> {
         Ok(())
     }
 
@@ -2682,52 +2637,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn skip_dedup_accepted_for_aggregation_compatibility() {
-        let ont = test_ontology();
-        let validator = Validator::new(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "u"}],
-            "options": {"skip_dedup": true}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(
-            validator.check_references(&input).is_ok(),
-            "skip_dedup should be accepted and ignored for aggregation"
-        );
-    }
-
-    #[test]
-    fn skip_dedup_allowed_for_traversal() {
-        let ont = test_ontology();
-        let validator = Validator::new(&ont);
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "p", "entity": "Project", "node_ids": [1]}
-            ],
-            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
-            "limit": 10,
-            "options": {"skip_dedup": true}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(
-            validator.check_references(&input).is_ok(),
-            "skip_dedup should be accepted and ignored for traversal"
-        );
-    }
 }

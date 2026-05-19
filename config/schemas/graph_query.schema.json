@@ -615,9 +615,8 @@
               "$ref": "#/$defs/Identifier",
               "description": "Output column alias for this group key"
             }
-          },
-          "additionalProperties": false
-        },
+      }
+    },
         {
           "type": "object",
           "description": "Group by a scalar property on a node selector.",
@@ -778,7 +777,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level presentation options. Compiler performance options are injected by the ontology-derived schema at runtime.",
+      "description": "Consumer-level presentation options.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
@@ -790,7 +789,8 @@
           "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
           "default": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "DynamicColumnMode": {
       "type": "string",

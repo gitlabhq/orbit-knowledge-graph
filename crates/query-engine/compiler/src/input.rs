@@ -36,39 +36,6 @@ pub struct QueryOptions {
     /// org members with Reporter+ access).
     #[serde(default)]
     pub include_debug_sql: bool,
-    /// Legacy option retained for client compatibility. Node table reads now
-    /// use `FINAL` for latest-row correctness, so this option is ignored by
-    /// the ClickHouse compiler.
-    #[serde(default)]
-    pub skip_dedup: bool,
-    /// When true, marks multi-referenced CTEs as `MATERIALIZED` so
-    /// ClickHouse evaluates them once instead of inlining at every
-    /// reference site. Reduces redundant scans for cascade and hop
-    /// frontier CTEs in multi-relationship queries.
-    #[serde(default)]
-    pub materialize_ctes: bool,
-    /// When true, rewrites `IN (SELECT id FROM cte)` SIP patterns into
-    /// explicit `LEFT SEMI JOIN` for early termination and reduced hash-set
-    /// materialization in ClickHouse.
-    #[serde(default)]
-    pub use_semi_join: bool,
-    /// When true, forces auth-scoped cascade seeding on every query,
-    /// regardless of whether any node has `node_ids`. When false (default),
-    /// auth-scoped cascades are only used when no node has `node_ids` —
-    /// pinned-node cascades provide better narrowing and avoid redundant
-    /// full-table _nf_* scans.
-    #[serde(default)]
-    pub auth_scope_cascade: bool,
-    /// When true, emits `SELECT DISTINCT` on cascade and hop frontier CTEs.
-    /// When false (default), CTEs emit plain `SELECT` — ClickHouse's `IN`
-    /// operator already deduplicates internally, and `DISTINCT` adds a
-    /// blocking hash aggregation barrier that prevents pipelining.
-    #[serde(default)]
-    pub cascade_distinct: bool,
-    /// No longer used. Kept for backward compatibility with clients that
-    /// still send it in query JSON.
-    #[serde(default)]
-    pub use_v2: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -1248,33 +1215,6 @@ mod tests {
         .unwrap();
 
         assert!(!input.options.include_debug_sql);
-    }
-
-    #[test]
-    fn options_skip_dedup_true() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"},
-            "options": {"skip_dedup": true}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(input.options.skip_dedup);
-    }
-
-    #[test]
-    fn options_skip_dedup_defaults_false() {
-        let input = parse_input(
-            r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User"}
-        }"#,
-        )
-        .unwrap();
-
-        assert!(!input.options.skip_dedup);
     }
 
     #[test]

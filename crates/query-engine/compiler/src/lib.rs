@@ -1227,8 +1227,7 @@ mod tests {
                 "target": "mr",
                 "alias": "user_mrs"
             }],
-            "limit": 5,
-            "options": {"materialize_ctes": true}
+            "limit": 5
         }"#;
 
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
@@ -1585,39 +1584,6 @@ mod tests {
     }
 
     #[test]
-    fn skip_dedup_is_ignored_and_keeps_latest_row_filtering() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "title": {"op": "contains", "value": "fix"}
-                }}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "limit": 10,
-            "options": {"skip_dedup": true}
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains(" FINAL"),
-            "skip_dedup is ignored; node reads should still use FINAL, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("LIMIT 1 BY"),
-            "latest-row reads should not use LIMIT 1 BY, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_deleted"),
-            "latest-row reads should still filter by _deleted, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn node_table_reads_use_final_for_latest_rows() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
@@ -1893,53 +1859,6 @@ mod tests {
         assert!(
             !sql.contains("LIMIT 1 BY"),
             "hydration should not use manual LIMIT BY dedup, got:\n{sql}"
-        );
-    }
-
-    /// FK elision replaces cascade CTEs and edge-chain JOINs with
-    /// direct FK column joins. The `materialize_ctes` option has
-    /// no effect when there are no multi-referenced CTEs to materialize.
-    #[test]
-    fn multi_ref_cte_emits_materialized_keyword_and_setting() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
-            }],
-            "limit": 5,
-            "options": {"materialize_ctes": true}
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // v2 lowerer uses edge-chain JOINs — no cascade CTEs.
-        assert!(
-            !sql.contains("_cascade_mr"),
-            "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
-        );
-        // FK elision replaces edge-chain JOINs with direct FK column joins.
-        assert!(
-            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
-            "User node_ids filter must be pushed to FK column, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
-            "IN_PROJECT FK join must use project_id, got:\n{sql}"
         );
     }
 
