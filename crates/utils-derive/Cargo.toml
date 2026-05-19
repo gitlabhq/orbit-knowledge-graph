@@ -1,0 +1,16 @@
+[package]
+name = "gkg-utils-derive"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+
+[lints]
+workspace = true

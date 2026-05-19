@@ -5274,10 +5274,21 @@ dependencies = [
  "arrow 58.2.0",
  "chrono",
  "enum-as-inner",
+ "gkg-utils-derive",
  "serde_json",
  "strum 0.28.0",
  "tempfile",
+ "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "gkg-utils-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

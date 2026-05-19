@@ -35,6 +35,7 @@ members = [
   "crates/integration-tests-codegraph",
   "crates/nats-client",
   "crates/utils",
+  "crates/utils-derive",
   "crates/integration-tests",
   "crates/duckdb-client",
   "crates/fuzz",
@@ -42,6 +43,7 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
+gkg-utils-derive = { path = "crates/utils-derive" }
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "551256f" }
 labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "551256f" }
 arrow = "58.0.0"

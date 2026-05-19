@@ -1,5 +1,9 @@
 //! Arrow array utilities: extraction helpers and RecordBatch builder.
 
+pub mod extract;
+
+pub use extract::FromRecordBatch;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
