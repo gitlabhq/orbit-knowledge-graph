@@ -53,37 +53,6 @@ enum DispatchDecision {
     PendingPartitions(Vec<u32>),
 }
 
-fn plan_entity_dispatch(
-    checkpoints: &[(String, Checkpoint)],
-    entity_prefix: &str,
-    partition_count: u32,
-) -> DispatchDecision {
-    if checkpoints.len() == 1 {
-        return DispatchDecision::Single;
-    }
-
-    let all_completed = checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
-
-    if checkpoints.len() > 1 && all_completed && checkpoints.len() as u32 == partition_count {
-        return DispatchDecision::Single;
-    }
-
-    if checkpoints.len() > 1 {
-        let pending: Vec<u32> = (0..partition_count)
-            .filter(|idx| {
-                let partition_key = format!("{entity_prefix}.p{idx}of{partition_count}");
-                match checkpoints.iter().find(|(k, _)| k == &partition_key) {
-                    Some((_, cp)) => cp.cursor_values.is_some(),
-                    None => true,
-                }
-            })
-            .collect();
-        return DispatchDecision::PendingPartitions(pending);
-    }
-
-    DispatchDecision::AllPartitions
-}
-
 pub struct EntityDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
@@ -232,7 +201,7 @@ impl EntityDispatcher {
                 TaskError::new(err)
             })?;
 
-        let decision = plan_entity_dispatch(&checkpoints, &prefix, partition_count);
+        let decision = Self::plan_entity_dispatch(&checkpoints, &prefix, partition_count);
 
         match decision {
             DispatchDecision::Single => self.publish_single(entity, scope, watermark).await,
@@ -250,6 +219,37 @@ impl EntityDispatcher {
                     .await
             }
         }
+    }
+
+    fn plan_entity_dispatch(
+        checkpoints: &[(String, Checkpoint)],
+        entity_prefix: &str,
+        partition_count: u32,
+    ) -> DispatchDecision {
+        if checkpoints.len() == 1 {
+            return DispatchDecision::Single;
+        }
+
+        let all_completed = checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
+
+        if checkpoints.len() > 1 && all_completed && checkpoints.len() as u32 == partition_count {
+            return DispatchDecision::Single;
+        }
+
+        if checkpoints.len() > 1 {
+            let pending: Vec<u32> = (0..partition_count)
+                .filter(|idx| {
+                    let partition_key = format!("{entity_prefix}.p{idx}of{partition_count}");
+                    match checkpoints.iter().find(|(k, _)| k == &partition_key) {
+                        Some((_, cp)) => cp.cursor_values.is_some(),
+                        None => true,
+                    }
+                })
+                .collect();
+            return DispatchDecision::PendingPartitions(pending);
+        }
+
+        DispatchDecision::AllPartitions
     }
 
     async fn publish_single(
@@ -417,7 +417,7 @@ mod tests {
         )];
 
         assert_eq!(
-            plan_entity_dispatch(&checkpoints, "ns.100.MergeRequest", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MergeRequest", 4),
             DispatchDecision::Single
         );
     }
@@ -444,7 +444,7 @@ mod tests {
         ];
 
         assert_eq!(
-            plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
             DispatchDecision::Single
         );
     }
@@ -467,7 +467,7 @@ mod tests {
         ];
 
         assert_eq!(
-            plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
             DispatchDecision::PendingPartitions(vec![1, 3])
         );
     }
@@ -477,7 +477,7 @@ mod tests {
         let checkpoints: Vec<(String, Checkpoint)> = vec![];
 
         assert_eq!(
-            plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
             DispatchDecision::AllPartitions
         );
     }
@@ -497,7 +497,7 @@ mod tests {
 
         // Partition count changed from 2 to 4 — old keys don't match new format
         assert_eq!(
-            plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
             DispatchDecision::PendingPartitions(vec![0, 1, 2, 3])
         );
     }
