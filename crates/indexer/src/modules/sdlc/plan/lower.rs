@@ -2,8 +2,6 @@ use std::collections::HashSet;
 
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
-use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
-use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
     ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
@@ -76,7 +74,7 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
         .unwrap_or_default();
 
     let mut transforms = vec![Transformation {
-        query: lower_node_transform(&input.columns),
+        sql: lower_node_transform(&input.columns),
         destination_table: node_destination,
         dict_encode_columns: dict_columns,
     }];
@@ -100,13 +98,7 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
 
     let sort_key = ontology
         .sort_key_for_table(table)
-        .map(|keys| {
-            keys.iter()
-                .map(|col| OrderExpr {
-                    expr: Expr::col("", col),
-                })
-                .collect()
-        })
+        .map(|keys| keys.to_vec())
         .unwrap_or_default();
 
     let dict_columns = ontology
@@ -129,78 +121,68 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
 }
 
 struct EdgeTableMetadata {
-    sort_key: Vec<OrderExpr>,
+    sort_key: Vec<String>,
     dict_columns: HashSet<String>,
 }
 
 fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
     let meta = edge_table_metadata(&fk_edge.relationship_kind, ontology);
 
-    let transform_query = Query {
-        select: lower_edge_select(
-            lower_edge_id(&fk_edge.source_id),
-            lower_edge_kind(&fk_edge.source_kind),
-            &fk_edge.relationship_kind,
-            lower_edge_id(&fk_edge.target_id),
-            lower_edge_kind(&fk_edge.target_kind),
-            fk_edge.namespaced,
-            &fk_edge.denormalized_columns,
-        ),
-        from: TableRef::scan(SOURCE_DATA_TABLE, None),
-        where_clause: lower_filters(&fk_edge.filters),
-        order_by: meta.sort_key,
-        limit: None,
-    };
+    let select = format_edge_select(
+        &format_edge_id(&fk_edge.source_id),
+        &format_edge_kind(&fk_edge.source_kind),
+        &fk_edge.relationship_kind,
+        &format_edge_id(&fk_edge.target_id),
+        &format_edge_kind(&fk_edge.target_kind),
+        fk_edge.namespaced,
+        &fk_edge.denormalized_columns,
+    );
+
+    let filters = format_filters(&fk_edge.filters);
+
+    let mut sql = format!("SELECT {select} FROM {SOURCE_DATA_TABLE}");
+    if let Some(where_clause) = filters {
+        sql.push_str(&format!(" WHERE {where_clause}"));
+    }
+    if !meta.sort_key.is_empty() {
+        sql.push_str(&format!(" ORDER BY {}", meta.sort_key.join(", ")));
+    }
 
     Transformation {
-        query: transform_query,
+        sql,
         destination_table: fk_edge.destination_table.clone(),
         dict_encode_columns: meta.dict_columns,
     }
 }
 
-fn lower_node_transform(columns: &[NodeColumn]) -> Query {
-    let mut select: Vec<SelectExpr> = columns.iter().map(lower_node_column).collect();
-    select.push(SelectExpr::bare(Expr::col("", VERSION_ALIAS)));
-    select.push(SelectExpr::bare(Expr::col("", DELETED_ALIAS)));
-
-    Query {
-        select,
-        from: TableRef::scan(SOURCE_DATA_TABLE, None),
-        where_clause: None,
-        order_by: vec![],
-        limit: None,
-    }
+fn lower_node_transform(columns: &[NodeColumn]) -> String {
+    let mut select: Vec<String> = columns.iter().map(format_node_column).collect();
+    select.push(VERSION_ALIAS.to_string());
+    select.push(DELETED_ALIAS.to_string());
+    format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select.join(", "))
 }
 
-fn lower_node_column(column: &NodeColumn) -> SelectExpr {
+fn format_node_column(column: &NodeColumn) -> String {
     match column {
-        NodeColumn::Identity(name) => SelectExpr::bare(Expr::col("", name)),
-        NodeColumn::Rename { source, target } => {
-            SelectExpr::new(Expr::col("", source), target.clone())
-        }
+        NodeColumn::Identity(name) => name.clone(),
+        NodeColumn::Rename { source, target } => format!("{source} AS {target}"),
         NodeColumn::IntEnum {
             source,
             target,
             values,
             nullable,
         } => {
-            let cases: Vec<String> = values
-                .iter()
-                .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
-                .collect();
             let null_case = if *nullable {
                 format!("WHEN {source} IS NULL THEN NULL ")
             } else {
                 String::new()
             };
-            SelectExpr::new(
-                Expr::raw(format!(
-                    "CASE {null_case}{} ELSE 'unknown' END",
-                    cases.join(" ")
-                )),
-                target.clone(),
-            )
+            let cases: String = values
+                .iter()
+                .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("CASE {null_case}{cases} ELSE 'unknown' END AS {target}")
         }
     }
 }
@@ -215,27 +197,31 @@ fn lower_standalone_edge_plan(
     let extract_query = lower_extract_plan(input.extract, batch_size);
     let meta = edge_table_metadata(&input.relationship_kind, ontology);
 
-    let transform_query = Query {
-        select: lower_edge_select(
-            lower_edge_id(&input.source_id),
-            lower_edge_kind(&input.source_kind),
-            &input.relationship_kind,
-            lower_edge_id(&input.target_id),
-            lower_edge_kind(&input.target_kind),
-            input.namespaced,
-            &input.denormalized_columns,
-        ),
-        from: TableRef::scan(SOURCE_DATA_TABLE, None),
-        where_clause: lower_filters(&input.filters),
-        order_by: meta.sort_key,
-        limit: None,
-    };
+    let select = format_edge_select(
+        &format_edge_id(&input.source_id),
+        &format_edge_kind(&input.source_kind),
+        &input.relationship_kind,
+        &format_edge_id(&input.target_id),
+        &format_edge_kind(&input.target_kind),
+        input.namespaced,
+        &input.denormalized_columns,
+    );
+
+    let filters = format_filters(&input.filters);
+
+    let mut sql = format!("SELECT {select} FROM {SOURCE_DATA_TABLE}");
+    if let Some(where_clause) = filters {
+        sql.push_str(&format!(" WHERE {where_clause}"));
+    }
+    if !meta.sort_key.is_empty() {
+        sql.push_str(&format!(" ORDER BY {}", meta.sort_key.join(", ")));
+    }
 
     PipelinePlan {
         name,
         extract_query,
         transforms: vec![Transformation {
-            query: transform_query,
+            sql,
             destination_table,
             dict_encode_columns: meta.dict_columns,
         }],
@@ -245,103 +231,84 @@ fn lower_standalone_edge_plan(
 fn plan_name(relationship_kind: &str, source: &ExtractSource) -> String {
     match source {
         ExtractSource::Table(table) => format!("{relationship_kind}_{table}"),
-        ExtractSource::Raw(_) => relationship_kind.to_string(),
+        ExtractSource::Template(_) => relationship_kind.to_string(),
     }
 }
 
-fn lower_edge_id(id: &EdgeId) -> Expr {
+fn format_edge_id(id: &EdgeId) -> String {
     match id {
-        EdgeId::Column(column) => Expr::col("", column),
-        EdgeId::Exploded { column, delimiter } => Expr::cast(
-            Expr::func(
-                "NULLIF",
-                vec![
-                    Expr::func(
-                        "unnest",
-                        vec![Expr::func(
-                            "string_to_array",
-                            vec![Expr::col("", column), Expr::raw(format!("'{delimiter}'"))],
-                        )],
-                    ),
-                    Expr::raw("''"),
-                ],
-            ),
-            "BIGINT",
-        ),
-        EdgeId::ArrayElement { column, field } => {
-            Expr::struct_field(Expr::func("unnest", vec![Expr::col("", column)]), field)
+        EdgeId::Column(column) => column.clone(),
+        EdgeId::Exploded { column, delimiter } => {
+            format!("CAST(NULLIF(unnest(string_to_array({column}, '{delimiter}')), '') AS BIGINT)")
         }
-        EdgeId::ArrayUnnest { column } => Expr::func("unnest", vec![Expr::col("", column)]),
+        EdgeId::ArrayElement { column, field } => format!("unnest({column})['{field}']"),
+        EdgeId::ArrayUnnest { column } => format!("unnest({column})"),
     }
 }
 
-fn lower_edge_kind(kind: &EdgeKind) -> Expr {
+fn format_edge_kind(kind: &EdgeKind) -> String {
     match kind {
-        EdgeKind::Literal(value) => Expr::raw(format!("'{value}'")),
-        EdgeKind::Column { column, mapping } if mapping.is_empty() => Expr::col("", column),
+        EdgeKind::Literal(value) => format!("'{value}'"),
+        EdgeKind::Column { column, mapping } if mapping.is_empty() => column.clone(),
         EdgeKind::Column { column, mapping } => {
-            let cases: Vec<String> = mapping
+            let cases: String = mapping
                 .iter()
                 .map(|(from, to)| format!("WHEN {column} = '{from}' THEN '{to}'"))
-                .collect();
-            Expr::raw(format!("CASE {} ELSE {column} END", cases.join(" ")))
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("CASE {cases} ELSE {column} END")
         }
     }
 }
 
-fn lower_filter(filter: &EdgeFilter) -> Expr {
+fn format_filter(filter: &EdgeFilter) -> String {
     match filter {
-        EdgeFilter::IsNotNull(column) => Expr::is_not_null(Expr::col("", column)),
-        EdgeFilter::NotEmpty(column) => {
-            Expr::binary(Op::Ne, Expr::col("", column), Expr::raw("''"))
-        }
-        EdgeFilter::ArrayNotEmpty(column) => Expr::binary(
-            Op::Gt,
-            Expr::func("cardinality", vec![Expr::col("", column)]),
-            Expr::raw("0"),
-        ),
+        EdgeFilter::IsNotNull(column) => format!("({column} IS NOT NULL)"),
+        EdgeFilter::NotEmpty(column) => format!("({column} != '')"),
+        EdgeFilter::ArrayNotEmpty(column) => format!("(cardinality({column}) > 0)"),
         EdgeFilter::TypeIn { column, types } => {
             let types_list = types
                 .iter()
                 .map(|t| format!("'{t}'"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            Expr::raw(format!("{column} IN ({types_list})"))
+            format!("{column} IN ({types_list})")
         }
     }
 }
 
-fn lower_filters(filters: &[EdgeFilter]) -> Option<Expr> {
-    Expr::and_all(filters.iter().map(|f| Some(lower_filter(f))))
+fn format_filters(filters: &[EdgeFilter]) -> Option<String> {
+    if filters.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = filters.iter().map(format_filter).collect();
+    Some(parts.join(" AND "))
 }
 
-fn lower_edge_select(
-    source_id: Expr,
-    source_kind: Expr,
+fn format_edge_select(
+    source_id: &str,
+    source_kind: &str,
     relationship_kind: &str,
-    target_id: Expr,
-    target_kind: Expr,
+    target_id: &str,
+    target_kind: &str,
     namespaced: bool,
     denormalized: &[DenormalizedColumnProjection],
-) -> Vec<SelectExpr> {
+) -> String {
     let traversal_path = if namespaced {
-        SelectExpr::bare(Expr::col("", "traversal_path"))
+        "traversal_path".to_string()
     } else {
-        SelectExpr::new(Expr::raw("'0/'"), "traversal_path")
+        "'0/' AS traversal_path".to_string()
     };
 
     let mut cols = vec![
         traversal_path,
-        SelectExpr::new(source_id, "source_id"),
-        SelectExpr::new(source_kind, "source_kind"),
-        SelectExpr::new(
-            Expr::raw(format!("'{relationship_kind}'")),
-            "relationship_kind",
-        ),
-        SelectExpr::new(target_id, "target_id"),
-        SelectExpr::new(target_kind, "target_kind"),
-        SelectExpr::bare(Expr::col("", VERSION_ALIAS)),
-        SelectExpr::bare(Expr::col("", DELETED_ALIAS)),
+        format!("{source_id} AS source_id"),
+        format!("{source_kind} AS source_kind"),
+        format!("'{relationship_kind}' AS relationship_kind"),
+        format!("{target_id} AS target_id"),
+        format!("{target_kind} AS target_kind"),
+        VERSION_ALIAS.to_string(),
+        DELETED_ALIAS.to_string(),
     ];
 
     // Group denormalized columns by edge_column (source_tags / target_tags)
@@ -389,37 +356,45 @@ fn lower_edge_select(
             Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
             None => "make_array()".to_string(),
         };
-        cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
+        cols.push(format!("{expr} AS {col_name}"));
     }
 
-    cols
+    cols.join(", ")
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
-    let mut select: Vec<SelectExpr> = input.columns.iter().map(lower_extract_column).collect();
+    if let ExtractSource::Template(template) = &input.source {
+        let resolved = template.replace("{BATCH_SIZE}", &batch_size.to_string());
+        return ExtractQuery::new(resolved, input.order_by, batch_size);
+    }
 
-    select.push(SelectExpr::new(
-        Expr::raw(input.watermark.clone()),
-        VERSION_ALIAS,
-    ));
-    select.push(SelectExpr::new(
-        Expr::raw(input.deleted.clone()),
-        DELETED_ALIAS,
-    ));
+    let select: Vec<String> = input.columns.iter().map(format_extract_column).collect();
 
-    let from = match &input.source {
-        ExtractSource::Table(table) => TableRef::scan(table.clone(), None),
-        ExtractSource::Raw(raw) => TableRef::Raw(raw.clone()),
+    let version_expr = format!("{} AS {VERSION_ALIAS}", input.watermark);
+    let deleted_expr = format!("{} AS {DELETED_ALIAS}", input.deleted);
+
+    let mut select_items = select;
+    select_items.push(version_expr);
+    select_items.push(deleted_expr);
+
+    let table = match &input.source {
+        ExtractSource::Table(t) => t.as_str(),
+        ExtractSource::Template(_) => unreachable!(),
     };
 
     let traversal_filter =
-        lower_traversal_filter(input.namespaced, input.traversal_path_filter.as_deref());
+        format_traversal_filter(input.namespaced, input.traversal_path_filter.as_deref());
 
-    let where_clause = Expr::and_all([
-        Some(watermark_where(&input.watermark)),
-        traversal_filter,
-        input.additional_where.map(Expr::raw),
-    ]);
+    let mut where_parts = vec![format!(
+        "({watermark} > {{last_watermark:String}}) AND ({watermark} <= {{watermark:String}})",
+        watermark = input.watermark,
+    )];
+    if let Some(filter) = traversal_filter {
+        where_parts.push(filter);
+    }
+    if let Some(extra) = &input.additional_where {
+        where_parts.push(extra.clone());
+    }
 
     if let Some(enrichment) = input.enrichment {
         // CTE-based enrichment: build the entire SQL as a raw template.
@@ -427,30 +402,15 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
         // Enrichment CTEs do point lookups by FK from _batch.
         // The outer SELECT LEFT JOINs _batch against enrichment CTEs.
 
-        // _batch CTE inner SELECT (base columns only, no enriched).
-        let base_select: Vec<String> = select.iter().map(codegen::emit_select_expr).collect();
-
-        let base_where = where_clause
-            .as_ref()
-            .map(codegen::emit_expr_to_string)
-            .unwrap_or_default();
-
-        let from_sql = match &from {
-            TableRef::Scan { table, .. } => table.clone(),
-            TableRef::Raw(r) => r.clone(),
-        };
-
-        let order_by_sql = input.order_by.join(", ");
-
-        // Outer SELECT: _batch.col AS col for base, enriched as-is.
-        let outer_cols: Vec<String> = select
+        let outer_cols: Vec<String> = select_items
             .iter()
-            .map(|s| {
-                let name = s.alias.as_deref().unwrap_or(match &s.expr {
-                    Expr::Column { column, .. } => column.as_str(),
-                    Expr::Raw(r) => r.as_str(),
-                    _ => "?",
-                });
+            .map(|item| {
+                // Extract the alias or bare column name to qualify with _batch.
+                let name = if let Some(pos) = item.find(" AS ") {
+                    &item[pos + 4..]
+                } else {
+                    item.as_str()
+                };
                 format!("_batch.{name} AS {name}")
             })
             .chain(enrichment.select_exprs.iter().cloned())
@@ -458,82 +418,57 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
 
         let template = format!(
             "WITH _batch AS (\
-             SELECT {base_select} FROM {from_sql} \
-             WHERE {base_where}{{CURSOR}} \
-             ORDER BY {order_by_sql} LIMIT {batch_size}\
+             SELECT {base_select} FROM {table} \
+             WHERE {where_clause}{{CURSOR}} \
+             ORDER BY {order_by} LIMIT {batch_size}\
              ), {cte_defs} \
              SELECT {outer_select} FROM _batch {joins}",
-            base_select = base_select.join(", "),
+            base_select = select_items.join(", "),
+            where_clause = where_parts.join(" AND "),
+            order_by = input.order_by.join(", "),
             cte_defs = enrichment.cte_defs.join(", "),
             outer_select = outer_cols.join(", "),
             joins = enrichment.join_clauses.join(" "),
         );
 
-        ExtractQuery::raw(template, input.order_by, batch_size)
+        ExtractQuery::new(template, input.order_by, batch_size)
     } else {
-        let base_query = Query {
-            select,
-            from,
-            where_clause,
-            order_by: vec![],
-            limit: None,
-        };
-        ExtractQuery::new(base_query, input.order_by, batch_size)
+        let template = format!(
+            "SELECT {} FROM {} WHERE {}{{CURSOR}} ORDER BY {} LIMIT {}",
+            select_items.join(", "),
+            table,
+            where_parts.join(" AND "),
+            input.order_by.join(", "),
+            batch_size,
+        );
+
+        ExtractQuery::new(template, input.order_by, batch_size)
     }
 }
 
 /// If namespaced and no custom filter, use the default `startsWith`.
 /// If a custom filter is provided, use it as-is (it replaces the default).
-fn lower_traversal_filter(namespaced: bool, custom_filter: Option<&str>) -> Option<Expr> {
+fn format_traversal_filter(namespaced: bool, custom_filter: Option<&str>) -> Option<String> {
     if !namespaced {
         return None;
     }
 
     match custom_filter {
-        Some(filter) => Some(Expr::raw(filter.to_string())),
-        None => Some(Expr::func(
-            "startsWith",
-            vec![
-                Expr::col("", TRAVERSAL_PATH_COLUMN),
-                Expr::param("traversal_path", "String"),
-            ],
+        Some(filter) => Some(filter.to_string()),
+        None => Some(format!(
+            "startsWith({TRAVERSAL_PATH_COLUMN}, {{traversal_path:String}})"
         )),
     }
 }
 
-fn lower_extract_column(column: &ExtractColumn) -> SelectExpr {
+fn format_extract_column(column: &ExtractColumn) -> String {
     match column {
-        ExtractColumn::Bare(name) => SelectExpr::bare(Expr::raw(name.clone())),
-        ExtractColumn::ToString(name) => SelectExpr::new(
-            Expr::func("toString", vec![Expr::col("", name)]),
-            name.clone(),
-        ),
-        // Clamp Postgres dates outside ClickHouse Date32 range (1900-01-01..2299-12-31)
-        // to NULL so a single bad row cannot poison the Arrow batch. Using >=/<= (rather
-        // than BETWEEN) lets NULL inputs short-circuit to NULL, matching Nullable(Date32).
-        ExtractColumn::DateClamp(name) => SelectExpr::new(
-            Expr::raw(format!(
-                "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL)"
-            )),
-            name.clone(),
+        ExtractColumn::Bare(name) => name.clone(),
+        ExtractColumn::ToString(name) => format!("toString({name}) AS {name}"),
+        ExtractColumn::DateClamp(name) => format!(
+            "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL) AS {name}"
         ),
     }
-}
-
-fn watermark_where(watermark: &str) -> Expr {
-    Expr::and_all([
-        Some(Expr::binary(
-            Op::Gt,
-            Expr::raw(watermark.to_string()),
-            Expr::param("last_watermark", "String"),
-        )),
-        Some(Expr::binary(
-            Op::Le,
-            Expr::raw(watermark.to_string()),
-            Expr::param("watermark", "String"),
-        )),
-    ])
-    .unwrap()
 }
 
 #[cfg(test)]
@@ -542,10 +477,6 @@ mod tests {
     use super::*;
     use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use std::collections::BTreeMap;
-
-    fn emit(query: &Query) -> String {
-        super::super::codegen::emit_sql(query)
-    }
 
     fn test_ontology() -> ontology::Ontology {
         ontology::Ontology::load_embedded().expect("should load ontology")
@@ -636,7 +567,7 @@ mod tests {
         let sql = note_plan
             .transforms
             .iter()
-            .map(|t| emit(&t.query))
+            .map(|t| t.to_sql())
             .find(|sql| sql.contains("'HAS_NOTE' AS relationship_kind"))
             .expect("HAS_NOTE transform on Note plan");
 
@@ -738,7 +669,7 @@ mod tests {
         );
 
         // Transform SQL should produce tag arrays.
-        let transform_sql = emit(&plan.transforms[0].query);
+        let transform_sql = plan.transforms[0].to_sql();
         eprintln!("ASSIGNED WorkItem transform SQL:\n{transform_sql}");
         assert!(
             transform_sql.contains("target_tags"),
@@ -757,7 +688,7 @@ mod tests {
             },
         ];
 
-        assert!(emit(&lower_node_transform(&columns)).contains("admin AS is_admin"));
+        assert!(lower_node_transform(&columns).contains("admin AS is_admin"));
     }
 
     #[test]
@@ -777,7 +708,7 @@ mod tests {
             },
         ];
 
-        let sql = emit(&lower_node_transform(&columns));
+        let sql = lower_node_transform(&columns);
         assert!(sql.contains("CASE"));
         assert!(sql.contains("WHEN state = 0 THEN 'active'"));
         assert!(sql.contains("WHEN state = 1 THEN 'blocked'"));
@@ -796,7 +727,7 @@ mod tests {
             nullable: true,
         }];
 
-        let sql = emit(&lower_node_transform(&columns));
+        let sql = lower_node_transform(&columns);
         assert!(sql.contains("WHEN failure_reason IS NULL THEN NULL"));
         assert!(sql.contains("WHEN failure_reason = 1 THEN 'script_failure'"));
         assert!(sql.contains("ELSE 'unknown' END AS failure_reason"));
@@ -818,7 +749,7 @@ mod tests {
 
         let ontology = test_ontology();
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
-        let sql = emit(&transform.query);
+        let sql = transform.to_sql();
 
         assert!(sql.contains("id AS source_id"));
         assert!(sql.contains("'Group' AS source_kind"));
@@ -842,7 +773,7 @@ mod tests {
 
         let ontology = test_ontology();
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
-        let sql = emit(&transform.query);
+        let sql = transform.to_sql();
 
         assert!(sql.contains("author_id AS source_id"));
         assert!(sql.contains("'User' AS source_kind"));
@@ -885,7 +816,7 @@ mod tests {
 
         let ontology = test_ontology();
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
-        let sql = emit(&transform.query);
+        let sql = transform.to_sql();
 
         // Mapped values collapse to ontology names via CASE.
         assert!(
@@ -924,7 +855,7 @@ mod tests {
 
         let ontology = test_ontology();
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
-        let sql = emit(&transform.query);
+        let sql = transform.to_sql();
 
         assert!(
             sql.contains("CAST(NULLIF(unnest(string_to_array(assignee_ids, '/')), '') AS BIGINT)"),
@@ -954,7 +885,7 @@ mod tests {
 
         let ontology = test_ontology();
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
-        let sql = emit(&transform.query);
+        let sql = transform.to_sql();
 
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
         assert!(sql.contains("'User' AS source_kind"), "sql: {sql}");
@@ -1018,26 +949,29 @@ mod tests {
     }
 
     #[test]
-    fn extract_query_query_etl_uses_structured_fields() {
+    fn extract_query_template_passes_through_with_batch_size_resolved() {
+        let template = "SELECT project.id AS id, \
+                         traversal_paths.traversal_path AS traversal_path, \
+                         project._siphon_replicated_at AS _version, \
+                         project._siphon_deleted AS _deleted \
+                         FROM siphon_projects project \
+                         INNER JOIN traversal_paths ON project.id = traversal_paths.id \
+                         WHERE project._siphon_replicated_at > {last_watermark:String} \
+                         AND project._siphon_replicated_at <= {watermark:String} \
+                         AND startsWith(traversal_path, {traversal_path:String})\
+                         {CURSOR} \
+                         ORDER BY traversal_path, id \
+                         LIMIT {BATCH_SIZE}";
+
         let extract = ExtractPlan {
             destination_table: "gl_project".to_string(),
-            columns: vec![
-                ExtractColumn::Bare("project.id AS id".to_string()),
-                ExtractColumn::Bare(
-                    "traversal_paths.traversal_path AS traversal_path".to_string(),
-                ),
-            ],
-            source: ExtractSource::Raw(
-                "siphon_projects project INNER JOIN traversal_paths ON project.id = traversal_paths.id"
-                    .to_string(),
-            ),
+            columns: Vec::new(),
+            source: ExtractSource::Template(template.to_string()),
             watermark: "project._siphon_replicated_at".to_string(),
             deleted: "project._siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
             namespaced: true,
-            traversal_path_filter: Some(
-                "startsWith(traversal_path, {traversal_path:String})".to_string(),
-            ),
+            traversal_path_filter: None,
             additional_where: None,
             enrichment: None,
         };
@@ -1064,5 +998,9 @@ mod tests {
         );
         assert!(sql.contains("ORDER BY traversal_path, id"), "sql: {sql}");
         assert!(sql.contains("LIMIT 500"), "sql: {sql}");
+        assert!(
+            !sql.contains("{BATCH_SIZE}"),
+            "BATCH_SIZE marker should be resolved: {sql}"
+        );
     }
 }

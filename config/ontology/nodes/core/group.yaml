@@ -73,16 +73,19 @@ properties:
 etl:
   type: query
   scope: namespaced
-  select: >-
+  source: siphon_namespaces
+  extract: >-
+    SELECT
     namespace.id AS id, namespace.name AS name,
     details.description AS description,
     namespace.visibility_level AS visibility_level,
     if(isNotNull(routes.source_id), routes.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
-    traversal_paths.traversal_path AS traversal_path
-  from: >-
-    siphon_namespaces namespace
+    traversal_paths.traversal_path AS traversal_path,
+    namespace._siphon_replicated_at AS _version,
+    (namespace._siphon_deleted OR namespace.type != 'Group') AS _deleted
+    FROM siphon_namespaces namespace
     INNER JOIN (
       SELECT id, traversal_path
       FROM namespace_traversal_paths
@@ -105,8 +108,13 @@ etl:
         AND source_type = 'Namespace' AND NOT _siphon_deleted
       GROUP BY source_id
     ) routes ON namespace.id = routes.source_id
-  where: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
-  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
+    WHERE namespace._siphon_replicated_at > {last_watermark:String}
+    AND namespace._siphon_replicated_at <= {watermark:String}
+    AND startsWith(traversal_paths.traversal_path, {traversal_path:String})
+    AND namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))
+    {CURSOR}
+    ORDER BY id
+    LIMIT {BATCH_SIZE}
   watermark: namespace._siphon_replicated_at
   table_alias: namespace
   deleted: "(namespace._siphon_deleted OR namespace.type != 'Group')"

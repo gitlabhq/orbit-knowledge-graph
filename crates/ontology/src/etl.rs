@@ -59,16 +59,21 @@ pub enum EtlConfig {
     },
     Query {
         scope: EtlScope,
-        select: String,
-        from: String,
-        where_clause: Option<String>,
+        /// Complete SQL template with `{CURSOR}` and `{BATCH_SIZE}` markers.
+        /// ClickHouse params like `{last_watermark:String}` stay for runtime binding.
+        extract: String,
+        /// Columns used for cursor-based keyset pagination (ORDER BY).
+        sort_keys: Vec<String>,
+        /// Base source table name, used by enrichment CTEs that look up
+        /// properties from this node on behalf of standalone edge ETLs.
+        source: String,
+        /// Watermark column for incremental processing. Kept for enrichment
+        /// CTEs that other ETLs build against this node.
         watermark: String,
+        /// Deleted-flag expression. Kept for enrichment CTEs.
         deleted: String,
-        order_by: Vec<String>,
-        traversal_path_filter: Option<String>,
-        /// Alias of the main table in the `from` JOIN expression.
-        /// Used to qualify bare column references (e.g. `id`) that would
-        /// otherwise be ambiguous across JOINed tables.
+        /// Alias of the main table in the extraction query.
+        /// Used by enrichment CTEs to qualify bare column references.
         table_alias: Option<String>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
@@ -110,7 +115,7 @@ impl EtlConfig {
     pub fn order_by(&self) -> &[String] {
         match self {
             EtlConfig::Table { order_by, .. } => order_by,
-            EtlConfig::Query { order_by, .. } => order_by,
+            EtlConfig::Query { sort_keys, .. } => sort_keys,
         }
     }
 
@@ -132,23 +137,26 @@ impl EtlConfig {
     }
 
     pub fn validate_query_parameters(&self) -> Vec<&'static str> {
-        let EtlConfig::Query {
-            scope,
-            traversal_path_filter,
-            ..
-        } = self
-        else {
+        let EtlConfig::Query { scope, extract, .. } = self else {
             return Vec::new();
         };
 
-        if *scope == EtlScope::Namespaced
-            && let Some(filter) = traversal_path_filter
-            && !filter.contains("{traversal_path:String}")
-        {
-            return vec!["{traversal_path:String}"];
+        let mut missing = Vec::new();
+
+        if !extract.contains("{CURSOR}") {
+            missing.push("{CURSOR}");
+        }
+        if !extract.contains("{BATCH_SIZE}") {
+            missing.push("{BATCH_SIZE}");
+        }
+        if !extract.contains("{last_watermark:String}") {
+            missing.push("{last_watermark:String}");
+        }
+        if *scope == EtlScope::Namespaced && !extract.contains("{traversal_path:String}") {
+            missing.push("{traversal_path:String}");
         }
 
-        Vec::new()
+        missing
     }
 }
 
@@ -156,20 +164,33 @@ impl EtlConfig {
 mod tests {
     use super::*;
 
-    fn query_config(
-        scope: EtlScope,
-        where_clause: Option<&str>,
-        traversal_path_filter: Option<&str>,
-    ) -> EtlConfig {
+    fn global_extract_template() -> String {
+        "SELECT id, name, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted \
+         FROM source_table \
+         WHERE _siphon_replicated_at > {last_watermark:String} \
+         AND _siphon_replicated_at <= {watermark:String}\
+         {CURSOR} ORDER BY id LIMIT {BATCH_SIZE}"
+            .to_string()
+    }
+
+    fn namespaced_extract_template() -> String {
+        "SELECT id, name, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted \
+         FROM source_table \
+         WHERE _siphon_replicated_at > {last_watermark:String} \
+         AND _siphon_replicated_at <= {watermark:String} \
+         AND startsWith(traversal_path, {traversal_path:String})\
+         {CURSOR} ORDER BY id LIMIT {BATCH_SIZE}"
+            .to_string()
+    }
+
+    fn query_config(scope: EtlScope, extract: &str) -> EtlConfig {
         EtlConfig::Query {
             scope,
-            select: "id, name".to_string(),
-            from: "source_table".to_string(),
-            where_clause: where_clause.map(String::from),
+            extract: extract.to_string(),
+            sort_keys: vec!["id".to_string()],
+            source: "source_table".to_string(),
             watermark: "_siphon_replicated_at".to_string(),
             deleted: "_siphon_deleted".to_string(),
-            order_by: vec!["id".to_string()],
-            traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
             edges: BTreeMap::new(),
         }
@@ -177,41 +198,53 @@ mod tests {
 
     #[test]
     fn validate_query_parameters_passes_for_global_query() {
-        let config = query_config(EtlScope::Global, None, None);
+        let config = query_config(EtlScope::Global, &global_extract_template());
         assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
-    fn validate_passes_for_custom_traversal_path_filter_with_placeholder() {
-        let config = query_config(
-            EtlScope::Namespaced,
-            None,
-            Some("startsWith(traversal_path, {traversal_path:String})"),
-        );
+    fn validate_passes_for_namespaced_query_with_all_markers() {
+        let config = query_config(EtlScope::Namespaced, &namespaced_extract_template());
         assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
-    fn validate_fails_for_custom_traversal_path_filter_without_placeholder() {
-        let config = query_config(
-            EtlScope::Namespaced,
-            None,
-            Some("startsWith(traversal_path, 'hardcoded')"),
-        );
+    fn validate_fails_for_missing_cursor_marker() {
+        let extract = "SELECT id FROM t WHERE _siphon_replicated_at > {last_watermark:String} \
+                        AND _siphon_replicated_at <= {watermark:String} \
+                        ORDER BY id LIMIT {BATCH_SIZE}";
+        let config = query_config(EtlScope::Global, extract);
         let missing = config.validate_query_parameters();
-        assert_eq!(missing, vec!["{traversal_path:String}"]);
+        assert!(missing.contains(&"{CURSOR}"));
     }
 
     #[test]
-    fn validate_passes_for_default_traversal_path_filter() {
-        let config = query_config(EtlScope::Namespaced, Some("status = 'active'"), None);
-        assert!(config.validate_query_parameters().is_empty());
+    fn validate_fails_for_missing_batch_size_marker() {
+        let extract = "SELECT id FROM t WHERE _siphon_replicated_at > {last_watermark:String} \
+                        AND _siphon_replicated_at <= {watermark:String}\
+                        {CURSOR} ORDER BY id";
+        let config = query_config(EtlScope::Global, extract);
+        let missing = config.validate_query_parameters();
+        assert!(missing.contains(&"{BATCH_SIZE}"));
     }
 
     #[test]
-    fn validate_passes_for_no_where_and_default_filter() {
-        let config = query_config(EtlScope::Namespaced, None, None);
-        assert!(config.validate_query_parameters().is_empty());
+    fn validate_fails_for_missing_watermark_marker() {
+        let extract = "SELECT id FROM t {CURSOR} ORDER BY id LIMIT {BATCH_SIZE}";
+        let config = query_config(EtlScope::Global, extract);
+        let missing = config.validate_query_parameters();
+        assert!(missing.contains(&"{last_watermark:String}"));
+    }
+
+    #[test]
+    fn validate_fails_for_namespaced_without_traversal_path() {
+        let extract = "SELECT id FROM t \
+                        WHERE _siphon_replicated_at > {last_watermark:String} \
+                        AND _siphon_replicated_at <= {watermark:String}\
+                        {CURSOR} ORDER BY id LIMIT {BATCH_SIZE}";
+        let config = query_config(EtlScope::Namespaced, extract);
+        let missing = config.validate_query_parameters();
+        assert!(missing.contains(&"{traversal_path:String}"));
     }
 
     #[test]
@@ -239,7 +272,7 @@ mod tests {
         };
         assert_eq!(table.deleted(), "_siphon_deleted");
 
-        let query = query_config(EtlScope::Global, None, None);
+        let query = query_config(EtlScope::Global, &global_extract_template());
         assert_eq!(query.deleted(), "_siphon_deleted");
     }
 
@@ -255,7 +288,13 @@ mod tests {
         };
         assert_eq!(table.watermark(), "_siphon_replicated_at");
 
-        let query = query_config(EtlScope::Global, None, None);
+        let query = query_config(EtlScope::Global, &global_extract_template());
         assert_eq!(query.watermark(), "_siphon_replicated_at");
+    }
+
+    #[test]
+    fn order_by_returns_sort_keys_for_query_type() {
+        let config = query_config(EtlScope::Global, &global_extract_template());
+        assert_eq!(config.order_by(), &["id".to_string()]);
     }
 }

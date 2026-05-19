@@ -95,7 +95,9 @@ properties:
 etl:
   type: query
   scope: namespaced
-  select: >-
+  source: siphon_projects
+  extract: >-
+    SELECT
     project.id AS id, project.name AS name, project.description AS description,
     project.visibility_level AS visibility_level,
     if(isNotNull(route.source_id), route.path, project.path) AS full_path,
@@ -103,9 +105,10 @@ etl:
     project.created_at AS created_at, project.updated_at AS updated_at,
     project.archived AS archived, project.star_count AS star_count,
     project.last_activity_at AS last_activity_at,
-    traversal_paths.traversal_path AS traversal_path
-  from: >-
-    siphon_projects project
+    traversal_paths.traversal_path AS traversal_path,
+    project._siphon_replicated_at AS _version,
+    project._siphon_deleted AS _deleted
+    FROM siphon_projects project
     INNER JOIN (
       SELECT id, traversal_path
       FROM project_namespace_traversal_paths
@@ -119,7 +122,12 @@ etl:
         AND source_type = 'Project' AND NOT _siphon_deleted
       GROUP BY source_id
     ) route ON project.id = route.source_id
-  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
+    WHERE project._siphon_replicated_at > {last_watermark:String}
+    AND project._siphon_replicated_at <= {watermark:String}
+    AND startsWith(traversal_paths.traversal_path, {traversal_path:String})
+    {CURSOR}
+    ORDER BY id
+    LIMIT {BATCH_SIZE}
   watermark: project._siphon_replicated_at
   table_alias: project
   deleted: project._siphon_deleted

@@ -237,43 +237,35 @@
           "additionalProperties": false
         },
         {
-          "description": "Query ETL: structured extraction with JOINs and custom conditions.",
+          "description": "Query ETL: complete SQL template with cursor pagination markers.",
           "properties": {
             "type": { "type": "string", "const": "query" },
             "scope": { "$ref": "#/definitions/etlScope" },
-            "select": {
+            "extract": {
               "type": "string",
-              "description": "Column expressions for the SELECT clause."
+              "description": "Complete SQL extraction template. Must contain {CURSOR} and {BATCH_SIZE} markers. ClickHouse params like {last_watermark:String} and {traversal_path:String} stay for runtime binding."
             },
-            "from": {
-              "type": "string",
-              "description": "Table or JOIN expression for the FROM clause."
-            },
-            "where": {
-              "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters)."
-            },
-            "watermark": {
-              "type": "string",
-              "description": "Column name for incremental processing watermark."
-            },
-            "deleted": {
-              "type": "string",
-              "description": "Column name indicating soft-deleted records."
-            },
-            "order_by": {
+            "sort_keys": {
               "type": "array",
-              "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
+              "description": "Columns used for cursor-based keyset pagination (ORDER BY). Defaults to the ETL default order_by if not specified.",
               "items": { "type": "string" },
               "minItems": 1
             },
-            "traversal_path_filter": {
+            "source": {
               "type": "string",
-              "description": "Custom traversal_path filter expression for namespace scoping. When set, replaces the default startsWith(traversal_path, ...) filter. Must contain {traversal_path:String} placeholder."
+              "description": "Base source table name. Used by enrichment CTEs when other ETLs look up properties from this node."
+            },
+            "watermark": {
+              "type": "string",
+              "description": "Watermark column expression for incremental processing. Used by enrichment CTEs."
+            },
+            "deleted": {
+              "type": "string",
+              "description": "Deleted-flag expression. Used by enrichment CTEs."
             },
             "table_alias": {
               "type": "string",
-              "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+              "description": "Alias of the main table in the extraction query. Used by enrichment CTEs to qualify bare column references."
             },
             "edges": {
               "type": "object",
@@ -290,7 +282,7 @@
               }
             }
           },
-          "required": ["type", "scope", "select", "from"],
+          "required": ["type", "scope", "extract", "source"],
           "additionalProperties": false
         }
       ]

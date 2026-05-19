@@ -125,7 +125,9 @@ properties:
 etl:
   type: query
   scope: namespaced
-  select: >-
+  source: siphon_merge_request_diff_files
+  extract: >-
+    SELECT
     sipHash64(file.merge_request_diff_id, file.relative_order) AS id,
     diff.merge_request_id AS merge_request_id,
     file.merge_request_diff_id AS merge_request_diff_id,
@@ -137,19 +139,25 @@ etl:
     file.generated AS generated,
     file.a_mode AS a_mode, file.b_mode AS b_mode,
     diff.traversal_path AS traversal_path,
-    file.relative_order AS relative_order
-  from: >-
-    siphon_merge_request_diff_files file
+    file.relative_order AS relative_order,
+    file._siphon_replicated_at AS _version,
+    file._siphon_deleted AS _deleted
+    FROM siphon_merge_request_diff_files file
     INNER JOIN (
       SELECT id, merge_request_id, project_id, traversal_path
       FROM siphon_merge_request_diffs
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) diff ON file.merge_request_diff_id = diff.id
-  traversal_path_filter: "startsWith(file.traversal_path, {traversal_path:String})"
+    WHERE file._siphon_replicated_at > {last_watermark:String}
+    AND file._siphon_replicated_at <= {watermark:String}
+    AND startsWith(file.traversal_path, {traversal_path:String})
+    {CURSOR}
+    ORDER BY traversal_path, merge_request_diff_id, relative_order
+    LIMIT {BATCH_SIZE}
+  sort_keys: [traversal_path, merge_request_diff_id, relative_order]
   watermark: file._siphon_replicated_at
   table_alias: file
   deleted: file._siphon_deleted
-  order_by: [traversal_path, merge_request_diff_id, relative_order]
   edges:
     merge_request_diff_id:
       to: MergeRequestDiff

@@ -57,18 +57,14 @@ enum EtlYaml {
     #[serde(rename = "query")]
     Query {
         scope: EtlScope,
-        select: String,
-        from: String,
-        #[serde(default, rename = "where")]
-        where_clause: Option<String>,
+        extract: String,
+        #[serde(default)]
+        sort_keys: Option<Vec<String>>,
+        source: String,
         #[serde(default)]
         watermark: Option<String>,
         #[serde(default)]
         deleted: Option<String>,
-        #[serde(default)]
-        order_by: Option<Vec<String>>,
-        #[serde(default)]
-        traversal_path_filter: Option<String>,
         #[serde(default)]
         table_alias: Option<String>,
         #[serde(default)]
@@ -457,24 +453,20 @@ impl EtlYaml {
             }),
             EtlYaml::Query {
                 scope,
-                select,
-                from,
-                where_clause,
+                extract,
+                sort_keys,
+                source,
                 watermark,
                 deleted,
-                order_by,
-                traversal_path_filter,
                 table_alias,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
-                select,
-                from,
-                where_clause,
+                extract,
+                sort_keys: sort_keys.unwrap_or_else(|| etl_settings.order_by.clone()),
+                source,
                 watermark: watermark.unwrap_or_else(|| etl_settings.watermark.clone()),
                 deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
-                order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                traversal_path_filter,
                 table_alias,
                 edges: convert_edge_mappings(edges)?,
             }),

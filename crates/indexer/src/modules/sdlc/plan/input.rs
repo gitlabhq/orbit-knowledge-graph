@@ -146,7 +146,9 @@ impl ExtractColumn {
 
 pub(in crate::modules::sdlc) enum ExtractSource {
     Table(String),
-    Raw(String),
+    /// Complete SQL template with `{CURSOR}` and `{BATCH_SIZE}` markers.
+    /// The lowering emits this as-is via `ExtractQuery::raw`.
+    Template(String),
 }
 
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
@@ -465,15 +467,22 @@ fn resolve_standalone_edge(
         };
         let Some(etl) = &node.etl else { continue };
         let node_table = match etl {
-            EtlConfig::Table { source, .. } => source.as_str(),
-            EtlConfig::Query { from, .. } => from.as_str(),
+            EtlConfig::Table { source, .. } => source.clone(),
+            EtlConfig::Query {
+                source,
+                table_alias,
+                ..
+            } => match table_alias {
+                Some(alias) => format!("{source} AS {alias}"),
+                None => source.clone(),
+            },
         };
         let watermark_col = etl.watermark();
         let deleted_col = etl.deleted();
         let fk_col = &endpoint.id_column;
 
-        // For Query-type ETLs the `from` is a JOIN expression and bare `id`
-        // is ambiguous. Use the explicit table_alias to qualify `id`.
+        // For Query-type ETLs with a table alias, qualify bare `id` to avoid
+        // ambiguity when the FROM clause has an alias.
         let qualified_id = if let Some(alias) = etl.table_alias() {
             format!("{alias}.id")
         } else {
@@ -653,34 +662,23 @@ fn build_extract_plan(
             }
         }
         EtlConfig::Query {
-            select,
-            from,
-            where_clause,
+            extract,
+            sort_keys,
             watermark,
             deleted,
-            order_by,
-            traversal_path_filter,
             ..
-        } => {
-            let mut columns: Vec<ExtractColumn> = select
-                .split(", ")
-                .map(|s| ExtractColumn::Bare(s.trim().to_string()))
-                .collect();
-            append_missing(&mut columns, order_by);
-
-            ExtractPlan {
-                destination_table: destination_table.to_string(),
-                columns,
-                source: ExtractSource::Raw(from.clone()),
-                watermark: watermark.clone(),
-                deleted: deleted.clone(),
-                order_by: order_by.clone(),
-                namespaced,
-                traversal_path_filter: traversal_path_filter.clone(),
-                additional_where: where_clause.clone(),
-                enrichment: None,
-            }
-        }
+        } => ExtractPlan {
+            destination_table: destination_table.to_string(),
+            columns: Vec::new(),
+            source: ExtractSource::Template(extract.clone()),
+            watermark: watermark.clone(),
+            deleted: deleted.clone(),
+            order_by: sort_keys.clone(),
+            namespaced,
+            traversal_path_filter: None,
+            additional_where: None,
+            enrichment: None,
+        },
     }
 }
 

@@ -1,9 +1,6 @@
 pub(crate) mod input;
 pub(crate) mod lower;
 
-pub(crate) use crate::llqm_v1::ast;
-use crate::llqm_v1::ast::TableRef;
-pub(crate) use crate::llqm_v1::codegen;
 use std::collections::HashSet;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
@@ -13,74 +10,33 @@ use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
 use crate::handler::HandlerError;
-use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
 /// SQL on demand. Immutable: `advance` and `resume_from` return new instances.
+///
+/// The `template` is a complete SQL string with a `{CURSOR}` placeholder
+/// that gets replaced with the keyset pagination WHERE clause at emit time.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct ExtractQuery {
-    base_query: Query,
+    template: String,
     sort_key_columns: Vec<String>,
     cursor_values: Vec<String>,
     batch_size: u64,
-    /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
-    /// that gets replaced with the keyset pagination WHERE clause at emit time.
-    raw_template: Option<String>,
 }
 
 impl ExtractQuery {
-    pub fn new(base_query: Query, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
+    pub fn new(template: String, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
         Self {
-            base_query,
+            template,
             sort_key_columns,
             cursor_values: Vec::new(),
             batch_size,
-            raw_template: None,
-        }
-    }
-
-    pub fn raw(template: String, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
-        Self {
-            base_query: Query {
-                select: vec![],
-                from: TableRef::Raw(String::new()),
-                where_clause: None,
-                order_by: vec![],
-                limit: None,
-            },
-            sort_key_columns,
-            cursor_values: Vec::new(),
-            batch_size,
-            raw_template: Some(template),
         }
     }
 
     pub fn to_sql(&self) -> String {
-        if let Some(template) = &self.raw_template {
-            let cursor_sql = match self.build_cursor_expr() {
-                Some(expr) => format!(" AND {}", codegen::emit_expr_to_string(&expr)),
-                None => String::new(),
-            };
-            return template.replace("{CURSOR}", &cursor_sql);
-        }
-
-        let mut query = self.base_query.clone();
-
-        if let Some(cursor_expr) = self.build_cursor_expr() {
-            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
-        }
-
-        query.order_by = self
-            .sort_key_columns
-            .iter()
-            .map(|column| OrderExpr {
-                expr: Expr::col("", column),
-            })
-            .collect();
-
-        query.limit = Some(self.batch_size);
-
-        codegen::emit_sql(&query)
+        let cursor_sql = self.build_cursor_clause().unwrap_or_default();
+        self.template.replace("{CURSOR}", &cursor_sql)
     }
 
     pub fn advance(&self, batch: &RecordBatch) -> Result<Self, HandlerError> {
@@ -109,35 +65,46 @@ impl ExtractQuery {
         self.batch_size
     }
 
-    /// Builds a DNF (disjunctive normal form) greater-than expression for
+    /// Builds a DNF (disjunctive normal form) greater-than clause for
     /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
-    /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
-    fn build_cursor_expr(&self) -> Option<Expr> {
+    /// ` AND ((c1 > 'v1') OR ((c1 = 'v1') AND (c2 > 'v2')))`
+    ///
+    /// Returns `None` when there are no cursor values (first page).
+    fn build_cursor_clause(&self) -> Option<String> {
         if self.cursor_values.is_empty() {
             return None;
         }
 
-        let disjuncts: Vec<Option<Expr>> = (0..self.sort_key_columns.len())
+        let disjuncts: Vec<String> = (0..self.sort_key_columns.len())
             .map(|depth| {
-                let mut conjuncts: Vec<Option<Expr>> = Vec::with_capacity(depth + 1);
+                let mut conjuncts: Vec<String> = Vec::with_capacity(depth + 1);
 
                 for prefix in 0..depth {
-                    conjuncts.push(Some(Expr::eq(
-                        Expr::col("", &self.sort_key_columns[prefix]),
-                        Expr::raw(format!("'{}'", self.cursor_values[prefix])),
-                    )));
+                    conjuncts.push(format!(
+                        "({} = '{}')",
+                        self.sort_key_columns[prefix], self.cursor_values[prefix]
+                    ));
                 }
-                conjuncts.push(Some(Expr::binary(
-                    Op::Gt,
-                    Expr::col("", &self.sort_key_columns[depth]),
-                    Expr::raw(format!("'{}'", self.cursor_values[depth])),
-                )));
+                conjuncts.push(format!(
+                    "({} > '{}')",
+                    self.sort_key_columns[depth], self.cursor_values[depth]
+                ));
 
-                Expr::and_all(conjuncts)
+                if conjuncts.len() == 1 {
+                    conjuncts.into_iter().next().unwrap()
+                } else {
+                    format!("({})", conjuncts.join(" AND "))
+                }
             })
             .collect();
 
-        Expr::or_all(disjuncts)
+        let expr = if disjuncts.len() == 1 {
+            disjuncts.into_iter().next().unwrap()
+        } else {
+            format!("({})", disjuncts.join(" OR "))
+        };
+
+        Some(format!(" AND {expr}"))
     }
 
     fn extract_cursor_values(&self, batch: &RecordBatch) -> Result<Vec<String>, HandlerError> {
@@ -175,7 +142,7 @@ pub(in crate::modules::sdlc) struct PipelinePlan {
 
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Transformation {
-    pub query: Query,
+    pub sql: String,
     pub destination_table: String,
     /// Low-cardinality columns to dictionary-encode before Arrow IPC
     /// serialization. Derived from the ontology's `LowCardinality(String)`
@@ -184,8 +151,8 @@ pub(in crate::modules::sdlc) struct Transformation {
 }
 
 impl Transformation {
-    pub fn to_sql(&self) -> String {
-        codegen::emit_sql(&self.query)
+    pub fn to_sql(&self) -> &str {
+        &self.sql
     }
 }
 
@@ -214,7 +181,6 @@ mod tests {
     use super::*;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
-    use ast::{SelectExpr, TableRef};
     use chrono::Utc;
     use std::sync::Arc;
 
@@ -225,51 +191,35 @@ mod tests {
         }
     }
 
-    fn base_extract_query(sort_keys: Vec<&str>) -> Query {
-        Query {
-            select: vec![
-                SelectExpr::bare(Expr::col("", "id")),
-                SelectExpr::bare(Expr::col("", "name")),
-                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
-                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
-            ],
-            from: TableRef::scan("source_table", None),
-            where_clause: Some(
-                Expr::and_all([
-                    Some(Expr::binary(
-                        Op::Gt,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("last_watermark", "String"),
-                    )),
-                    Some(Expr::binary(
-                        Op::Le,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("watermark", "String"),
-                    )),
-                ])
-                .unwrap(),
-            ),
-            order_by: sort_keys
-                .iter()
-                .map(|k| OrderExpr {
-                    expr: Expr::raw(k.to_string()),
-                })
-                .collect(),
-            limit: None,
-        }
+    fn base_template(sort_keys: &[&str], batch_size: u64) -> String {
+        format!(
+            "SELECT id, name, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted \
+             FROM source_table \
+             WHERE (_siphon_replicated_at > {{last_watermark:String}}) \
+             AND (_siphon_replicated_at <= {{watermark:String}}){{CURSOR}} \
+             ORDER BY {} LIMIT {batch_size}",
+            sort_keys.join(", "),
+        )
     }
 
     fn simple_query(sort_keys: Vec<&str>, batch_size: u64) -> ExtractQuery {
         let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        ExtractQuery::new(base_extract_query(sort_keys), sort_key_columns, batch_size)
+        let template = base_template(&sort_keys, batch_size);
+        ExtractQuery::new(template, sort_key_columns, batch_size)
     }
 
     fn query_with_where(where_clause: &str, sort_keys: Vec<&str>) -> ExtractQuery {
         let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        let mut base = base_extract_query(sort_keys);
-        base.where_clause =
-            Expr::and_all([base.where_clause, Some(Expr::raw(where_clause.to_string()))]);
-        ExtractQuery::new(base, sort_key_columns, 1000)
+        let template = format!(
+            "SELECT id, name, _siphon_replicated_at AS _version, _siphon_deleted AS _deleted \
+             FROM source_table \
+             WHERE (_siphon_replicated_at > {{last_watermark:String}}) \
+             AND (_siphon_replicated_at <= {{watermark:String}}) \
+             AND {where_clause}{{CURSOR}} \
+             ORDER BY {} LIMIT 1000",
+            sort_keys.join(", "),
+        );
+        ExtractQuery::new(template, sort_key_columns, 1000)
     }
 
     #[test]
