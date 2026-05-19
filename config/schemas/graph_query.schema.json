@@ -777,7 +777,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level presentation options.",
+      "description": "Optional presentation hints that control response shape without affecting query semantics. Only 'dynamic_columns' and 'include_debug_sql' are recognized; all other fields are ignored.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",

@@ -2636,5 +2636,4 @@ mod tests {
             "filter on filterable:true field should pass"
         );
     }
-
 }

@@ -24,7 +24,8 @@ pub enum DynamicColumnMode {
     Default,
 }
 
-/// Consumer-level preferences that affect result presentation, not query semantics.
+/// Optional presentation hints that control response shape without affecting query
+/// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct QueryOptions {
     /// Columns fetched for dynamically-discovered entities during hydration.
