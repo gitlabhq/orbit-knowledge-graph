@@ -26,8 +26,13 @@ properties — calling `schema` without arguments returns the full ontology
 
 ```bash
 glab orbit remote schema MergeRequest Project   # scoped properties
-glab orbit remote tools                         # full DSL JSON Schema
+glab orbit remote dsl                           # full query DSL JSON Schema
+glab orbit remote tools                         # MCP tool manifest
 ```
+
+Always fetch the DSL with `glab orbit remote dsl` (which hits
+`/api/v4/orbit/schema/dsl`) — it is the source of truth for the query body
+shape. The `tools` manifest is for MCP wiring, not DSL discovery.
 
 ## Running a query
 
