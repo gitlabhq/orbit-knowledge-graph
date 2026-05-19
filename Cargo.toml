@@ -42,8 +42,8 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "e923251" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "e923251" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "551256f" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "551256f" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -101,7 +101,7 @@ thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
 toon-format = { version = "0.4.1", default-features = false }
-opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.48.0", features = ["server_2_11"] }
