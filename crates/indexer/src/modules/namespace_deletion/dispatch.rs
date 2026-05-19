@@ -215,6 +215,13 @@ mod tests {
             Ok(None)
         }
 
+        async fn load_by_prefix(
+            &self,
+            _entity_prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(vec![])
+        }
+
         async fn save_progress(
             &self,
             _key: &str,

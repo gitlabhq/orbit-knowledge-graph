@@ -41,6 +41,13 @@ pub struct Checkpoint {
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
 
+    /// Load all checkpoints whose key equals `entity_prefix` or starts with
+    /// `{entity_prefix}.p` (partition suffix). Returns `(key, checkpoint)` pairs.
+    async fn load_by_prefix(
+        &self,
+        entity_prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError>;
+
     async fn save_progress(
         &self,
         key: &str,
@@ -92,6 +99,76 @@ impl ClickHouseCheckpointStore {
 
 #[async_trait]
 impl CheckpointStore for ClickHouseCheckpointStore {
+    async fn load_by_prefix(
+        &self,
+        entity_prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let batches = self
+            .client
+            .query(&format!(
+                "SELECT key, \
+                        argMax(watermark, _version) AS watermark, \
+                        argMax(cursor_values, _version) AS cursor_values \
+                 FROM {table} \
+                 WHERE key = {{prefix:String}} \
+                    OR startsWith(key, concat({{prefix:String}}, '.p')) \
+                 GROUP BY key"
+            ))
+            .param("prefix", entity_prefix)
+            .fetch_arrow()
+            .await
+            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+
+        let mut results = Vec::new();
+
+        for batch in &batches {
+            let keys: &StringArray = ArrowUtils::get_column_by_index(batch, 0)
+                .ok_or_else(|| CheckpointError::Store("invalid key type".to_string()))?;
+            let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(batch, 1)
+                .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
+            let cursor_col: Option<&StringArray> = ArrowUtils::get_column_by_index(batch, 2);
+
+            for row in 0..batch.num_rows() {
+                if timestamps.is_null(row) {
+                    continue;
+                }
+                let micros = timestamps.value(row);
+                if micros == 0 {
+                    continue;
+                }
+
+                let watermark = Utc
+                    .timestamp_micros(micros)
+                    .single()
+                    .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
+
+                let cursor_values: Option<Vec<String>> = cursor_col
+                    .and_then(|arr| {
+                        if arr.is_null(row) || arr.value(row).is_empty() {
+                            None
+                        } else {
+                            Some(arr.value(row).to_string())
+                        }
+                    })
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|err| CheckpointError::Store(err.to_string()))?;
+
+                let key = keys.value(row).to_string();
+                results.push((
+                    key,
+                    Checkpoint {
+                        watermark,
+                        cursor_values,
+                    },
+                ));
+            }
+        }
+
+        Ok(results)
+    }
+
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let batches = self

@@ -68,6 +68,7 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
+use modules::sdlc::dispatch::partition_strategy::DatalakePartitionStrategy;
 use modules::sdlc::dispatch::{EntityDispatcher, GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
@@ -242,6 +243,13 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace.clone(),
         )),
         Box::new(EntityDispatcher::new(
+            services.nats.clone(),
+            config.datalake.build_client(),
+            checkpoint_store.clone(),
+            Arc::new(DatalakePartitionStrategy::new(
+                config.datalake.build_client(),
+            )),
+            ontology,
             metrics.clone(),
             config.schedule.tasks.entity.clone(),
         )),
