@@ -36,6 +36,7 @@ parking_lot = { workspace = true }
 prost = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
+serde_arrow = { workspace = true }
 serde_json = { workspace = true }
 siphon-proto = { path = "../siphon-proto" }
 tar = { workspace = true }

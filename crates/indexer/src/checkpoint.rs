@@ -2,10 +2,8 @@ use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use gkg_utils::arrow::ArrowUtils;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -97,6 +95,38 @@ impl ClickHouseCheckpointStore {
     }
 }
 
+#[derive(Deserialize)]
+struct CheckpointRow {
+    key: String,
+    watermark: i64,
+    cursor_values: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CheckpointRowNoKey {
+    watermark: i64,
+    cursor_values: Option<String>,
+}
+
+fn parse_watermark(micros: i64) -> Result<Option<DateTime<Utc>>, CheckpointError> {
+    if micros == 0 {
+        return Ok(None);
+    }
+    Utc.timestamp_micros(micros)
+        .single()
+        .map(Some)
+        .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))
+}
+
+fn parse_cursor_values(raw: Option<String>) -> Result<Option<Vec<String>>, CheckpointError> {
+    match raw {
+        Some(json) if !json.is_empty() => {
+            serde_json::from_str(&json).map_err(|err| CheckpointError::Store(err.to_string()))
+        }
+        _ => Ok(None),
+    }
+}
+
 #[async_trait]
 impl CheckpointStore for ClickHouseCheckpointStore {
     async fn load_by_prefix(
@@ -123,41 +153,16 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         let mut results = Vec::new();
 
         for batch in &batches {
-            let keys: &StringArray = ArrowUtils::get_column_by_index(batch, 0)
-                .ok_or_else(|| CheckpointError::Store("invalid key type".to_string()))?;
-            let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(batch, 1)
-                .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
-            let cursor_col: Option<&StringArray> = ArrowUtils::get_column_by_index(batch, 2);
+            let rows: Vec<CheckpointRow> = serde_arrow::from_record_batch(batch)
+                .map_err(|err| CheckpointError::Store(err.to_string()))?;
 
-            for row in 0..batch.num_rows() {
-                if timestamps.is_null(row) {
+            for row in rows {
+                let Some(watermark) = parse_watermark(row.watermark)? else {
                     continue;
-                }
-                let micros = timestamps.value(row);
-                if micros == 0 {
-                    continue;
-                }
-
-                let watermark = Utc
-                    .timestamp_micros(micros)
-                    .single()
-                    .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
-
-                let cursor_values: Option<Vec<String>> = cursor_col
-                    .and_then(|arr| {
-                        if arr.is_null(row) || arr.value(row).is_empty() {
-                            None
-                        } else {
-                            Some(arr.value(row).to_string())
-                        }
-                    })
-                    .map(|json| serde_json::from_str(&json))
-                    .transpose()
-                    .map_err(|err| CheckpointError::Store(err.to_string()))?;
-
-                let key = keys.value(row).to_string();
+                };
+                let cursor_values = parse_cursor_values(row.cursor_values)?;
                 results.push((
-                    key,
+                    row.key,
                     Checkpoint {
                         watermark,
                         cursor_values,
@@ -189,37 +194,17 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             _ => return Ok(None),
         };
 
-        let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(&batch, 0)
-            .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
+        let rows: Vec<CheckpointRowNoKey> = serde_arrow::from_record_batch(&batch)
+            .map_err(|err| CheckpointError::Store(err.to_string()))?;
 
-        if timestamps.is_null(0) {
+        let Some(row) = rows.into_iter().next() else {
             return Ok(None);
-        }
-
-        let micros = timestamps.value(0);
-        if micros == 0 {
-            return Ok(None);
-        }
-
-        let watermark = Utc
-            .timestamp_micros(micros)
-            .single()
-            .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
-
-        let cursor_json =
-            ArrowUtils::get_column_by_index::<StringArray>(&batch, 1).and_then(|arr| {
-                if arr.is_null(0) || arr.value(0).is_empty() {
-                    None
-                } else {
-                    Some(arr.value(0).to_string())
-                }
-            });
-
-        let cursor_values: Option<Vec<String>> = match cursor_json {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|err| CheckpointError::Store(err.to_string()))?,
-            None => None,
         };
+
+        let Some(watermark) = parse_watermark(row.watermark)? else {
+            return Ok(None);
+        };
+        let cursor_values = parse_cursor_values(row.cursor_values)?;
 
         Ok(Some(Checkpoint {
             watermark,
