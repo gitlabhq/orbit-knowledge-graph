@@ -296,6 +296,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
     ) -> Result<Response<Self::ExecuteQueryStream>, Status> {
         let ctx = extract_request_context(&request, &self.validator)?;
         record_coding_agent(ctx.coding_agent());
+        let coding_agent = ctx.coding_agent().map(String::from);
         let claims = ctx.claims;
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
@@ -321,7 +322,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
                 let timeout = std::time::Duration::from_secs(stream_timeout);
                 let result = pipeline
-                    .run_query(claims, &req.query, tx.clone(), stream, timeout)
+                    .run_query(
+                        claims,
+                        coding_agent,
+                        &req.query,
+                        tx.clone(),
+                        stream,
+                        timeout,
+                    )
                     .await;
 
                 match result {
