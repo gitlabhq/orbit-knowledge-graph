@@ -108,10 +108,15 @@ impl HydrationStage {
 
         let start = Instant::now();
         let mut query = client.query(&compiled.base.sql);
+
+        let mut log_comment = match labkit::correlation::current() {
+            Some(id) => format!("gkg;hydration;correlation_id={id}"),
+            None => "gkg;hydration".to_string(),
+        };
         if let Some(ref pid) = profiling_id {
-            let log_comment = format!("gkg;hydration;profiling_id={pid}");
-            query = query.with_setting("log_comment", log_comment);
+            log_comment.push_str(&format!(";profiling_id={pid}"));
         }
+        query = query.with_setting("log_comment", log_comment);
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
