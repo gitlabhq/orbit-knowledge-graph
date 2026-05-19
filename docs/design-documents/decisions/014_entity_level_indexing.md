@@ -194,7 +194,7 @@ for why hash was considered and rejected.
 
 The dispatcher computes quantile boundaries using `quantilesTDigest`
 each time it plans partition jobs. Boundaries are not persisted — they
-are recomputed from the source table. This is acceptable because:
+are recomputed from the source table. This works because:
 
 - Boundary drift between runs does not cause data gaps. Each partition
   has its own cursor-based checkpoint, so rows near a shifted boundary
