@@ -126,8 +126,6 @@ local-cli-code-sign:
     - local-cli-build-darwin-amd64
     - local-cli-build-darwin-arm64
     - local-cli-build-windows-amd64
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends zip unzip
   script:
     - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-x86_64.tar.gz macos orbit
     - ./scripts/sign-and-repackage.sh ./orbit-local-darwin-aarch64.tar.gz macos orbit
