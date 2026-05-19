@@ -8,7 +8,7 @@ use clickhouse_client::FromArrowColumn;
 use tracing::{debug, info, warn};
 
 use super::partition_strategy::{self, PartitionStrategy};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
+use crate::checkpoint::{Checkpoint, CheckpointStore, entity_checkpoint_prefix};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
@@ -27,15 +27,12 @@ WHERE _siphon_deleted = false
   AND traversal_path != ''
 "#;
 
-// ── Entity metadata derived from the ontology ───────────────────────
-
 #[derive(Debug, Clone)]
 struct DispatchableEntity {
     name: String,
     scope: EtlScope,
     source_table: Option<String>,
     order_by: Vec<String>,
-    deleted_column: String,
 }
 
 impl DispatchableEntity {
@@ -58,23 +55,10 @@ fn collect_dispatchable_entities(ontology: &Ontology) -> Vec<DispatchableEntity>
                 scope: etl.scope(),
                 source_table,
                 order_by: etl.order_by().to_vec(),
-                deleted_column: etl.deleted().to_string(),
             })
         })
         .collect()
 }
-
-// ── Checkpoint key helpers ──────────────────────────────────────────
-
-fn entity_checkpoint_prefix(scope: &IndexingScope, entity_kind: &str) -> String {
-    let base = match scope {
-        IndexingScope::Global => "global".to_string(),
-        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
-    };
-    format!("{base}.{entity_kind}")
-}
-
-// ── Dispatch decision (pure, testable) ──────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DispatchDecision {
@@ -113,8 +97,6 @@ fn plan_entity_dispatch(
 
     DispatchDecision::AllPartitions
 }
-
-// ── EntityDispatcher ────────────────────────────────────────────────
 
 pub struct EntityDispatcher {
     nats: Arc<dyn NatsServices>,
@@ -329,13 +311,7 @@ impl EntityDispatcher {
         let query_start = Instant::now();
         let boundaries = self
             .partition_strategy
-            .compute_boundaries(
-                source_table,
-                partition_column,
-                &entity.deleted_column,
-                partition_count,
-                scope,
-            )
+            .compute_boundaries(source_table, partition_column, partition_count, scope)
             .await
             .inspect_err(|_| {
                 self.metrics
@@ -465,8 +441,6 @@ mod tests {
         }
     }
 
-    // ── plan_entity_dispatch tests ──────────────────────────────────
-
     #[test]
     fn single_checkpoint_dispatches_single() {
         let checkpoints = vec![(
@@ -560,8 +534,6 @@ mod tests {
         );
     }
 
-    // ── entity_checkpoint_prefix tests ──────────────────────────────
-
     #[test]
     fn checkpoint_prefix_global() {
         assert_eq!(
@@ -581,8 +553,6 @@ mod tests {
             "ns.100.MergeRequest"
         );
     }
-
-    // ── collect_dispatchable_entities test ───────────────────────────
 
     #[test]
     fn collects_entities_from_embedded_ontology() {
@@ -613,11 +583,6 @@ mod tests {
             assert!(
                 !entity.order_by.is_empty(),
                 "{} should have non-empty order_by",
-                entity.name
-            );
-            assert!(
-                !entity.deleted_column.is_empty(),
-                "{} should have a deleted column",
                 entity.name
             );
         }

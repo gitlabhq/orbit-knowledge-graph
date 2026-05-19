@@ -17,6 +17,16 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("ns.{namespace_id}")
 }
 
+pub fn entity_checkpoint_prefix(scope: &crate::topic::IndexingScope, entity_kind: &str) -> String {
+    let base = match scope {
+        crate::topic::IndexingScope::Global => "global".to_string(),
+        crate::topic::IndexingScope::Namespace { namespace_id, .. } => {
+            format!("ns.{namespace_id}")
+        }
+    };
+    format!("{base}.{entity_kind}")
+}
+
 #[derive(Debug, Error)]
 pub enum CheckpointError {
     #[error("checkpoint store operation failed: {0}")]
@@ -39,8 +49,6 @@ pub struct Checkpoint {
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
 
-    /// Load all checkpoints whose key equals `entity_prefix` or starts with
-    /// `{entity_prefix}.p` (partition suffix). Returns `(key, checkpoint)` pairs.
     async fn load_by_prefix(
         &self,
         entity_prefix: &str,
@@ -141,8 +149,9 @@ impl CheckpointStore for ClickHouseCheckpointStore {
                         argMax(watermark, _version) AS watermark, \
                         argMax(cursor_values, _version) AS cursor_values \
                  FROM {table} \
-                 WHERE key = {{prefix:String}} \
-                    OR startsWith(key, concat({{prefix:String}}, '.p')) \
+                 WHERE _deleted = false \
+                   AND (key = {{prefix:String}} \
+                    OR startsWith(key, concat({{prefix:String}}, '.p'))) \
                  GROUP BY key"
             ))
             .param("prefix", entity_prefix)
@@ -182,7 +191,8 @@ impl CheckpointStore for ClickHouseCheckpointStore {
                 "SELECT argMax(watermark, _version) AS watermark, \
                         argMax(cursor_values, _version) AS cursor_values \
                  FROM {table} \
-                 WHERE key = {{key:String}}"
+                 WHERE _deleted = false \
+                   AND key = {{key:String}}"
             ))
             .param("key", key)
             .fetch_arrow()

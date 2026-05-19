@@ -12,13 +12,10 @@ pub trait PartitionStrategy: Send + Sync {
         &self,
         source_table: &str,
         partition_column: &str,
-        deleted_column: &str,
         num_partitions: u32,
         scope: &IndexingScope,
     ) -> Result<Vec<PartitionBounds>, TaskError>;
 }
-
-// ── ClickHouse implementation ───────────────────────────────────────
 
 pub struct DatalakePartitionStrategy {
     datalake: ArrowClickHouseClient,
@@ -36,17 +33,10 @@ impl PartitionStrategy for DatalakePartitionStrategy {
         &self,
         source_table: &str,
         partition_column: &str,
-        deleted_column: &str,
         num_partitions: u32,
         scope: &IndexingScope,
     ) -> Result<Vec<PartitionBounds>, TaskError> {
-        let sql = build_quantile_query(
-            source_table,
-            partition_column,
-            deleted_column,
-            num_partitions,
-            scope,
-        );
+        let sql = build_quantile_query(source_table, partition_column, num_partitions, scope);
 
         let batches = self
             .datalake
@@ -79,12 +69,9 @@ impl PartitionStrategy for DatalakePartitionStrategy {
     }
 }
 
-// ── Query building and boundary construction (public for testing) ───
-
 pub fn build_quantile_query(
     source_table: &str,
     partition_column: &str,
-    deleted_column: &str,
     num_partitions: u32,
     scope: &IndexingScope,
 ) -> String {
@@ -113,7 +100,7 @@ pub fn build_quantile_query(
     format!(
         "SELECT {select_parts} \
          FROM {source_table} \
-         WHERE {deleted_column} = false {scope_filter}"
+         WHERE _siphon_deleted = false {scope_filter}"
     )
 }
 
@@ -140,8 +127,6 @@ pub fn boundaries_from_splits(
 
     boundaries
 }
-
-// ── Partition column derivation ─────────────────────────────────────
 
 pub fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
     let skip = match scope {
@@ -214,13 +199,7 @@ mod tests {
 
     #[test]
     fn quantile_query_global_two_partitions() {
-        let sql = build_quantile_query(
-            "siphon_users",
-            "id",
-            "_siphon_deleted",
-            2,
-            &IndexingScope::Global,
-        );
+        let sql = build_quantile_query("siphon_users", "id", 2, &IndexingScope::Global);
 
         assert!(sql.contains("min(id)"), "sql: {sql}");
         assert!(sql.contains("max(id)"), "sql: {sql}");
@@ -235,13 +214,7 @@ mod tests {
             namespace_id: 100,
             traversal_path: "42/100/".to_string(),
         };
-        let sql = build_quantile_query(
-            "siphon_p_merge_requests",
-            "id",
-            "_siphon_deleted",
-            4,
-            &scope,
-        );
+        let sql = build_quantile_query("siphon_p_merge_requests", "id", 4, &scope);
 
         assert!(sql.contains("quantileTDigest(0.25)(id)"), "sql: {sql}");
         assert!(sql.contains("quantileTDigest(0.5)(id)"), "sql: {sql}");
