@@ -338,7 +338,7 @@ pub struct InputNode {
     #[serde(default, deserialize_with = "deserialize_columns")]
     pub columns: Option<ColumnSelection>,
     #[serde(default, deserialize_with = "deserialize_filters")]
-    pub filters: HashMap<String, InputFilter>,
+    pub filters: HashMap<String, Vec<InputFilter>>,
     #[serde(default, deserialize_with = "deserialize_id_vec")]
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
@@ -489,15 +489,32 @@ pub enum FilterOp {
     AnyTokens,
 }
 
-fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>
+fn deserialize_filters<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<InputFilter>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let raw: HashMap<String, Value> = HashMap::deserialize(deserializer)?;
-    Ok(raw.into_iter().map(|(k, v)| (k, parse_filter(v))).collect())
+    Ok(raw
+        .into_iter()
+        .map(|(k, v)| (k, parse_filter_entry(v)))
+        .collect())
 }
 
-fn parse_filter(value: Value) -> InputFilter {
+/// Parse a filter entry that may be a single filter or an array of
+/// PropertyFilter objects (AND-combined, for expressing ranges).
+fn parse_filter_entry(value: Value) -> Vec<InputFilter> {
+    if let Value::Array(ref arr) = value
+        && !arr.is_empty()
+        && arr.iter().all(|v| v.is_object() && v.get("op").is_some())
+    {
+        return arr.iter().cloned().map(parse_single_filter).collect();
+    }
+    vec![parse_single_filter(value)]
+}
+
+fn parse_single_filter(value: Value) -> InputFilter {
     if let Value::Object(ref obj) = value
         && let Some(op_val) = obj.get("op")
         && let Ok(op) = serde_json::from_value::<FilterOp>(op_val.clone())
@@ -532,7 +549,7 @@ pub struct InputRelationship {
     #[serde(default)]
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
-    pub filters: HashMap<String, InputFilter>,
+    pub filters: HashMap<String, Vec<InputFilter>>,
     /// FK column on a node table that encodes this relationship. Set during normalization.
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
@@ -930,8 +947,71 @@ mod tests {
         .unwrap();
 
         let filters = &input.nodes[0].filters;
-        assert_eq!(filters.get("created_at").unwrap().op, Some(FilterOp::Gte));
-        assert_eq!(filters.get("state").unwrap().op, Some(FilterOp::In));
+        assert_eq!(
+            filters.get("created_at").unwrap()[0].op,
+            Some(FilterOp::Gte)
+        );
+        assert_eq!(filters.get("state").unwrap()[0].op, Some(FilterOp::In));
+    }
+
+    #[test]
+    fn multi_filter_range() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "mr", "entity": "MergeRequest",
+                "filters": {
+                    "created_at": [
+                        {"op": "gte", "value": "2026-04-01T00:00:00Z"},
+                        {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                    ],
+                    "state": "merged"
+                }
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let filters = &input.nodes[0].filters;
+        let created_at = filters.get("created_at").unwrap();
+        assert_eq!(created_at.len(), 2);
+        assert_eq!(created_at[0].op, Some(FilterOp::Gte));
+        assert_eq!(
+            created_at[0].value,
+            Some(serde_json::json!("2026-04-01T00:00:00Z"))
+        );
+        assert_eq!(created_at[1].op, Some(FilterOp::Lt));
+        assert_eq!(
+            created_at[1].value,
+            Some(serde_json::json!("2026-05-01T00:00:00Z"))
+        );
+
+        let state = filters.get("state").unwrap();
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].op, None);
+        assert_eq!(state[0].value, Some(serde_json::json!("merged")));
+    }
+
+    #[test]
+    fn multi_filter_bare_array_is_equality() {
+        // A bare array like [1, 2, 3] should be treated as a single equality
+        // filter with an array value, NOT as multiple filters.
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"state": [1, 2, 3]}
+            }]
+        }"#,
+        )
+        .unwrap();
+
+        let state = input.nodes[0].filters.get("state").unwrap();
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].op, None);
+        assert_eq!(state[0].value, Some(serde_json::json!([1, 2, 3])));
     }
 
     #[test]

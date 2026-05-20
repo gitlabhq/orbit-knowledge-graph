@@ -219,10 +219,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
 
         // Coerce filter values to match ontology field types (e.g., enum int → string)
-        for (column, filter) in &mut node.filters {
-            let Some(value) = &filter.value else {
-                continue;
-            };
+        for (column, filters) in &mut node.filters {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {
                 continue;
             };
@@ -233,7 +230,12 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             let Some(enum_values) = field.enum_values.as_ref() else {
                 continue;
             };
-            filter.value = Some(coerce_value(value, enum_values));
+            for filter in filters {
+                let Some(value) = &filter.value else {
+                    continue;
+                };
+                filter.value = Some(coerce_value(value, enum_values));
+            }
         }
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
@@ -387,7 +389,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("state").unwrap().value,
+            r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!("opened"))
         );
 
@@ -396,7 +398,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("state").unwrap().value,
+            r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(["opened", "closed", "merged", "locked"]))
         );
 
@@ -405,7 +407,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("state").unwrap().value,
+            r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(["opened", 999, "merged"]))
         );
 
@@ -414,7 +416,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("state").unwrap().value,
+            r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!("opened"))
         );
 
@@ -423,7 +425,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("state").unwrap().value,
+            r.nodes[0].filters.get("state").unwrap()[0].value,
             Some(json!(999))
         );
 
@@ -431,7 +433,7 @@ mod tests {
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
         );
-        assert_eq!(r.nodes[0].filters.get("state").unwrap().value, None);
+        assert_eq!(r.nodes[0].filters.get("state").unwrap()[0].value, None);
     }
 
     #[test]
@@ -456,48 +458,48 @@ mod tests {
         // User: table resolved, non-enum filters unchanged
         assert_eq!(result.nodes[0].table, Some("gl_user".into()));
         assert_eq!(
-            result.nodes[0].filters.get("username").unwrap().value,
+            result.nodes[0].filters.get("username").unwrap()[0].value,
             Some(json!("admin"))
         );
         assert_eq!(
-            result.nodes[0].filters.get("id").unwrap().value,
+            result.nodes[0].filters.get("id").unwrap()[0].value,
             Some(json!(42))
         );
 
         // MergeRequest: table + enum coercion + non-enum passthrough
         assert_eq!(result.nodes[1].table, Some("gl_merge_request".into()));
         assert_eq!(
-            result.nodes[1].filters.get("state").unwrap().value,
+            result.nodes[1].filters.get("state").unwrap()[0].value,
             Some(json!("merged"))
         );
         assert_eq!(
-            result.nodes[1].filters.get("draft").unwrap().value,
+            result.nodes[1].filters.get("draft").unwrap()[0].value,
             Some(json!(false))
         );
         assert_eq!(
-            result.nodes[1].filters.get("title").unwrap().value,
+            result.nodes[1].filters.get("title").unwrap()[0].value,
             Some(json!("fix"))
         );
 
         // Pipeline: multiple enum fields coerced
         assert_eq!(result.nodes[2].table, Some("gl_pipeline".into()));
         assert_eq!(
-            result.nodes[2].filters.get("source").unwrap().value,
+            result.nodes[2].filters.get("source").unwrap()[0].value,
             Some(json!("merge_request_event"))
         );
         assert_eq!(
-            result.nodes[2].filters.get("failure_reason").unwrap().value,
+            result.nodes[2].filters.get("failure_reason").unwrap()[0].value,
             Some(json!("config_error"))
         );
 
         // WorkItem: different entity with same enum field name (state) + work_item_type
         assert_eq!(result.nodes[3].table, Some("gl_work_item".into()));
         assert_eq!(
-            result.nodes[3].filters.get("state").unwrap().value,
+            result.nodes[3].filters.get("state").unwrap()[0].value,
             Some(json!("closed"))
         );
         assert_eq!(
-            result.nodes[3].filters.get("work_item_type").unwrap().value,
+            result.nodes[3].filters.get("work_item_type").unwrap()[0].value,
             Some(json!("epic"))
         );
 
@@ -512,7 +514,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("nonexistent_field").unwrap().value,
+            r.nodes[0].filters.get("nonexistent_field").unwrap()[0].value,
             Some(json!(42))
         );
 
@@ -520,14 +522,17 @@ mod tests {
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
         );
-        assert_eq!(r.nodes[0].filters.get("id").unwrap().value, Some(json!(1)));
+        assert_eq!(
+            r.nodes[0].filters.get("id").unwrap()[0].value,
+            Some(json!(1))
+        );
 
         // Boolean field unchanged
         let r = normalize_query(
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("squash").unwrap().value,
+            r.nodes[0].filters.get("squash").unwrap()[0].value,
             Some(json!(true))
         );
 
@@ -536,7 +541,7 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
         );
         assert_eq!(
-            r.nodes[0].filters.get("source_branch").unwrap().value,
+            r.nodes[0].filters.get("source_branch").unwrap()[0].value,
             Some(json!(["main", "develop"]))
         );
 
