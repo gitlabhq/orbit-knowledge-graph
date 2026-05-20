@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use tracing::{debug, info, warn};
 
-use super::partition_strategy::{PartitionPlan, PartitionStrategy};
+use super::partition_strategy::{PartitionStrategy, partition_column};
 use crate::checkpoint::{Checkpoint, CheckpointStore, entity_checkpoint_prefix};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -16,7 +16,7 @@ use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::{EntityIndexingRequest, IndexingScope, PartitionAssignment};
 use crate::types::{Envelope, Subscription};
 use gkg_server_config::{EntityDispatcherConfig, ScheduleConfiguration};
-use ontology::{EtlScope, Ontology};
+use ontology::{EdgeSourceEtlConfig, EtlConfig, EtlScope, NodeEntity, Ontology};
 
 const INDEXER_STREAM: &str = crate::topic::INDEXER_STREAM;
 
@@ -29,22 +29,74 @@ WHERE _siphon_deleted = false
 "#;
 
 #[derive(Debug, Clone)]
+struct PartitionConfig {
+    count: u32,
+    source_table: String,
+    column: String,
+}
+
+#[derive(Debug, Clone)]
 struct DispatchableEntity {
     name: String,
     scope: EtlScope,
+    partition: Option<PartitionConfig>,
 }
 
-fn collect_dispatchable_entities(ontology: &Ontology) -> Vec<DispatchableEntity> {
-    ontology
-        .nodes()
-        .filter_map(|node| {
-            let etl = node.etl.as_ref()?;
-            Some(DispatchableEntity {
-                name: node.name.clone(),
-                scope: etl.scope(),
-            })
+impl DispatchableEntity {
+    fn from_node(node: &NodeEntity, partition_overrides: &HashMap<String, u32>) -> Option<Self> {
+        let etl = node.etl.as_ref()?;
+        let partition = Self::build_partition(
+            &node.name,
+            partition_overrides,
+            || match etl {
+                EtlConfig::Table { source, .. } => Some(source.clone()),
+                EtlConfig::Query { .. } => None,
+            },
+            etl.order_by(),
+            etl.scope(),
+        );
+        Some(Self {
+            name: node.name.clone(),
+            scope: etl.scope(),
+            partition,
         })
-        .collect()
+    }
+
+    fn from_edge(
+        name: &str,
+        etl: &EdgeSourceEtlConfig,
+        partition_overrides: &HashMap<String, u32>,
+    ) -> Self {
+        let partition = Self::build_partition(
+            name,
+            partition_overrides,
+            || Some(etl.source.clone()),
+            &etl.order_by,
+            etl.scope,
+        );
+        Self {
+            name: name.to_owned(),
+            scope: etl.scope,
+            partition,
+        }
+    }
+
+    fn build_partition(
+        name: &str,
+        overrides: &HashMap<String, u32>,
+        source_table: impl FnOnce() -> Option<String>,
+        order_by: &[String],
+        scope: EtlScope,
+    ) -> Option<PartitionConfig> {
+        let count = overrides.get(name).copied().filter(|&n| n > 1)?;
+        let table = source_table()?;
+        let column = partition_column(order_by, scope)?.to_owned();
+        Some(PartitionConfig {
+            count,
+            source_table: table,
+            column,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +112,6 @@ pub struct EntityDispatcher {
     checkpoint_store: Arc<dyn CheckpointStore>,
     partition_strategy: Arc<dyn PartitionStrategy>,
     entities: Vec<DispatchableEntity>,
-    partition_overrides: HashMap<String, u32>,
     metrics: ScheduledTaskMetrics,
     config: EntityDispatcherConfig,
 }
@@ -75,13 +126,21 @@ impl EntityDispatcher {
         metrics: ScheduledTaskMetrics,
         config: EntityDispatcherConfig,
     ) -> Self {
-        let entities = collect_dispatchable_entities(ontology);
-        let partition_overrides = config.partition_overrides.clone();
+        let overrides = &config.partition_overrides;
+        let entities: Vec<_> = ontology
+            .nodes()
+            .filter_map(|n| DispatchableEntity::from_node(n, overrides))
+            .chain(
+                ontology
+                    .edge_etl_configs()
+                    .map(|(name, etl)| DispatchableEntity::from_edge(name, etl, overrides)),
+            )
+            .collect();
 
         info!(
             global_entities = entities.iter().filter(|e| e.scope == EtlScope::Global).count(),
             namespaced_entities = entities.iter().filter(|e| e.scope == EtlScope::Namespaced).count(),
-            partition_overrides = ?partition_overrides,
+            partition_overrides = ?config.partition_overrides,
             "entity dispatcher initialized"
         );
 
@@ -91,7 +150,6 @@ impl EntityDispatcher {
             checkpoint_store,
             partition_strategy,
             entities,
-            partition_overrides,
             metrics,
             config,
         }
@@ -124,11 +182,10 @@ impl EntityDispatcher {
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
-        let global_entities: Vec<_> = self
+        let (namespaced_entities, global_entities): (Vec<_>, Vec<_>) = self
             .entities
             .iter()
-            .filter(|e| e.scope == EtlScope::Global)
-            .collect();
+            .partition(|e| e.scope == EtlScope::Namespaced);
 
         for entity in &global_entities {
             let (d, s) = self
@@ -137,12 +194,6 @@ impl EntityDispatcher {
             dispatched += d;
             skipped += s;
         }
-
-        let namespaced_entities: Vec<_> = self
-            .entities
-            .iter()
-            .filter(|e| e.scope == EtlScope::Namespaced)
-            .collect();
 
         if namespaced_entities.is_empty() {
             self.metrics
@@ -188,9 +239,8 @@ impl EntityDispatcher {
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
     ) -> Result<(u64, u64), TaskError> {
-        let partition_count = match self.partition_overrides.get(&entity.name).copied() {
-            Some(n) if n > 1 => n,
-            _ => return self.publish_single(entity, scope, watermark).await,
+        let Some(ref partition) = entity.partition else {
+            return self.publish_single(entity, scope, watermark).await;
         };
         let prefix = entity_checkpoint_prefix(scope, &entity.name);
         let checkpoints = self
@@ -202,21 +252,20 @@ impl EntityDispatcher {
                 TaskError::new(err)
             })?;
 
-        let decision = Self::plan_entity_dispatch(&checkpoints, &prefix, partition_count);
-
-        match decision {
+        match Self::plan_entity_dispatch(&checkpoints, &prefix, partition.count) {
             DispatchDecision::Single => self.publish_single(entity, scope, watermark).await,
             DispatchDecision::AllPartitions => {
                 self.publish_partitions(
                     entity,
                     scope,
                     watermark,
-                    &(0..partition_count).collect::<Vec<_>>(),
+                    partition,
+                    &(0..partition.count).collect::<Vec<_>>(),
                 )
                 .await
             }
             DispatchDecision::PendingPartitions(pending) => {
-                self.publish_partitions(entity, scope, watermark, &pending)
+                self.publish_partitions(entity, scope, watermark, partition, &pending)
                     .await
             }
         }
@@ -233,6 +282,7 @@ impl EntityDispatcher {
 
         let all_completed = checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
 
+        // All partitions finished: switch to a single incremental checkpoint going forward.
         if checkpoints.len() > 1 && all_completed && checkpoints.len() as u32 == partition_count {
             return DispatchDecision::Single;
         }
@@ -273,14 +323,18 @@ impl EntityDispatcher {
         entity: &DispatchableEntity,
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
+        partition: &PartitionConfig,
         partition_indices: &[u32],
     ) -> Result<(u64, u64), TaskError> {
-        let partition_count = self.partition_overrides[&entity.name];
-
         let query_start = Instant::now();
-        let PartitionPlan { column, boundaries } = self
+        let boundaries = self
             .partition_strategy
-            .compute_boundaries(&entity.name, partition_count, scope)
+            .compute_boundaries(
+                &partition.source_table,
+                &partition.column,
+                partition.count,
+                scope,
+            )
             .await
             .inspect_err(|_| {
                 self.metrics
@@ -299,7 +353,7 @@ impl EntityDispatcher {
                 warn!(
                     entity = entity.name,
                     partition_index = idx,
-                    total = partition_count,
+                    total = partition.count,
                     "partition index out of bounds, skipping"
                 );
                 continue;
@@ -311,8 +365,8 @@ impl EntityDispatcher {
                 scope: scope.clone(),
                 partition: Some(PartitionAssignment {
                     index: idx,
-                    total: partition_count,
-                    column: column.clone(),
+                    total: partition.count,
+                    column: partition.column.clone(),
                     bounds: bounds.clone(),
                 }),
             };
@@ -522,7 +576,11 @@ mod tests {
     #[test]
     fn collects_entities_from_embedded_ontology() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let entities = collect_dispatchable_entities(&ontology);
+        let no_overrides = HashMap::new();
+        let entities: Vec<_> = ontology
+            .nodes()
+            .filter_map(|n| DispatchableEntity::from_node(n, &no_overrides))
+            .collect();
 
         let global: Vec<_> = entities
             .iter()
