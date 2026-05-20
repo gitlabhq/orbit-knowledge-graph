@@ -278,31 +278,25 @@ impl EntityDispatcher {
         entity_prefix: &str,
         partition_count: u32,
     ) -> DispatchDecision {
-        if checkpoints.len() == 1 {
-            return DispatchDecision::Single;
+        let all_completed = || checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
+
+        match checkpoints.len() {
+            0 => DispatchDecision::AllPartitions,
+            1 => DispatchDecision::Single,
+            n if all_completed() && n as u32 == partition_count => DispatchDecision::Single,
+            _ => {
+                let pending: Vec<u32> = (0..partition_count)
+                    .filter(|idx| {
+                        let partition_key = format!("{entity_prefix}.p{idx}of{partition_count}");
+                        match checkpoints.iter().find(|(k, _)| k == &partition_key) {
+                            Some((_, cp)) => cp.cursor_values.is_some(),
+                            None => true,
+                        }
+                    })
+                    .collect();
+                DispatchDecision::PendingPartitions(pending)
+            }
         }
-
-        let all_completed = checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
-
-        // All partitions finished: switch to a single incremental checkpoint going forward.
-        if checkpoints.len() > 1 && all_completed && checkpoints.len() as u32 == partition_count {
-            return DispatchDecision::Single;
-        }
-
-        if checkpoints.len() > 1 {
-            let pending: Vec<u32> = (0..partition_count)
-                .filter(|idx| {
-                    let partition_key = format!("{entity_prefix}.p{idx}of{partition_count}");
-                    match checkpoints.iter().find(|(k, _)| k == &partition_key) {
-                        Some((_, cp)) => cp.cursor_values.is_some(),
-                        None => true,
-                    }
-                })
-                .collect();
-            return DispatchDecision::PendingPartitions(pending);
-        }
-
-        DispatchDecision::AllPartitions
     }
 
     async fn publish_single(

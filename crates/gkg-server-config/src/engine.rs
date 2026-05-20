@@ -198,30 +198,10 @@ impl Default for NamespaceHandlerConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct EntityHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
-
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
-
-    #[serde(default)]
-    pub batch_size_overrides: HashMap<String, u64>,
-
-    #[serde(default)]
-    pub partition_overrides: HashMap<String, u32>,
-}
-
-impl Default for EntityHandlerConfig {
-    fn default() -> Self {
-        Self {
-            engine: HandlerConfiguration::default(),
-            datalake_batch_size: default_datalake_batch_size(),
-            batch_size_overrides: HashMap::new(),
-            partition_overrides: HashMap::new(),
-        }
-    }
 }
 
 fn default_code_indexing_max_file_size_bytes() -> u64 {

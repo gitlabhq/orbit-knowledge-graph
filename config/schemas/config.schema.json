@@ -68,11 +68,8 @@
             "retry_interval_secs": null
           },
           "entity-handler": {
-            "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 500000,
             "max_attempts": null,
-            "partition_overrides": {},
             "retry_interval_secs": null
           },
           "global-handler": {
@@ -231,7 +228,8 @@
             "events_stream_name": "siphon_stream_main_db"
           },
           "entity": {
-            "cron": null
+            "cron": null,
+            "partition_overrides": {}
           },
           "global": {
             "cron": null
@@ -523,11 +521,8 @@
               "retry_interval_secs": null
             },
             "entity-handler": {
-              "batch_size_overrides": {},
               "concurrency_group": null,
-              "datalake_batch_size": 500000,
               "max_attempts": null,
-              "partition_overrides": {},
               "retry_interval_secs": null
             },
             "global-handler": {
@@ -585,6 +580,15 @@
             "null"
           ],
           "default": null
+        },
+        "partition_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "default": {}
         }
       }
     },
@@ -592,15 +596,6 @@
       "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
-        "batch_size_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "default": {}
-        },
         "concurrency_group": {
           "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
           "type": [
@@ -608,12 +603,6 @@
             "null"
           ],
           "default": null
-        },
-        "datalake_batch_size": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 500000,
-          "minimum": 0
         },
         "max_attempts": {
           "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
@@ -624,15 +613,6 @@
           "format": "uint32",
           "default": null,
           "minimum": 0
-        },
-        "partition_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "default": {}
         },
         "retry_interval_secs": {
           "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
@@ -818,11 +798,8 @@
         "entity-handler": {
           "$ref": "#/$defs/EntityHandlerConfig",
           "default": {
-            "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 500000,
             "max_attempts": null,
-            "partition_overrides": {},
             "retry_interval_secs": null
           }
         },
@@ -1452,7 +1429,8 @@
               "events_stream_name": "siphon_stream_main_db"
             },
             "entity": {
-              "cron": null
+              "cron": null,
+              "partition_overrides": {}
             },
             "global": {
               "cron": null
@@ -1494,7 +1472,8 @@
         "entity": {
           "$ref": "#/$defs/EntityDispatcherConfig",
           "default": {
-            "cron": null
+            "cron": null,
+            "partition_overrides": {}
           }
         },
         "global": {

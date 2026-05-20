@@ -119,13 +119,6 @@ pub enum IndexingScope {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PartitionSpec {
-    pub partition_index: u32,
-    pub total_partitions: u32,
-    pub bounds: PartitionBounds,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum PartitionBounds {
