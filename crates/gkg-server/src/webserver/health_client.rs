@@ -45,6 +45,7 @@ impl InfrastructureHealthClient {
                         name: "clickhouse".to_string(),
                         status: health_check::Status::Unhealthy,
                         error: Some(format!("Health-check service unreachable: {}", e)),
+                        reason: Some("dependency_unhealthy".to_string()),
                     }],
                 }
             }

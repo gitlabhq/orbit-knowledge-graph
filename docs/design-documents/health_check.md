@@ -59,6 +59,47 @@ each component's metrics. Local development works without a K8s cluster.
 |---------|--------|
 | `GKG_HEALTH_CHECK__SERVICES` | Base URL for the health-check sidecar (e.g. `http://localhost:9090`). When unset, stubbed mode is used. |
 
+## Status taxonomy
+
+Both `ServiceHealth` (per-component) and `HealthStatus` (cluster aggregate)
+use a three-state status enum. The aggregate is the worst-of all components:
+`Unhealthy` > `Degraded` > `Healthy`.
+
+| Status | Meaning | Consumer action |
+|---|---|---|
+| `Healthy` | Component is fully serving traffic with all desired replicas ready. | Proceed normally. |
+| `Degraded` | Component is serving traffic but not at full capacity (mid-rollout, HPA scale-up, single pod restarting). Self-resolves. | Keep sending traffic. Do not page. |
+| `Unhealthy` | Component is unable to serve traffic, or a rollout has failed. | Page. Check `reason` for triage. |
+
+Each non-healthy component carries a `reason` field with a short
+machine-readable code. Consumers should treat unknown values as opaque.
+The cluster aggregate carries its own `reason` copied from the worst
+component whose status matches the aggregate, so an agent can read the
+top-level field without iterating components.
+
+### Reason codes
+
+| Reason | When emitted |
+|---|---|
+| `rolling_update` | New replicas being created, old replicas terminating, or the controller has not yet observed the latest spec. |
+| `scaling_up` | Spec increased and all current replicas already match the template (HPA scale-up, no rollout in flight). |
+| `recovering` | `ready < desired` with no rollout in flight (single-pod restart, node drain). |
+| `progress_deadline_exceeded` | k8s gave up on the rollout (Deployment only; see `progressDeadlineSeconds`). |
+| `no_replicas_available` | `available_replicas == 0` while `desired > 0`. |
+| `controller_unreachable` | kube-apiserver call failed. |
+| `dependency_unhealthy` | A ClickHouse instance failed its `SELECT 1` health check. |
+
+### Rollout disambiguation
+
+The sidecar reads `.spec.replicas`, `metadata.generation`, and the standard
+`.status` replica counters from each Deployment and StatefulSet. The same
+algorithm `kubectl rollout status` uses powers the taxonomy: a
+`ProgressDeadlineExceeded` condition flips the component to `Unhealthy`,
+`observed_generation < generation` or any rollout-in-flight signal flips
+it to `Degraded(rolling_update)`, and `ready == desired` with no rollout
+in flight is `Healthy`. `desired == 0` is intentional scale-to-zero and
+reports `Healthy`.
+
 ## REST API
 
 Rails `GrpcClient.get_cluster_health` calls the gRPC endpoint and serves

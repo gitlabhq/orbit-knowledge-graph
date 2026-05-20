@@ -423,6 +423,11 @@ pub struct StructuredClusterHealth {
     pub version: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "4")]
     pub components: ::prost::alloc::vec::Vec<ComponentHealth>,
+    /// Optional short machine-readable code explaining a non-healthy aggregate
+    /// status (e.g. "rolling_update", "no_replicas_available"). Open set;
+    /// consumers should treat unknown values as opaque.
+    #[prost(string, tag = "5")]
+    pub reason: ::prost::alloc::string::String,
 }
 /// Health of a single service component (clickhouse, indexer, webserver).
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -439,6 +444,10 @@ pub struct ComponentHealth {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+    /// Optional short machine-readable code explaining the component's status
+    /// (e.g. "rolling_update", "recovering", "progress_deadline_exceeded").
+    #[prost(string, tag = "5")]
+    pub reason: ::prost::alloc::string::String,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ReplicaStatus {

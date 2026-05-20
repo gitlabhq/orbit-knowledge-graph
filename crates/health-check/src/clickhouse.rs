@@ -31,6 +31,7 @@ impl ClickHouseChecker {
                 name: instance.name.clone(),
                 status: Status::Healthy,
                 error: None,
+                reason: None,
             },
             Err(e) => {
                 warn!(instance = %instance.name, error = %e, "ClickHouse health check failed");
@@ -38,6 +39,7 @@ impl ClickHouseChecker {
                     name: instance.name.clone(),
                     status: Status::Unhealthy,
                     error: Some(e.to_string()),
+                    reason: Some("dependency_unhealthy".to_string()),
                 }
             }
         }

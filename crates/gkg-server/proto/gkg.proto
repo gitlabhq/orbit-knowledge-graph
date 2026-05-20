@@ -344,6 +344,10 @@ message StructuredClusterHealth {
   string timestamp = 2;
   string version = 3;
   repeated ComponentHealth components = 4;
+  // Optional short machine-readable code explaining a non-healthy aggregate
+  // status (e.g. "rolling_update", "no_replicas_available"). Open set;
+  // consumers should treat unknown values as opaque.
+  string reason = 5;
 }
 
 enum ClusterStatus {
@@ -359,6 +363,9 @@ message ComponentHealth {
   ClusterStatus status = 2;
   ReplicaStatus replicas = 3;
   map<string, string> metrics = 4;  // component-specific metrics (e.g. query_latency_p99_ms)
+  // Optional short machine-readable code explaining the component's status
+  // (e.g. "rolling_update", "recovering", "progress_deadline_exceeded").
+  string reason = 5;
 }
 
 message ReplicaStatus {

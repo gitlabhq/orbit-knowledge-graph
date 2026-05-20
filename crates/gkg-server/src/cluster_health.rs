@@ -64,20 +64,12 @@ impl ClusterHealthChecker {
     }
 
     fn convert_health_status(&self, status: HealthStatus) -> StructuredClusterHealth {
-        let cluster_status = match status.status {
-            health_check::Status::Healthy => ClusterStatus::Healthy,
-            health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
-        };
+        let cluster_status = map_cluster_status(status.status);
 
         let mut components: Vec<ComponentHealth> = status
             .services
             .into_iter()
             .map(|s| {
-                let component_status = match s.status {
-                    health_check::Status::Healthy => ClusterStatus::Healthy,
-                    health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
-                };
-
                 let kind = match s.kind {
                     health_check::ResourceKind::Deployment => "Deployment",
                     health_check::ResourceKind::StatefulSet => "StatefulSet",
@@ -85,7 +77,7 @@ impl ClusterHealthChecker {
 
                 ComponentHealth {
                     name: s.name,
-                    status: component_status.into(),
+                    status: map_cluster_status(s.status).into(),
                     replicas: Some(ReplicaStatus {
                         ready: s.ready_replicas,
                         desired: s.desired_replicas,
@@ -94,16 +86,12 @@ impl ClusterHealthChecker {
                         ("namespace".to_string(), s.namespace),
                         ("kind".to_string(), kind.to_string()),
                     ]),
+                    reason: s.reason.unwrap_or_default(),
                 }
             })
             .collect();
 
         for ch in status.clickhouse {
-            let ch_status = match ch.status {
-                health_check::Status::Healthy => ClusterStatus::Healthy,
-                health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
-            };
-
             let mut metrics = HashMap::new();
             if let Some(error) = ch.error {
                 metrics.insert("error".to_string(), error);
@@ -111,17 +99,21 @@ impl ClusterHealthChecker {
 
             components.push(ComponentHealth {
                 name: ch.name,
-                status: ch_status.into(),
+                status: map_cluster_status(ch.status).into(),
                 replicas: None,
                 metrics,
+                reason: ch.reason.unwrap_or_default(),
             });
         }
+
+        let aggregate_reason = aggregate_reason(&components, cluster_status);
 
         StructuredClusterHealth {
             status: cluster_status.into(),
             timestamp: Utc::now().to_rfc3339(),
             version: self.version.clone(),
             components,
+            reason: aggregate_reason,
         }
     }
 
@@ -130,6 +122,7 @@ impl ClusterHealthChecker {
             status: ClusterStatus::Healthy.into(),
             timestamp: Utc::now().to_rfc3339(),
             version: self.version.clone(),
+            reason: String::new(),
             components: vec![
                 ComponentHealth {
                     name: "webserver".to_string(),
@@ -139,6 +132,7 @@ impl ClusterHealthChecker {
                         desired: 1,
                     }),
                     metrics: HashMap::from([("mode".to_string(), "stubbed".to_string())]),
+                    reason: String::new(),
                 },
                 ComponentHealth {
                     name: "indexer".to_string(),
@@ -148,12 +142,14 @@ impl ClusterHealthChecker {
                         desired: 1,
                     }),
                     metrics: HashMap::from([("mode".to_string(), "stubbed".to_string())]),
+                    reason: String::new(),
                 },
                 ComponentHealth {
                     name: "clickhouse".to_string(),
                     status: ClusterStatus::Healthy.into(),
                     replicas: None,
                     metrics: HashMap::from([("mode".to_string(), "stubbed".to_string())]),
+                    reason: String::new(),
                 },
             ],
         }
@@ -165,6 +161,8 @@ impl ClusterHealthChecker {
         #[derive(Serialize)]
         struct HealthToon {
             status: String,
+            #[serde(skip_serializing_if = "String::is_empty")]
+            reason: String,
             timestamp: String,
             version: String,
             components: Vec<ComponentToon>,
@@ -174,6 +172,8 @@ impl ClusterHealthChecker {
         struct ComponentToon {
             name: String,
             status: String,
+            #[serde(skip_serializing_if = "String::is_empty")]
+            reason: String,
             #[serde(skip_serializing_if = "Option::is_none")]
             replicas: Option<String>,
             #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -191,6 +191,7 @@ impl ClusterHealthChecker {
 
         let toon = HealthToon {
             status: status_name(health.status),
+            reason: health.reason.clone(),
             timestamp: health.timestamp.clone(),
             version: health.version.clone(),
             components: health
@@ -199,6 +200,7 @@ impl ClusterHealthChecker {
                 .map(|c| ComponentToon {
                     name: c.name.clone(),
                     status: status_name(c.status),
+                    reason: c.reason.clone(),
                     replicas: c
                         .replicas
                         .as_ref()
@@ -214,6 +216,28 @@ impl ClusterHealthChecker {
             format!("status:{}", toon.status)
         })
     }
+}
+
+fn map_cluster_status(status: health_check::Status) -> ClusterStatus {
+    match status {
+        health_check::Status::Healthy => ClusterStatus::Healthy,
+        health_check::Status::Degraded => ClusterStatus::Degraded,
+        health_check::Status::Unhealthy => ClusterStatus::Unhealthy,
+    }
+}
+
+/// Pick a representative reason for a non-healthy aggregate. Uses the first
+/// component whose status matches the aggregate severity, so the cluster-level
+/// reason always points at an actual contributing component.
+fn aggregate_reason(components: &[ComponentHealth], cluster_status: ClusterStatus) -> String {
+    if cluster_status == ClusterStatus::Healthy {
+        return String::new();
+    }
+    components
+        .iter()
+        .find(|c| c.status == cluster_status as i32 && !c.reason.is_empty())
+        .map(|c| c.reason.clone())
+        .unwrap_or_default()
 }
 
 impl Default for ClusterHealthChecker {
@@ -261,6 +285,7 @@ mod tests {
                     status: Status::Healthy,
                     ready_replicas: 2,
                     desired_replicas: 2,
+                    reason: None,
                 },
                 ServiceHealth {
                     name: "indexer".to_string(),
@@ -269,12 +294,14 @@ mod tests {
                     status: Status::Healthy,
                     ready_replicas: 1,
                     desired_replicas: 1,
+                    reason: None,
                 },
             ],
             clickhouse: vec![HcComponentHealth {
                 name: "clickhouse".to_string(),
                 status: Status::Healthy,
                 error: None,
+                reason: None,
             }],
         }
     }
@@ -289,11 +316,13 @@ mod tests {
                 status: Status::Unhealthy,
                 ready_replicas: 0,
                 desired_replicas: 2,
+                reason: Some("no_replicas_available".to_string()),
             }],
             clickhouse: vec![HcComponentHealth {
                 name: "clickhouse".to_string(),
                 status: Status::Healthy,
                 error: None,
+                reason: None,
             }],
         }
     }
@@ -394,10 +423,15 @@ mod tests {
             timestamp: "2026-03-03T00:00:00Z".to_string(),
             version: "0.6.0".to_string(),
             components: vec![],
+            reason: "rolling_update".to_string(),
         };
 
         let text = ClusterHealthChecker::format_health_as_toon(&health);
         assert!(text.contains("degraded"), "Should map degraded status");
+        assert!(
+            text.contains("rolling_update"),
+            "Should surface cluster reason"
+        );
     }
 
     #[test]
@@ -406,6 +440,7 @@ mod tests {
             status: ClusterStatus::Healthy.into(),
             timestamp: "2026-03-03T00:00:00Z".to_string(),
             version: "0.6.0".to_string(),
+            reason: String::new(),
             components: vec![ComponentHealth {
                 name: "webserver".to_string(),
                 status: ClusterStatus::Healthy.into(),
@@ -414,6 +449,7 @@ mod tests {
                     desired: 3,
                 }),
                 metrics: HashMap::new(),
+                reason: String::new(),
             }],
         };
 
@@ -422,6 +458,44 @@ mod tests {
             text.contains("2/3"),
             "Should format replicas as ready/desired"
         );
+    }
+
+    #[test]
+    fn degraded_sidecar_propagates_to_cluster_degraded_with_reason() {
+        let sidecar = HealthStatus {
+            status: Status::Degraded,
+            services: vec![ServiceHealth {
+                name: "webserver".to_string(),
+                namespace: "gkg".to_string(),
+                kind: ResourceKind::Deployment,
+                status: Status::Degraded,
+                ready_replicas: 3,
+                desired_replicas: 4,
+                reason: Some("rolling_update".to_string()),
+            }],
+            clickhouse: vec![HcComponentHealth {
+                name: "clickhouse".to_string(),
+                status: Status::Healthy,
+                error: None,
+                reason: None,
+            }],
+        };
+        let checker = ClusterHealthChecker::new(None);
+        let s = checker.convert_health_status(sidecar);
+
+        assert_eq!(s.status, ClusterStatus::Degraded as i32);
+        assert_eq!(s.reason, "rolling_update");
+        let webserver = s.components.iter().find(|c| c.name == "webserver").unwrap();
+        assert_eq!(webserver.status, ClusterStatus::Degraded as i32);
+        assert_eq!(webserver.reason, "rolling_update");
+    }
+
+    #[test]
+    fn healthy_cluster_has_empty_reason() {
+        let checker = ClusterHealthChecker::new(None);
+        let s = checker.convert_health_status(healthy_sidecar_response());
+        assert_eq!(s.status, ClusterStatus::Healthy as i32);
+        assert!(s.reason.is_empty());
     }
 
     #[test]
