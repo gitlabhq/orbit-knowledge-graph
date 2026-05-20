@@ -18,17 +18,19 @@
 //!
 //! # KV Operations
 //!
-//! Handlers can use KV operations for caching and distributed locking:
+//! Handlers can use KV operations for caching. For locking, prefer
+//! `crate::locking::LockService`, which encodes expiration in the value and
+//! handles re-acquire over a delete marker:
 //!
 //! ```ignore
 //! async fn handle(&self, ctx: HandlerContext, envelope: Envelope) -> Result<(), HandlerError> {
-//!     // Acquire a lock with TTL
-//!     let options = KvPutOptions::create_with_ttl(Duration::from_secs(300));
-//!     match ctx.nats.kv_put("locks", "my-key", Bytes::new(), options).await? {
-//!         KvPutResult::Success(_) => { /* lock acquired */ }
-//!         KvPutResult::AlreadyExists => { /* lock held by another */ }
-//!         _ => {}
-//!     }
+//!     let guard = crate::locking::LockGuard::acquire(
+//!         ctx.lock_service.clone(),
+//!         "my-key",
+//!         Duration::from_secs(300),
+//!     )
+//!     .await?;
+//!     // ...
 //!     Ok(())
 //! }
 //! ```

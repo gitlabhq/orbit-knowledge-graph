@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use tracing::{debug, warn};
 
 use crate::nats::{KvPutOptions, KvPutResult};
@@ -74,26 +75,77 @@ impl NatsLockService {
     }
 }
 
+fn encode_expiration(at: DateTime<Utc>) -> Bytes {
+    Bytes::from(at.to_rfc3339())
+}
+
+fn decode_expiration(value: &[u8]) -> Option<DateTime<Utc>> {
+    let s = std::str::from_utf8(value).ok()?;
+    if s.is_empty() {
+        return None;
+    }
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
+}
+
 #[async_trait]
 impl LockService for NatsLockService {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
-        let options = KvPutOptions::create_with_ttl(ttl);
+        let chrono_ttl =
+            chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
+        let expiration = Utc::now() + chrono_ttl;
+        let value = encode_expiration(expiration);
+
         match self
             .nats
-            .kv_put(INDEXING_LOCKS_BUCKET, key, Bytes::new(), options)
+            .kv_put(
+                INDEXING_LOCKS_BUCKET,
+                key,
+                value.clone(),
+                KvPutOptions::create_only(),
+            )
             .await
+            .map_err(|e| LockError::Backend(e.to_string()))?
         {
-            Ok(KvPutResult::Success(_)) => {
+            KvPutResult::Success(_) => {
                 debug!(key, "lock acquired");
-                Ok(true)
+                return Ok(true);
             }
-            Ok(KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch) => {
-                debug!(key, "lock contention, already held");
+            KvPutResult::RevisionMismatch => return Ok(false),
+            KvPutResult::AlreadyExists => {}
+        }
+
+        let entry = self
+            .nats
+            .kv_get(INDEXING_LOCKS_BUCKET, key)
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?;
+        let Some(entry) = entry else { return Ok(false) };
+
+        match decode_expiration(&entry.value) {
+            Some(at) if Utc::now() < at => {
+                debug!(key, expires_at = %at, "lock contention, still valid");
                 Ok(false)
             }
-            Err(e) => {
-                debug!(key, error = %e, "lock acquisition error");
-                Err(LockError::Backend(e.to_string()))
+            Some(_) | None => {
+                match self
+                    .nats
+                    .kv_put(
+                        INDEXING_LOCKS_BUCKET,
+                        key,
+                        value,
+                        KvPutOptions::update_revision(entry.revision),
+                    )
+                    .await
+                    .map_err(|e| LockError::Backend(e.to_string()))?
+                {
+                    KvPutResult::Success(_) => {
+                        debug!(key, "lock acquired after expiry");
+                        Ok(true)
+                    }
+                    KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => Ok(false),
+                }
             }
         }
     }
@@ -184,5 +236,97 @@ mod tests {
             .await
             .expect("acquire ok");
         assert!(result.is_none(), "contended acquire must return None");
+    }
+
+    mod nats_lock_service {
+        use super::*;
+        use crate::testkit::mocks::MockNatsServices;
+
+        fn new_service() -> (Arc<MockNatsServices>, NatsLockService) {
+            let nats = Arc::new(MockNatsServices::new());
+            let svc = NatsLockService::new(nats.clone());
+            (nats, svc)
+        }
+
+        #[tokio::test]
+        async fn first_acquire_succeeds_and_stores_future_expiration() {
+            let (nats, svc) = new_service();
+            let acquired = svc
+                .try_acquire("p1", Duration::from_secs(30))
+                .await
+                .expect("acquire");
+            assert!(acquired);
+
+            let stored = nats.get_kv(INDEXING_LOCKS_BUCKET, "p1").expect("value");
+            let expires = decode_expiration(&stored).expect("rfc3339 expiry");
+            assert!(expires > Utc::now(), "stored expiry must be in the future");
+        }
+
+        #[tokio::test]
+        async fn reacquire_while_still_valid_returns_false() {
+            let (_, svc) = new_service();
+            assert!(
+                svc.try_acquire("p2", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !svc.try_acquire("p2", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+        }
+
+        #[tokio::test]
+        async fn reacquire_after_expiry_succeeds() {
+            let (nats, svc) = new_service();
+            assert!(svc.try_acquire("p3", Duration::from_secs(1)).await.unwrap());
+
+            nats.set_kv(
+                INDEXING_LOCKS_BUCKET,
+                "p3",
+                encode_expiration(Utc::now() - chrono::Duration::seconds(1)),
+            );
+
+            assert!(
+                svc.try_acquire("p3", Duration::from_secs(30))
+                    .await
+                    .unwrap(),
+                "expired lock must be reclaimable",
+            );
+        }
+
+        #[tokio::test]
+        async fn release_then_acquire_succeeds() {
+            let (_, svc) = new_service();
+            assert!(
+                svc.try_acquire("p4", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            svc.release("p4").await.expect("release");
+            assert!(
+                svc.try_acquire("p4", Duration::from_secs(30))
+                    .await
+                    .unwrap(),
+                "fresh acquire after release must succeed",
+            );
+        }
+
+        #[tokio::test]
+        async fn malformed_value_is_treated_as_stale() {
+            let (nats, svc) = new_service();
+            nats.set_kv(
+                INDEXING_LOCKS_BUCKET,
+                "p5",
+                Bytes::from_static(b"not-a-timestamp"),
+            );
+            assert!(
+                svc.try_acquire("p5", Duration::from_secs(30))
+                    .await
+                    .unwrap(),
+                "unparseable lock value must not pin the lock forever",
+            );
+        }
     }
 }
