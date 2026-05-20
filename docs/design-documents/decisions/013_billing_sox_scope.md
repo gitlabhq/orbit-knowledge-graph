@@ -70,23 +70,6 @@ These files live outside `gkg-billing` but can change billing correctness withou
 
 The rest of the repository — ontology, query compiler, code graph, indexer, gitaly bindings, formatters other than billing-relevant output, integration testkit, fuzz harness, xtask — is not SOX-scoped. The crate-level seam is what makes this defensible: nothing outside the listed paths can reach the billing crate's emission path except through the adapter's `From<&Claims>` impls.
 
-## ITGC control mapping
-
-Mapping in-scope IT General Controls from the GitLab ITGC matrix to GKG implementation. Source matrix: confidential Google Sheet (linked under References).
-
-| Control | Implementation in GKG |
-|---|---|
-| **LA.1 Access Provisioning** (preventive, as-needed) | Required-reviewer `CODEOWNERS` rules on all in-scope paths. Only members of the SOX-reviewer group can approve changes; new approvers added only through the same controlled-merge process. |
-| **LA.2 Access Termination** (preventive, as-needed) | Inherited from the GitLab platform's deprovisioning script (off-boarding flow). No GKG-specific implementation; documented as inherited. |
-| **LA.3 User Access Review** (detective, quarterly) | Quarterly review of the SOX-reviewer group membership (the GitLab group named in the default `CODEOWNERS` rule and in any per-path overrides). Owned by the GKG maintainers; cadence tracked in the operational runbook under `docs/dev/runbooks/`. |
-| **LA.4 Privileged Access Management** (preventive, as-needed) | Privileged access for SOX paths = the ability to approve `CODEOWNERS` changes themselves. Restricted to project Owner/Maintainer roles. The `CODEOWNERS` file is itself listed as a SOX-scoped path (any change to it requires the same controlled review). |
-| **LA.5 Authentication** (preventive, as-needed) | Inherited from GitLab platform: SSO via Okta + the GitLab.com organization. No local sign-in option for project access. Documented as inherited. |
-| **PC.1 Access to Migrate** (preventive, as-needed) | Production migration = merging to `main` and the subsequent release pipeline. Merge access to `main` for SOX paths is gated by `CODEOWNERS` (same mechanism as LA.1). |
-| **PC.2 Change Approval** (preventive, as-needed) | `CODEOWNERS` rules on in-scope paths require approval from the SOX-reviewer group before merge. No optional/soft section markers (`^[...]`) on SOX paths — these are hard requirements. |
-| **PC.3 Change Review** (detective, monthly) | Monthly audit-log review of changes touching SOX-scoped paths in this project, mirroring the existing AI Gateway cadence. Evidence captured in the shared Audit Events Review spreadsheet. Performed by the SOX-reviewer group lead. |
-
-Out-of-scope controls from the matrix: **CO.1** (Access to Modify Jobs) and **CO.2** (Job Monitoring). All operational jobs live in-project and go through the same MR process as code changes — CO.1 collapses into PC.1/PC.2. CO.2 monitoring is satisfied by the GKG observability stack (`gkg-observability`); not SOX-scoped per the matrix.
-
 ## Implementation
 
 ### CODEOWNERS
@@ -96,7 +79,7 @@ A new `.gitlab/CODEOWNERS` file is added with two kinds of rules:
 1. **Default rule** — assigns the GKG maintainers group as default owners of the entire repository.
 2. **SOX-scoped rules** — required-reviewer entries (no `^` optional-section prefix) for the primary scope and each extended hook point.
 
-The `CODEOWNERS` file itself is listed as a SOX-scoped path so changes to the reviewer set require the same controlled-merge approval (satisfies LA.4).
+The `CODEOWNERS` file itself is listed as a SOX-scoped path so changes to the reviewer set require the same controlled-merge approval.
 
 ### Adapter header comment
 
@@ -119,10 +102,6 @@ The bespoke integration test is the most defensible from a SOX evidence standpoi
 ## Why not the alternatives
 
 **Whole-repo SOX scope.** Matches the AI Gateway precedent and removes any ambiguity about the surface. Rejected because Knowledge Graph engineering pushed back on the velocity cost during the !937 review: the GKG repo's surface includes the ontology, the query compiler, code-graph parsers, the indexer, and dozens of supporting crates that have no influence on billing correctness. Subjecting them all to SOX merge gates would slow non-billing work without any compliance benefit.
-
-**File-level scope (`BillingObserver` only).** Tighter than crate-level, but the rest of the billing crate (tracker setup, quota client, metrics, constants normalization) carries equal billing-correctness risk. Splitting the crate's contents into "SOX file" and "non-SOX file" is artificial and fragile.
-
-**Tag billing as a label on MRs rather than CODEOWNERS.** Considered as a lower-friction alternative. Rejected because compliance evidence requires *automated enforcement of reviewer requirements* (PC.2), not human-applied labels.
 
 **Move JWT claim parsing into `gkg-billing`.** Would eliminate the `claims.rs` hook point dependency. Rejected: claims are consumed by the entire authorization layer, not just billing. Moving them would invert a much larger dependency relationship for the sake of a single auditable boundary.
 
@@ -158,7 +137,6 @@ What stays the same:
 - SOX scoping discussion on !937: [review thread starting at note 3268652539](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539)
 - Quota check MR: [b3f415cf — feat(billing): add CustomersDot usage quota checks for mcp/rest queries](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/b3f415cf5b)
 - Rails JWT claim additions: [gitlab!232123](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/232123)
-- ITGC matrix: confidential Google Sheet (request access through the compliance team)
 - AI Gateway billing events reference: [`ai-assist/lib/billing_events/`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/tree/main/lib/billing_events)
 - AI Gateway billing events docs: [`ai-assist/docs/billing_events.md`](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/blob/main/docs/billing_events.md)
 - Billing schema (Iglu): [`com.gitlab/billable_usage/jsonschema/1-0-2`](https://gitlab.com/gitlab-org/iglu/-/blob/master/public/schemas/com.gitlab/billable_usage/jsonschema/1-0-2)
