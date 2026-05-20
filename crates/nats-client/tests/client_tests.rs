@@ -1,25 +1,18 @@
-//! Integration tests for `NatsClient::ensure_kv_bucket_exists` against a real
-//! NATS server (testcontainers; requires Docker).
-//!
-//! Regression coverage: when a bucket already exists with a different config,
-//! `ensure_kv_bucket_exists` must migrate the existing bucket in place rather
-//! than erroring with `STREAM_NAME_IN_USE`.
+//! Integration tests for `NatsClient` KV operations against a real NATS server
+//! (testcontainers; requires Docker).
 
 use std::time::Duration;
 
 use bytes::Bytes;
 use gkg_server_config::NatsConfiguration;
 use nats_client::NatsClient;
-use nats_client::kv_types::{KvBucketConfig, KvPutOptions};
+use nats_client::kv_types::{KvBucketConfig, KvPutOptions, KvPutResult};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 const BUCKET: &str = "test_locks";
-
-// Pin to a NATS 2.11+ tag because per-message TTL is a 2.11 server feature.
-// testcontainers-modules' default tag is older and cannot host the bucket.
 const NATS_TAG: &str = "2.11-alpine";
 
 async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
@@ -45,78 +38,103 @@ fn config(url: &str) -> NatsConfiguration {
     }
 }
 
-async fn stream_allow_message_ttl(url: &str, bucket: &str) -> bool {
-    let client = async_nats::connect(format!("nats://{url}"))
-        .await
-        .expect("nats connect");
-    let js = async_nats::jetstream::new(client);
-    let mut stream = js
-        .get_stream(format!("KV_{bucket}"))
-        .await
-        .expect("KV stream should exist");
-    stream
-        .info()
-        .await
-        .expect("stream info")
-        .config
-        .allow_message_ttl
-}
-
-/// Simulates the production state: a prior release created the bucket without
-/// per-message TTL, then a new release boots and calls `ensure_kv_bucket_exists`
-/// with `with_per_message_ttl()`. The fix uses `create_or_update_key_value`
-/// under the hood, which sends `STREAM.UPDATE` and migrates the existing
-/// bucket. Without the fix this errors with `STREAM_NAME_IN_USE` and the
-/// bucket stays in its original config forever, so per-key TTL never works.
 #[tokio::test]
-async fn ensure_kv_bucket_exists_migrates_existing_bucket_to_enable_per_key_ttl() {
+async fn kv_put_errors_when_bucket_not_registered() {
     let (_container, url) = start_nats().await;
 
-    // Step 1: create bucket WITHOUT per-message TTL (old release).
-    let client_old = NatsClient::connect(&config(&url)).await.expect("connect");
-    client_old
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+
+    let result = client
+        .kv_put(
+            "never_ensured",
+            "k",
+            Bytes::new(),
+            KvPutOptions::create_only(),
+        )
+        .await;
+
+    let err = result.expect_err("kv_put must not target an unregistered bucket");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("ensure_kv_bucket_exists"),
+        "error must point operators at the explicit-create path, got: {msg}",
+    );
+}
+
+#[tokio::test]
+async fn kv_create_only_returns_already_exists_on_live_key() {
+    let (_container, url) = start_nats().await;
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    client
         .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::default())
         .await
-        .expect("initial bucket create should succeed");
-    assert!(
-        !stream_allow_message_ttl(&url, BUCKET).await,
-        "precondition: existing bucket should not have allow_message_ttl",
-    );
+        .expect("ensure");
 
-    // Step 2: new release reconnects and calls ensure with TTL config.
-    let client_new = NatsClient::connect(&config(&url)).await.expect("connect");
-    client_new
-        .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::with_per_message_ttl())
-        .await
-        .expect("ensure_kv_bucket_exists must migrate existing bucket, not error");
-
-    assert!(
-        stream_allow_message_ttl(&url, BUCKET).await,
-        "after re-ensure with TTL config, stream must advertise allow_message_ttl",
-    );
-
-    // Step 3: per-key TTL must actually work end-to-end on the migrated bucket.
-    let ttl = Duration::from_secs(2);
-    client_new
+    client
         .kv_put(
             BUCKET,
-            "expiring_key",
-            Bytes::new(),
-            KvPutOptions::create_with_ttl(ttl),
+            "k",
+            Bytes::from_static(b"v1"),
+            KvPutOptions::create_only(),
         )
         .await
-        .expect("kv_put with TTL");
+        .expect("first create");
 
-    tokio::time::sleep(ttl + Duration::from_secs(2)).await;
-
-    let key = client_new
-        .kv_get(BUCKET, "expiring_key")
+    let result = client
+        .kv_put(
+            BUCKET,
+            "k",
+            Bytes::from_static(b"v2"),
+            KvPutOptions::create_only(),
+        )
         .await
-        .expect("kv_get");
-    assert!(
-        key.is_none(),
-        "key with per-key TTL must expire on the migrated bucket",
-    );
+        .expect("second create");
+    assert_eq!(result, KvPutResult::AlreadyExists);
+}
+
+#[tokio::test]
+async fn kv_update_revision_cas_succeeds_only_on_matching_revision() {
+    let (_container, url) = start_nats().await;
+    let client = NatsClient::connect(&config(&url)).await.expect("connect");
+    client
+        .ensure_kv_bucket_exists(BUCKET, KvBucketConfig::default())
+        .await
+        .expect("ensure");
+
+    let initial = client
+        .kv_put(
+            BUCKET,
+            "k",
+            Bytes::from_static(b"v1"),
+            KvPutOptions::create_only(),
+        )
+        .await
+        .expect("create");
+    let KvPutResult::Success(rev) = initial else {
+        panic!("expected Success, got {initial:?}");
+    };
+
+    let stale = client
+        .kv_put(
+            BUCKET,
+            "k",
+            Bytes::from_static(b"v2"),
+            KvPutOptions::update_revision(rev + 99),
+        )
+        .await
+        .expect("stale cas");
+    assert_eq!(stale, KvPutResult::RevisionMismatch);
+
+    let fresh = client
+        .kv_put(
+            BUCKET,
+            "k",
+            Bytes::from_static(b"v3"),
+            KvPutOptions::update_revision(rev),
+        )
+        .await
+        .expect("fresh cas");
+    assert!(matches!(fresh, KvPutResult::Success(_)));
 }
 
 #[tokio::test]

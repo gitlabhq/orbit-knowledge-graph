@@ -198,6 +198,32 @@ impl Default for NamespaceHandlerConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct EntityHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+
+    #[serde(default = "default_datalake_batch_size")]
+    pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
+
+    #[serde(default)]
+    pub partition_overrides: HashMap<String, u32>,
+}
+
+impl Default for EntityHandlerConfig {
+    fn default() -> Self {
+        Self {
+            engine: HandlerConfiguration::default(),
+            datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
+            partition_overrides: HashMap::new(),
+        }
+    }
+}
+
 fn default_code_indexing_max_file_size_bytes() -> u64 {
     5_000_000
 }
@@ -264,6 +290,8 @@ pub struct HandlersConfiguration {
     #[serde(default)]
     pub namespace_handler: NamespaceHandlerConfig,
     #[serde(default)]
+    pub entity_handler: EntityHandlerConfig,
+    #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
     #[serde(default)]
     pub namespace_deletion: NamespaceDeletionHandlerConfig,
@@ -279,6 +307,12 @@ pub struct GlobalDispatcherConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct EntityDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
@@ -392,6 +426,8 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
+    #[serde(default)]
+    pub entity: EntityDispatcherConfig,
     #[serde(default)]
     pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
     #[serde(default)]

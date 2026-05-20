@@ -68,7 +68,7 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::sdlc::dispatch::{EntityDispatcher, GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -92,9 +92,8 @@ pub async fn run(
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
-    let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
-        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
     broker
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
@@ -129,6 +128,7 @@ pub async fn run(
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
         modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        modules::sdlc::register_entity_handlers(&registry, config, &ontology).await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
@@ -240,6 +240,10 @@ pub async fn run_dispatcher(
             datalake,
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
+        )),
+        Box::new(EntityDispatcher::new(
+            metrics.clone(),
+            config.schedule.tasks.entity.clone(),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),

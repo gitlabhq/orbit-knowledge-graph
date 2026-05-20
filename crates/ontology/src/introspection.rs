@@ -23,11 +23,12 @@ pub enum IntrospectionScope {
 }
 
 /// Top-level schema response — a list of domains (each grouping its nodes)
-/// and a flat list of edges.
+/// and edge names for orientation. Expand specific nodes to see which types
+/// each edge connects.
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
     pub domains: Vec<SchemaDomain>,
-    pub edges: Vec<SchemaEdge>,
+    pub edges: Vec<String>,
 }
 
 /// One domain from the ontology (e.g. `source_code`, `ci`) plus its nodes.
@@ -51,14 +52,6 @@ pub enum SchemaNode {
     },
 }
 
-/// A relationship (edge) with all source/target node kinds it connects.
-#[derive(Debug, Serialize)]
-pub struct SchemaEdge {
-    pub name: String,
-    pub from: Vec<String>,
-    pub to: Vec<String>,
-}
-
 /// Build a schema response for the given ontology and scope.
 ///
 /// `expand_nodes` controls which nodes get expanded to props/in/out; pass
@@ -71,15 +64,8 @@ pub fn build_schema_response(
 ) -> SchemaResponse {
     SchemaResponse {
         domains: build_domains(ontology, scope, expand_nodes),
-        edges: build_edges(ontology, scope),
+        edges: build_edge_names(ontology, scope),
     }
-}
-
-/// Build just the edges list for the given ontology and scope, skipping
-/// the domain/node construction.
-#[must_use]
-pub fn build_schema_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge> {
-    build_edges(ontology, scope)
 }
 
 fn build_domains(
@@ -138,7 +124,7 @@ fn build_domains(
         .collect()
 }
 
-fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge> {
+fn build_edge_names(ontology: &Ontology, scope: IntrospectionScope) -> Vec<String> {
     let local_names: Vec<&str> = match scope {
         IntrospectionScope::Local => ontology.local_entity_names(),
         IntrospectionScope::All => Vec::new(),
@@ -146,27 +132,11 @@ fn build_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge
 
     ontology
         .edge_names()
-        .filter_map(|edge_name| {
+        .filter(|edge_name| {
             let variants = ontology.get_edge(edge_name).unwrap_or(&[]);
-            let filtered = filter_variants(variants, scope, &local_names);
-            if filtered.is_empty() {
-                return None;
-            }
-
-            let mut sources: Vec<String> = filtered.iter().map(|e| e.source_kind.clone()).collect();
-            sources.sort();
-            sources.dedup();
-
-            let mut targets: Vec<String> = filtered.iter().map(|e| e.target_kind.clone()).collect();
-            targets.sort();
-            targets.dedup();
-
-            Some(SchemaEdge {
-                name: edge_name.to_string(),
-                from: sources,
-                to: targets,
-            })
+            !filter_variants(variants, scope, &local_names).is_empty()
         })
+        .map(|name| name.to_string())
         .collect()
 }
 
@@ -206,14 +176,27 @@ fn node_relationships(
         };
         let filtered = filter_variants(variants, scope, &local_names);
 
-        let has_outgoing = filtered.iter().any(|e| e.source_kind == node_name);
-        let has_incoming = filtered.iter().any(|e| e.target_kind == node_name);
+        let mut out_targets: Vec<&str> = filtered
+            .iter()
+            .filter(|e| e.source_kind == node_name)
+            .map(|e| e.target_kind.as_str())
+            .collect();
+        out_targets.sort();
+        out_targets.dedup();
 
-        if has_outgoing {
-            outgoing.push(edge_name.to_string());
+        let mut in_sources: Vec<&str> = filtered
+            .iter()
+            .filter(|e| e.target_kind == node_name)
+            .map(|e| e.source_kind.as_str())
+            .collect();
+        in_sources.sort();
+        in_sources.dedup();
+
+        if !out_targets.is_empty() {
+            outgoing.push(format!("{} → [{}]", edge_name, out_targets.join(", ")));
         }
-        if has_incoming {
-            incoming.push(edge_name.to_string());
+        if !in_sources.is_empty() {
+            incoming.push(format!("{} ← [{}]", edge_name, in_sources.join(", ")));
         }
     }
 
@@ -282,33 +265,17 @@ mod tests {
     }
 
     #[test]
-    fn local_scope_edges_only_connect_local_entities() {
+    fn local_scope_edges_are_present() {
         let ont = load();
         let response = build_schema_response(&ont, IntrospectionScope::Local, &[]);
 
-        let local: Vec<&str> = ont.local_entity_names();
-        for edge in &response.edges {
-            for s in &edge.from {
-                assert!(
-                    local.contains(&s.as_str()),
-                    "edge {} source {} not in local scope",
-                    edge.name,
-                    s
-                );
-            }
-            for t in &edge.to {
-                assert!(
-                    local.contains(&t.as_str()),
-                    "edge {} target {} not in local scope",
-                    edge.name,
-                    t
-                );
-            }
-        }
         assert!(
             !response.edges.is_empty(),
             "expected at least one local edge"
         );
+        for edge in &response.edges {
+            assert!(!edge.is_empty(), "edge name should not be empty");
+        }
     }
 
     #[test]
@@ -348,7 +315,7 @@ mod tests {
             })
             .collect();
         assert!(names.iter().any(|n| n == "User"));
-        assert!(response.edges.iter().any(|e| e.name == "AUTHORED"));
+        assert!(response.edges.iter().any(|e| e == "AUTHORED"));
     }
 
     #[test]
@@ -387,8 +354,18 @@ mod tests {
             .expect("File should be expanded");
 
         assert!(!file.2.is_empty(), "File should have props");
-        assert!(file.0.contains(&"DEFINES".to_string()) || file.0.contains(&"IMPORTS".to_string()));
-        assert!(file.1.contains(&"CONTAINS".to_string()));
+        assert!(
+            file.0
+                .iter()
+                .any(|e| e.starts_with("DEFINES") || e.starts_with("IMPORTS")),
+            "File should have outgoing DEFINES or IMPORTS: {:?}",
+            file.0
+        );
+        assert!(
+            file.1.iter().any(|e| e.starts_with("CONTAINS")),
+            "File should have incoming CONTAINS: {:?}",
+            file.1
+        );
     }
 
     #[test]

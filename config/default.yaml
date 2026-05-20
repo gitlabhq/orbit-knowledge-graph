@@ -74,6 +74,15 @@ engine:
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 5000
+    entity-handler:
+      concurrency_group: sdlc
+      max_attempts: 1  # re-dispatched every minute, no need to retry
+      retry_interval_secs: 60
+      batch_size_overrides:
+        WorkItem: 50000
+      # partition_overrides:
+      #   MergeRequest: 4
+      #   Job: 4
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1  # re-dispatched daily, no need to retry
@@ -83,6 +92,8 @@ schedule:
     global:
       cron: "0 */1 * * * *"           # every minute
     namespace:
+      cron: "0 */1 * * * *"           # every minute
+    entity:
       cron: "0 */1 * * * *"           # every minute
     code-indexing-task:
       cron: "0 */1 * * * *"           # every minute

@@ -20,6 +20,7 @@ pub struct NatsClient {
     config: NatsConfiguration,
     streams: RwLock<HashMap<String, Stream>>,
     kv_stores: RwLock<HashMap<String, KvStore>>,
+    kv_configs: RwLock<HashMap<String, KvBucketConfig>>,
 }
 
 impl NatsClient {
@@ -43,6 +44,7 @@ impl NatsClient {
             config: config.clone(),
             streams: RwLock::new(HashMap::new()),
             kv_stores: RwLock::new(HashMap::new()),
+            kv_configs: RwLock::new(HashMap::new()),
         })
     }
 
@@ -154,29 +156,41 @@ impl NatsClient {
         bucket: &str,
         config: KvBucketConfig,
     ) -> Result<(), NatsError> {
+        self.kv_configs
+            .write()
+            .await
+            .insert(bucket.to_string(), config.clone());
+
+        let store = self.create_or_update_kv_bucket(bucket, &config).await?;
+        info!(bucket, "KV bucket ready");
+
+        self.kv_stores
+            .write()
+            .await
+            .insert(bucket.to_string(), store);
+        Ok(())
+    }
+
+    async fn create_or_update_kv_bucket(
+        &self,
+        bucket: &str,
+        _config: &KvBucketConfig,
+    ) -> Result<KvStore, NatsError> {
         let kv_config = async_nats::jetstream::kv::Config {
             bucket: bucket.to_string(),
-            limit_markers: config.limit_markers,
             ..Default::default()
         };
 
-        let store = self
-            .jetstream
+        self.jetstream
             .create_or_update_key_value(kv_config)
             .await
             .map_err(|e| NatsError::KvBucket {
                 bucket: bucket.to_string(),
                 message: e.to_string(),
-            })?;
-
-        info!(bucket, "KV bucket ready");
-
-        let mut cache = self.kv_stores.write().await;
-        cache.insert(bucket.to_string(), store);
-        Ok(())
+            })
     }
 
-    async fn get_or_create_kv_store(&self, bucket: &str) -> Result<KvStore, NatsError> {
+    async fn get_kv_store(&self, bucket: &str) -> Result<KvStore, NatsError> {
         {
             let cache = self.kv_stores.read().await;
             if let Some(store) = cache.get(bucket) {
@@ -184,32 +198,29 @@ impl NatsClient {
             }
         }
 
+        let config = self
+            .kv_configs
+            .read()
+            .await
+            .get(bucket)
+            .cloned()
+            .ok_or_else(|| NatsError::KvBucket {
+                bucket: bucket.to_string(),
+                message: "bucket not registered; call ensure_kv_bucket_exists at startup".into(),
+            })?;
+
         let mut cache = self.kv_stores.write().await;
         if let Some(store) = cache.get(bucket) {
             return Ok(store.clone());
         }
 
-        let store = match self.jetstream.get_key_value(bucket).await {
-            Ok(store) => store,
-            Err(_) => self
-                .jetstream
-                .create_key_value(async_nats::jetstream::kv::Config {
-                    bucket: bucket.to_string(),
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| NatsError::KvBucket {
-                    bucket: bucket.to_string(),
-                    message: e.to_string(),
-                })?,
-        };
-
+        let store = self.create_or_update_kv_bucket(bucket, &config).await?;
         cache.insert(bucket.to_string(), store.clone());
         Ok(store)
     }
 
     pub async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
+        let store = self.get_kv_store(bucket).await?;
 
         match store.entry(key).await {
             Ok(Some(entry)) => Ok(Some(KvEntry {
@@ -233,16 +244,10 @@ impl NatsClient {
         value: Bytes,
         options: KvPutOptions,
     ) -> Result<KvPutResult, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
+        let store = self.get_kv_store(bucket).await?;
 
         if options.create_only {
-            let result = if let Some(ttl) = options.ttl {
-                store.create_with_ttl(key, value, ttl).await
-            } else {
-                store.create(key, value).await
-            };
-
-            return match result {
+            return match store.create(key, value).await {
                 Ok(revision) => Ok(KvPutResult::Success(revision)),
                 Err(e) if e.kind() == CreateErrorKind::AlreadyExists => {
                     Ok(KvPutResult::AlreadyExists)
@@ -281,7 +286,7 @@ impl NatsClient {
     }
 
     pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
+        let store = self.get_kv_store(bucket).await?;
 
         store.delete(key).await.map_err(|e| NatsError::KvDelete {
             bucket: bucket.to_string(),
@@ -291,7 +296,7 @@ impl NatsClient {
     }
 
     pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
+        let store = self.get_kv_store(bucket).await?;
 
         let keys = store.keys().await.map_err(|e| NatsError::KvKeys {
             bucket: bucket.to_string(),
