@@ -239,7 +239,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "enable before release to validate parity with GlobalHandler"]
     async fn handle_all_global_entities_writes_correct_checkpoints() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
@@ -277,7 +276,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "enable before release to validate parity with NamespaceHandler"]
     async fn handle_all_namespaced_entities_writes_correct_checkpoints() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
