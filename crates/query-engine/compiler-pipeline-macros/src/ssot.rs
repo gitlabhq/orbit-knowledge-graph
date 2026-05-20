@@ -1,9 +1,13 @@
 //! `define_compiler_ctx!` proc macro implementation.
 //!
-//! Parses the DSL and generates:
-//! - Per-phase view structs with compile-time field access enforcement
-//! - Per-pipeline context structs with `new()` and `into_output()`
-//! - Per-pipeline `run_<phase>` methods and `run_<pipeline>` runner functions
+//! Generates:
+//! - A `CompilerCtx` trait with guarded accessor methods for state fields
+//! - Per-pipeline context structs that implement the trait
+//! - Per-pipeline runner functions that set `current_phase` and call phases
+//!
+//! State fields are private. Access goes through trait methods that assert
+//! the current phase has the required grant. Phase functions take
+//! `&mut impl CompilerCtx`, so they work with any pipeline's ctx.
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -64,7 +68,6 @@ fn parse_fields(input: ParseStream) -> Result<Vec<Field>> {
     braced!(content in input);
     let mut fields = Vec::new();
     while !content.is_empty() {
-        // Optional `pub`
         if content.peek(Token![pub]) {
             content.parse::<Token![pub]>()?;
         }
@@ -84,11 +87,9 @@ impl Parse for PhaseDecl {
         let name: Ident = input.parse()?;
         let content;
         braced!(content in input);
-
         let mut reads_env = Vec::new();
         let mut reads_state = Vec::new();
         let mut mutates = Vec::new();
-
         while !content.is_empty() {
             let key: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
@@ -99,14 +100,11 @@ impl Parse for PhaseDecl {
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!(
-                            "unknown phase grant: `{other}`, expected reads_env, reads_state, or mutates"
-                        ),
+                        format!("unknown phase grant: `{other}`"),
                     ));
                 }
             }
         }
-
         Ok(PhaseDecl {
             name,
             reads_env,
@@ -121,11 +119,9 @@ impl Parse for PipelineDecl {
         let name: Ident = input.parse()?;
         let content;
         braced!(content in input);
-
         let mut env = Vec::new();
         let mut state = Vec::new();
         let mut run = Vec::new();
-
         while !content.is_empty() {
             let key: Ident = content.parse()?;
             content.parse::<Token![:]>()?;
@@ -136,12 +132,11 @@ impl Parse for PipelineDecl {
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!("unknown pipeline key: `{other}`, expected env, state, or run"),
+                        format!("unknown pipeline key: `{other}`"),
                     ));
                 }
             }
         }
-
         Ok(PipelineDecl {
             name,
             env,
@@ -157,7 +152,6 @@ impl Parse for CompilerCtxInput {
         let mut state_fields = Vec::new();
         let mut phases = Vec::new();
         let mut pipelines = Vec::new();
-
         while !input.is_empty() {
             let key: Ident = input.parse()?;
             match key.to_string().as_str() {
@@ -180,14 +174,11 @@ impl Parse for CompilerCtxInput {
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
-                        format!(
-                            "unknown block: `{other}`, expected env, state, phases, or pipelines"
-                        ),
+                        format!("unknown block: `{other}`"),
                     ));
                 }
             }
         }
-
         Ok(CompilerCtxInput {
             env_fields,
             state_fields,
@@ -198,7 +189,7 @@ impl Parse for CompilerCtxInput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Codegen helpers
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn find_env_ty(fields: &[Field], name: &Ident) -> Type {
@@ -219,11 +210,24 @@ fn find_state_ty(fields: &[Field], name: &Ident) -> Type {
         .clone()
 }
 
-fn find_phase<'a>(phases: &'a [PhaseDecl], name: &Ident) -> &'a PhaseDecl {
+fn phases_with_access(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
     phases
         .iter()
-        .find(|p| p.name == *name)
-        .unwrap_or_else(|| panic!("unknown phase: `{name}`"))
+        .filter(|p| {
+            p.reads_env.contains(field)
+                || p.reads_state.contains(field)
+                || p.mutates.contains(field)
+        })
+        .map(|p| p.name.to_string())
+        .collect()
+}
+
+fn phases_with_mutate(phases: &[PhaseDecl], field: &Ident) -> Vec<String> {
+    phases
+        .iter()
+        .filter(|p| p.mutates.contains(field))
+        .map(|p| p.name.to_string())
+        .collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,149 +235,306 @@ fn find_phase<'a>(phases: &'a [PhaseDecl], name: &Ident) -> &'a PhaseDecl {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn generate(input: TokenStream) -> TokenStream {
-    let ctx_input = syn::parse_macro_input!(input as CompilerCtxInput);
-    let mut output = proc_macro2::TokenStream::new();
+    let ctx = syn::parse_macro_input!(input as CompilerCtxInput);
+    let mut out = proc_macro2::TokenStream::new();
 
-    // ── Phase view structs ──────────────────────────────────────────────
-    for phase in &ctx_input.phases {
-        let view_name = format_ident!("{}View", to_pascal(&phase.name.to_string()));
+    // ── Trait: one method per env field + guarded accessors per state ───
+    let mut trait_methods = Vec::new();
 
-        let env_read_fields: Vec<_> = phase
-            .reads_env
-            .iter()
-            .map(|name| {
-                let ty = find_env_ty(&ctx_input.env_fields, name);
-                quote! { pub #name: &'a #ty }
-            })
-            .collect();
+    // Env: simple getters
+    for ef in &ctx.env_fields {
+        let name = &ef.name;
+        let ty = &ef.ty;
+        trait_methods.push(quote! {
+            fn #name(&self) -> &#ty;
+        });
+    }
 
-        let state_read_fields: Vec<_> = phase
-            .reads_state
-            .iter()
-            .map(|name| {
-                let ty = find_state_ty(&ctx_input.state_fields, name);
-                quote! { pub #name: &'a Option<#ty> }
-            })
-            .collect();
+    // current_phase getter/setter
+    trait_methods.push(quote! {
+        fn current_phase(&self) -> &'static str;
+        fn set_current_phase(&mut self, phase: &'static str);
+    });
 
-        let mutate_fields: Vec<_> = phase
-            .mutates
-            .iter()
-            .map(|name| {
-                let ty = find_state_ty(&ctx_input.state_fields, name);
-                quote! { pub #name: &'a mut Option<#ty> }
-            })
-            .collect();
+    // State: guarded read, read_mut, set, take
+    for sf in &ctx.state_fields {
+        let name = &sf.name;
+        let ty = &sf.ty;
+        let name_str = name.to_string();
 
-        output.extend(quote! {
-            pub struct #view_name<'a> {
-                #(#env_read_fields,)*
-                #(#state_read_fields,)*
-                #(#mutate_fields,)*
+        let getter_mut = format_ident!("{}_mut", name);
+        let setter = format_ident!("set_{}", name);
+        let taker = format_ident!("take_{}", name);
+
+        let read_phases = phases_with_access(&ctx.phases, name);
+        let read_arms: Vec<_> = read_phases.iter().map(|p| quote! { #p }).collect();
+        let read_allowed = read_phases.join(", ");
+
+        let mut_phases = phases_with_mutate(&ctx.phases, name);
+        let mut_arms: Vec<_> = mut_phases.iter().map(|p| quote! { #p }).collect();
+        let mut_allowed = mut_phases.join(", ");
+
+        trait_methods.push(quote! {
+            fn #name(&self) -> &Option<#ty> {
+                assert!(
+                    matches!(self.current_phase(), #(#read_arms)|*),
+                    "phase `{}` cannot read `{}` (allowed: {})",
+                    self.current_phase(), #name_str, #read_allowed
+                );
+                self.__raw_state().#name.as_ref()
+            }
+
+            fn #getter_mut(&mut self) -> &mut Option<#ty> {
+                assert!(
+                    matches!(self.current_phase(), #(#mut_arms)|*),
+                    "phase `{}` cannot mutate `{}` (allowed: {})",
+                    self.current_phase(), #name_str, #mut_allowed
+                );
+                &mut self.__raw_state_mut().#name
+            }
+
+            fn #setter(&mut self, value: #ty) {
+                assert!(
+                    matches!(self.current_phase(), #(#mut_arms)|*),
+                    "phase `{}` cannot mutate `{}` (allowed: {})",
+                    self.current_phase(), #name_str, #mut_allowed
+                );
+                self.__raw_state_mut().#name = Some(value);
+            }
+
+            fn #taker(&mut self) -> #ty {
+                assert!(
+                    matches!(self.current_phase(), #(#mut_arms)|*),
+                    "phase `{}` cannot mutate `{}` (allowed: {})",
+                    self.current_phase(), #name_str, #mut_allowed
+                );
+                self.__raw_state_mut().#name.take()
+                    .unwrap_or_else(|| panic!("{} not yet populated", #name_str))
             }
         });
     }
 
-    // ── Per-pipeline context structs and runners ────────────────────────
-    for pipeline in &ctx_input.pipelines {
+    // Hmm, putting guarded logic in default trait methods requires access to
+    // internal state. This doesn't work cleanly with a trait because we can't
+    // have __raw_state() expose private fields of different struct layouts.
+    //
+    // Simpler approach: the trait just declares the signatures. The macro
+    // generates the guarded impl for each pipeline ctx struct directly.
+
+    // Let me restart with the simpler approach: trait has signatures only,
+    // each pipeline ctx gets the guarded impls.
+
+    out = proc_macro2::TokenStream::new();
+
+    // ── Trait with just signatures ─────────────────────────────────────
+    let mut trait_sigs = Vec::new();
+
+    for ef in &ctx.env_fields {
+        let name = &ef.name;
+        let ty = &ef.ty;
+        trait_sigs.push(quote! { fn #name(&self) -> &#ty; });
+    }
+
+    trait_sigs.push(quote! {
+        fn current_phase(&self) -> &'static str;
+        fn set_current_phase(&mut self, phase: &'static str);
+    });
+
+    for sf in &ctx.state_fields {
+        let name = &sf.name;
+        let ty = &sf.ty;
+        let getter_mut = format_ident!("{}_mut", name);
+        let setter = format_ident!("set_{}", name);
+        let taker = format_ident!("take_{}", name);
+
+        trait_sigs.push(quote! { fn #name(&self) -> &Option<#ty>; });
+        trait_sigs.push(quote! { fn #getter_mut(&mut self) -> &mut Option<#ty>; });
+        trait_sigs.push(quote! { fn #setter(&mut self, value: #ty); });
+        trait_sigs.push(quote! { fn #taker(&mut self) -> #ty; });
+    }
+
+    out.extend(quote! {
+        pub trait CompilerCtx {
+            #(#trait_sigs)*
+        }
+    });
+
+    // ── Per-pipeline ctx structs + trait impls ──────────────────────────
+    for pipeline in &ctx.pipelines {
         let ctx_name = format_ident!("{}Ctx", to_pascal(&pipeline.name.to_string()));
         let run_fn = format_ident!("run_{}", pipeline.name);
 
         // Struct fields
-        let env_struct_fields: Vec<_> = pipeline
+        let env_fields: Vec<_> = pipeline
             .env
             .iter()
-            .map(|name| {
-                let ty = find_env_ty(&ctx_input.env_fields, name);
-                quote! { pub #name: #ty }
+            .map(|n| {
+                let ty = find_env_ty(&ctx.env_fields, n);
+                quote! { pub #n: #ty }
             })
             .collect();
 
-        let state_struct_fields: Vec<_> = pipeline
+        let state_fields: Vec<_> = pipeline
             .state
             .iter()
-            .map(|name| {
-                let ty = find_state_ty(&ctx_input.state_fields, name);
-                quote! { pub #name: Option<#ty> }
+            .map(|n| {
+                let ty = find_state_ty(&ctx.state_fields, n);
+                quote! { #n: Option<#ty> }
             })
             .collect();
 
-        // Constructor params (env only)
+        // Constructor
         let ctor_params: Vec<_> = pipeline
             .env
             .iter()
-            .map(|name| {
-                let ty = find_env_ty(&ctx_input.env_fields, name);
-                quote! { #name: #ty }
+            .map(|n| {
+                let ty = find_env_ty(&ctx.env_fields, n);
+                quote! { #n: #ty }
+            })
+            .collect();
+        let env_names: Vec<_> = pipeline.env.iter().collect();
+        let state_names: Vec<_> = pipeline.state.iter().collect();
+
+        // Trait impl: env getters
+        let mut trait_impls = Vec::new();
+
+        for env_name in &pipeline.env {
+            let ty = find_env_ty(&ctx.env_fields, env_name);
+            trait_impls.push(quote! {
+                fn #env_name(&self) -> &#ty { &self.#env_name }
+            });
+        }
+
+        // For env fields the pipeline doesn't have, panic
+        for ef in &ctx.env_fields {
+            if !pipeline.env.contains(&ef.name) {
+                let name = &ef.name;
+                let ty = &ef.ty;
+                let msg = format!(
+                    "pipeline `{}` does not have env field `{}`",
+                    pipeline.name, name
+                );
+                trait_impls.push(quote! {
+                    fn #name(&self) -> &#ty { panic!(#msg) }
+                });
+            }
+        }
+
+        trait_impls.push(quote! {
+            fn current_phase(&self) -> &'static str { self.current_phase }
+            fn set_current_phase(&mut self, phase: &'static str) { self.current_phase = phase; }
+        });
+
+        // State accessors with guards
+        for sf in &ctx.state_fields {
+            let name = &sf.name;
+            let ty = &sf.ty;
+            let name_str = name.to_string();
+            let getter_mut = format_ident!("{}_mut", name);
+            let setter = format_ident!("set_{}", name);
+            let taker = format_ident!("take_{}", name);
+
+            let read_phases = phases_with_access(&ctx.phases, name);
+            let read_arms: Vec<_> = read_phases.iter().map(|p| quote! { #p }).collect();
+            let read_allowed = read_phases.join(", ");
+
+            let mut_phases = phases_with_mutate(&ctx.phases, name);
+            let mut_arms: Vec<_> = mut_phases.iter().map(|p| quote! { #p }).collect();
+            let mut_allowed = mut_phases.join(", ");
+
+            if pipeline.state.contains(name) {
+                // Pipeline has this state field — generate guarded accessors
+                trait_impls.push(quote! {
+                    fn #name(&self) -> &Option<#ty> {
+                        assert!(
+                            matches!(self.current_phase, #(#read_arms)|*),
+                            "phase `{}` cannot read `{}` (allowed: {})",
+                            self.current_phase, #name_str, #read_allowed
+                        );
+                        &self.#name
+                    }
+                    fn #getter_mut(&mut self) -> &mut Option<#ty> {
+                        assert!(
+                            matches!(self.current_phase, #(#mut_arms)|*),
+                            "phase `{}` cannot mutate `{}` (allowed: {})",
+                            self.current_phase, #name_str, #mut_allowed
+                        );
+                        &mut self.#name
+                    }
+                    fn #setter(&mut self, value: #ty) {
+                        assert!(
+                            matches!(self.current_phase, #(#mut_arms)|*),
+                            "phase `{}` cannot mutate `{}` (allowed: {})",
+                            self.current_phase, #name_str, #mut_allowed
+                        );
+                        self.#name = Some(value);
+                    }
+                    fn #taker(&mut self) -> #ty {
+                        assert!(
+                            matches!(self.current_phase, #(#mut_arms)|*),
+                            "phase `{}` cannot mutate `{}` (allowed: {})",
+                            self.current_phase, #name_str, #mut_allowed
+                        );
+                        self.#name.take()
+                            .unwrap_or_else(|| panic!("{} not yet populated", #name_str))
+                    }
+                });
+            } else {
+                // Pipeline doesn't have this state field — panic
+                let msg = format!(
+                    "pipeline `{}` does not have state field `{}`",
+                    pipeline.name, name
+                );
+                trait_impls.push(quote! {
+                    fn #name(&self) -> &Option<#ty> { panic!(#msg) }
+                    fn #getter_mut(&mut self) -> &mut Option<#ty> { panic!(#msg) }
+                    fn #setter(&mut self, _: #ty) { panic!(#msg) }
+                    fn #taker(&mut self) -> #ty { panic!(#msg) }
+                });
+            }
+        }
+
+        // Runner
+        let phase_calls: Vec<_> = pipeline
+            .run
+            .iter()
+            .map(|phase_name| {
+                let phase_str = phase_name.to_string();
+                quote! {
+                    ctx.set_current_phase(#phase_str);
+                    #phase_name(ctx)?;
+                }
             })
             .collect();
 
-        let env_field_names: Vec<_> = pipeline.env.iter().collect();
-        let state_field_names: Vec<_> = pipeline.state.iter().collect();
-
-        // Per-phase run methods
-        let mut phase_methods = Vec::new();
-        let mut phase_calls = Vec::new();
-
-        for phase_name in &pipeline.run {
-            let phase = find_phase(&ctx_input.phases, phase_name);
-            let method_name = format_ident!("run_{}", phase_name);
-            let view_name = format_ident!("{}View", to_pascal(&phase_name.to_string()));
-
-            let view_env_reads: Vec<_> = phase
-                .reads_env
-                .iter()
-                .map(|name| quote! { #name: &self.#name })
-                .collect();
-
-            let view_state_reads: Vec<_> = phase
-                .reads_state
-                .iter()
-                .map(|name| quote! { #name: &self.#name })
-                .collect();
-
-            let view_mutates: Vec<_> = phase
-                .mutates
-                .iter()
-                .map(|name| quote! { #name: &mut self.#name })
-                .collect();
-
-            phase_methods.push(quote! {
-                fn #method_name(&mut self) -> crate::error::Result<()> {
-                    #phase_name(&mut #view_name {
-                        #(#view_env_reads,)*
-                        #(#view_state_reads,)*
-                        #(#view_mutates,)*
-                    })
-                }
-            });
-
-            phase_calls.push(quote! { ctx.#method_name()?; });
-        }
-
-        output.extend(quote! {
+        out.extend(quote! {
             pub struct #ctx_name {
-                #(#env_struct_fields,)*
-                #(#state_struct_fields,)*
+                #(#env_fields,)*
+                #(#state_fields,)*
+                current_phase: &'static str,
             }
 
             impl #ctx_name {
                 pub fn new(#(#ctor_params),*) -> Self {
                     Self {
-                        #(#env_field_names,)*
-                        #(#state_field_names: None,)*
+                        #(#env_names,)*
+                        #(#state_names: None,)*
+                        current_phase: "",
                     }
                 }
+            }
 
-                #(#phase_methods)*
+            impl CompilerCtx for #ctx_name {
+                #(#trait_impls)*
             }
 
             pub fn #run_fn(ctx: &mut #ctx_name) -> crate::error::Result<()> {
                 #(#phase_calls)*
+                ctx.set_current_phase("");
                 Ok(())
             }
         });
     }
 
-    TokenStream::from(output)
+    TokenStream::from(out)
 }

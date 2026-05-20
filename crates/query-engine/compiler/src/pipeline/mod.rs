@@ -212,7 +212,6 @@ impl<E: PipelineEnv, S: PipelineState> SealedPipeline<E, S> {
 mod ctx_tests {
     use crate::error::Result;
 
-    // Toy types for testing the macro
     #[derive(Clone)]
     struct Ontology(String);
     #[derive(Clone)]
@@ -266,68 +265,83 @@ mod ctx_tests {
         }
     }
 
-    // Phase functions — these take the generated view types
-    fn normalize(view: &mut NormalizeView) -> Result<()> {
-        let input = view.input.take().ok_or_else(|| {
-            crate::error::QueryError::PipelineInvariant("input not available".into())
-        })?;
-        *view.input = Some(Input(format!("normalized({})", input.0)));
+    // Every phase takes &mut impl CompilerCtx — works with any pipeline
+    fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
+        let input = ctx.take_input();
+        ctx.set_input(Input(format!("normalized({})", input.0)));
         Ok(())
     }
 
-    fn lower(view: &mut LowerView) -> Result<()> {
-        let input = view.input.as_ref().ok_or_else(|| {
-            crate::error::QueryError::PipelineInvariant("input not available".into())
-        })?;
-        *view.node = Some(Node(format!("ast({})", input.0)));
+    fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
+        let input = ctx.input().as_ref().expect("input required").clone();
+        ctx.set_node(Node(format!("ast({})", input.0)));
         Ok(())
     }
 
-    fn secure(view: &mut SecureView) -> Result<()> {
-        let node = view.node.as_mut().ok_or_else(|| {
-            crate::error::QueryError::PipelineInvariant("node not available".into())
-        })?;
+    fn secure(ctx: &mut impl CompilerCtx) -> Result<()> {
+        let node = ctx.node_mut().as_mut().expect("node required");
         node.0 = format!("secured({})", node.0);
         Ok(())
     }
 
-    fn codegen(view: &mut CodegenView) -> Result<()> {
-        let node = view.node.as_ref().ok_or_else(|| {
-            crate::error::QueryError::PipelineInvariant("node not available".into())
-        })?;
-        *view.output = Some(Output(format!("sql({})", node.0)));
+    fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
+        let node = ctx.node().as_ref().expect("node required").clone();
+        ctx.set_output(Output(format!("sql({})", node.0)));
         Ok(())
     }
 
     #[test]
     fn full_pipeline_runs_all_phases() {
         let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
-        ctx.input = Some(Input("raw".into()));
+        ctx.set_current_phase("normalize");
+        ctx.set_input(Input("raw".into()));
 
         run_full(&mut ctx).expect("pipeline should succeed");
 
+        ctx.set_current_phase("codegen");
         assert_eq!(
-            ctx.output,
-            Some(Output("sql(secured(ast(normalized(raw))))".into()))
+            ctx.output().as_ref(),
+            Some(&Output("sql(secured(ast(normalized(raw))))".into()))
         );
     }
 
     #[test]
     fn local_pipeline_skips_security() {
         let mut ctx = LocalCtx::new(Ontology("ont".into()));
-        ctx.input = Some(Input("raw".into()));
+        ctx.set_current_phase("normalize");
+        ctx.set_input(Input("raw".into()));
 
         run_local(&mut ctx).expect("pipeline should succeed");
 
-        // No secure phase — node is not wrapped in secured()
-        assert_eq!(ctx.output, Some(Output("sql(ast(normalized(raw)))".into())));
+        ctx.set_current_phase("codegen");
+        assert_eq!(
+            ctx.output().as_ref(),
+            Some(&Output("sql(ast(normalized(raw)))".into()))
+        );
     }
 
     #[test]
-    fn missing_input_returns_error() {
+    fn missing_input_panics() {
         let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
-        // Don't set input
-        let err = run_full(&mut ctx);
-        assert!(err.is_err());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_full(&mut ctx).ok();
+        }));
+        assert!(result.is_err(), "should panic on missing input");
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot read `node`")]
+    fn unauthorized_read_panics() {
+        let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
+        ctx.set_current_phase("normalize");
+        let _ = ctx.node(); // normalize can't read node
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot mutate `output`")]
+    fn unauthorized_mutate_panics() {
+        let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
+        ctx.set_current_phase("normalize");
+        ctx.set_output(Output("bad".into())); // normalize can't write output
     }
 }
