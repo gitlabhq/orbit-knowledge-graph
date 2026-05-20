@@ -20,8 +20,8 @@ Proposed
 
 Because GKG now emits its own billable usage events, the work falls under SOX IT General Controls (ITGC). The compliance team's guidance is that two scoping approaches are possible:
 
-- **Whole-repo scope.** The path taken by AI Gateway. Every change to the repository becomes a SOX-controlled change. AIGW arrived here because billing logic in `lib/billing_events/` was reached through cross-cutting dependency-injection paths that could not be cleanly isolated.
-- **Limited scope (folder / crate level).** Restrict SOX controls to a specific code surface. Compliance accepts this *only if* "everything related to billing events is within that folder," because any code path that can silently alter billing correctness must be inside the controlled surface.
+- **Whole-repo scope.** The path taken by AI Gateway. Every change to the repository becomes a SOX-controlled change.
+- **Limited scope (folder / crate level).** Restrict SOX controls to a specific code surface.
 
 The narrow framing in the [!937 review thread](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539) noted that a naive folder boundary fails for GKG: `BillingObserver` plugs into the generic `PipelineObserver` / `MultiObserver` in `crates/query-engine/pipeline/`, and billing payload fields are populated from JWT claims parsed upstream of the billing module. A change in either could silently drop, duplicate, or corrupt billing events without touching billing code.
 
