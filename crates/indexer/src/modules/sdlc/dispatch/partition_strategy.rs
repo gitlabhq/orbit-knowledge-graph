@@ -69,7 +69,7 @@ impl PartitionStrategy for DatalakePartitionStrategy {
     }
 }
 
-pub fn build_quantile_query(
+fn build_quantile_query(
     source_table: &str,
     partition_column: &str,
     num_partitions: u32,
@@ -104,7 +104,7 @@ pub fn build_quantile_query(
     )
 }
 
-pub fn boundaries_from_splits(
+fn boundaries_from_splits(
     min_val: &str,
     quantile_splits: &[String],
     max_val: &str,
@@ -128,7 +128,7 @@ pub fn boundaries_from_splits(
     boundaries
 }
 
-pub fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
+pub(crate) fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
     let skip = match scope {
         EtlScope::Namespaced => 1,
         EtlScope::Global => 0,
