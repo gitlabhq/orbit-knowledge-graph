@@ -38,11 +38,11 @@ graph instead of a GitLab instance.
 
 | Tool | Description |
 |------|-------------|
-| `query_graph` | Execute a graph query using the Orbit query DSL against the local graph. |
-| `get_graph_schema` | Fetch the schema: node types, properties, and relationship types present in the local graph. |
+| `run_sql` | Execute a read-only SQL query against the local DuckDB graph. |
+| `get_graph_schema` | Fetch the schema: table names, columns, and data types present in the local DuckDB. |
 
-The contract is identical to Orbit Remote, so any skill or agent prompt that
-works against Remote works against Local without changes.
+Unlike Orbit Remote (which exposes a JSON query DSL), Orbit Local speaks raw
+DuckDB SQL — agents compose SQL directly against the property graph tables.
 
 > [!note]
 > A planned `glab orbit setup` subcommand will install the Orbit skill and
@@ -99,7 +99,7 @@ Map a module:
 > "Use Orbit to list every definition declared in `src/auth/` and show their
 > kind."
 
-The agent composes the JSON query DSL and calls `query_graph` on your behalf.
+The agent composes SQL and calls `run_sql` on your behalf.
 
 ## What's in the local graph
 
