@@ -2,7 +2,7 @@ use arrow::array::{StringArray, UInt64Array};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
-use crate::indexer::common::{TestContext, handler_context, namespace_envelope, namespace_handler};
+use crate::indexer::common::{TestContext, entity_envelope, entity_handler, handler_context};
 
 pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     ctx.execute(&format!(
@@ -32,9 +32,9 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .expect("handler should succeed");
 

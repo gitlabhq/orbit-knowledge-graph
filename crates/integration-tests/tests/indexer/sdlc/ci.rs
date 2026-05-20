@@ -5,8 +5,8 @@ use integration_testkit::t;
 use crate::indexer::common::{
     TestContext, assert_edge_tags_by_source, assert_edge_tags_by_target,
     assert_edges_have_traversal_path, assert_node_count, create_namespace, create_project,
-    create_runner, create_runner_namespace, create_runner_project, create_user, global_envelope,
-    global_handler, handler_context, namespace_envelope, namespace_handler,
+    create_runner, create_runner_namespace, create_runner_project, create_user, entity_envelope,
+    entity_handler, global_entity_envelope, handler_context,
 };
 
 pub async fn processes_pipelines(ctx: &TestContext) {
@@ -22,9 +22,9 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Pipeline", 1, 100))
         .await
         .unwrap();
 
@@ -114,9 +114,9 @@ pub async fn processes_stages(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Stage", 1, 100))
         .await
         .unwrap();
 
@@ -158,9 +158,9 @@ pub async fn processes_jobs(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Job", 1, 100))
         .await
         .unwrap();
 
@@ -225,9 +225,19 @@ pub async fn processes_ci_hierarchy(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Pipeline", 1, 100))
+        .await
+        .unwrap();
+    entity_handler(ctx)
+        .await
+        .handle(handler_context(ctx), entity_envelope("Stage", 1, 100))
+        .await
+        .unwrap();
+    entity_handler(ctx)
+        .await
+        .handle(handler_context(ctx), entity_envelope("Job", 1, 100))
         .await
         .unwrap();
 
@@ -258,9 +268,9 @@ pub async fn processes_pipeline_auto_canceled_by(ctx: &TestContext) {
         "ALTER TABLE siphon_p_ci_pipelines UPDATE auto_canceled_by_id = 5002 WHERE id = 5001 SETTINGS mutations_sync = 1",
     ).await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Pipeline", 1, 100))
         .await
         .unwrap();
 
@@ -293,14 +303,14 @@ pub async fn processes_job_in_pipeline_and_runs_on(ctx: &TestContext) {
          VALUES (7001, 1, 6001, 5001, 1000, 9001, 'Ci::Build', 'compile', 'success', 'main', false, '1/100/1000/', '2024-01-20 12:00:00')",
     ).await;
 
-    global_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(ctx), global_entity_envelope("Runner"))
         .await
         .unwrap();
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Job", 1, 100))
         .await
         .unwrap();
 
@@ -318,14 +328,25 @@ pub async fn processes_runs_for_group_and_project(ctx: &TestContext) {
     create_runner_namespace(ctx, 1, 9002, 100, "1/100/").await;
     create_runner_project(ctx, 1, 9003, 1000, "1/100/1000/").await;
 
-    global_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(ctx), global_entity_envelope("Runner"))
         .await
         .unwrap();
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("RUNS_FOR_GROUP_siphon_ci_runner_namespaces", 1, 100),
+        )
+        .await
+        .unwrap();
+    entity_handler(ctx)
+        .await
+        .handle(
+            handler_context(ctx),
+            entity_envelope("RUNS_FOR_PROJECT_siphon_ci_runner_projects", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -364,9 +385,20 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
          VALUES (1, 1000, 1000, 7001, 1, 1, 5002, 5001, '1/100/1000/', '2024-01-20 12:00:00')",
     ).await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("CHILD_OF_siphon_ci_sources_pipelines", 1, 100),
+        )
+        .await
+        .unwrap();
+    entity_handler(ctx)
+        .await
+        .handle(
+            handler_context(ctx),
+            entity_envelope("TRIGGERS_PIPELINE_siphon_ci_sources_pipelines", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -439,9 +471,9 @@ pub async fn processes_job_metadata(ctx: &TestContext) {
          VALUES (9001, 7001, 1000, 1, 3600, 2, true, 'production', '1/100/1000/', '2024-01-20 12:00:00')",
     ).await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("JobMetadata", 1, 100))
         .await
         .unwrap();
 

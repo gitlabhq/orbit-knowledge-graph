@@ -5,7 +5,7 @@ use integration_testkit::t;
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
     assert_node_count, create_member, create_namespace, create_namespace_with_path, create_route,
-    create_user, handler_context, namespace_envelope, namespace_handler,
+    create_user, entity_envelope, entity_handler, handler_context,
 };
 
 pub async fn processes_and_transforms_groups(ctx: &TestContext) {
@@ -28,9 +28,9 @@ pub async fn processes_and_transforms_groups(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -53,9 +53,9 @@ pub async fn creates_group_edges(ctx: &TestContext) {
     create_namespace(ctx, 100, None, 0, "1/100/").await;
     create_namespace(ctx, 101, Some(100), 0, "1/100/101/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -68,9 +68,9 @@ pub async fn computes_full_path_for_top_level_group(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("acme")).await;
     create_route(ctx, 100, 100, "Namespace", "acme", 100, "1/100/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -119,9 +119,9 @@ pub async fn computes_full_path_for_nested_subgroups(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -150,9 +150,9 @@ pub async fn route_rename_updates_full_path(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("old-name")).await;
     create_route(ctx, 100, 100, "Namespace", "old-name", 100, "1/100/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -188,9 +188,9 @@ pub async fn route_rename_updates_full_path(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -220,9 +220,9 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -273,9 +273,9 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -298,9 +298,9 @@ pub async fn child_route_reflects_parent_rename(ctx: &TestContext) {
 pub async fn no_route_falls_back_to_slug(ctx: &TestContext) {
     create_namespace_with_path(ctx, 100, None, 0, "1/100/", Some("my-group")).await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Group", 1, 100))
         .await
         .unwrap();
 
@@ -322,9 +322,12 @@ pub async fn creates_member_of_edges_for_groups(ctx: &TestContext) {
     create_member(ctx, 1, 100, "Namespace", "1/100/").await;
     create_member(ctx, 2, 100, "Namespace", "1/100/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("MEMBER_OF_siphon_members", 1, 100),
+        )
         .await
         .unwrap();
 

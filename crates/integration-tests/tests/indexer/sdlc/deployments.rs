@@ -4,7 +4,7 @@ use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, create_user, handler_context, namespace_envelope, namespace_handler,
+    create_project, create_user, entity_envelope, entity_handler, handler_context,
 };
 
 pub async fn processes_deployments(ctx: &TestContext) {
@@ -22,9 +22,9 @@ pub async fn processes_deployments(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Deployment", 1, 100))
         .await
         .unwrap();
 
@@ -70,9 +70,9 @@ pub async fn processes_deployment_environment_link(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Deployment", 1, 100))
         .await
         .unwrap();
 
@@ -101,9 +101,12 @@ pub async fn processes_deployment_merge_request_links(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("DEPLOYED_TO_siphon_deployment_merge_requests", 1, 100),
+        )
         .await
         .unwrap();
 

@@ -5,8 +5,8 @@ use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
-    assert_node_count, create_namespace, create_project, handler_context, namespace_envelope,
-    namespace_handler,
+    assert_node_count, create_namespace, create_project, entity_envelope, entity_handler,
+    handler_context,
 };
 
 pub async fn processes_vulnerabilities(ctx: &TestContext) {
@@ -28,9 +28,12 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("Vulnerability", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -82,9 +85,12 @@ pub async fn processes_scanners(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("VulnerabilityScanner", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -123,9 +129,12 @@ pub async fn processes_vulnerability_identifiers(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("VulnerabilityIdentifier", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -184,9 +193,9 @@ pub async fn processes_findings(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Finding", 1, 100))
         .await
         .unwrap();
 
@@ -262,9 +271,12 @@ pub async fn processes_vulnerability_with_user_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("Vulnerability", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -304,9 +316,12 @@ pub async fn processes_vulnerability_finding_edge(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("Vulnerability", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -375,9 +390,12 @@ pub async fn processes_vulnerability_occurrences(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("VulnerabilityOccurrence", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -496,9 +514,12 @@ pub async fn processes_vulnerability_merge_request_links(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("FIXES_siphon_vulnerability_merge_request_links", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -551,9 +572,16 @@ pub async fn processes_vulnerability_occurrence_identifiers(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope(
+                "HAS_IDENTIFIER_siphon_vulnerability_occurrence_identifiers",
+                1,
+                100,
+            ),
+        )
         .await
         .unwrap();
 
@@ -597,9 +625,12 @@ pub async fn processes_security_scans(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("SecurityScan", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -666,9 +697,12 @@ pub async fn processes_security_scan_finding_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("SecurityScan", 1, 100),
+        )
         .await
         .unwrap();
 

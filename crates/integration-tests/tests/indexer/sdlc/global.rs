@@ -3,7 +3,7 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_node_count, global_envelope, global_handler, handler_context,
+    TestContext, assert_node_count, entity_handler, global_entity_envelope, handler_context,
 };
 
 pub async fn processes_and_transforms_users(ctx: &TestContext) {
@@ -28,9 +28,9 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
     )
     .await;
 
-    global_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(ctx), global_entity_envelope("User"))
         .await
         .expect("handler should succeed");
 
@@ -78,9 +78,9 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     )
     .await;
 
-    global_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), global_envelope())
+        .handle(handler_context(ctx), global_entity_envelope("User"))
         .await
         .expect("handler should succeed");
 

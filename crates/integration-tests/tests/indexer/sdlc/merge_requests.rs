@@ -4,7 +4,7 @@ use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edge_tags_by_target, assert_edges_have_traversal_path, assert_node_count,
-    create_namespace, handler_context, namespace_envelope, namespace_handler,
+    create_namespace, entity_envelope, entity_handler, handler_context,
 };
 
 pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
@@ -70,9 +70,12 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("MergeRequest", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -198,9 +201,12 @@ pub async fn metric_columns_read_from_siphon_not_stale_denorm(ctx: &TestContext)
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("MergeRequest", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -269,9 +275,12 @@ pub async fn processes_merge_requests_closing_issues(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("CLOSES_siphon_merge_requests_closing_issues", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -304,9 +313,12 @@ pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("REVIEWER_siphon_merge_request_reviewers", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -369,9 +381,12 @@ pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("APPROVED_siphon_approvals", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -433,9 +448,12 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("ASSIGNED_siphon_merge_request_assignees", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -495,9 +513,12 @@ pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("HAS_LABEL_siphon_label_links", 1, 100),
+        )
         .await
         .unwrap();
 

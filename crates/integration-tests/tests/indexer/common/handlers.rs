@@ -27,28 +27,16 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
     )
 }
 
-pub async fn namespace_handler(ctx: &TestContext) -> Arc<dyn Handler> {
+pub async fn entity_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
+    indexer::modules::sdlc::register_entity_handlers(&registry, &config, &ontology)
         .await
-        .expect("failed to register SDLC handlers");
+        .expect("failed to register entity handlers");
     registry
-        .find_by_name("namespace_handler")
-        .expect("namespace_handler not found")
-}
-
-pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
-    let config = create_test_indexer_config(&ctx.config);
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
-    registry
-        .find_by_name("global_handler")
-        .expect("global_handler not found")
+        .find_by_name("entity_handler")
+        .expect("entity_handler not found")
 }
 
 pub fn default_test_watermark() -> DateTime<Utc> {
@@ -57,21 +45,30 @@ pub fn default_test_watermark() -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
+pub fn entity_envelope(entity_kind: &str, org_id: i64, namespace_id: i64) -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
-            "namespace": namespace_id,
-            "traversal_path": format!("{org_id}/{namespace_id}/"),
-            "watermark": default_test_watermark().to_rfc3339()
+            "dispatch_id": "integration-test",
+            "entity_kind": entity_kind,
+            "watermark": default_test_watermark().to_rfc3339(),
+            "scope": {
+                "Namespace": {
+                    "namespace_id": namespace_id,
+                    "traversal_path": format!("{org_id}/{namespace_id}/")
+                }
+            }
         })
         .to_string(),
     )
 }
 
-pub fn global_envelope() -> Envelope {
+pub fn global_entity_envelope(entity_kind: &str) -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
-            "watermark": default_test_watermark().to_rfc3339()
+            "dispatch_id": "integration-test",
+            "entity_kind": entity_kind,
+            "watermark": default_test_watermark().to_rfc3339(),
+            "scope": "Global"
         })
         .to_string(),
     )

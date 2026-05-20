@@ -5,8 +5,8 @@ use integration_testkit::t;
 use crate::indexer::common::{
     TestContext, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
     assert_node_count, create_member, create_namespace, create_namespace_with_path, create_project,
-    create_project_with_path, create_route, create_user, handler_context, namespace_envelope,
-    namespace_handler,
+    create_project_with_path, create_route, create_user, entity_envelope, entity_handler,
+    handler_context,
 };
 
 pub async fn processes_projects(ctx: &TestContext) {
@@ -14,9 +14,9 @@ pub async fn processes_projects(ctx: &TestContext) {
     create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
     create_project(ctx, 1001, 100, 2, 20, "1/100/1001/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Project", 1, 100))
         .await
         .unwrap();
 
@@ -76,9 +76,9 @@ pub async fn computes_full_path_for_projects(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Project", 1, 100))
         .await
         .unwrap();
 
@@ -109,9 +109,9 @@ pub async fn project_route_update_changes_full_path(ctx: &TestContext) {
     create_route(ctx, 200, 200, "Namespace", "org/team", 200, "1/100/200/").await;
     create_route(ctx, 1000, 1000, "Project", "org/app", 100, "1/100/1000/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Project", 1, 100))
         .await
         .unwrap();
 
@@ -143,9 +143,9 @@ pub async fn project_route_update_changes_full_path(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("Project", 1, 100))
         .await
         .unwrap();
 
@@ -166,9 +166,12 @@ pub async fn creates_member_of_edges_for_projects(ctx: &TestContext) {
     create_user(ctx, 1).await;
     create_member(ctx, 1, 1000, "Project", "1/100/").await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("MEMBER_OF_siphon_members", 1, 100),
+        )
         .await
         .unwrap();
 

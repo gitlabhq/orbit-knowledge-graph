@@ -4,7 +4,7 @@ use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_edge_tags_by_target, assert_edges_have_traversal_path, assert_node_count,
-    create_namespace, handler_context, namespace_envelope, namespace_handler,
+    create_namespace, entity_envelope, entity_handler, handler_context,
 };
 
 pub async fn processes_work_items_with_edges(ctx: &TestContext) {
@@ -25,9 +25,9 @@ pub async fn processes_work_items_with_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("WorkItem", 1, 100))
         .await
         .unwrap();
 
@@ -78,9 +78,9 @@ pub async fn processes_work_item_single_value_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("WorkItem", 1, 100))
         .await
         .unwrap();
 
@@ -115,9 +115,12 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("ASSIGNED_siphon_issue_assignees", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -160,9 +163,12 @@ pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("HAS_LABEL_siphon_label_links", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -195,9 +201,12 @@ pub async fn processes_work_item_parent_links(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("CONTAINS_siphon_work_item_parent_links", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -228,9 +237,12 @@ pub async fn processes_issue_links(ctx: &TestContext) {
     )
     .await;
 
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(
+            handler_context(ctx),
+            entity_envelope("RELATED_TO_siphon_issue_links", 1, 100),
+        )
         .await
         .unwrap();
 
@@ -300,11 +312,11 @@ pub async fn clamps_out_of_range_due_date_to_null(ctx: &TestContext) {
     assert_eq!(days.value(2), 0);
 
     // The handler must succeed end-to-end despite the poisoned source rows.
-    namespace_handler(ctx)
+    entity_handler(ctx)
         .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .handle(handler_context(ctx), entity_envelope("WorkItem", 1, 100))
         .await
-        .expect("namespace_handler must not fail on out-of-range Date32 input");
+        .expect("entity_handler must not fail on out-of-range Date32 input");
 
     assert_node_count(ctx, "gl_work_item", 3).await;
 
