@@ -1896,4 +1896,29 @@ mod tests {
             "state filter must be applied on MR node table, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn multi_filter_range_compiles_both_predicates() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "node_ids": [1],
+                     "filters": {
+                         "created_at": [
+                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
+                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                         ]
+                     },
+                     "columns": ["id", "created_at"]},
+            "limit": 10
+        }"#;
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains(">=") && sql.contains("<"),
+            "both range predicates must appear in SQL, got:\n{sql}"
+        );
+    }
 }

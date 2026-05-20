@@ -280,8 +280,10 @@ fn enforce_return_columns(
                         TableRef::scan_final(table, &node.id)
                     } else {
                         let mut node_predicates = Vec::new();
-                        for (prop, filter) in &node.filters {
-                            node_predicates.push(filter_to_expr(&node.id, prop, filter));
+                        for (prop, filters) in &node.filters {
+                            for filter in filters {
+                                node_predicates.push(filter_to_expr(&node.id, prop, filter));
+                            }
                         }
                         if !node.node_ids.is_empty() {
                             node_predicates.push(id_list_predicate(
