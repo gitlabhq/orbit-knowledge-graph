@@ -212,6 +212,52 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "enable before release to validate parity with GlobalHandler"]
+    async fn handle_all_global_entities() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let entity_names: Vec<String> = plans.global.iter().map(|p| p.name.clone()).collect();
+        let handler = build_test_handler();
+
+        for entity_kind in entity_names {
+            let payload = serde_json::json!({
+                "dispatch_id": "20240121T000000",
+                "entity_kind": entity_kind,
+                "watermark": "2024-01-21T00:00:00Z",
+                "scope": "Global"
+            })
+            .to_string();
+            let envelope = TestEnvelopeFactory::simple(&payload);
+
+            let result = handler.handle(test_handler_context(), envelope).await;
+            assert!(result.is_ok(), "failed for global entity {entity_kind}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "enable before release to validate parity with NamespaceHandler"]
+    async fn handle_all_namespaced_entities() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let entity_names: Vec<String> = plans.namespaced.iter().map(|p| p.name.clone()).collect();
+        let handler = build_test_handler();
+
+        for entity_kind in entity_names {
+            let payload = serde_json::json!({
+                "dispatch_id": "20240121T000000",
+                "entity_kind": entity_kind,
+                "watermark": "2024-01-21T00:00:00Z",
+                "scope": { "Namespace": { "namespace_id": 100, "traversal_path": "42/100/" } }
+            })
+            .to_string();
+            let envelope = TestEnvelopeFactory::simple(&payload);
+
+            let result = handler.handle(test_handler_context(), envelope).await;
+            assert!(result.is_ok(), "failed for namespaced entity {entity_kind}");
+        }
+    }
+
+    #[tokio::test]
     async fn handle_with_partition_assignment() {
         let handler = build_test_handler();
 
