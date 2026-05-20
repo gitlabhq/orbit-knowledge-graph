@@ -400,7 +400,7 @@ mod tests {
 
     /// Aggregation with a relationship and a property-less `count(target)`
     /// must resolve correctly without ClickHouse `Database does not exist`
-    /// errors. The v2 lowerer uses FK-shortcut joins for IN_PROJECT,
+    /// errors. The lowerer uses FK-shortcut joins for IN_PROJECT,
     /// joining MR and Project via `mr.project_id` instead of an edge scan.
     #[test]
     fn aggregation_with_relationship_emits_no_bare_node_ref() {
@@ -474,7 +474,7 @@ mod tests {
     }
 
     /// When the target node has filters, the count must still be bounded
-    /// by those filters. The v2 lowerer uses FK-shortcut joins for
+    /// by those filters. The lowerer uses FK-shortcut joins for
     /// IN_PROJECT, so the MR table is joined directly and the state
     /// filter appears as `mr.state = 'opened'` in the WHERE clause.
     #[test]
@@ -665,7 +665,7 @@ mod tests {
             sql.contains("f.traversal_path = b.traversal_path"),
             "frontier intersection should stay within one traversal_path, got:\n{sql}"
         );
-        // v2 lowerer uses `forward` CTE seeded from _nf_start.
+        // lowerer uses `forward` CTE seeded from _nf_start.
         assert!(
             sql.contains("forward") && sql.contains("FROM _nf_start"),
             "forward CTE should seed from _nf_start, got:\n{sql}"
@@ -735,7 +735,7 @@ mod tests {
     }
 
     /// Wildcard path finding passes `*` through as the relationship_kind
-    /// on all hops. The v2 lowerer scans all edge tables (UNION ALL) to
+    /// on all hops. The lowerer scans all edge tables (UNION ALL) to
     /// cover all relationship types.
     #[test]
     fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
@@ -1048,7 +1048,7 @@ mod tests {
         );
         assert!(
             !sql.contains("_cascade_mr"),
-            "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
+            "lowerer should not emit cascade CTEs, got:\n{sql}"
         );
         // FK elision replaces edge-chain JOINs with direct FK joins.
         // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
@@ -1063,7 +1063,7 @@ mod tests {
     }
 
     /// Multi-hop traversal with a pinned source node must generate UNION ALL
-    /// arms for each depth. The v2 lowerer uses inline edge JOINs within
+    /// arms for each depth. The lowerer uses inline edge JOINs within
     /// each arm instead of frontier CTEs.
     #[test]
     fn multi_hop_traversal_generates_hop_frontier_ctes() {
@@ -1088,7 +1088,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer uses UNION ALL arms for variable-length hops.
+        // lowerer uses UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
@@ -1096,7 +1096,7 @@ mod tests {
         // No frontier CTEs — v2 uses inline edge JOINs.
         assert!(
             !sql.contains("_thop0_1") && !sql.contains("_thop0_2"),
-            "v2 lowerer should not emit frontier CTEs, got:\n{sql}"
+            "lowerer should not emit frontier CTEs, got:\n{sql}"
         );
         // Pinned source node_ids must be pushed into the arms.
         assert!(
@@ -1110,7 +1110,7 @@ mod tests {
         );
     }
 
-    /// Multi-hop traversal with a pinned to-side node. The v2 lowerer
+    /// Multi-hop traversal with a pinned to-side node. The lowerer
     /// uses UNION ALL arms with inline edge JOINs instead of frontier CTEs.
     /// The pinned `node_ids` filter is pushed into the outer WHERE.
     #[test]
@@ -1136,10 +1136,10 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer uses UNION ALL for variable-length, no frontier CTEs.
+        // lowerer uses UNION ALL for variable-length, no frontier CTEs.
         assert!(
             !sql.contains("_thop0_1"),
-            "v2 lowerer should not emit frontier CTEs, got:\n{sql}"
+            "lowerer should not emit frontier CTEs, got:\n{sql}"
         );
         assert!(
             sql.contains("UNION ALL"),
@@ -1154,7 +1154,7 @@ mod tests {
 
     /// Multi-hop aggregation with a pinned root must generate a UNION ALL
     /// subquery with depth-1 and depth-2 arms for the variable-length
-    /// CONTAINS relationship. The v2 lowerer uses inline UNION ALL instead
+    /// CONTAINS relationship. The lowerer uses inline UNION ALL instead
     /// of cascade CTEs.
     #[test]
     fn multi_hop_aggregation_generates_cascade_cte() {
@@ -1181,7 +1181,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer emits UNION ALL arms for variable-length hops.
+        // lowerer emits UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "multi-hop aggregation should use UNION ALL for variable-length hops, got:\n{sql}"
@@ -1189,7 +1189,7 @@ mod tests {
         // No cascade CTEs.
         assert!(
             !sql.contains("_cascade_f"),
-            "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
+            "lowerer should not emit cascade CTEs, got:\n{sql}"
         );
         assert!(
             sql.contains("startsWith"),
@@ -1313,7 +1313,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer pushes the denorm filter to edge tags — no _nf CTE.
+        // lowerer pushes the denorm filter to edge tags — no _nf CTE.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
@@ -1321,7 +1321,7 @@ mod tests {
         // No _nf_mr CTE needed — filter is fully on the edge.
         assert!(
             !sql.contains("_nf_mr"),
-            "v2 lowerer should not emit _nf_mr CTE, got:\n{sql}"
+            "lowerer should not emit _nf_mr CTE, got:\n{sql}"
         );
     }
 
@@ -1343,7 +1343,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer pushes IN-list filter to edge tags via hasAny.
+        // lowerer pushes IN-list filter to edge tags via hasAny.
         assert!(
             sql.contains("hasAny(e0.target_tags"),
             "IN-list denorm filter must use hasAny on edge target_tags, got:\n{sql}"
@@ -1372,7 +1372,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer pushes single-value IN-list to edge tags via has.
+        // lowerer pushes single-value IN-list to edge tags via has.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "single-value IN-list denorm must use has on edge target_tags, got:\n{sql}"
@@ -1401,7 +1401,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer emits a _filter_mr CTE for the non-denormalized filter
+        // lowerer emits a _filter_mr CTE for the non-denormalized filter
         // and pushes the denormalized filter to edge tags.
         assert!(
             sql.contains("_filter_mr"),
@@ -1419,7 +1419,7 @@ mod tests {
         );
     }
 
-    /// When node_ids are present alongside filters, the v2 lowerer applies
+    /// When node_ids are present alongside filters, the lowerer applies
     /// both the node_ids filter (e0.target_id IN [...]) and the denorm tag
     /// filter (has on target_tags) to the edge. Both filters narrow the scan.
     #[test]
@@ -1475,7 +1475,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer pushes the denorm filter to edge tags directly.
+        // lowerer pushes the denorm filter to edge tags directly.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
@@ -1483,7 +1483,7 @@ mod tests {
         // No _nf_mr CTE needed — edge tag handles the filter.
         assert!(
             !sql.contains("_nf_mr"),
-            "v2 lowerer should not emit _nf_mr when filter is fully denormalized, got:\n{sql}"
+            "lowerer should not emit _nf_mr when filter is fully denormalized, got:\n{sql}"
         );
     }
 
@@ -1888,7 +1888,7 @@ mod tests {
     }
 
     /// Aggregation query where the target node has a denormalized filter
-    /// (state=merged). The v2 lowerer uses edge-chain JOINs with the
+    /// (state=merged). The lowerer uses edge-chain JOINs with the
     /// denorm filter pushed to `has(e0.target_tags, 'state:merged')`.
     /// No cascade or _nf_mr CTEs are needed.
     #[test]
@@ -1920,10 +1920,10 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // No cascade CTEs in v2 lowerer — edge-chain JOINs replace them.
+        // No cascade CTEs in lowerer — edge-chain JOINs replace them.
         assert!(
             !sql.contains("_cascade_mr"),
-            "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
+            "lowerer should not emit cascade CTEs, got:\n{sql}"
         );
 
         // No _target_mr_ids or _nf_mr CTEs — denorm covers the filter.

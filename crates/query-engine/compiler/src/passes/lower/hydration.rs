@@ -108,7 +108,6 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
             SelectExpr::star(),
         ],
         scan_where,
-        pk,
     );
 
     Ok(Query {

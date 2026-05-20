@@ -7,7 +7,7 @@
 //! Lifecycle: build → configure → seal → execute
 
 pub mod macros;
-use std::collections::HashSet;
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,10 +78,6 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
         StepBuilder { inner: self }
     }
 
-    pub fn pass_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
-        if cond { self.pass(pass).done() } else { self }
-    }
-
     pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {
         self.observer = Some(Arc::new(obs));
         self
@@ -120,16 +116,6 @@ impl<E: PipelineEnv, S: PipelineState> StepBuilder<E, S> {
         self.inner.pass(pass)
     }
 
-    pub fn pass_if<P: CompilerPass<E, S> + 'static>(self, cond: bool, pass: P) -> Self {
-        if cond {
-            StepBuilder {
-                inner: self.inner.pass(pass).inner,
-            }
-        } else {
-            self
-        }
-    }
-
     pub fn observe(self, obs: impl PipelineObserver + 'static) -> PipelineBuilder<E, S> {
         self.inner.observe(obs)
     }
@@ -159,16 +145,6 @@ impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
     pub fn disable(mut self, pass_name: &str) -> Self {
         for step in &mut self.steps {
             if step.pass.name() == pass_name {
-                step.enabled = false;
-            }
-        }
-        self
-    }
-
-    pub fn disable_all(mut self, pass_names: &[&str]) -> Self {
-        let names: HashSet<&str> = pass_names.iter().copied().collect();
-        for step in &mut self.steps {
-            if names.contains(step.pass.name()) {
                 step.enabled = false;
             }
         }
