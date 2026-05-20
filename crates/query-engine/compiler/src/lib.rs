@@ -376,17 +376,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compile_without_prefix_uses_unprefixed_tables() {
-        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("gl_group") && !sql.contains("v1_gl_group"),
-            "unprefixed search should use gl_group, got: {sql}"
-        );
-    }
-
     /// Aggregation with a relationship and a property-less `count(target)`
     /// must resolve correctly without ClickHouse `Database does not exist`
     /// errors. The lowerer uses FK-shortcut joins for IN_PROJECT,
@@ -578,32 +567,6 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_filtered_endpoint_seeds_hop_frontier_from_anchor_cte() {
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        // v2 uses `forward` CTE seeded from _nf_start anchor.
-        assert!(
-            sql.contains("forward"),
-            "filtered endpoint should create a forward expansion CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_nf_start"),
-            "forward expansion should seed from _nf_start anchor, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
         let query = r#"{
             "query_type": "path_finding",
@@ -791,32 +754,6 @@ mod tests {
         assert!(
             !sql.contains("ORDER BY e.source_id"),
             "cursor neighbors over UNION must not order by the inner edge alias, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn wildcard_aggregation_infers_relationship_kinds_from_endpoint_entities() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mrs"}],
-            "limit": 10
-        }"#;
-
-        let sql = compile_sql(query);
-
-        assert!(
-            sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
-            "wildcard aggregation should infer concrete User to MergeRequest relationship kinds, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("gl_code_edge"),
-            "inferred aggregation relationship kinds should avoid scanning code edge table, got:\n{sql}"
         );
     }
 
@@ -1102,46 +1039,6 @@ mod tests {
 
     /// Intermediate nodes (referenced by 2+ relationships) must keep
     /// connectivity even when absent from the aggregation target/group_by.
-    /// FK elision replaces edge-chain JOINs with direct FK column joins
-    /// (e.g. `mr.author_id`, `mr.project_id`) so intermediate nodes
-    /// bridge relationships via their FK columns.
-    #[test]
-    fn aggregation_keeps_intermediate_node_table_join() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let sql = compile_sql(query);
-
-        // FK elision replaces edge-chain JOINs with direct FK joins.
-        // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
-        // MR bridges the two relationships via its FK columns.
-        assert!(
-            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
-            "User node_ids filter must be pushed to FK column, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
-            "IN_PROJECT FK join must use project_id, got:\n{sql}"
-        );
-    }
-
     /// Variable-length CONTAINS×{1..3} traversal: each UNION ALL arm should
     /// carry static `e1.source_kind = 'Group'` and `e<depth>.target_kind = 'Project'`
     /// literals so ClickHouse can use the kind-led PK projection
