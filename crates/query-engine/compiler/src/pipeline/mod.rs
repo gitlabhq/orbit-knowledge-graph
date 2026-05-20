@@ -207,3 +207,127 @@ impl<E: PipelineEnv, S: PipelineState> SealedPipeline<E, S> {
         Ok(state)
     }
 }
+
+#[cfg(test)]
+mod ctx_tests {
+    use crate::error::Result;
+
+    // Toy types for testing the macro
+    #[derive(Clone)]
+    struct Ontology(String);
+    #[derive(Clone)]
+    struct SecurityCtx(u32);
+    #[derive(Clone, Debug, PartialEq)]
+    struct Input(String);
+    #[derive(Clone, Debug, PartialEq)]
+    struct Node(String);
+    #[derive(Clone, Debug, PartialEq)]
+    struct Output(String);
+
+    compiler_pipeline_macros::define_compiler_ctx! {
+        env {
+            pub ontology: Ontology,
+            pub security_ctx: SecurityCtx,
+        }
+        state {
+            pub input: Input,
+            pub node: Node,
+            pub output: Output,
+        }
+        phases {
+            normalize {
+                reads_env: [ontology]
+                mutates: [input]
+            }
+            lower {
+                reads_state: [input]
+                mutates: [node]
+            }
+            secure {
+                reads_env: [security_ctx]
+                mutates: [node]
+            }
+            codegen {
+                reads_state: [node]
+                mutates: [output]
+            }
+        }
+        pipelines {
+            full {
+                env: [ontology, security_ctx]
+                state: [input, node, output]
+                run: [normalize, lower, secure, codegen]
+            }
+            local {
+                env: [ontology]
+                state: [input, node, output]
+                run: [normalize, lower, codegen]
+            }
+        }
+    }
+
+    // Phase functions — these take the generated view types
+    fn normalize(view: &mut NormalizeView) -> Result<()> {
+        let input = view.input.take().ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("input not available".into())
+        })?;
+        *view.input = Some(Input(format!("normalized({})", input.0)));
+        Ok(())
+    }
+
+    fn lower(view: &mut LowerView) -> Result<()> {
+        let input = view.input.as_ref().ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("input not available".into())
+        })?;
+        *view.node = Some(Node(format!("ast({})", input.0)));
+        Ok(())
+    }
+
+    fn secure(view: &mut SecureView) -> Result<()> {
+        let node = view.node.as_mut().ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("node not available".into())
+        })?;
+        node.0 = format!("secured({})", node.0);
+        Ok(())
+    }
+
+    fn codegen(view: &mut CodegenView) -> Result<()> {
+        let node = view.node.as_ref().ok_or_else(|| {
+            crate::error::QueryError::PipelineInvariant("node not available".into())
+        })?;
+        *view.output = Some(Output(format!("sql({})", node.0)));
+        Ok(())
+    }
+
+    #[test]
+    fn full_pipeline_runs_all_phases() {
+        let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
+        ctx.input = Some(Input("raw".into()));
+
+        run_full(&mut ctx).expect("pipeline should succeed");
+
+        assert_eq!(
+            ctx.output,
+            Some(Output("sql(secured(ast(normalized(raw))))".into()))
+        );
+    }
+
+    #[test]
+    fn local_pipeline_skips_security() {
+        let mut ctx = LocalCtx::new(Ontology("ont".into()));
+        ctx.input = Some(Input("raw".into()));
+
+        run_local(&mut ctx).expect("pipeline should succeed");
+
+        // No secure phase — node is not wrapped in secured()
+        assert_eq!(ctx.output, Some(Output("sql(ast(normalized(raw)))".into())));
+    }
+
+    #[test]
+    fn missing_input_returns_error() {
+        let mut ctx = FullCtx::new(Ontology("ont".into()), SecurityCtx(1));
+        // Don't set input
+        let err = run_full(&mut ctx);
+        assert!(err.is_err());
+    }
+}

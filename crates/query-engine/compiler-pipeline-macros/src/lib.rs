@@ -2,10 +2,14 @@
 //!
 //! - `#[derive(PipelineEnv)]`   — implements capability traits + `new()` constructor
 //! - `#[derive(PipelineState)]` — wraps fields in `Option`, implements capability traits + `from_*()` constructors
+//! - `define_compiler_ctx! { .. }` — generates per-pipeline context structs with
+//!   per-phase view types for compile-time field access enforcement
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
+
+mod ssot;
 
 fn require_named_fields(
     input: &DeriveInput,
@@ -183,4 +187,13 @@ pub fn derive_pipeline_state(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// Generate per-pipeline context structs and per-phase view structs with
+/// compile-time field access enforcement.
+///
+/// See module-level docs for the full DSL syntax.
+#[proc_macro]
+pub fn define_compiler_ctx(input: TokenStream) -> TokenStream {
+    ssot::generate(input)
 }
