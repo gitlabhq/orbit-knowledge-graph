@@ -83,14 +83,6 @@ impl DispatchableEntity {
         }
     }
 
-    fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
-        let skip = match scope {
-            EtlScope::Namespaced => 1,
-            EtlScope::Global => 0,
-        };
-        order_by.get(skip).map(String::as_str)
-    }
-
     fn build_partition(
         name: &str,
         overrides: &HashMap<String, u32>,
@@ -100,7 +92,11 @@ impl DispatchableEntity {
     ) -> Option<PartitionConfig> {
         let count = overrides.get(name).copied().filter(|&n| n > 1)?;
         let source_table = source_table?.to_owned();
-        let column = Self::partition_column(order_by, scope)?.to_owned();
+        let skip = match scope {
+            EtlScope::Namespaced => 1,
+            EtlScope::Global => 0,
+        };
+        let column = order_by.get(skip)?.to_owned();
         Some(PartitionConfig {
             count,
             source_table,
@@ -574,33 +570,6 @@ mod tests {
         assert_eq!(
             entity_checkpoint_prefix(&scope, "MergeRequest"),
             "ns.100.MergeRequest"
-        );
-    }
-
-    #[test]
-    fn partition_column_namespaced_skips_traversal_path() {
-        let order_by = vec!["traversal_path".into(), "id".into()];
-        assert_eq!(
-            DispatchableEntity::partition_column(&order_by, EtlScope::Namespaced),
-            Some("id")
-        );
-    }
-
-    #[test]
-    fn partition_column_global_uses_first() {
-        let order_by = vec!["id".into()];
-        assert_eq!(
-            DispatchableEntity::partition_column(&order_by, EtlScope::Global),
-            Some("id")
-        );
-    }
-
-    #[test]
-    fn partition_column_none_when_no_non_scope_columns() {
-        let order_by = vec!["traversal_path".into()];
-        assert_eq!(
-            DispatchableEntity::partition_column(&order_by, EtlScope::Namespaced),
-            None
         );
     }
 
