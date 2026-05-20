@@ -41,6 +41,9 @@ pub mod types;
 // pipeline must come before pipelines — its macros.rs defines
 // `define_env_capabilities!` and `define_state_capabilities!` which
 // pipelines.rs invokes.
+// TODO: wire phase functions, then remove cfg gate
+#[cfg(any())]
+pub mod config;
 pub mod passes;
 pub mod pipeline;
 pub mod pipelines;
