@@ -7,6 +7,7 @@ use gkg_server_config::HandlerConfiguration;
 use tracing::{info, warn};
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::entity_status_key;
 use crate::modules::sdlc::entity_pipeline::EntityPipeline;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::topic::{EntityIndexingRequest, IndexingScope};
@@ -70,11 +71,15 @@ impl Handler for EntityIndexingHandler {
             "starting entity indexing"
         );
 
-        if let IndexingScope::Namespace { traversal_path, .. } = &request.scope {
-            context
-                .indexing_status
-                .record_start(traversal_path, started_at)
-                .await;
+        let status_key = match &request.scope {
+            IndexingScope::Namespace { traversal_path, .. } => {
+                Some(entity_status_key(traversal_path, &request.entity_kind))
+            }
+            IndexingScope::Global => None,
+        };
+
+        if let Some(key) = &status_key {
+            context.indexing_status.record_start(key, started_at).await;
         }
 
         let result = pipeline
@@ -89,11 +94,11 @@ impl Handler for EntityIndexingHandler {
         self.metrics
             .record_handler_duration("entity_handler", elapsed.as_secs_f64());
 
-        if let IndexingScope::Namespace { traversal_path, .. } = &request.scope {
+        if let Some(key) = &status_key {
             context
                 .indexing_status
                 .record_completion(
-                    traversal_path,
+                    key,
                     started_at,
                     completed_at,
                     result.as_ref().err().map(ToString::to_string),

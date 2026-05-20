@@ -11,6 +11,7 @@ use super::metrics::CodeMetrics;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::namespace_status_key;
 use crate::locking::LockGuard;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
@@ -220,9 +221,10 @@ impl CodeIndexingTaskHandler {
             }
         };
 
+        let status_key = namespace_status_key(&request.traversal_path);
         context
             .indexing_status
-            .record_start(&request.traversal_path, started_at)
+            .record_start(&status_key, started_at)
             .await;
 
         let result = self
@@ -242,7 +244,7 @@ impl CodeIndexingTaskHandler {
         context
             .indexing_status
             .record_completion(
-                &request.traversal_path,
+                &status_key,
                 started_at,
                 Utc::now(),
                 result.as_ref().err().map(ToString::to_string),

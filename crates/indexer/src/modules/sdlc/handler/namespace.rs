@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::namespace_status_key;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -66,9 +67,10 @@ impl Handler for NamespaceHandler {
         );
 
         let traversal_path = payload.traversal_path.clone();
+        let status_key = namespace_status_key(&traversal_path);
         context
             .indexing_status
-            .record_start(&traversal_path, started_at)
+            .record_start(&status_key, started_at)
             .await;
 
         let pipeline_context = PipelineContext {
@@ -102,7 +104,7 @@ impl Handler for NamespaceHandler {
         context
             .indexing_status
             .record_completion(
-                &traversal_path,
+                &status_key,
                 started_at,
                 completed_at,
                 result.as_ref().err().map(ToString::to_string),

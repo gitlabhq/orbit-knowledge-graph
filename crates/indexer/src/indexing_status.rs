@@ -42,12 +42,12 @@ impl IndexingStatusStore {
         Self { kv }
     }
 
-    /// Read-modify-write — a concurrent call on the same path could lose the
-    /// previous completion fields. Safe here because NATS message deduping and
-    /// per-path locks already serialize runs for a given traversal path.
-    pub async fn record_start(&self, traversal_path: &str, started_at: DateTime<Utc>) {
-        let previous = self.get(traversal_path).await.unwrap_or_else(|error| {
-            warn!(traversal_path, %error, "failed to read previous progress; starting from scratch");
+    /// Read-modify-write — a concurrent call on the same key could lose the
+    /// previous completion fields. Safe here because NATS message deduping
+    /// serializes runs for the same (entity, scope) pair.
+    pub async fn record_start(&self, key: &str, started_at: DateTime<Utc>) {
+        let previous = self.get(key).await.unwrap_or_else(|error| {
+            warn!(key, %error, "failed to read previous progress; starting from scratch");
             None
         });
         let progress = match previous {
@@ -62,12 +62,12 @@ impl IndexingStatusStore {
                 last_error: None,
             },
         };
-        self.write(traversal_path, progress).await;
+        self.write(key, progress).await;
     }
 
     pub async fn record_completion(
         &self,
-        traversal_path: &str,
+        key: &str,
         started_at: DateTime<Utc>,
         completed_at: DateTime<Utc>,
         error: Option<String>,
@@ -77,7 +77,7 @@ impl IndexingStatusStore {
             .num_milliseconds()
             .max(0) as u64;
         self.write(
-            traversal_path,
+            key,
             IndexingProgress {
                 last_started_at: started_at,
                 last_completed_at: Some(completed_at),
@@ -88,24 +88,15 @@ impl IndexingStatusStore {
         .await;
     }
 
-    pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
-        let key = normalize_key(traversal_path)?;
-        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
+    pub async fn get(&self, key: &str) -> Result<Option<IndexingProgress>, Error> {
+        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, key).await? else {
             return Ok(None);
         };
         let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
         Ok(Some(progress))
     }
 
-    async fn write(&self, traversal_path: &str, progress: IndexingProgress) {
-        let key = match normalize_key(traversal_path) {
-            Ok(key) => key,
-            Err(error) => {
-                warn!(traversal_path, %error, "skipping indexing status record");
-                return;
-            }
-        };
-
+    async fn write(&self, key: &str, progress: IndexingProgress) {
         let payload = match serde_json::to_vec(&progress) {
             Ok(bytes) => Bytes::from(bytes),
             Err(error) => {
@@ -118,7 +109,7 @@ impl IndexingStatusStore {
             .kv
             .kv_put(
                 INDEXING_PROGRESS_BUCKET,
-                &key,
+                key,
                 payload,
                 KvPutOptions::default(),
             )
@@ -129,13 +120,16 @@ impl IndexingStatusStore {
     }
 }
 
-/// `"42/9970/12345/"` → `"status.42.9970.12345"`.
-fn normalize_key(traversal_path: &str) -> Result<String, Error> {
+/// `("42/9970/", "MergeRequest")` → `"status.42.9970.MergeRequest"`.
+pub fn entity_status_key(traversal_path: &str, entity_kind: &str) -> String {
     let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
-    if dotted.is_empty() {
-        return Err(Error::EmptyTraversalPath);
-    }
-    Ok(format!("{KEY_PREFIX}.{dotted}"))
+    format!("{KEY_PREFIX}.{dotted}.{entity_kind}")
+}
+
+/// `"42/9970/12345/"` → `"status.42.9970.12345"`.
+pub fn namespace_status_key(traversal_path: &str) -> String {
+    let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
+    format!("{KEY_PREFIX}.{dotted}")
 }
 
 #[cfg(test)]
@@ -143,7 +137,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_key_formats_paths() {
+    fn entity_status_key_includes_entity_kind() {
+        assert_eq!(
+            entity_status_key("42/9970/", "MergeRequest"),
+            "status.42.9970.MergeRequest"
+        );
+        assert_eq!(
+            entity_status_key("42/9970/12345/", "Pipeline"),
+            "status.42.9970.12345.Pipeline"
+        );
+    }
+
+    #[test]
+    fn namespace_status_key_formats_paths() {
         let cases = [
             ("42/9970/", "status.42.9970"),
             ("42/9970/12345/", "status.42.9970.12345"),
@@ -151,14 +157,7 @@ mod tests {
             ("42//9970", "status.42.9970"),
         ];
         for (input, expected) in cases {
-            assert_eq!(normalize_key(input).unwrap(), expected, "input: {input:?}");
-        }
-
-        for empty in ["", "/", "//"] {
-            assert!(
-                matches!(normalize_key(empty), Err(Error::EmptyTraversalPath)),
-                "input: {empty:?}"
-            );
+            assert_eq!(namespace_status_key(input), expected, "input: {input:?}");
         }
     }
 

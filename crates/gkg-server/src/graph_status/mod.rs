@@ -9,8 +9,8 @@ use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::indexing_status::IndexingStatusStore;
-use ontology::Ontology;
+use indexer::indexing_status::{self, IndexingStatusStore};
+use ontology::{EtlScope, Ontology};
 use query_engine::compiler::{ResultContext, SecurityContext, codegen};
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -113,32 +113,67 @@ impl GraphStatusService {
             return Ok(None);
         };
 
-        let progress = match store.get(traversal_path).await {
-            Ok(p) => p,
-            Err(error) => {
-                warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
-                return Ok(Some(IndexingStatus {
-                    state: IndexingState::Unknown.into(),
-                    ..Default::default()
-                }));
-            }
-        };
+        let entity_kinds: Vec<&str> = self
+            .ontology
+            .nodes()
+            .filter(|n| {
+                n.etl
+                    .as_ref()
+                    .is_some_and(|etl| etl.scope() == EtlScope::Namespaced)
+            })
+            .map(|n| n.name.as_str())
+            .collect();
 
-        Ok(Some(match progress {
-            None => IndexingStatus {
-                state: IndexingState::NotIndexed.into(),
-                ..Default::default()
-            },
-            Some(p) => {
-                let state = derive_indexing_state(&p);
-                IndexingStatus {
-                    state: state.into(),
-                    last_started_at: Some(p.last_started_at.to_rfc3339()),
-                    last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
-                    last_duration_ms: p.last_duration_ms,
-                    last_error: p.last_error,
+        let mut worst_state = IndexingState::Indexed;
+        let mut latest_start = None;
+        let mut latest_completion = None;
+        let mut latest_duration = None;
+        let mut latest_error = None;
+        let mut found_any = false;
+
+        for entity_kind in &entity_kinds {
+            let key = indexing_status::entity_status_key(traversal_path, entity_kind);
+            let progress = match store.get(&key).await {
+                Ok(p) => p,
+                Err(error) => {
+                    warn!(%error, key, "failed to read entity indexing progress");
+                    return Ok(Some(IndexingStatus {
+                        state: IndexingState::Unknown.into(),
+                        ..Default::default()
+                    }));
                 }
+            };
+
+            let Some(p) = progress else {
+                worst_state = IndexingState::NotIndexed;
+                continue;
+            };
+            found_any = true;
+
+            let state = derive_indexing_state(&p);
+            if state_priority(state) > state_priority(worst_state) {
+                worst_state = state;
             }
+
+            let is_latest = latest_start.map(|s| p.last_started_at > s).unwrap_or(true);
+            if is_latest {
+                latest_start = Some(p.last_started_at);
+                latest_completion = p.last_completed_at;
+                latest_duration = p.last_duration_ms;
+                latest_error = p.last_error;
+            }
+        }
+
+        if !found_any {
+            worst_state = IndexingState::NotIndexed;
+        }
+
+        Ok(Some(IndexingStatus {
+            state: worst_state.into(),
+            last_started_at: latest_start.map(|t| t.to_rfc3339()),
+            last_completed_at: latest_completion.map(|t| t.to_rfc3339()),
+            last_duration_ms: latest_duration,
+            last_error: latest_error,
         }))
     }
 
@@ -224,6 +259,17 @@ impl GraphStatusService {
             .fetch_arrow()
             .await
             .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))
+    }
+}
+
+fn state_priority(state: IndexingState) -> u8 {
+    match state {
+        IndexingState::Indexed => 0,
+        IndexingState::Indexing => 1,
+        IndexingState::Error => 2,
+        IndexingState::Backfilling => 3,
+        IndexingState::NotIndexed => 4,
+        IndexingState::Unknown => 5,
     }
 }
 
