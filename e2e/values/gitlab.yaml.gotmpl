@@ -1,6 +1,9 @@
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 global:
   edition: ee
+  gatewayApi:
+    enabled: false
+    installEnvoy: false
   # Trust licenses signed by the staging customer portal (loads
   # .test_license_encryption_key.pub as a fallback decryption key) and point the
   # subscription/activation client at the staging portal. Applied to every Rails
