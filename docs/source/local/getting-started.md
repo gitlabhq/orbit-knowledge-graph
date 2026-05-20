@@ -25,20 +25,48 @@ method that matches how you work, then run your first query.
 
 ## Install
 
-Each installer downloads the latest release, verifies its SHA-256 checksum,
-and adds the `orbit` binary to your `PATH`.
+Install the `orbit` binary directly with the one-line installer, or through
+the GitLab CLI (`glab`) if you already use it.
 
-### macOS and Linux
+{{< tabs >}}
+
+{{< tab title="macOS and Linux" >}}
+
+The installer downloads the latest release, verifies its SHA-256 checksum,
+and adds `orbit` to `~/.local/bin`.
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
 ```
 
-### Windows
+{{< /tab >}}
+
+{{< tab title="Windows" >}}
+
+In PowerShell. The installer downloads the latest release, verifies its
+SHA-256 checksum, and adds `orbit.exe` to `%LOCALAPPDATA%\Programs\orbit`.
 
 ```powershell
 irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
 ```
+
+{{< /tab >}}
+
+{{< tab title="GitLab CLI (glab)" >}}
+
+If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed, it
+can download, verify, and keep `orbit` up to date for you.
+
+```shell
+glab orbit local --install
+```
+
+See the [`glab orbit local` reference](https://docs.gitlab.com/cli/orbit/local/)
+for details.
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 Open a new terminal after the install completes, then verify:
 
