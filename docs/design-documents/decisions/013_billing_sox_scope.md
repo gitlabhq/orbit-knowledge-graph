@@ -124,12 +124,6 @@ What stays the same:
 - Day-to-day work on ontology, query compilation, code-graph indexing, and unrelated server features.
 - The current emission and quota-check code paths — the ADR is policy, not behavior.
 
-## Out of scope
-
-- **Tightening the JWT claims schema.** Several billing-relevant fields are `Option<...>` with `#[serde(default)]`. Making them required is tracked separately (the MR !937 follow-up list calls this out) and is not part of the SOX scoping decision.
-- **The CustomersDot quota path's specific control surface.** Quota inputs flow through the same adapter and live in `crates/gkg-billing/src/quota/`, so they are automatically in scope; specific control evidence for quota responses (logging, error handling) is a quota-implementation concern, not a scoping concern.
-- **Workhorse and Rails-side controls.** The Rails JWT-minting code and the Workhorse proxy in front of GKG are governed by their own repositories' SOX scope and CODEOWNERS.
-
 ## References
 
 - Issue: [#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/507)
