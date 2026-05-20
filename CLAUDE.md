@@ -85,6 +85,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Local development (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
+| SOX scope for billing emission | `docs/design-documents/decisions/013_billing_sox_scope.md` (read before touching `crates/gkg-billing/`, `billing_adapter.rs`, or the enumerated hook points in `.gitlab/CODEOWNERS`) |
 | **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
