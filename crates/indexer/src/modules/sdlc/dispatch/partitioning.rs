@@ -6,7 +6,7 @@ use crate::scheduler::TaskError;
 use crate::topic::{IndexingScope, PartitionBounds};
 
 #[async_trait]
-pub trait PartitionStrategy: Send + Sync {
+pub trait Partitioner: Send + Sync {
     async fn compute_boundaries(
         &self,
         source_table: &str,
@@ -16,18 +16,18 @@ pub trait PartitionStrategy: Send + Sync {
     ) -> Result<Vec<PartitionBounds>, TaskError>;
 }
 
-pub struct DatalakePartitionStrategy {
+pub struct DatalakePartitioner {
     datalake: ArrowClickHouseClient,
 }
 
-impl DatalakePartitionStrategy {
+impl DatalakePartitioner {
     pub fn new(datalake: ArrowClickHouseClient) -> Self {
         Self { datalake }
     }
 }
 
 #[async_trait]
-impl PartitionStrategy for DatalakePartitionStrategy {
+impl Partitioner for DatalakePartitioner {
     async fn compute_boundaries(
         &self,
         source_table: &str,

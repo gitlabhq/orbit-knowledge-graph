@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use clickhouse_client::FromArrowColumn;
 use tracing::{debug, info, warn};
 
-use super::partition_strategy::PartitionStrategy;
+use super::partitioning::Partitioner;
 use crate::checkpoint::{Checkpoint, CheckpointStore, entity_checkpoint_prefix};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -116,7 +116,7 @@ pub struct EntityDispatcher {
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
-    partition_strategy: Arc<dyn PartitionStrategy>,
+    partitioner: Arc<dyn Partitioner>,
     entities: Vec<DispatchableEntity>,
     metrics: ScheduledTaskMetrics,
     config: EntityDispatcherConfig,
@@ -127,7 +127,7 @@ impl EntityDispatcher {
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
         checkpoint_store: Arc<dyn CheckpointStore>,
-        partition_strategy: Arc<dyn PartitionStrategy>,
+        partitioner: Arc<dyn Partitioner>,
         ontology: &Ontology,
         metrics: ScheduledTaskMetrics,
         config: EntityDispatcherConfig,
@@ -154,7 +154,7 @@ impl EntityDispatcher {
             nats,
             datalake,
             checkpoint_store,
-            partition_strategy,
+            partitioner,
             entities,
             metrics,
             config,
@@ -328,7 +328,7 @@ impl EntityDispatcher {
     ) -> Result<(u64, u64), TaskError> {
         let query_start = Instant::now();
         let boundaries = self
-            .partition_strategy
+            .partitioner
             .compute_boundaries(
                 &partition.source_table,
                 &partition.column,
