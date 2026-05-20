@@ -45,13 +45,14 @@ struct DispatchableEntity {
 impl DispatchableEntity {
     fn from_node(node: &NodeEntity, partition_overrides: &HashMap<String, u32>) -> Option<Self> {
         let etl = node.etl.as_ref()?;
+        let source_table = match etl {
+            EtlConfig::Table { source, .. } => Some(source.as_str()),
+            EtlConfig::Query { .. } => None,
+        };
         let partition = Self::build_partition(
             &node.name,
             partition_overrides,
-            || match etl {
-                EtlConfig::Table { source, .. } => Some(source.clone()),
-                EtlConfig::Query { .. } => None,
-            },
+            source_table,
             etl.order_by(),
             etl.scope(),
         );
@@ -63,19 +64,20 @@ impl DispatchableEntity {
     }
 
     fn from_edge(
-        name: &str,
+        relationship_kind: &str,
         etl: &EdgeSourceEtlConfig,
         partition_overrides: &HashMap<String, u32>,
     ) -> Self {
+        let name = format!("{relationship_kind}_{}", etl.source);
         let partition = Self::build_partition(
-            name,
+            &name,
             partition_overrides,
-            || Some(etl.source.clone()),
+            Some(&etl.source),
             &etl.order_by,
             etl.scope,
         );
         Self {
-            name: name.to_owned(),
+            name,
             scope: etl.scope,
             partition,
         }
@@ -84,16 +86,16 @@ impl DispatchableEntity {
     fn build_partition(
         name: &str,
         overrides: &HashMap<String, u32>,
-        source_table: impl FnOnce() -> Option<String>,
+        source_table: Option<&str>,
         order_by: &[String],
         scope: EtlScope,
     ) -> Option<PartitionConfig> {
         let count = overrides.get(name).copied().filter(|&n| n > 1)?;
-        let table = source_table()?;
+        let source_table = source_table?.to_owned();
         let column = partition_column(order_by, scope)?.to_owned();
         Some(PartitionConfig {
             count,
-            source_table: table,
+            source_table,
             column,
         })
     }
