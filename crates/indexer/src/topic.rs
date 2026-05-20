@@ -8,7 +8,6 @@ pub fn all_managed_subscriptions() -> Vec<Subscription> {
     vec![
         Subscription::new(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT),
         Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN),
-        Subscription::new(INDEXER_STREAM, ENTITY_INDEXING_SUBJECT_PATTERN),
         Subscription::new(INDEXER_STREAM, CODE_INDEXING_TASK_SUBJECT_PATTERN),
         Subscription::new(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN),
     ]
