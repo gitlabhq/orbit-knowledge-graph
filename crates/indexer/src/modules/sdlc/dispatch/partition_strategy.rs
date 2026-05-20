@@ -4,7 +4,6 @@ use clickhouse_client::FromArrowColumn;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::scheduler::TaskError;
 use crate::topic::{IndexingScope, PartitionBounds};
-use ontology::EtlScope;
 
 #[async_trait]
 pub trait PartitionStrategy: Send + Sync {
@@ -128,14 +127,6 @@ fn boundaries_from_splits(
     boundaries
 }
 
-pub(crate) fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
-    let skip = match scope {
-        EtlScope::Namespaced => 1,
-        EtlScope::Global => 0,
-    };
-    order_by.get(skip).map(String::as_str)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,26 +214,5 @@ mod tests {
             sql.contains("startsWith(traversal_path, '42/100/')"),
             "sql: {sql}"
         );
-    }
-
-    #[test]
-    fn partition_column_namespaced_skips_traversal_path() {
-        let order_by = vec!["traversal_path".into(), "id".into()];
-        assert_eq!(
-            partition_column(&order_by, EtlScope::Namespaced),
-            Some("id")
-        );
-    }
-
-    #[test]
-    fn partition_column_global_uses_first() {
-        let order_by = vec!["id".into()];
-        assert_eq!(partition_column(&order_by, EtlScope::Global), Some("id"));
-    }
-
-    #[test]
-    fn partition_column_none_when_no_non_scope_columns() {
-        let order_by = vec!["traversal_path".into()];
-        assert_eq!(partition_column(&order_by, EtlScope::Namespaced), None);
     }
 }
