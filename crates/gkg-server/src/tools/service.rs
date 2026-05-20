@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use ontology::Ontology;
 use ontology::introspection::{
-    IntrospectionScope, SchemaDomain, SchemaEdge, SchemaResponse, build_schema_edges,
-    build_schema_response,
+    IntrospectionScope, SchemaDomain, SchemaResponse, build_schema_response,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -262,8 +261,8 @@ impl ToolService {
         self.build_graph_schema_response(expand_nodes).domains
     }
 
-    pub fn build_edges(&self) -> Vec<SchemaEdge> {
-        build_schema_edges(&self.ontology, IntrospectionScope::All)
+    pub fn build_edges(&self) -> Vec<String> {
+        self.build_graph_schema_response(&[]).edges
     }
 }
 
@@ -336,13 +335,11 @@ mod tests {
     }
 
     #[test]
-    fn test_edges_show_source_and_target_nodes() {
+    fn test_edges_are_name_only() {
         let output = get_toon_output("{}");
 
-        assert!(
-            output.contains("from") && output.contains("to"),
-            "Edges should have from/to fields"
-        );
+        assert!(output.contains("AUTHORED"), "Missing AUTHORED edge name");
+        assert!(output.contains("CONTAINS"), "Missing CONTAINS edge name");
     }
 
     #[test]
@@ -467,22 +464,15 @@ mod tests {
     }
 
     #[test]
-    fn test_build_edges_returns_all_relationships() {
+    fn test_build_edges_returns_edge_names() {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
         let service = ToolService::new(ontology);
 
         let edges = service.build_edges();
         assert!(!edges.is_empty());
-
-        let authored = edges.iter().find(|e| e.name == "AUTHORED");
-        assert!(authored.is_some(), "Should have AUTHORED edge");
         assert!(
-            !authored.unwrap().from.is_empty(),
-            "AUTHORED should have source types"
-        );
-        assert!(
-            !authored.unwrap().to.is_empty(),
-            "AUTHORED should have target types"
+            edges.iter().any(|e| e == "AUTHORED"),
+            "Should have AUTHORED edge"
         );
     }
 
