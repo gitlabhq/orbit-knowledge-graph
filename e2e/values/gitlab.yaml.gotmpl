@@ -1,13 +1,6 @@
 {{ $v := fromYaml (readFile "../config/versions.yaml") }}
 global:
   edition: ee
-  # Disable bundled envoy-gateway and Gateway API rendering. e2e talks to
-  # webservice directly via Service DNS (see robot-runner job), so no front
-  # door is needed. Envoy-gateway installs cluster-scoped resources
-  # (ClusterRole `gitlab-envoy-gateway-envoy-gateway-role`, GatewayClass
-  # `gitlab-gw`) keyed by release name+namespace; two concurrent e2e jobs
-  # cannot share them and the second helm install fails with
-  # "cannot be imported into the current release".
   gatewayApi:
     enabled: false
     installEnvoy: false
