@@ -37,6 +37,7 @@ GitLab account, no network connection required.
 | [How it works](how-it-works.md) | Indexing pipeline, graph model, query execution |
 | [What Orbit Local indexes](indexing.md) | Code coverage, language support, scope |
 | [Schema reference](schema.md) | The four node types in the local code graph |
+| [Advanced installation and troubleshooting](install-troubleshooting.md) | Pin a version, force reinstall, delete the local graph |
 
 ## Access methods
 

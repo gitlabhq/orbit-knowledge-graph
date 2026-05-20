@@ -20,12 +20,34 @@ title: Get started with Orbit Local
 
 {{< /history >}}
 
-> [!note]
-> Orbit Local is experimental. Until packaged binaries ship,
-> you must build from source.
+Orbit Local runs on your machine. Install the `orbit` binary, pick the access
+method that matches how you work, then run your first query.
 
-Orbit Local runs on your machine. Pick the access method that matches how you
-work, then run your first query.
+## Install
+
+Each installer downloads the latest release, verifies its SHA-256 checksum,
+and adds the `orbit` binary to your `PATH`.
+
+### macOS and Linux
+
+```shell
+curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+```
+
+### Windows
+
+```powershell
+irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
+```
+
+Open a new terminal after the install completes, then verify:
+
+```shell
+orbit --help
+```
+
+To pin a specific version, reinstall, or delete the local graph, see
+[advanced installation and troubleshooting](install-troubleshooting.md).
 
 ## Pick an access method
 
