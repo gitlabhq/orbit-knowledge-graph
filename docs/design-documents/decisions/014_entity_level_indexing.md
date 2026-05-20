@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

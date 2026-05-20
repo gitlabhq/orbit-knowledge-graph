@@ -68,7 +68,8 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::sdlc::dispatch::EntityDispatcher;
+use modules::sdlc::dispatch::partitioning::DatalakePartitioner;
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -126,8 +127,8 @@ pub async fn run(
     let registry = Arc::new(HandlerRegistry::default());
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
-        info!("initializing SDLC handlers");
-        modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        info!("initializing SDLC entity handler");
+        modules::sdlc::register_entity_handlers(&registry, config, &ontology).await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
@@ -207,7 +208,6 @@ pub async fn run_dispatcher(
 ) -> Result<(), DispatcherError> {
     let services = scheduler::connect(&config.nats).await?;
     let graph = config.graph.build_client();
-    let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
@@ -228,17 +228,17 @@ pub async fn run_dispatcher(
         gitlab_client: None,
     };
 
+    let partitioner = Arc::new(DatalakePartitioner::new(config.datalake.build_client()));
+
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
-        Box::new(GlobalDispatcher::new(
+        Box::new(EntityDispatcher::new(
             services.nats.clone(),
+            config.datalake.build_client(),
+            checkpoint_store.clone(),
+            partitioner,
+            ontology,
             metrics.clone(),
-            config.schedule.tasks.global.clone(),
-        )),
-        Box::new(NamespaceDispatcher::new(
-            services.nats.clone(),
-            datalake,
-            metrics.clone(),
-            config.schedule.tasks.namespace.clone(),
+            config.schedule.tasks.entity.clone(),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),

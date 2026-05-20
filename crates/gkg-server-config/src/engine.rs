@@ -450,7 +450,7 @@ pub struct ScheduledTasksConfiguration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IndexerModule {
-    /// SDLC handlers: `global-handler` and `namespace-handler`.
+    /// SDLC handler: `entity-handler` (entity-level indexing, ADR 014).
     Sdlc,
     /// Code indexing handler: clones repositories, runs tree-sitter, writes the code graph.
     Code,
