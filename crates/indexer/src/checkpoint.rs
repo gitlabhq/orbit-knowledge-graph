@@ -17,14 +17,30 @@ pub fn namespace_position_key(namespace_id: i64) -> String {
     format!("ns.{namespace_id}")
 }
 
-pub fn entity_checkpoint_prefix(scope: &crate::topic::IndexingScope, entity_kind: &str) -> String {
-    let base = match scope {
-        crate::topic::IndexingScope::Global => "global".to_string(),
-        crate::topic::IndexingScope::Namespace { namespace_id, .. } => {
-            format!("ns.{namespace_id}")
+pub struct EntityCheckpointKey {
+    prefix: String,
+}
+
+impl EntityCheckpointKey {
+    pub fn new(scope: &crate::topic::IndexingScope, entity_kind: &str) -> Self {
+        let scope_prefix = match scope {
+            crate::topic::IndexingScope::Global => "global".to_string(),
+            crate::topic::IndexingScope::Namespace { namespace_id, .. } => {
+                format!("ns.{namespace_id}")
+            }
+        };
+        Self {
+            prefix: format!("{scope_prefix}.{entity_kind}"),
         }
-    };
-    format!("{base}.{entity_kind}")
+    }
+
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    pub fn partition_key(&self, index: u32, total: u32) -> String {
+        format!("{}.p{index}of{total}", self.prefix)
+    }
 }
 
 #[derive(Debug, Error)]

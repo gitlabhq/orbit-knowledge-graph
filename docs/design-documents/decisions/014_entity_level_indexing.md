@@ -69,7 +69,7 @@ pub struct PartitionAssignment {
 
 The dispatcher attaches a `PartitionAssignment` when it decides to split
 work. The handler applies the range filter from the assignment to its
-extract query. `PartitionSpec` and `PartitionStrategy` are internal
+extract query. `PartitionBounds` and `Partitioner` are internal
 dispatcher types used for checkpoint keys and quantile computation.
 
 ### NATS subject hierarchy
@@ -153,9 +153,9 @@ fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
     order_by.get(skip).map(String::as_str)
 }
 
-fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
-    match &spec.strategy {
-        PartitionStrategy::Range { lower_bound, upper_bound } => format!(
+fn partition_filter_sql(column: &str, bounds: &PartitionBounds) -> String {
+    match bounds {
+        PartitionBounds::Range { lower_bound, upper_bound } => format!(
             "{column} >= '{lower_bound}' AND {column} < '{upper_bound}'"
         ),
     }
@@ -231,7 +231,7 @@ fn entity_position_key(scope: &IndexingScope) -> String {
 fn entity_checkpoint_key(
     scope: &IndexingScope,
     entity_kind: &str,
-    partition: Option<&PartitionSpec>,
+    partition: Option<&PartitionAssignment>,
 ) -> String {
     let base = entity_position_key(scope);
     match partition {
@@ -260,7 +260,7 @@ and `"global"` constants (e.g., `ns.100.MergeRequest`,
    - All partition checkpoints completed → consolidate (write unified
      checkpoint with min watermark), then publish non-partitioned.
    - Some partitions incomplete or none started → compute quantile
-     boundaries via `PartitionStrategy`, publish one message per
+     boundaries via `Partitioner`, publish one message per
      pending partition with a `PartitionAssignment`.
 3. `PublishDuplicate` is handled silently (NATS dedup).
 
@@ -275,7 +275,7 @@ engine's worker pool caps total concurrent SDLC handlers via the group
 semaphore. Per-entity groups can be added later without code changes.
 
 `partition-overrides` lives on the handler config. The dispatcher reads
-it at startup to build `PartitionStrategy` instances per entity.
+it at startup to build partition configs per entity.
 
 ```yaml
 handlers:

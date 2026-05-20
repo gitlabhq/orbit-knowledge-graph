@@ -8,7 +8,7 @@ use clickhouse_client::FromArrowColumn;
 use tracing::{debug, info, warn};
 
 use super::partitioning::Partitioner;
-use crate::checkpoint::{Checkpoint, CheckpointStore, entity_checkpoint_prefix};
+use crate::checkpoint::{Checkpoint, CheckpointStore, EntityCheckpointKey};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
@@ -248,17 +248,17 @@ impl EntityDispatcher {
         let Some(ref partition) = entity.partition else {
             return self.publish_single(entity, scope, watermark).await;
         };
-        let prefix = entity_checkpoint_prefix(scope, &entity.name);
+        let key = EntityCheckpointKey::new(scope, &entity.name);
         let checkpoints = self
             .checkpoint_store
-            .load_by_prefix(&prefix)
+            .load_by_prefix(key.prefix())
             .await
             .map_err(|err| {
                 self.metrics.record_error(self.name(), "checkpoint");
                 TaskError::new(err)
             })?;
 
-        match Self::plan_entity_dispatch(&checkpoints, &prefix, partition.count) {
+        match Self::plan_entity_dispatch(&checkpoints, &key, partition.count) {
             DispatchDecision::Single => self.publish_single(entity, scope, watermark).await,
             DispatchDecision::AllPartitions => {
                 self.publish_partitions(
@@ -279,7 +279,7 @@ impl EntityDispatcher {
 
     fn plan_entity_dispatch(
         checkpoints: &[(String, Checkpoint)],
-        entity_prefix: &str,
+        key: &EntityCheckpointKey,
         partition_count: u32,
     ) -> DispatchDecision {
         let all_completed = || checkpoints.iter().all(|(_, cp)| cp.cursor_values.is_none());
@@ -291,7 +291,7 @@ impl EntityDispatcher {
             _ => {
                 let pending: Vec<u32> = (0..partition_count)
                     .filter(|idx| {
-                        let partition_key = format!("{entity_prefix}.p{idx}of{partition_count}");
+                        let partition_key = key.partition_key(*idx, partition_count);
                         match checkpoints.iter().find(|(k, _)| k == &partition_key) {
                             Some((_, cp)) => cp.cursor_values.is_some(),
                             None => true,
@@ -460,117 +460,119 @@ mod tests {
         }
     }
 
+    fn ns_key(namespace_id: i64, entity_kind: &str) -> EntityCheckpointKey {
+        let scope = IndexingScope::Namespace {
+            namespace_id,
+            traversal_path: format!("42/{namespace_id}/"),
+        };
+        EntityCheckpointKey::new(&scope, entity_kind)
+    }
+
     #[test]
     fn single_checkpoint_dispatches_single() {
+        let key = ns_key(100, "MergeRequest");
         let checkpoints = vec![(
-            "ns.100.MergeRequest".to_string(),
+            key.prefix().to_owned(),
             completed_checkpoint("2024-01-01T00:00:00Z"),
         )];
 
         assert_eq!(
-            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MergeRequest", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, &key, 4),
             DispatchDecision::Single
         );
     }
 
     #[test]
     fn all_partitions_completed_dispatches_single() {
-        let checkpoints = vec![
-            (
-                "ns.100.MR.p0of4".to_string(),
-                completed_checkpoint("2024-01-01T00:00:00Z"),
-            ),
-            (
-                "ns.100.MR.p1of4".to_string(),
-                completed_checkpoint("2024-01-01T00:00:00Z"),
-            ),
-            (
-                "ns.100.MR.p2of4".to_string(),
-                completed_checkpoint("2024-01-01T00:00:00Z"),
-            ),
-            (
-                "ns.100.MR.p3of4".to_string(),
-                completed_checkpoint("2024-01-01T00:00:00Z"),
-            ),
-        ];
+        let key = ns_key(100, "MR");
+        let checkpoints: Vec<_> = (0..4)
+            .map(|i| {
+                (
+                    key.partition_key(i, 4),
+                    completed_checkpoint("2024-01-01T00:00:00Z"),
+                )
+            })
+            .collect();
 
         assert_eq!(
-            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, &key, 4),
             DispatchDecision::Single
         );
     }
 
     #[test]
     fn some_partitions_incomplete_dispatches_pending() {
+        let key = ns_key(100, "MR");
         let checkpoints = vec![
             (
-                "ns.100.MR.p0of4".to_string(),
+                key.partition_key(0, 4),
                 completed_checkpoint("2024-01-01T00:00:00Z"),
             ),
             (
-                "ns.100.MR.p1of4".to_string(),
+                key.partition_key(1, 4),
                 in_progress_checkpoint("2024-01-01T00:00:00Z", vec!["42"]),
             ),
             (
-                "ns.100.MR.p2of4".to_string(),
+                key.partition_key(2, 4),
                 completed_checkpoint("2024-01-01T00:00:00Z"),
             ),
         ];
 
         assert_eq!(
-            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, &key, 4),
             DispatchDecision::PendingPartitions(vec![1, 3])
         );
     }
 
     #[test]
     fn no_checkpoints_dispatches_all_partitions() {
+        let key = ns_key(100, "MR");
         let checkpoints: Vec<(String, Checkpoint)> = vec![];
 
         assert_eq!(
-            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&checkpoints, &key, 4),
             DispatchDecision::AllPartitions
         );
     }
 
     #[test]
     fn completed_count_mismatch_dispatches_pending() {
-        let checkpoints = vec![
+        let key = ns_key(100, "MR");
+        let old_checkpoints = vec![
             (
-                "ns.100.MR.p0of2".to_string(),
+                key.partition_key(0, 2),
                 completed_checkpoint("2024-01-01T00:00:00Z"),
             ),
             (
-                "ns.100.MR.p1of2".to_string(),
+                key.partition_key(1, 2),
                 completed_checkpoint("2024-01-01T00:00:00Z"),
             ),
         ];
 
         // Partition count changed from 2 to 4 — old keys don't match new format
         assert_eq!(
-            EntityDispatcher::plan_entity_dispatch(&checkpoints, "ns.100.MR", 4),
+            EntityDispatcher::plan_entity_dispatch(&old_checkpoints, &key, 4),
             DispatchDecision::PendingPartitions(vec![0, 1, 2, 3])
         );
     }
 
     #[test]
-    fn checkpoint_prefix_global() {
-        assert_eq!(
-            entity_checkpoint_prefix(&IndexingScope::Global, "User"),
-            "global.User"
-        );
+    fn checkpoint_key_prefix_global() {
+        let key = EntityCheckpointKey::new(&IndexingScope::Global, "User");
+        assert_eq!(key.prefix(), "global.User");
     }
 
     #[test]
-    fn checkpoint_prefix_namespaced() {
-        let scope = IndexingScope::Namespace {
-            namespace_id: 100,
-            traversal_path: "42/100/".to_string(),
-        };
-        assert_eq!(
-            entity_checkpoint_prefix(&scope, "MergeRequest"),
-            "ns.100.MergeRequest"
-        );
+    fn checkpoint_key_prefix_namespaced() {
+        let key = ns_key(100, "MergeRequest");
+        assert_eq!(key.prefix(), "ns.100.MergeRequest");
+    }
+
+    #[test]
+    fn checkpoint_key_partition() {
+        let key = ns_key(100, "MR");
+        assert_eq!(key.partition_key(0, 4), "ns.100.MR.p0of4");
+        assert_eq!(key.partition_key(3, 4), "ns.100.MR.p3of4");
     }
 
     #[test]
