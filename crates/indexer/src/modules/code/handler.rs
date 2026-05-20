@@ -11,6 +11,7 @@ use super::metrics::CodeMetrics;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::locking::LockGuard;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
@@ -200,16 +201,24 @@ impl CodeIndexingTaskHandler {
         started_at: DateTime<Utc>,
     ) -> Result<Option<IndexOutcome>, HandlerError> {
         let project_id = request.project_id;
+        let key = project_lock_key(project_id, branch);
 
-        if !self.try_acquire_lock(context, project_id, branch).await? {
-            debug!(
-                task_id = request.task_id,
-                project_id,
-                branch = %branch,
-                "lock held by another indexer, skipping"
-            );
-            return Ok(None);
-        }
+        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
+        {
+            Some(guard) => guard,
+            None => {
+                warn!(
+                    task_id = request.task_id,
+                    project_id,
+                    branch = %branch,
+                    lock_key = %key,
+                    "code indexing skipped: lock held by another indexer"
+                );
+                return Ok(None);
+            }
+        };
 
         context
             .indexing_status
@@ -240,10 +249,6 @@ impl CodeIndexingTaskHandler {
             )
             .await;
 
-        if let Err(e) = self.release_lock(context, project_id, branch).await {
-            warn!(project_id, branch = %branch, error = %e, "failed to release lock");
-        }
-
         if let Err(e) = &result {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
         }
@@ -264,34 +269,6 @@ impl CodeIndexingTaskHandler {
             return true;
         }
         false
-    }
-}
-
-impl CodeIndexingTaskHandler {
-    async fn try_acquire_lock(
-        &self,
-        ctx: &HandlerContext,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<bool, HandlerError> {
-        let key = project_lock_key(project_id, branch);
-        ctx.lock_service
-            .try_acquire(&key, self.lock_ttl)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
-    }
-
-    async fn release_lock(
-        &self,
-        ctx: &HandlerContext,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<(), HandlerError> {
-        let key = project_lock_key(project_id, branch);
-        ctx.lock_service
-            .release(&key)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("lock release failed: {e}")))
     }
 }
 
