@@ -25,6 +25,7 @@ SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = false
   AND traversal_path != ''
+  AND traversal_path != '0/'
 "#;
 
 #[derive(Debug, Clone)]
@@ -377,11 +378,7 @@ impl EntityDispatcher {
         let namespace_ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
         let traversal_paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
 
-        let namespaces: Vec<_> = namespace_ids
-            .into_iter()
-            .zip(traversal_paths)
-            .filter(|(_, path)| gkg_utils::traversal_path::is_valid(path))
-            .collect();
+        let namespaces: Vec<_> = namespace_ids.into_iter().zip(traversal_paths).collect();
 
         debug!(
             count = namespaces.len(),
