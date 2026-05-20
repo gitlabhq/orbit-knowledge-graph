@@ -133,21 +133,7 @@ pub const PATHS_ALIAS: &str = "paths";
 /// CTE name prefix for node-filter CTEs in edge-centric traversal.
 const NODE_FILTER_CTE_PREFIX: &str = "_nf_";
 
-/// CTE name prefix for cascading SIP CTEs.
-const CASCADE_CTE_PREFIX: &str = "_cascade_";
-
 /// CTE name for a node-filter: `_nf_{alias}`.
 pub fn node_filter_cte(alias: &str) -> String {
     format!("{NODE_FILTER_CTE_PREFIX}{alias}")
 }
-
-/// CTE name for a cascade SIP: `_cascade_{alias}`.
-pub fn cascade_cte(alias: &str) -> String {
-    format!("{CASCADE_CTE_PREFIX}{alias}")
-}
-
-/// Edge alias used in cascade/hop-frontier CTE building.
-pub const CASCADE_EDGE_ALIAS: &str = "_ce";
-
-/// Edge alias used in hop-frontier CTE building.
-pub const HOP_EDGE_ALIAS: &str = "_he";

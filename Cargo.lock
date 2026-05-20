@@ -2267,7 +2267,6 @@ dependencies = [
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
- "once_cell",
  "ontology",
  "opentelemetry",
  "pastey",

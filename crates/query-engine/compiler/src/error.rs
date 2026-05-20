@@ -2,7 +2,7 @@
 //!
 //! Each variant maps to at most one threat-model counter in [`crate::metrics`].
 //! Adding a new variant that represents a security-relevant rejection? Update
-//! [`crate::metrics::threat_counter`] to wire it to the right instrument.
+//! [`crate::metrics::failure_reason`] to wire it to the right instrument.
 
 use ontology::OntologyError;
 use thiserror::Error;

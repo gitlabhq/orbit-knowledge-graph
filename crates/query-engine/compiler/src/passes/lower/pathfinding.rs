@@ -319,7 +319,7 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     }
     select.push(SelectExpr::col(alias, DELETED_COLUMN));
 
-    let dedup_scan = dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY);
+    let dedup_scan = dedup_query(alias, table, select, scan_where);
 
     let mut outer_select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
     if has_tp {
