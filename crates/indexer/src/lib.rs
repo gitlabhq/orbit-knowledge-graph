@@ -92,9 +92,8 @@ pub async fn run(
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
-    let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
-        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
     broker
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())

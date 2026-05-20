@@ -63,10 +63,7 @@ pub struct SchedulerServices {
 pub async fn connect(nats_config: &NatsConfiguration) -> Result<SchedulerServices, SchedulerError> {
     let broker = Arc::new(NatsBroker::connect(nats_config).await?);
     broker
-        .ensure_kv_bucket_exists(
-            INDEXING_LOCKS_BUCKET,
-            KvBucketConfig::with_per_message_ttl(),
-        )
+        .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, KvBucketConfig::default())
         .await?;
 
     let nats_client = broker.nats_client().clone();
