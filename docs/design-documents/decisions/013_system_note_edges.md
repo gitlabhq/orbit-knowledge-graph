@@ -17,7 +17,7 @@ Proposed
 
 The current Knowledge Graph drops a large class of cross-entity relationships before they reach `gl_edge`. `config/ontology/nodes/core/note.yaml` filters with `where: "system = false"`, which silently excludes every system note Rails writes when an issue is closed, a merge request is merged, a commit is added to an MR, or one entity references another in free text. The graph-completeness epic and Angelo's "you don't have anything useful" verdict from the 2026-04-20 Orbit sync both name this gap. The concrete shapes missing today are MR<->MR mentions, MR<->WorkItem mentions, MR<->Commit linkages from `commit`/`merge` actions, and the `REOPENED` lifecycle transition (the `MERGED` and `CLOSED` slices exist via FK but are sparse on older data).
 
-Three things make this hard. The structured discriminator, `system_note_metadata.action`, is **not yet replicated** into Siphon (`siphon_notes` exists; `siphon_system_note_metadata` does not, verified by absence from `fixtures/siphon.sql` and from the Siphon repo's sample config). The target entities of cross-references are encoded as GFM reference tokens inside the **free-text body** (e.g. `mentioned in !123`, `mentioned in group/subgroup/project#456`, `mentioned in 54f7727c`), not as structured foreign keys. And the source data is large: kg#499 cites ~6.7M system notes for `gitlab-org` alone, against a ~4TB global notes table.
+Three things make this hard. The structured discriminator, `system_note_metadata.action`, is **not yet replicated** into Siphon (`siphon_notes` exists; `siphon_system_note_metadata` does not, verified by absence from `fixtures/siphon.sql` and from the Siphon repo's sample config). The target entities of cross-references are encoded as GFM reference tokens inside the **free-text body** (e.g. `mentioned in !123`, `mentioned in group/subgroup/project#456`, `mentioned in 54f7727c`), not as structured foreign keys. And the source data is large: [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499) cites ~6.7M system notes for `gitlab-org` alone, against a ~4TB global notes table.
 
 The previous attempt at this work, [!1109][prev-mr], reached green CI and was then closed by the author on 2026-05-18 with *"I'll close this MR, and open an MR with an ADR first."* That MR scoped itself to the lifecycle subset (`merged`, `closed`, `reopened`), added a `siphon_system_note_metadata` fixture, and materialized one pre-filtered ClickHouse view per action (`siphon_system_note_merged`, `siphon_system_note_closed`, `siphon_system_note_reopened`) so the existing standalone-edge ETL machinery could consume them. The closure was process-driven, not correctness-driven.
 
@@ -25,7 +25,7 @@ Three inputs from that MR: (a) standalone edge ETL has **no `WHERE` clause** in 
 
 [prev-mr]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1109
 
-Constraints: Rails owns authorization and is the source of system note bodies, so we do not control templates and must accept Rails-side phrasing changes as a maintenance cost. The Analytics team owns Siphon, so the new source-table replication is cross-team coordination on the critical path. The v0.5 migration framework from kg#443 is complete and validated on staging, so adding new edge kinds is a `SCHEMA_VERSION` bump, not a table rebuild.
+Constraints: Rails owns authorization and is the source of system note bodies, so we do not control templates and must accept Rails-side phrasing changes as a maintenance cost. The Analytics team owns Siphon, so the new source-table replication is cross-team coordination on the critical path. The v0.5 migration framework from [`gitlab-org/orbit/knowledge-graph#443`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/443) is complete and validated on staging, so adding new edge kinds is a `SCHEMA_VERSION` bump, not a table rebuild.
 
 This ADR proposes a Rust extraction handler running inside the SDLC indexer, with two batched ClickHouse lookups for entity resolution, gated on a one-time Siphon-side replication of `system_note_metadata`. The recommendation is backed by a POC harness ([!1335][poc-mr]) that measured parser throughput on both a 21-entry synthetic golden corpus and a 74,125-note GDK-seeded real corpus, plus an end-to-end ClickHouse resolver pass against a local GDK instance.
 
@@ -53,13 +53,13 @@ Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/ch
 | `CLOSED` (supplement to FK) | User → MergeRequest, WorkItem | `closed` | n/a |
 | `REOPENED` (new edge kind) | User → MergeRequest, WorkItem | `reopened` | n/a |
 
-Explicit non-goals: `@`-mention edges (separate `*_user_mentions` tables, tracked under a follow-up to kg#482), resource state / label / milestone events (dedicated `resource_*_events` tables under kg#482), Banzai HTML rendering (the parser is regex-only on plain text), external (Jira) issue references, and the Siphon-side replication MR itself.
+Explicit non-goals: `@`-mention edges (separate `*_user_mentions` tables, tracked under a follow-up to [`gitlab-org/orbit/knowledge-graph#482`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/482)), resource state / label / milestone events (dedicated `resource_*_events` tables under #482), Banzai HTML rendering (the parser is regex-only on plain text), external (Jira) issue references, and the Siphon-side replication MR itself.
 
 ### Handler architecture
 
 ```plaintext
 crates/indexer/src/modules/sdlc/handler/system_notes/
-  mod.rs            // SystemNotesEdgeHandler impl, registration
+  mod.rs            // SystemNotesPipeline: impl EntityPipeline + registration
   extract.rs        // SQL for the JOIN(siphon_notes ⋈ siphon_system_note_metadata)
   parse.rs          // Regex + per-action dispatch (lifted verbatim from xtask POC)
   resolve.rs        // siphon_routes IN-list and (project_id, iid) IN-list batchers
@@ -68,7 +68,15 @@ crates/indexer/src/modules/sdlc/handler/system_notes/
   tests/            // Unit tests for parse.rs (regex coverage)
 ```
 
-This is a **custom handler**, not an ontology-driven plan. The departure from the ontology-first convention (AGENTS.md: *"New entity types start there, not in Rust"*) is deliberate and bounded:
+Under ADR 014's entity-level SDLC dispatch (scaffolded in [!1341][adr014-mr]), each entity-kind dispatched by `EntityDispatcher` flows through a single shared `EntityIndexingHandler`, which routes by `entity_kind` to a per-kind pipeline. ADR 014 introduces `SimpleEntityPipeline` as the default plan-driven pipeline and names SystemNotes specifically as the motivating example for the **`EntityPipeline`** custom-pipeline extension point:
+
+> *"All current entities use `SimpleEntityPipeline` … Future entities (e.g., SystemNotes) can implement `EntityPipeline` with custom logic instead of using `SimpleEntityPipeline`."* — ADR 014, "Handler and pipeline"
+
+ADR 013's `SystemNotesPipeline` is that custom impl. It receives an `EntityIndexingRequest` (`entity_kind = "SystemNote"`, `scope = IndexingScope::Namespace { namespace_id, traversal_path }`, `partition = None` for v1) on `sdlc.entity.indexing.requested.SystemNote.{dotted_traversal_path}` and applies the two-stage extract → resolve → emit pipeline below. See [Compatibility with entity-level SDLC indexing (ADR 014)](#compatibility-with-entity-level-sdlc-indexing-adr-014) for the full forward-compatibility analysis.
+
+[adr014-mr]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1341
+
+This is a **custom `EntityPipeline` implementation**, not an ontology-driven plan. The custom-pipeline path is the *intended* extension point for entities whose ETL shape (multi-edge dispatch off body parsing, cross-typed targets) cannot be expressed in YAML. The departure from the ontology-first convention (AGENTS.md: *"New entity types start there, not in Rust"*) is deliberate and bounded:
 
 - Edge ETL YAML has no `WHERE` clause (verified against `config/schemas/ontology.schema.json::edgeEtlConfig`, which has `additionalProperties: false` and exposes only `scope`, `source`, `watermark`, `deleted`, `order_by`, `from`, `to`).
 - A single source table needs to dispatch into ~9 edge variants whose target type depends on body parsing, not on a fixed source-column enum.
@@ -114,14 +122,52 @@ for batch in extract():       # paginated, watermark-bounded, traversal-path-sco
   emit(edges)
 ```
 
-Dedup key: `(system_note_metadata.id, edge_kind, source_kind, source_id, target_kind, target_id)`. ReplacingMergeTree handles re-processing idempotency. The two-stage `IN (…)` resolution pattern is precedented at `config/ontology/nodes/core/project.yaml:115-121` (the inverse direction `source_id → path`) and `crates/indexer/src/modules/namespace_deletion/store.rs:92`.
+Dedup key: `(system_note_metadata.id, edge_kind, source_kind, source_id, target_kind, target_id)`. ReplacingMergeTree handles re-processing idempotency. The two-stage `IN (…)` resolution pattern is precedented at `config/ontology/nodes/core/project.yaml:115-121` and `config/ontology/nodes/core/group.yaml:101-107` (both resolve in the inverse direction `source_id → path` via `siphon_routes`).
 
 ### Mode A / Mode B
 
-- **Mode A (preferred, production default):** join `siphon_notes` to `siphon_system_note_metadata` on `note_id` and filter `snm.action IN (TARGET_ACTIONS)`. This is the shape the handler is designed for.
-- **Mode B (degraded fallback):** if `siphon_system_note_metadata` is not yet replicated, lifecycle actions can be detected directly from `notes.note` (the body strings are exact, e.g. `notes.note = 'closed'`) and cross-reference actions can be detected with an anchored regex on the body prefix (`"mentioned in "`, `"marked this issue as related to "`, etc.). Mode B is slower (no metadata-based pre-filter), less precise (a user-typed note that happens to start with `"mentioned in "` could match, though `system = true` filtering keeps the surface tiny), and is intended only to unblock staging benchmarks and demos while the Siphon-side MR is in flight.
+Both modes operate exclusively on **system-authored notes** — they read `siphon_notes` with `WHERE system = true AND _siphon_deleted = false`. The current `config/ontology/nodes/core/note.yaml` ETL is the exact inverse (`where: "system = false"`, feeding the user-note `Note` node table); the system-notes handler is the first ETL that consumes the complementary half of the `siphon_notes` table.
+
+- **Mode A (preferred, production default):** join `siphon_notes` to `siphon_system_note_metadata` on `note_id` and filter `snm.action IN (TARGET_ACTIONS)`. The `system = true` constraint is implicit on the join (the join target only contains system rows) but is still emitted on `siphon_notes` for query-shape clarity. This is the shape the handler is designed for.
+- **Mode B (degraded fallback):** if `siphon_system_note_metadata` is not yet replicated, the handler reads `siphon_notes WHERE system = true` and dispatches by body content: lifecycle actions are detected by exact equality (`notes.note = 'closed'`, `'merged'`, `'reopened'`), and cross-reference actions are detected with an anchored regex on the body prefix (`^"mentioned in "`, `^"marked this issue as related to "`, etc.). The `system = true` filter is **load-bearing for Mode B's precision claim**: it scopes the prefix-regex away from arbitrary user-typed notes that happen to start with `"mentioned in "`. Mode B is still slower than Mode A (no metadata-based pre-filter) and is intended only to unblock staging benchmarks and demos while the Siphon-side MR is in flight.
 
 The handler reads its mode from config; production deployment uses Mode A.
+
+### Compatibility with entity-level SDLC indexing (ADR 014)
+
+[ADR 014][adr014] (scaffolded in [!1341][adr014-mr]) replaces today's `GlobalHandler` + `NamespaceHandler` split with a single `EntityIndexingHandler` that dispatches one entity kind per NATS message. The scaffold is a no-op commit that ships the wire format (`EntityIndexingRequest`, `IndexingScope`, `PartitionAssignment`, `PartitionBounds`), the empty `EntityIndexingHandler` and `EntityDispatcher`, and the `entity-handler` / `entity` config blocks — the `EntityPipeline` trait and per-entity wiring come in a stacked follow-up. ADR 013 is structured to plug into that surface without further rework.
+
+[adr014]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1341
+
+**Reversed partition ownership.** ADR 014 reverses the pipeline-owned partitioning model that the previous draft (!1272) carried: now the dispatcher reads checkpoint state, computes quantile boundaries with `quantilesTDigest`, and publishes one message per `(entity, scope, partition)` combination,
+each message carrying an optional `PartitionAssignment { index, total, column, bounds: Range { lower_bound, upper_bound } }`.
+The handler applies the range filter as a plain SQL `WHERE` conjunct and uses a partition-specific checkpoint key.
+The `SystemNotesPipeline` therefore stays simple — *parse + resolve + emit*, with no checkpoint orchestration, no quantile queries, no consolidation logic.
+v1 ships with `partition = None` (see "Out of scope") and adopts partitioning later through the same plumbing if and when the system-notes pass outgrows a single worker.
+
+**Compatibility matrix.**
+
+| ADR 013 element | Compatible with !1341 (ADR 014)? | Action |
+|---|---|---|
+| Custom Rust pipeline at `modules/sdlc/handler/system_notes/` | ✅ via `EntityPipeline` trait | Re-frame as a **custom `EntityPipeline`** impl (the trait extension point ADR 014 names). |
+| Mode A / Mode B (datalake source selection) | ✅ unchanged | Source-table SQL is orthogonal to dispatch model. |
+| Two-batched-IN-list ClickHouse resolver | ✅ unchanged | Runs inside the pipeline; dispatch model does not see it. |
+| Per-namespace batching | ✅ improved | Batch unit shifts from "all entities for a namespace" to "this entity for this scope" — a strictly finer-grained fit. |
+| Edge YAML declarations (`mentions.yaml`, `adds_commit.yaml`, …) | ✅ unchanged | Ontology declarations are dispatch-model-orthogonal. |
+| Metrics catalog | ✅ improved | Reuse `gkg.indexer.sdlc.*` with `entity = "SystemNote"` label; add only `edges_emitted_total` and `unknown_action_total`. |
+| Implementation plan step 7 (handler registration) | ✅ forward-compatible | Register as an `EntityPipeline` in the `EntityIndexingHandler`'s `HashMap<String, Arc<dyn EntityPipeline>>` (post-!1341), or as a `Handler` next to `NamespaceHandler` / `GlobalHandler` (pre-!1341). |
+| Checkpoint key shape | ✅ unchanged | `ns.{id}.SystemNote` works in both worlds; ADR 014 explicitly preserves the format. |
+| `system_note_metadata` Siphon prerequisite | ✅ unchanged | Independent of dispatch model. |
+| Schema-version bump (44 → 45) | ✅ unchanged | Ontology change, not dispatch. |
+| Feature flag rollout | ✅ improved | Per-entity flag is finer-grained under ADR 014. |
+| Partitioning of system-notes pass | ✅ deferred | v1 sets `partition = None`; later via `partition_overrides.SystemNote: N` plus a custom `PartitionStrategy` (see "Out of scope"). |
+
+**Ship now, forward-compatible.** ADR 013 does not need to wait for !1341 (or its stacked `EntityPipeline` follow-up) to merge:
+
+- !1341 is a no-op scaffold and the wire format / config types are already committed; approving ADR 013 against this surface is not betting on a speculative refactor.
+- ADR 014 names `SystemNotes` specifically as the motivating example for the `EntityPipeline` extension point ("Handler and pipeline"). The custom-pipeline path is the documented extension point, not a special case.
+- The Siphon-side `system_note_metadata` replication is the longer lead-time item; ADR 013 unblocks *that* coordination immediately.
+- The implementation MR can target whichever dispatch model is live when it lands. Only the registration glue differs (post-!1341 entity-handler `HashMap` insertion, ~5 lines; pre-!1341 standalone `Handler`, <30 lines of wrapper that is deleted once !1341 lands). The pipeline's *internal* code (parser, resolver, edge writer) is identical in both worlds.
 
 ### Action-coverage drift mitigation
 
@@ -129,7 +175,7 @@ Three-layer defence:
 
 1. **Vendored constant.** `crates/indexer/src/modules/sdlc/handler/system_notes/vendored/icon_types.rs` carries a literal copy of upstream Rails `ICON_TYPES` (61 values at the time of writing), pinned to a SHA and documented in a header comment.
 2. **CI drift check.** `scripts/check-system-note-actions.sh` mirrors the working pattern of `scripts/check-goon-format-version.sh` (ADR 012, the analogous "upstream owns the source of truth, we vendor a copy" problem): the script fetches the upstream `system_note_metadata.rb`, diffs the `ICON_TYPES` array against the vendored constant, and fails with an explicit message listing values present upstream but missing locally. Wired into lefthook pre-commit and into the `lint` CI stage.
-3. **Runtime safety.** The handler's dispatch is `match action { ... _ => log_and_drop }`, never `panic!`. Unknown actions surface as a new metric `gkg.indexer.system_notes.unknown_action_total{action}` registered in `crates/gkg-observability/src/indexer.rs`; cardinality is bounded by `ICON_TYPES` size (~60–100), so a label dimension is safe.
+3. **Runtime safety.** The handler's dispatch is `match action { ... _ => log_and_drop }`, never `panic!`. Unknown actions surface as a new metric `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` registered in `crates/gkg-observability/src/indexer/sdlc.rs`; cardinality is bounded by `ICON_TYPES` size (~60–100), so a label dimension is safe. See the [metrics step](#implementation-plan) of the implementation plan for the full instrument list.
 
 ## Implementation plan
 
@@ -139,12 +185,43 @@ Three-layer defence:
 4. Add the CI drift check `scripts/check-system-note-actions.sh` + lefthook hook (model: `scripts/check-goon-format-version.sh`).
 5. Add new edge YAML: `config/ontology/edges/{mentions.yaml, adds_commit.yaml, merged_at_commit.yaml, reopened.yaml}`. `RELATED_TO`, `CLOSED`, `MERGED` get a documented comment that the system-notes handler is an additional emitter; no YAML schema change.
 6. Register the new edge kinds in `config/ontology/schema.yaml`.
-7. Implement the handler module `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. Register in `modules/sdlc/mod.rs::register_handlers` alongside `NamespaceHandler` and `GlobalHandler`. Custom-handler precedent: `crates/indexer/src/modules/code/`.
-8. Add metrics: `gkg.indexer.system_notes.edges_emitted_total{edge_kind}`, `gkg.indexer.system_notes.unknown_action_total{action}`, `gkg.indexer.system_notes.parse_failures_total{action}`, `gkg.indexer.system_notes.batch_duration_seconds`. Catalog regeneration via `metrics-catalog-check`.
+7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration depends on which dispatch model is live when the implementation MR lands:
+
+    - **Post-!1341 (entity dispatch, expected target):** insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341). The single shared handler routes by `entity_kind` automatically. The scaffold in !1341 already commits the wire format, the `EntityIndexingHandler` shell, and the `entity-handler` config block — only the pipeline trait and registration entry are stacked follow-ups.
+    - **Pre-!1341 (current `main`):** register as a separate `Handler` next to `NamespaceHandler` / `GlobalHandler`, with its own NATS subscription. This wrapper is temporary; the registration code is <30 lines and is deleted once !1341 plus its `EntityPipeline` follow-up land.
+
+    Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
+8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
+
+    | Concern | Instrument | Status |
+    |---|---|---|
+    | Per-batch duration | `gkg.indexer.sdlc.pipeline.duration{entity="SystemNote"}` | Reuse existing |
+    | Rows extracted | `gkg.indexer.sdlc.pipeline.rows.processed{entity="SystemNote"}` | Reuse existing |
+    | Parse failures | `gkg.indexer.sdlc.pipeline.errors{entity="SystemNote", error_kind="parse_failure"}` | Reuse existing |
+    | Edges emitted | `gkg.indexer.sdlc.edges_emitted_total{entity, edge_kind}` | **Add** to `sdlc.rs` (general-purpose; future entities benefit) |
+    | Unknown action drift | `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` | **Add**; cardinality bounded by `ICON_TYPES` (~60–100) |
+
+    Catalog regeneration via `metrics-catalog-check`. The two new instruments land in `gkg-observability/src/indexer/sdlc.rs` (not in a system-notes-specific module) so the catalog stays domain-aligned.
 9. Bump `config/SCHEMA_VERSION` (currently 44 → 45).
 10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, `AGENTS.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
-11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges` plus the lifecycle test from MR !1109 (recoverable from `git show 0871d6c2^...`).
-12. Feature flag (config-driven) defaulting to off; staging-only first.
+11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges`, plus a lifecycle test ported from the closed !1109. The full source of the !1109 lifecycle test is preserved alongside the research package at [`dgruzd/droid-workspace/task/2685`](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/) so future implementers do not need to spelunk a closed-MR branch.
+12. Feature flag (config-driven) defaulting to off; staging-only first. The flag is handler-config-driven and lives where the rest of the handler config lives in whichever dispatch model is current:
+
+    ```yaml
+    # Post-!1341 (entity dispatch — target shape)
+    handlers:
+      entity-handler:
+        batch_size_overrides:
+          SystemNote: 100000     # ~13s of resolver budget per pass on local GDK
+        # No partition_overrides for v1; see "Out of scope".
+
+    # Pre-!1341 (current main — temporary wrapper)
+    handlers:
+      namespace-handler:
+        enable-system-notes: false  # opt-in, staging only
+    ```
+
+    The post-!1341 form is the target shape. `HandlersConfiguration` uses `deny_unknown_fields` (`crates/gkg-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
 
 ## POC results
 
@@ -174,7 +251,7 @@ The real corpus runs **~16% faster** than the synthetic baseline. The cause is t
 
 **Correctness on the real corpus:** 75,125 notes × 100 iterations produced zero panics, zero incorrect parses, and zero false positives across all 16 action types. Unknown actions seeded into the GDK data (`work_item_status`, `assignee`, `start_date_or_due_date`) were silently dropped with a `WARN` log as expected by the `log_and_drop` design.
 
-Both figures exceed the 500k/sec/core pass criterion by ~3×. At `gitlab-org`'s ~6.7M system notes (kg#499, 2026-04-27) this puts pure-CPU parse time at **~4 seconds per full indexing pass on a single core**.
+Both figures exceed the 500k/sec/core pass criterion by ~3×. At `gitlab-org`'s ~6.7M system notes (#499, 2026-04-27) this puts pure-CPU parse time at **~4 seconds per full indexing pass on a single core**.
 
 ### Benchmarks 2–3 — early E2E numbers against GDK
 
@@ -195,7 +272,7 @@ Hit rates of 6–10% are realistic for the GDK seed: the seeder references rando
 The GDK numbers validate the query shape but do not exercise (a) the `gitlab-org`-scale ~6.7M-note corpus, (b) a non-empty `traversal_path` filter, or (c) `siphon_routes.path` IN-list against millions of rows where a skip index would matter. The remaining benchmarks need staging ClickHouse access and (for Mode A) the in-progress Siphon replication:
 
 - **Benchmark 4 — end-to-end pass against `gitlab-org`.** Pass criterion: ≤10 min wall-clock for the full namespace. The 125k notes/sec end-to-end figure from the GDK E2E run extrapolates to ~54 s of pure compute for 6.7M notes; the 10-minute budget is dominated by ClickHouse scan time, not by parse + resolve.
-- **Benchmark 5 — edge density gain (the kg#499 acceptance criterion).** Pass criteria: **≥3× MR<->WorkItem edges**, **≥10× MR<->MR edges**, both vs. current `gl_edge` state for `gitlab-org`. Proposed as the concrete numeric form of "a material increase in edge density" from the upstream issue; to be agreed at ADR review.
+- **Benchmark 5 — edge density gain (the #499 acceptance criterion).** Pass criteria: **≥3× MR<->WorkItem edges**, **≥10× MR<->MR edges**, both vs. current `gl_edge` state for `gitlab-org`. Proposed as the concrete numeric form of "a material increase in edge density" from the upstream issue; to be agreed at ADR review.
 
 The handler implementation MR will not merge to behind-flag-on until Benchmarks 4 and 5 have produced numbers and the report is attached.
 
@@ -222,7 +299,7 @@ Both fixes are localised to `crates/xtask/src/system_notes_bench/`; the parser a
 
 ## Why not the alternatives
 
-**Why not Option B — Rails internal endpoint.** Calling Rails on the indexing hot path couples GKG throughput to Puma thread capacity for a workload whose primary cost is text regex matching. The MR-diff resolver (kg#482) chose Rails precisely because diff data lives in object storage; system notes are already in `siphon_notes`, so there is nothing structural Rails can give us that the lake does not have. Backfilling a ~4TB notes table through Rails would be a production incident waiting to happen. Where Option B *could* fit is a future contingency: calling Rails *only* for unknown `action` values as a schema authority. That is not a Stage 1 plan.
+**Why not Option B — Rails internal endpoint.** Calling Rails on the indexing hot path couples GKG throughput to Puma thread capacity for a workload whose primary cost is text regex matching. The MR-diff resolver ([`gitlab-org/orbit/knowledge-graph#482`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/482)) chose Rails precisely because diff data lives in object storage; system notes are already in `siphon_notes`, so there is nothing structural Rails can give us that the lake does not have. Backfilling a ~4TB notes table through Rails would be a production incident waiting to happen. Where Option B *could* fit is a future contingency: calling Rails *only* for unknown `action` values as a schema authority. That is not a Stage 1 plan.
 
 **Why not Option C — structured-action only, no text parsing.** MR !1109 was effectively Option C for the lifecycle subset and the author closed it as insufficient. The cross-reference gap (the actual "you don't have anything useful" problem) stays unaddressed. Lifecycle edges are 80% redundant with existing FKs (`merge_user_id`, `closed_by_id`); only `REOPENED` is novel ground. Option C is preserved as a degraded mode (Mode B above), but it is not the recommended target shape.
 
@@ -238,6 +315,7 @@ What improves:
 
 - Closes the MR<->MR / MR<->WorkItem / MR<->Commit edge gap that motivates the graph-completeness epic.
 - One end-to-end story for system-note edges: one handler, one CI drift check, one new metric family, one feature flag. Future cross-reference actions (Rails ships a new action; agent training surfaces a new edge need) become a regex / match-arm change, not a YAML + fixture + ETL change.
+- Under the entity-based dispatch model (ADR 014 / !1341), system-notes gets its own NATS subject (`sdlc.entity.indexing.requested.SystemNote.{dotted_traversal_path}`) and ack lifecycle. A slow or failing system-notes pass no longer redelivers MergeRequest / Issue / Pipeline messages for the same namespace; conversely, a slow MR pass does not block system-notes. The stream's `max_messages_per_subject: 1` + `discard_new_per_subject: true` deduplication operates at the exact `(entity_kind, scope)` level, which is strictly finer-grained than today's per-namespace ack scope.
 - The POC harness output is reusable as a regression baseline: any throughput regression in the production handler can be checked against the 1.5M notes/sec/core synthetic POC number and the 1.74M notes/sec/core real-GDK E2E number, plus the 8 ms 3-query CH resolver budget at batch=1,000.
 
 What gets harder:
@@ -250,11 +328,17 @@ What gets harder:
 ## Out of scope
 
 - **`@`-mention edges** (`*_user_mentions` tables). Separate effort, separate Siphon prerequisite.
-- **Resource state / label / milestone events.** Tracked under kg#482 with dedicated `resource_*_events` Siphon replication.
+- **Resource state / label / milestone events.** Tracked under #482 with dedicated `resource_*_events` Siphon replication.
 - **Banzai HTML rendering.** The parser only extracts GFM references from plain text; `lib/banzai/reference_parser/*_parser.rb` (HTML-AST-based) is explicitly *not* what we port.
-- **External (Jira) issue references.** Out per upstream kg#499.
+- **External (Jira) issue references.** Out per upstream #499.
 - **The Siphon replication MR itself.** Filed as a separate Analytics-owned MR against `gitlab-org/analytics-section/siphon`; this ADR depends on it but does not specify it.
 - **`@-link_type` property on `MENTIONS` to distinguish `relate` vs. `moved` vs. `duplicate`.** Open design question for review feedback; default proposal is yes, using the existing `link_type` enum pattern from `related_to.yaml`. To be settled in the implementation MR, not the ADR.
+- **Partitioning of the system-notes ETL across workers.**
+  v1 ships with `partition = None` on the `EntityIndexingRequest` because the POC measured ~125k notes/sec end-to-end on a single core, giving ~54 s per `gitlab-org`-scale pass — well inside the per-message budget.
+  Partitioning is available later through ADR 014's dispatcher-owned `PartitionAssignment` machinery: setting `handlers.entity-handler.partition_overrides.SystemNote: N` makes the dispatcher compute quantile boundaries and publish N messages, each carrying a `PartitionAssignment` whose `Range { lower_bound, upper_bound }` the pipeline applies as a SQL `WHERE` conjunct.
+  The default partition column derivation in ADR 014 picks the *first non-scope column* of the source `order_by`; for `siphon_notes` that is `noteable_type` (low-cardinality, ~10 enum values), so when partitioning is enabled the implementation will need either a per-entity `partition_column` override or a custom `PartitionStrategy` registered for `SystemNote`.
+  The natural partition column is `siphon_system_note_metadata.note_id` (high cardinality, primary key).
+  Listed here so a future contributor does not re-derive that we already considered it.
 
 ## Key risks
 
@@ -262,20 +346,21 @@ What gets harder:
 2. **Parser drift against Rails' `ICON_TYPES` and body templates.** `ICON_TYPES` has grown across releases (now 61 values; prior captures show ~50) and Rails has moved system-note phrasing more than once. Mitigation: vendored constant + CI drift check + `log_and_drop` on unknown actions + regex anchored on the GFM-reference token rather than on the verb phrase (so phrasing changes do not break extraction). E2E validation against a real 75k-note GDK corpus seeded with unknown actions confirmed the `log_and_drop` path silently absorbs unrecognised values without breaking the pass (see [POC results](#poc-results)).
 3. **Custom-handler maintenance cost.** This is the first cross-reference-oriented handler departing from the ontology-first convention. Mitigation: confine the deviation to the *materialization logic* only (edge **kinds** still declare in YAML) and document the rationale in `AGENTS.md` so future ADRs do not treat this as precedent for arbitrary custom handlers.
 4. **`siphon_routes.path` IN-list scan cost.** No skip index on `path` today (only a `pg_pkey_ordered` projection on `id`). The GDK E2E pass showed 8 ms at batch=1,000 against 93 routes, but that does not stress the path-index dimension; the staging run at production scale still needs to confirm. If it fails the threshold, a `set(N)` or `bloom_filter` skip index on `path` is the prepared mitigation, and Adam's guidance (skip indexes over projections) aligns with the Siphon team's review preferences.
-5. **Acceptance threshold vagueness.** kg#499 says "a material increase in edge density (numeric target to be set after initial measurement)". This ADR proposes ≥3× MR<->WorkItem and ≥10× MR<->MR as concrete numeric forms. If review prefers different thresholds, the POC harness (`xtask system-notes-bench`) can re-run cheaply.
+5. **Acceptance threshold vagueness.** [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499) says "a material increase in edge density (numeric target to be set after initial measurement)". This ADR proposes ≥3× MR<->WorkItem and ≥10× MR<->MR as concrete numeric forms. If review prefers different thresholds, the POC harness (`xtask system-notes-bench`) can re-run cheaply.
 
 ## References
 
-- Upstream issue: [kg#499](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499)
+- Upstream issue: [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499)
 - POC MR: [!1335](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335)
 - POC E2E validation report against GDK: [!1335 note 3360033462](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1335#note_3360033462) (74,125-note seeded corpus, parser + ClickHouse resolver, bench-harness bug fixes)
 - Closed prior MR: [!1109](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1109)
-- Related: kg#482 (MR ingestion gaps), kg#443 (migration framework, complete), graph-completeness epic
-- Prior research and POC plan: [dgruzd/droid-workspace/task/2685](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/)
+- Related: [`gitlab-org/orbit/knowledge-graph#482`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/482) (MR ingestion gaps), [`gitlab-org/orbit/knowledge-graph#443`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/443) (migration framework, complete), graph-completeness epic
+- Entity-level SDLC indexing scaffold: [!1341](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1341) (ADR 014, supersedes the earlier !1272 draft); pipeline-owned vs. dispatcher-owned partitioning trade-off discussed in this ADR's [Compatibility section](#compatibility-with-entity-level-sdlc-indexing-adr-014)
+- Prior research and POC plan: [dgruzd/droid-workspace/task/2685](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/), E2E validation report: [task/2685-e2e](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685-e2e/), entity-refactor compatibility analysis: [task/2685-entity-refactor](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685-entity-refactor/)
 - Rails source of truth: `app/models/system_note_metadata.rb` (`ICON_TYPES`, `TYPES_WITH_CROSS_REFERENCES`), `app/services/system_notes/*.rb` (body templates), `app/models/{issue,merge_request,commit,project}.rb` (`reference_pattern`)
 - Siphon repo: `gitlab-org/analytics-section/siphon`
 - ADR precedent: [009 (Code Indexer Service)](009_code_indexer_service.md) for implementation-plan shape; [012 (GOON Format)](012_goon_format.md) for benchmark-driven decision rationale and the vendored-constant + CI drift-check pattern
 - Custom-handler precedent in code: `crates/indexer/src/modules/code/`, `crates/indexer/src/modules/namespace_deletion/`
 - Schema version file: `config/SCHEMA_VERSION` (44 → 45 with this work)
-- Routes-join precedent: `config/ontology/nodes/core/project.yaml:115-121`
+- Routes-join precedent: `config/ontology/nodes/core/project.yaml:115-121`, `config/ontology/nodes/core/group.yaml:101-107`
 - Note filter today: `config/ontology/nodes/core/note.yaml` (`where: "system = false"`)
