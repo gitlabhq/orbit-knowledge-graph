@@ -137,7 +137,7 @@ mod tests {
 
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::new()),
             test_metrics(),
             Default::default(),
         ));

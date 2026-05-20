@@ -95,6 +95,7 @@ pub const ENTITY_INDEXING_SUBJECT_PATTERN: &str = "sdlc.entity.indexing.requeste
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityIndexingRequest {
+    pub dispatch_id: String,
     pub entity_kind: String,
     pub watermark: DateTime<Utc>,
     pub scope: IndexingScope,
@@ -189,6 +190,7 @@ mod tests {
 
     fn namespace_request(entity_kind: &str) -> EntityIndexingRequest {
         EntityIndexingRequest {
+            dispatch_id: "20240101T000000".to_string(),
             entity_kind: entity_kind.to_string(),
             watermark: "2024-01-01T00:00:00Z".parse().unwrap(),
             scope: IndexingScope::Namespace {
@@ -201,6 +203,7 @@ mod tests {
 
     fn global_request(entity_kind: &str) -> EntityIndexingRequest {
         EntityIndexingRequest {
+            dispatch_id: "20240101T000000".to_string(),
             entity_kind: entity_kind.to_string(),
             watermark: "2024-01-01T00:00:00Z".parse().unwrap(),
             scope: IndexingScope::Global,

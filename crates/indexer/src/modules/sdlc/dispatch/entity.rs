@@ -185,6 +185,7 @@ impl ScheduledTask for EntityDispatcher {
 impl EntityDispatcher {
     async fn dispatch_all(&self) -> Result<(), TaskError> {
         let watermark = Utc::now();
+        let dispatch_id = uuid::Uuid::new_v4().to_string();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -195,7 +196,7 @@ impl EntityDispatcher {
 
         for entity in &global_entities {
             let (d, s) = self
-                .dispatch_entity(entity, &IndexingScope::Global, watermark)
+                .dispatch_entity(&dispatch_id, entity, &IndexingScope::Global, watermark)
                 .await?;
             dispatched += d;
             skipped += s;
@@ -206,8 +207,8 @@ impl EntityDispatcher {
                 .record_requests_published(self.name(), dispatched);
             self.metrics.record_requests_skipped(self.name(), skipped);
             info!(
-                dispatched,
-                skipped, "entity dispatcher completed (no namespaced entities)"
+                dispatch_id,
+                dispatched, skipped, "entity dispatcher completed (no namespaced entities)"
             );
             return Ok(());
         }
@@ -220,7 +221,9 @@ impl EntityDispatcher {
                 traversal_path: traversal_path.clone(),
             };
             for entity in &namespaced_entities {
-                let (d, s) = self.dispatch_entity(entity, &scope, watermark).await?;
+                let (d, s) = self
+                    .dispatch_entity(&dispatch_id, entity, &scope, watermark)
+                    .await?;
                 dispatched += d;
                 skipped += s;
             }
@@ -231,6 +234,7 @@ impl EntityDispatcher {
         self.metrics.record_requests_skipped(self.name(), skipped);
 
         info!(
+            dispatch_id,
             dispatched,
             skipped,
             namespaces = namespaces.len(),
@@ -241,12 +245,15 @@ impl EntityDispatcher {
 
     async fn dispatch_entity(
         &self,
+        dispatch_id: &str,
         entity: &DispatchableEntity,
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
     ) -> Result<(u64, u64), TaskError> {
         let Some(ref partition) = entity.partition else {
-            return self.publish_single(entity, scope, watermark).await;
+            return self
+                .publish_single(dispatch_id, entity, scope, watermark)
+                .await;
         };
         let key = EntityCheckpointKey::new(scope, &entity.name);
         let checkpoints = self
@@ -259,9 +266,13 @@ impl EntityDispatcher {
             })?;
 
         match Self::plan_entity_dispatch(&checkpoints, &key, partition.count) {
-            DispatchDecision::Single => self.publish_single(entity, scope, watermark).await,
+            DispatchDecision::Single => {
+                self.publish_single(dispatch_id, entity, scope, watermark)
+                    .await
+            }
             DispatchDecision::AllPartitions => {
                 self.publish_partitions(
+                    dispatch_id,
                     entity,
                     scope,
                     watermark,
@@ -271,7 +282,7 @@ impl EntityDispatcher {
                 .await
             }
             DispatchDecision::PendingPartitions(pending) => {
-                self.publish_partitions(entity, scope, watermark, partition, &pending)
+                self.publish_partitions(dispatch_id, entity, scope, watermark, partition, &pending)
                     .await
             }
         }
@@ -305,11 +316,13 @@ impl EntityDispatcher {
 
     async fn publish_single(
         &self,
+        dispatch_id: &str,
         entity: &DispatchableEntity,
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
     ) -> Result<(u64, u64), TaskError> {
         let request = EntityIndexingRequest {
+            dispatch_id: dispatch_id.to_owned(),
             entity_kind: entity.name.clone(),
             watermark,
             scope: scope.clone(),
@@ -320,6 +333,7 @@ impl EntityDispatcher {
 
     async fn publish_partitions(
         &self,
+        dispatch_id: &str,
         entity: &DispatchableEntity,
         scope: &IndexingScope,
         watermark: DateTime<Utc>,
@@ -360,6 +374,7 @@ impl EntityDispatcher {
             };
 
             let request = EntityIndexingRequest {
+                dispatch_id: dispatch_id.to_owned(),
                 entity_kind: entity.name.clone(),
                 watermark,
                 scope: scope.clone(),
@@ -445,6 +460,9 @@ impl EntityDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::sdlc::test_helpers::{MockCheckpointStore, MockPartitioner};
+    use crate::testkit::MockNatsServices;
+    use crate::topic::PartitionBounds;
 
     fn completed_checkpoint(watermark: &str) -> Checkpoint {
         Checkpoint {
@@ -466,6 +484,66 @@ mod tests {
             traversal_path: format!("42/{namespace_id}/"),
         };
         EntityCheckpointKey::new(&scope, entity_kind)
+    }
+
+    fn four_boundaries() -> Vec<PartitionBounds> {
+        vec![
+            PartitionBounds::Range {
+                lower_bound: "1".into(),
+                upper_bound: "25".into(),
+            },
+            PartitionBounds::Range {
+                lower_bound: "25".into(),
+                upper_bound: "50".into(),
+            },
+            PartitionBounds::Range {
+                lower_bound: "50".into(),
+                upper_bound: "75".into(),
+            },
+            PartitionBounds::Range {
+                lower_bound: "75".into(),
+                upper_bound: "100".into(),
+            },
+        ]
+    }
+
+    fn dummy_datalake() -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            "http://localhost:0",
+            "test",
+            "default",
+            None,
+            &HashMap::new(),
+        )
+    }
+
+    fn build_dispatcher(
+        nats: Arc<MockNatsServices>,
+        checkpoint_store: Arc<dyn CheckpointStore>,
+        partitioner: Arc<dyn Partitioner>,
+        partition_overrides: HashMap<String, u32>,
+    ) -> EntityDispatcher {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let config = EntityDispatcherConfig {
+            partition_overrides,
+            ..Default::default()
+        };
+        EntityDispatcher::new(
+            nats,
+            dummy_datalake(),
+            checkpoint_store,
+            partitioner,
+            &ontology,
+            ScheduledTaskMetrics::new(),
+            config,
+        )
+    }
+
+    fn published_entity_requests(nats: &MockNatsServices) -> Vec<EntityIndexingRequest> {
+        nats.get_published()
+            .into_iter()
+            .map(|(_, envelope)| serde_json::from_slice(&envelope.payload).unwrap())
+            .collect()
     }
 
     #[test]
@@ -557,25 +635,6 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_key_prefix_global() {
-        let key = EntityCheckpointKey::new(&IndexingScope::Global, "User");
-        assert_eq!(key.prefix(), "global.User");
-    }
-
-    #[test]
-    fn checkpoint_key_prefix_namespaced() {
-        let key = ns_key(100, "MergeRequest");
-        assert_eq!(key.prefix(), "ns.100.MergeRequest");
-    }
-
-    #[test]
-    fn checkpoint_key_partition() {
-        let key = ns_key(100, "MR");
-        assert_eq!(key.partition_key(0, 4), "ns.100.MR.p0of4");
-        assert_eq!(key.partition_key(3, 4), "ns.100.MR.p3of4");
-    }
-
-    #[test]
     fn collects_entities_from_embedded_ontology() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let no_overrides = HashMap::new();
@@ -603,5 +662,154 @@ mod tests {
             namespaced.contains(&"MergeRequest"),
             "should include MergeRequest"
         );
+    }
+
+    #[tokio::test]
+    async fn dispatches_single_message_for_non_partitioned_entity() {
+        let nats = Arc::new(MockNatsServices::new());
+        let dispatcher = build_dispatcher(
+            nats.clone(),
+            Arc::new(MockCheckpointStore::new()),
+            Arc::new(MockPartitioner::new(vec![])),
+            HashMap::new(),
+        );
+
+        let entity = DispatchableEntity {
+            name: "User".into(),
+            scope: EtlScope::Global,
+            partition: None,
+        };
+
+        let (dispatched, skipped) = dispatcher
+            .dispatch_entity("test-dispatch", &entity, &IndexingScope::Global, Utc::now())
+            .await
+            .unwrap();
+
+        assert_eq!((dispatched, skipped), (1, 0));
+        let requests = published_entity_requests(&nats);
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].entity_kind, "User");
+        assert!(requests[0].partition.is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatches_all_partitions_when_no_checkpoints_exist() {
+        let nats = Arc::new(MockNatsServices::new());
+        let dispatcher = build_dispatcher(
+            nats.clone(),
+            Arc::new(MockCheckpointStore::new()),
+            Arc::new(MockPartitioner::new(four_boundaries())),
+            HashMap::from([("Runner".into(), 4)]),
+        );
+
+        let entity = DispatchableEntity {
+            name: "Runner".into(),
+            scope: EtlScope::Global,
+            partition: Some(PartitionConfig {
+                count: 4,
+                source_table: "siphon_ci_runners".into(),
+                column: "id".into(),
+            }),
+        };
+
+        let (dispatched, _) = dispatcher
+            .dispatch_entity("test-dispatch", &entity, &IndexingScope::Global, Utc::now())
+            .await
+            .unwrap();
+
+        assert_eq!(dispatched, 4);
+        let requests = published_entity_requests(&nats);
+        let indices: Vec<u32> = requests
+            .iter()
+            .map(|r| r.partition.as_ref().unwrap().index)
+            .collect();
+        assert_eq!(indices, vec![0, 1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn dispatches_single_after_unified_checkpoint() {
+        let key = EntityCheckpointKey::new(&IndexingScope::Global, "Runner");
+        let checkpoint_store = MockCheckpointStore::with_checkpoints(vec![(
+            key.prefix().to_owned(),
+            completed_checkpoint("2024-01-01T00:00:00Z"),
+        )]);
+
+        let nats = Arc::new(MockNatsServices::new());
+        let dispatcher = build_dispatcher(
+            nats.clone(),
+            Arc::new(checkpoint_store),
+            Arc::new(MockPartitioner::new(four_boundaries())),
+            HashMap::from([("Runner".into(), 4)]),
+        );
+
+        let entity = DispatchableEntity {
+            name: "Runner".into(),
+            scope: EtlScope::Global,
+            partition: Some(PartitionConfig {
+                count: 4,
+                source_table: "siphon_ci_runners".into(),
+                column: "id".into(),
+            }),
+        };
+
+        let (dispatched, _) = dispatcher
+            .dispatch_entity("test-dispatch", &entity, &IndexingScope::Global, Utc::now())
+            .await
+            .unwrap();
+
+        assert_eq!(dispatched, 1);
+        let requests = published_entity_requests(&nats);
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].partition.is_none());
+    }
+
+    #[tokio::test]
+    async fn dispatches_only_pending_partitions() {
+        let key = EntityCheckpointKey::new(&IndexingScope::Global, "Runner");
+        let checkpoint_store = MockCheckpointStore::with_checkpoints(vec![
+            (
+                key.partition_key(0, 4),
+                completed_checkpoint("2024-01-01T00:00:00Z"),
+            ),
+            (
+                key.partition_key(1, 4),
+                in_progress_checkpoint("2024-01-01T00:00:00Z", vec!["42"]),
+            ),
+            (
+                key.partition_key(2, 4),
+                completed_checkpoint("2024-01-01T00:00:00Z"),
+            ),
+        ]);
+
+        let nats = Arc::new(MockNatsServices::new());
+        let dispatcher = build_dispatcher(
+            nats.clone(),
+            Arc::new(checkpoint_store),
+            Arc::new(MockPartitioner::new(four_boundaries())),
+            HashMap::from([("Runner".into(), 4)]),
+        );
+
+        let entity = DispatchableEntity {
+            name: "Runner".into(),
+            scope: EtlScope::Global,
+            partition: Some(PartitionConfig {
+                count: 4,
+                source_table: "siphon_ci_runners".into(),
+                column: "id".into(),
+            }),
+        };
+
+        let (dispatched, _) = dispatcher
+            .dispatch_entity("test-dispatch", &entity, &IndexingScope::Global, Utc::now())
+            .await
+            .unwrap();
+
+        assert_eq!(dispatched, 2);
+        let requests = published_entity_requests(&nats);
+        let indices: Vec<u32> = requests
+            .iter()
+            .map(|r| r.partition.as_ref().unwrap().index)
+            .collect();
+        assert_eq!(indices, vec![1, 3]);
     }
 }

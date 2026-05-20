@@ -203,46 +203,14 @@ mod tests {
     };
     use crate::testkit::mocks::MockNatsServices;
 
-    use crate::checkpoint::{Checkpoint, CheckpointError};
+    use crate::modules::sdlc::test_helpers::MockCheckpointStore;
     use crate::nats::{NatsError, NatsServices};
     use crate::types::{Envelope, Subscription};
-
-    struct MockCheckpointStore;
-
-    #[async_trait]
-    impl CheckpointStore for MockCheckpointStore {
-        async fn load(&self, _key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
-            Ok(None)
-        }
-
-        async fn load_by_prefix(
-            &self,
-            _entity_prefix: &str,
-        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-            Ok(vec![])
-        }
-
-        async fn save_progress(
-            &self,
-            _key: &str,
-            _checkpoint: &Checkpoint,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-
-        async fn save_completed(
-            &self,
-            _key: &str,
-            _watermark: &chrono::DateTime<Utc>,
-        ) -> Result<(), CheckpointError> {
-            Ok(())
-        }
-    }
 
     fn scheduler_with_store(store: Arc<dyn NamespaceDeletionStore>) -> NamespaceDeletionScheduler {
         NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::new()),
             Arc::new(MockNatsServices::new()),
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),
@@ -281,7 +249,7 @@ mod tests {
         let nats = Arc::new(MockNatsServices::new());
         let scheduler = NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::new()),
             nats.clone(),
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),
@@ -334,7 +302,7 @@ mod tests {
         let nats = Arc::new(DuplicateNatsServices);
         let scheduler = NamespaceDeletionScheduler::new(
             store,
-            Arc::new(MockCheckpointStore),
+            Arc::new(MockCheckpointStore::new()),
             nats,
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),

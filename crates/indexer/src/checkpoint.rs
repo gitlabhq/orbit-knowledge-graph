@@ -287,4 +287,31 @@ mod tests {
         assert_eq!(deserialized, checkpoint);
         assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
     }
+
+    #[test]
+    fn entity_checkpoint_key_prefix_global() {
+        let key = EntityCheckpointKey::new(&crate::topic::IndexingScope::Global, "User");
+        assert_eq!(key.prefix(), "global.User");
+    }
+
+    #[test]
+    fn entity_checkpoint_key_prefix_namespaced() {
+        let scope = crate::topic::IndexingScope::Namespace {
+            namespace_id: 100,
+            traversal_path: "42/100/".to_string(),
+        };
+        let key = EntityCheckpointKey::new(&scope, "MergeRequest");
+        assert_eq!(key.prefix(), "ns.100.MergeRequest");
+    }
+
+    #[test]
+    fn entity_checkpoint_key_partition() {
+        let scope = crate::topic::IndexingScope::Namespace {
+            namespace_id: 100,
+            traversal_path: "42/100/".to_string(),
+        };
+        let key = EntityCheckpointKey::new(&scope, "MR");
+        assert_eq!(key.partition_key(0, 4), "ns.100.MR.p0of4");
+        assert_eq!(key.partition_key(3, 4), "ns.100.MR.p3of4");
+    }
 }

@@ -14,6 +14,7 @@ mod merge_request_diffs;
 mod merge_requests;
 mod milestones;
 mod notes;
+mod partitioning;
 mod projects;
 mod security;
 mod watermarking;
@@ -21,6 +22,17 @@ mod work_items;
 
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 use integration_testkit::run_subtests;
+
+#[tokio::test]
+async fn partitioning() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL]).await;
+    run_subtests!(
+        &ctx,
+        partitioning::computes_boundaries_for_namespaced_scope,
+        partitioning::computes_boundaries_for_global_scope,
+        partitioning::namespace_filter_excludes_other_namespaces,
+    );
+}
 
 #[tokio::test]
 async fn global_indexing() {

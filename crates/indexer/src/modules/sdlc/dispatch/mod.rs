@@ -1,7 +1,7 @@
 mod entity;
 mod global;
 mod namespace;
-pub(crate) mod partitioning;
+pub mod partitioning;
 
 pub use entity::EntityDispatcher;
 pub use global::GlobalDispatcher;

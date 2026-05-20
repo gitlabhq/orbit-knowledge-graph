@@ -79,6 +79,7 @@ mod tests {
         let handler = EntityIndexingHandler::new(HandlerConfiguration::default());
 
         let payload = serde_json::json!({
+            "dispatch_id": "20240121T000000",
             "entity_kind": "User",
             "watermark": "2024-01-21T00:00:00Z",
             "scope": "Global"
@@ -95,6 +96,7 @@ mod tests {
         let handler = EntityIndexingHandler::new(HandlerConfiguration::default());
 
         let payload = serde_json::json!({
+            "dispatch_id": "20240121T000000",
             "entity_kind": "MergeRequest",
             "watermark": "2024-01-21T00:00:00Z",
             "scope": { "Namespace": { "namespace_id": 100, "traversal_path": "42/100/" } }
