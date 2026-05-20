@@ -40,7 +40,6 @@ pub mod types;
 
 pub mod config;
 pub mod passes;
-mod pipeline;
 
 pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
