@@ -25,16 +25,6 @@ pub enum ExecutorError {
     InterceptedCommand(String),
 }
 
-impl ExecutorError {
-    pub fn code(&self) -> String {
-        match self {
-            Self::NotFound(_) => "tool_not_found".to_string(),
-            Self::InvalidArguments(_) => "invalid_arguments".to_string(),
-            Self::InterceptedCommand(_) => "intercepted_command".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     #[default]

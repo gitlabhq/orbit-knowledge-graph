@@ -37,7 +37,6 @@ impl SchemaState {
 
 pub struct SchemaWatcher {
     state: Arc<AtomicU8>,
-    embedded_version: u32,
 }
 
 impl SchemaWatcher {
@@ -58,25 +57,17 @@ impl SchemaWatcher {
             state.clone(),
         ));
 
-        Arc::new(Self {
-            state,
-            embedded_version,
-        })
+        Arc::new(Self { state })
     }
 
     pub fn current(&self) -> SchemaState {
         SchemaState::from_raw(self.state.load(Ordering::Relaxed))
     }
 
-    pub fn embedded_version(&self) -> u32 {
-        self.embedded_version
-    }
-
     #[cfg(any(test, feature = "testkit"))]
-    pub fn for_state(state: SchemaState, embedded_version: u32) -> Arc<Self> {
+    pub fn for_state(state: SchemaState) -> Arc<Self> {
         Arc::new(Self {
             state: Arc::new(AtomicU8::new(state as u8)),
-            embedded_version,
         })
     }
 }

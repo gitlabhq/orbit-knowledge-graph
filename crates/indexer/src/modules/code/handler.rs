@@ -346,8 +346,7 @@ mod tests {
             let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> = Arc::new(
                 LocalRepositoryCache::new(temp_dir.path().to_path_buf(), u64::MAX, metrics.clone()),
             );
-            let resolver =
-                RepositoryResolver::new(Arc::clone(&repo_service), cache, metrics.clone());
+            let resolver = RepositoryResolver::new(Arc::clone(&repo_service), cache);
 
             let pipeline = Arc::new(CodeIndexingPipeline::new(
                 resolver,

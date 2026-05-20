@@ -55,7 +55,7 @@ fn dummy_client() -> ArrowClickHouseClient {
 }
 
 fn ready_watcher() -> Arc<SchemaWatcher> {
-    SchemaWatcher::for_state(SchemaState::Ready, 0)
+    SchemaWatcher::for_state(SchemaState::Ready)
 }
 
 #[tokio::test]

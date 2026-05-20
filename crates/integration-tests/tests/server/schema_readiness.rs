@@ -60,7 +60,7 @@ async fn await_state(watcher: &Arc<SchemaWatcher>, target: SchemaState) {
 
 #[tokio::test]
 async fn ready_returns_503_when_schema_pending() {
-    let watcher = SchemaWatcher::for_state(SchemaState::Pending, 1);
+    let watcher = SchemaWatcher::for_state(SchemaState::Pending);
     let router = create_router(dummy_clickhouse(), None, watcher);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -71,7 +71,7 @@ async fn ready_returns_503_when_schema_pending() {
 
 #[tokio::test]
 async fn ready_returns_503_when_schema_outdated() {
-    let watcher = SchemaWatcher::for_state(SchemaState::Outdated, 1);
+    let watcher = SchemaWatcher::for_state(SchemaState::Outdated);
     let router = create_router(dummy_clickhouse(), None, watcher);
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;

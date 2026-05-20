@@ -472,19 +472,6 @@ impl PipelineError {
             fatal: false,
         }
     }
-
-    pub fn fatal(
-        file_path: impl Into<String>,
-        error: impl Into<String>,
-        stage: &'static str,
-    ) -> Self {
-        Self {
-            file_path: file_path.into(),
-            error: error.into(),
-            stage,
-            fatal: true,
-        }
-    }
 }
 
 impl From<crate::v2::error::CodeGraphError> for PipelineError {

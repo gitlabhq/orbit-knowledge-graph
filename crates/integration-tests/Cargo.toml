@@ -10,7 +10,6 @@ publish = false
 
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
-gitalisk-core = { workspace = true }
 compiler = { path = "../query-engine/compiler" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-server-config = { path = "../gkg-server-config" }
@@ -37,17 +36,13 @@ prost = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
-health-check = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
-siphon-proto = { path = "../siphon-proto" }
 tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
-tokio-stream = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
 reqwest = { workspace = true }
@@ -55,5 +50,4 @@ labkit = { workspace = true, features = ["http"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.32", features = ["metrics", "rt-tokio", "testing"] }
-zstd = "0.13.3"
 sqlparser.workspace = true

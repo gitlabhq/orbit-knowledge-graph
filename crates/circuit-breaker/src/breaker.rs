@@ -41,10 +41,6 @@ impl CircuitBreakerRegistry {
         }
     }
 
-    pub fn with_defaults(observer: Arc<dyn CircuitBreakerObserver>) -> Self {
-        Self::new(HashMap::new(), observer)
-    }
-
     pub fn without_observer(configs: HashMap<&'static str, CircuitConfig>) -> Self {
         Self::new(configs, Arc::new(NoopObserver))
     }

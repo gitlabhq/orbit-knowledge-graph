@@ -13,7 +13,7 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use tower::ServiceExt;
 
 fn ready_watcher() -> Arc<SchemaWatcher> {
-    SchemaWatcher::for_state(SchemaState::Ready, 0)
+    SchemaWatcher::for_state(SchemaState::Ready)
 }
 
 fn live_request() -> Request<Body> {

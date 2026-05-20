@@ -5,7 +5,6 @@ use tracing::info;
 use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
-use crate::modules::code::metrics::CodeMetrics;
 use gitlab_client::GitlabClientError;
 
 /// Errors produced when resolving a repository snapshot for indexing.
@@ -74,20 +73,16 @@ fn classify_download_error(
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
     cache: Arc<dyn RepositoryCache>,
-    #[allow(dead_code)]
-    metrics: CodeMetrics,
 }
 
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
         cache: Arc<dyn RepositoryCache>,
-        metrics: CodeMetrics,
     ) -> Self {
         Self {
             repository_service,
             cache,
-            metrics,
         }
     }
 
@@ -160,6 +155,7 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
+    use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::repository::cache::{LocalRepositoryCache, RepositoryCache};
     use crate::modules::code::repository::service::RepositoryServiceError;
     use async_trait::async_trait;
@@ -274,10 +270,9 @@ mod tests {
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             temp_dir.path().to_path_buf(),
             u64::MAX,
-            metrics.clone(),
+            metrics,
         ));
-        let resolver =
-            RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache, metrics);
+        let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);
         (temp_dir, resolver)
     }
 

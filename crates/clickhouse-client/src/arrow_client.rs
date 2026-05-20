@@ -171,10 +171,6 @@ impl ArrowClickHouseClient {
         &self.client
     }
 
-    pub fn new_query_id() -> String {
-        uuid::Uuid::new_v4().to_string()
-    }
-
     /// Bind a named parameter to a query.
     ///
     /// `ch_type` carries the ClickHouse type from the query placeholder. For
@@ -251,20 +247,6 @@ fn warn_on_dropped_elements(key: &str, scalar: &str, input: usize, bound: usize)
             bound,
             "bind_param: array had elements that could not be converted, dropped values"
         );
-    }
-}
-
-#[cfg(any(test, feature = "testkit"))]
-impl ArrowClickHouseClient {
-    /// Unconfigured client for unit tests. Never connects to anything.
-    pub fn dummy() -> Self {
-        Self::new(
-            "http://localhost:0",
-            "default",
-            "default",
-            None,
-            &std::collections::HashMap::new(),
-        )
     }
 }
 

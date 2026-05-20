@@ -57,11 +57,7 @@ oxc_linter = { workspace = true }
 oxc_resolver = { workspace = true }
 
 [dev-dependencies]
-gitalisk-core = { workspace = true }
 tempfile = { workspace = true }
-walkdir = { workspace = true }
-criterion = { workspace = true }
-tracing-test = { workspace = true }
 
 [lints]
 workspace = true

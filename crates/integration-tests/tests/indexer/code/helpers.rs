@@ -61,8 +61,7 @@ impl CodeIndexingDeps {
             u64::MAX,
             metrics.clone(),
         ));
-        let resolver =
-            RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+        let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
         let pipeline = Arc::new(CodeIndexingPipeline::new(
             resolver,

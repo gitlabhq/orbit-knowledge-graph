@@ -13,13 +13,11 @@ arrow_56 = { workspace = true }
 
 # arrow 58 for IPC bridge (arrow 58 → arrow 56 conversion)
 arrow = { workspace = true }
-arrow-ipc = { workspace = true }
 
 crossbeam-channel = "0.5"
 globset = { workspace = true }
 rayon = { workspace = true }
 petgraph = { workspace = true }
-rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
