@@ -446,35 +446,43 @@ pub fn generate(input: TokenStream) -> TokenStream {
                 // Pipeline has this state field — generate guarded accessors
                 trait_impls.push(quote! {
                     fn #name(&self) -> &Option<#ty> {
-                        assert!(
-                            matches!(self.current_phase, #(#read_arms)|*),
-                            "phase `{}` cannot read `{}` (allowed: {})",
-                            self.current_phase, #name_str, #read_allowed
-                        );
+                        if !self.current_phase.is_empty() {
+                            assert!(
+                                matches!(self.current_phase, #(#read_arms)|*),
+                                "phase `{}` cannot read `{}` (allowed: {})",
+                                self.current_phase, #name_str, #read_allowed
+                            );
+                        }
                         &self.#name
                     }
                     fn #getter_mut(&mut self) -> &mut Option<#ty> {
-                        assert!(
-                            matches!(self.current_phase, #(#mut_arms)|*),
-                            "phase `{}` cannot mutate `{}` (allowed: {})",
-                            self.current_phase, #name_str, #mut_allowed
-                        );
+                        if !self.current_phase.is_empty() {
+                            assert!(
+                                matches!(self.current_phase, #(#mut_arms)|*),
+                                "phase `{}` cannot mutate `{}` (allowed: {})",
+                                self.current_phase, #name_str, #mut_allowed
+                            );
+                        }
                         &mut self.#name
                     }
                     fn #setter(&mut self, value: #ty) {
-                        assert!(
-                            matches!(self.current_phase, #(#mut_arms)|*),
-                            "phase `{}` cannot mutate `{}` (allowed: {})",
-                            self.current_phase, #name_str, #mut_allowed
-                        );
+                        if !self.current_phase.is_empty() {
+                            assert!(
+                                matches!(self.current_phase, #(#mut_arms)|*),
+                                "phase `{}` cannot mutate `{}` (allowed: {})",
+                                self.current_phase, #name_str, #mut_allowed
+                            );
+                        }
                         self.#name = Some(value);
                     }
                     fn #taker(&mut self) -> Option<#ty> {
-                        assert!(
-                            matches!(self.current_phase, #(#mut_arms)|*),
-                            "phase `{}` cannot mutate `{}` (allowed: {})",
-                            self.current_phase, #name_str, #mut_allowed
-                        );
+                        if !self.current_phase.is_empty() {
+                            assert!(
+                                matches!(self.current_phase, #(#mut_arms)|*),
+                                "phase `{}` cannot mutate `{}` (allowed: {})",
+                                self.current_phase, #name_str, #mut_allowed
+                            );
+                        }
                         self.#name.take()
                     }
                 });
