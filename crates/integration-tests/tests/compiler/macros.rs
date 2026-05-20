@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use compiler::{
-    HasInput, HasJson, HasOntology, HasSecurityCtx, Input, LocalEnv, QueryError, QueryState, Seal,
-    SealInput, SealJson, SealNode, SecureEnv, SecurityContext,
+    HasInput, HasJson, HasOntology, HasSecurityCtx, Input, QueryError, QueryState, Seal, SealInput,
+    SealJson, SealNode, SecureEnv, SecurityContext,
 };
 use ontology::Ontology;
 
@@ -30,18 +30,6 @@ fn secure_env_new_stores_fields() {
 
     assert!(Arc::ptr_eq(env.ontology(), &ontology));
     assert_eq!(env.security_ctx().org_id, ctx.org_id);
-}
-
-#[test]
-fn local_env_new_stores_ontology() {
-    let ontology = Arc::new(Ontology::new());
-    let env = LocalEnv::local(ontology.clone());
-
-    assert!(Arc::ptr_eq(env.ontology(), &ontology));
-    assert!(
-        env.security_ctx().admin,
-        "local env must run as admin so admin_only fields stay visible in CLI tooling"
-    );
 }
 
 #[test]

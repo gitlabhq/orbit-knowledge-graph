@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -57,33 +56,6 @@ impl Workspace {
         } else {
             Ok(discovered)
         }
-    }
-
-    /// Return `project_id -> repo_path` mapping for all indexed repos.
-    pub fn project_roots(&self) -> Result<HashMap<i64, PathBuf>> {
-        let client = DuckDbClient::open_read_only(&self.db_path())
-            .context("failed to open DuckDB for manifest read")?;
-        let batches = client
-            .query_arrow(
-                "SELECT project_id, repo_path FROM _orbit_manifest WHERE status = 'indexed'",
-            )
-            .context("failed to query project roots")?;
-
-        use arrow::datatypes::Int64Type;
-        use gkg_utils::arrow::ArrowUtils;
-
-        let mut map = HashMap::new();
-        for batch in &batches {
-            for row in 0..batch.num_rows() {
-                if let (Some(pid), Some(path)) = (
-                    ArrowUtils::get_column::<Int64Type>(batch, "project_id", row),
-                    ArrowUtils::get_column_string(batch, "repo_path", row),
-                ) {
-                    map.insert(pid, PathBuf::from(path));
-                }
-            }
-        }
-        Ok(map)
     }
 }
 

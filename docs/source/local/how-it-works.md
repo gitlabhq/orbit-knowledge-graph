@@ -50,14 +50,15 @@ Edges connect files to their definitions, files to their imports, and definition
 
 ## Query execution
 
-When you run `orbit query`:
+Orbit Local exposes the graph as a DuckDB database. Run any read-only SQL
+against it with `orbit sql`:
 
-1. Orbit Local parses the JSON query payload.
-1. The query engine compiles the same JSON DSL as Orbit Remote, but targets DuckDB SQL instead of ClickHouse SQL.
-1. DuckDB executes the query against the local graph tables.
-1. Results are returned as typed JSON (or formatted text by default).
+1. `orbit sql` opens `~/.orbit/graph.duckdb` read-only.
+1. Your SQL runs directly against the graph tables — no DSL compilation,
+   no authorization layer.
+1. Results stream back as a table, JSON, NDJSON, or CSV.
 
-There is no authorization layer. All data in the graph is accessible to whoever runs the CLI.
+All data in the graph is accessible to whoever runs the CLI.
 
 ## Storage
 

@@ -60,7 +60,7 @@ Next:
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
 - Wire it into your AI agent: see [Connect via MCP](access/mcp.md) for the
   manual config. (`glab orbit setup` is planned to automate this.)
-- Learn the query DSL: [Query language reference](../remote/queries/).
+- Browse the table layout: [Schema reference](schema.md).
 
 ## Billing
 
