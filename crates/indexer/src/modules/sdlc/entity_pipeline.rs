@@ -22,6 +22,8 @@ pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
     ) -> Result<(), HandlerError>;
 }
 
+/// Delegates to the shared `Pipeline` ETL engine with a single `PipelinePlan`.
+/// Once GlobalHandler/NamespaceHandler are removed, `Pipeline` can be absorbed here.
 pub(in crate::modules::sdlc) struct SimpleEntityPipeline {
     plan: PipelinePlan,
     pipeline: Arc<Pipeline>,
