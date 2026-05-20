@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
@@ -14,15 +15,16 @@ use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, info_span, warn};
 
+use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
+use crate::topic::{EntityIndexingRequest, IndexingScope};
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
 use super::plan::{ExtractQuery, PipelinePlan, SOURCE_DATA_TABLE, Transformation};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
@@ -108,7 +110,7 @@ impl Pipeline {
         )))
     }
 
-    async fn run_plan(
+    pub(in crate::modules::sdlc) async fn run_plan(
         &self,
         plan: &PipelinePlan,
         context: &PipelineContext,
@@ -425,22 +427,16 @@ impl Pipeline {
     }
 
     async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
-        match self.checkpoint_store.load(position_key).await {
+        match self.checkpoint_store.load_consolidated(position_key).await {
             Ok(Some(checkpoint)) => checkpoint,
-            Ok(None) => Checkpoint {
-                watermark: DateTime::<Utc>::UNIX_EPOCH,
-                cursor_values: None,
-            },
+            Ok(None) => Checkpoint::default(),
             Err(err) => {
                 warn!(
                     position_key,
                     %err,
                     "failed to load checkpoint, starting from epoch"
                 );
-                Checkpoint {
-                    watermark: DateTime::<Utc>::UNIX_EPOCH,
-                    cursor_values: None,
-                }
+                Checkpoint::default()
             }
         }
     }
@@ -463,6 +459,63 @@ impl Pipeline {
             params.insert(key.clone(), Value::String(value.clone()));
         }
         Value::Object(params)
+    }
+}
+
+#[async_trait]
+pub(in crate::modules::sdlc) trait EntityPipeline: Send + Sync {
+    async fn run(
+        &self,
+        request: &EntityIndexingRequest,
+        destination: &dyn Destination,
+        progress: &ProgressNotifier,
+    ) -> Result<(), HandlerError>;
+}
+
+pub(in crate::modules::sdlc) struct SimpleEntityPipeline {
+    plan: PipelinePlan,
+    pipeline: Arc<Pipeline>,
+}
+
+impl SimpleEntityPipeline {
+    pub fn new(plan: PipelinePlan, pipeline: Arc<Pipeline>) -> Self {
+        Self { plan, pipeline }
+    }
+}
+
+#[async_trait]
+impl EntityPipeline for SimpleEntityPipeline {
+    async fn run(
+        &self,
+        request: &EntityIndexingRequest,
+        destination: &dyn Destination,
+        progress: &ProgressNotifier,
+    ) -> Result<(), HandlerError> {
+        let (position_key, base_conditions) = match &request.scope {
+            IndexingScope::Global => ("global".to_string(), BTreeMap::new()),
+            IndexingScope::Namespace {
+                namespace_id,
+                traversal_path,
+            } => (
+                namespace_position_key(*namespace_id),
+                BTreeMap::from([("traversal_path".to_string(), traversal_path.clone())]),
+            ),
+        };
+
+        let plan = match &request.partition {
+            Some(partition) => self.plan.clone().with_partition(partition),
+            None => self.plan.clone(),
+        };
+
+        let context = PipelineContext {
+            watermark: request.watermark,
+            position_key,
+            base_conditions,
+        };
+
+        self.pipeline
+            .run_plan(&plan, &context, destination, progress)
+            .await
     }
 }
 
@@ -637,9 +690,15 @@ mod tests {
 
         async fn load_by_prefix(
             &self,
-            _entity_prefix: &str,
+            entity_prefix: &str,
         ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
-            Ok(vec![])
+            Ok(self
+                .state
+                .lock()
+                .unwrap()
+                .clone()
+                .map(|cp| vec![(entity_prefix.to_owned(), cp)])
+                .unwrap_or_default())
         }
 
         async fn save_progress(
@@ -664,6 +723,11 @@ mod tests {
                 watermark: *watermark,
                 cursor_values: None,
             });
+            Ok(())
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), CheckpointError> {
+            *self.state.lock().unwrap() = None;
             Ok(())
         }
     }

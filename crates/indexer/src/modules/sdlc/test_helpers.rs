@@ -123,6 +123,11 @@ impl CheckpointStore for MockCheckpointStore {
         );
         Ok(())
     }
+
+    async fn delete(&self, key: &str) -> Result<(), CheckpointError> {
+        self.data.lock().remove(key);
+        Ok(())
+    }
 }
 
 pub(crate) struct MockPartitioner {

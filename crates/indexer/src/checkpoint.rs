@@ -61,6 +61,15 @@ pub struct Checkpoint {
     pub cursor_values: Option<Vec<String>>,
 }
 
+impl Default for Checkpoint {
+    fn default() -> Self {
+        Self {
+            watermark: DateTime::<Utc>::UNIX_EPOCH,
+            cursor_values: None,
+        }
+    }
+}
+
 #[async_trait]
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
@@ -81,6 +90,38 @@ pub trait CheckpointStore: Send + Sync {
         key: &str,
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError>;
+
+    async fn delete(&self, key: &str) -> Result<(), CheckpointError>;
+
+    async fn load_consolidated(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError> {
+        let checkpoints = self.load_by_prefix(key).await?;
+        if checkpoints.is_empty() {
+            return Ok(None);
+        }
+
+        let (unified, partitions): (Vec<_>, Vec<_>) =
+            checkpoints.into_iter().partition(|(k, _)| k == key);
+
+        if partitions.is_empty() {
+            return Ok(unified.into_iter().next().map(|(_, cp)| cp));
+        }
+
+        let min_watermark = partitions
+            .iter()
+            .map(|(_, cp)| cp.watermark)
+            .min()
+            .expect("partitions is non-empty");
+
+        self.save_completed(key, &min_watermark).await?;
+        for (partition_key, _) in &partitions {
+            self.delete(partition_key).await?;
+        }
+
+        Ok(Some(Checkpoint {
+            watermark: min_watermark,
+            cursor_values: None,
+        }))
+    }
 }
 
 pub struct ClickHouseCheckpointStore {
@@ -253,6 +294,20 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError> {
         self.upsert(key, watermark, &None).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        self.client
+            .query(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
+                 VALUES ({{key:String}}, '1970-01-01 00:00:00.000000', '', true)"
+            ))
+            .param("key", key)
+            .execute()
+            .await
+            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+        Ok(())
     }
 }
 

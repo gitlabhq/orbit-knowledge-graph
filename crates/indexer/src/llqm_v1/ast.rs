@@ -49,8 +49,10 @@ impl UnaryOp {
 pub enum Op {
     Eq,
     Ne,
+    Lt,
     Le,
     Gt,
+    Gte,
     And,
     Or,
 }
@@ -60,8 +62,10 @@ impl Op {
         match self {
             Op::Eq => "=",
             Op::Ne => "!=",
+            Op::Lt => "<",
             Op::Le => "<=",
             Op::Gt => ">",
+            Op::Gte => ">=",
             Op::And => "AND",
             Op::Or => "OR",
         }

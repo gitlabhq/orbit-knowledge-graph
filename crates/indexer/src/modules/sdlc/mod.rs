@@ -5,6 +5,7 @@ mod metrics;
 mod pipeline;
 mod plan;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::IndexerConfig;
@@ -16,7 +17,7 @@ use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
 use metrics::SdlcMetrics;
-use pipeline::Pipeline;
+use pipeline::{EntityPipeline, Pipeline, SimpleEntityPipeline};
 use plan::build_plans;
 use tracing::info;
 
@@ -88,14 +89,54 @@ pub async fn register_handlers(
 pub async fn register_entity_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
-    _ontology: &ontology::Ontology,
+    ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
     let entity_config = &config.engine.handlers.entity_handler;
 
-    info!("registering entity indexing handler (no pipelines yet)");
+    let datalake_client = Arc::new(config.datalake.build_client());
+    let graph_client = Arc::new(config.graph.build_client());
+
+    let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
+        datalake_client,
+        entity_config.datalake_batch_size,
+    ));
+    let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
+        Arc::new(ClickHouseCheckpointStore::new(graph_client));
+    let metrics = SdlcMetrics::new();
+
+    let plans = build_plans(
+        ontology,
+        entity_config.datalake_batch_size,
+        entity_config.datalake_batch_size,
+        &entity_config.batch_size_overrides,
+    );
+
+    let pipeline = Arc::new(Pipeline::new(
+        datalake,
+        checkpoint_store,
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+    ));
+
+    let mut entity_pipelines: HashMap<String, Arc<dyn EntityPipeline>> = HashMap::new();
+    for plan in plans.global.into_iter().chain(plans.namespaced) {
+        let name = plan.name.clone();
+        entity_pipelines.insert(
+            name,
+            Arc::new(SimpleEntityPipeline::new(plan, Arc::clone(&pipeline))),
+        );
+    }
+
+    info!(
+        entity_count = entity_pipelines.len(),
+        entities = ?entity_pipelines.keys().collect::<Vec<_>>(),
+        "entity pipelines initialized"
+    );
 
     registry.register_handler(Box::new(EntityIndexingHandler::new(
         entity_config.engine.clone(),
+        entity_pipelines,
+        metrics,
     )));
 
     Ok(())

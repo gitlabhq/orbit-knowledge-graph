@@ -4,6 +4,7 @@ pub(crate) mod lower;
 pub(crate) use crate::llqm_v1::ast;
 use crate::llqm_v1::ast::TableRef;
 pub(crate) use crate::llqm_v1::codegen;
+use crate::topic::PartitionAssignment;
 use std::collections::HashSet;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
@@ -109,6 +110,17 @@ impl ExtractQuery {
         self.batch_size
     }
 
+    pub fn with_condition(mut self, condition: Expr) -> Self {
+        if let Some(template) = &mut self.raw_template {
+            let condition_sql = codegen::emit_expr_to_string(&condition);
+            *template = template.replace("{CURSOR}", &format!(" AND {condition_sql}{{CURSOR}}"));
+        } else {
+            self.base_query.where_clause =
+                Expr::and_all([self.base_query.where_clause, Some(condition)]);
+        }
+        self
+    }
+
     /// Builds a DNF (disjunctive normal form) greater-than expression for
     /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
     /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
@@ -171,6 +183,35 @@ pub(in crate::modules::sdlc) struct PipelinePlan {
     pub name: String,
     pub extract_query: ExtractQuery,
     pub transforms: Vec<Transformation>,
+}
+
+impl PipelinePlan {
+    pub fn with_partition(mut self, partition: &PartitionAssignment) -> Self {
+        use crate::topic::PartitionBounds;
+
+        self.name = format!("{}.p{}of{}", self.name, partition.index, partition.total);
+
+        let PartitionBounds::Range {
+            lower_bound,
+            upper_bound,
+        } = &partition.bounds;
+        let range_filter = Expr::and_all([
+            Some(Expr::binary(
+                Op::Gte,
+                Expr::col("", &partition.column),
+                Expr::raw(format!("'{lower_bound}'")),
+            )),
+            Some(Expr::binary(
+                Op::Lt,
+                Expr::col("", &partition.column),
+                Expr::raw(format!("'{upper_bound}'")),
+            )),
+        ])
+        .expect("two Some values always produce Some");
+
+        self.extract_query = self.extract_query.with_condition(range_filter);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
