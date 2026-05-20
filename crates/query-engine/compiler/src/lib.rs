@@ -38,13 +38,9 @@ pub mod input;
 pub mod metrics;
 pub mod types;
 
-// pipeline must come before pipelines — its macros.rs defines
-// `define_env_capabilities!` and `define_state_capabilities!` which
-// pipelines.rs invokes.
 pub mod config;
 pub mod passes;
-pub mod pipeline;
-pub mod pipelines;
+mod pipeline;
 
 pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
@@ -60,21 +56,7 @@ pub use input::{
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
-pub use pipeline::{
-    CompilerPass, Pipeline, PipelineEnv, PipelineObserver, PipelineState, Seal, SealedPipeline,
-};
 
-// Re-export env, state, and capability traits.
-pub use passes::{
-    CheckPass, CodegenPass, DuckDbCodegenPass, EnforcePass, HydratePlanPass, LowerPass,
-    NormalizePass, PlannerPass, SecurityPass, SettingsPass, ValidatePass,
-};
-pub use pipelines::{
-    DuckDbState, HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput,
-    HasResultCtx, HasSecurityCtx, LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
-};
-
-// Re-export key types from pass modules.
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,
