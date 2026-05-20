@@ -97,12 +97,12 @@ pub fn compile(
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
     let mut pipeline_ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
-    pipeline_ctx.set_current_phase("validate_phase");
+    pipeline_ctx.set_current_phase("validate");
     pipeline_ctx.set_json(json_input.to_string());
     pipeline_ctx.set_current_phase("");
     config::run_clickhouse(&mut pipeline_ctx)
         .and_then(|()| {
-            pipeline_ctx.set_current_phase("codegen_phase");
+            pipeline_ctx.set_current_phase("codegen");
             let out = pipeline_ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })?;
@@ -130,22 +130,22 @@ pub fn compile_input(
 
     let result = if is_hydration {
         let mut pipeline_ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
-        pipeline_ctx.set_current_phase("restrict_phase");
+        pipeline_ctx.set_current_phase("restrict");
         pipeline_ctx.set_input(input);
         pipeline_ctx.set_current_phase("");
         config::run_ch_hydration(&mut pipeline_ctx).and_then(|()| {
-            pipeline_ctx.set_current_phase("codegen_phase");
+            pipeline_ctx.set_current_phase("codegen");
             pipeline_ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
     } else {
         let mut pipeline_ctx = config::FromInputCtx::new(Arc::clone(ontology), ctx.clone());
-        pipeline_ctx.set_current_phase("restrict_phase");
+        pipeline_ctx.set_current_phase("restrict");
         pipeline_ctx.set_input(input);
         pipeline_ctx.set_current_phase("");
         config::run_from_input(&mut pipeline_ctx).and_then(|()| {
-            pipeline_ctx.set_current_phase("codegen_phase");
+            pipeline_ctx.set_current_phase("codegen");
             pipeline_ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
@@ -174,12 +174,12 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
         .expect("empty traversal paths are always valid")
         .with_role(true, None);
     let mut pipeline_ctx = config::DuckdbCtx::new(Arc::new(ont), admin_ctx);
-    pipeline_ctx.set_current_phase("validate_phase");
+    pipeline_ctx.set_current_phase("validate");
     pipeline_ctx.set_json(json_input.to_string());
     pipeline_ctx.set_current_phase("");
     config::run_duckdb(&mut pipeline_ctx)
         .and_then(|()| {
-            pipeline_ctx.set_current_phase("duckdb_codegen_phase");
+            pipeline_ctx.set_current_phase("duckdb_codegen");
             pipeline_ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
@@ -203,12 +203,12 @@ pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<Compiled
         .expect("empty traversal paths are always valid")
         .with_role(true, None);
     let mut pipeline_ctx = config::DuckdbHydrationCtx::new(Arc::new(ont), admin_ctx);
-    pipeline_ctx.set_current_phase("plan_phase");
+    pipeline_ctx.set_current_phase("plan");
     pipeline_ctx.set_input(input);
     pipeline_ctx.set_current_phase("");
     config::run_duckdb_hydration(&mut pipeline_ctx)
         .and_then(|()| {
-            pipeline_ctx.set_current_phase("duckdb_codegen_phase");
+            pipeline_ctx.set_current_phase("duckdb_codegen");
             pipeline_ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })

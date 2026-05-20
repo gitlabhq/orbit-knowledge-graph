@@ -43,51 +43,51 @@ compiler_pipeline_macros::define_compiler_ctx! {
     }
 
     phases {
-        validate_phase {
+        validate {
             reads_env: [ontology]
             mutates: [json, input]
         }
-        normalize_phase {
+        normalize {
             reads_env: [ontology]
             mutates: [input]
         }
-        restrict_phase {
+        restrict {
             reads_env: [ontology, security_ctx]
             mutates: [input]
         }
-        plan_phase {
+        plan {
             mutates: [input, query_plan]
         }
-        lower_phase {
+        lower {
             reads_state: [input]
             mutates: [query_plan, node]
         }
-        enforce_phase {
+        enforce {
             reads_state: [input]
             mutates: [query_plan, node, result_ctx]
         }
-        security_phase {
+        security {
             reads_env: [security_ctx, ontology]
             mutates: [node]
         }
-        check_phase {
+        check {
             reads_env: [security_ctx]
             reads_state: [node]
         }
-        hydrate_plan_phase {
+        hydrate_plan {
             reads_env: [ontology, security_ctx]
             reads_state: [input]
             mutates: [hydration_plan]
         }
-        settings_phase {
+        settings {
             reads_state: [input, node]
             mutates: [query_plan, query_config]
         }
-        codegen_phase {
+        codegen {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
-        duckdb_codegen_phase {
+        duckdb_codegen {
             reads_state: [node, input]
             mutates: [result_ctx, hydration_plan, output]
         }
@@ -97,27 +97,27 @@ compiler_pipeline_macros::define_compiler_ctx! {
         clickhouse {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            run: [validate_phase, normalize_phase, restrict_phase, plan_phase, lower_phase, enforce_phase, security_phase, check_phase, hydrate_plan_phase, settings_phase, codegen_phase]
+            phases: [validate, normalize, restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
         }
         from_input {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            run: [restrict_phase, plan_phase, lower_phase, enforce_phase, security_phase, check_phase, hydrate_plan_phase, settings_phase, codegen_phase]
+            phases: [restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
         }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            run: [restrict_phase, plan_phase, lower_phase, enforce_phase, settings_phase, codegen_phase]
+            phases: [restrict, plan, lower, enforce, settings, codegen]
         }
         duckdb {
             env: [ontology, security_ctx]
             state: [json, input, query_plan, node, result_ctx, hydration_plan, output]
-            run: [validate_phase, normalize_phase, plan_phase, lower_phase, enforce_phase, hydrate_plan_phase, duckdb_codegen_phase]
+            phases: [validate, normalize, plan, lower, enforce, hydrate_plan, duckdb_codegen]
         }
         duckdb_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, output]
-            run: [plan_phase, lower_phase, enforce_phase, duckdb_codegen_phase]
+            phases: [plan, lower, enforce, duckdb_codegen]
         }
     }
 }
@@ -126,7 +126,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 // Phase functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn validate_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
     let json = ctx.take_json().expect("json required");
     let ontology = ctx.ontology();
     let v = validate::Validator::new(ontology);
@@ -139,27 +139,27 @@ fn validate_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn normalize_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = ctx.take_input().expect("input required");
     ctx.set_input(normalize::normalize(input, ctx.ontology())?);
     Ok(())
 }
 
-fn restrict_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let security_ctx = ctx.security_ctx().clone();
     let input = ctx.input_mut().as_mut().expect("input required");
     restrict::restrict(input, &ontology, &security_ctx)
 }
 
-fn plan_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = ctx.input_mut().as_mut().expect("input required");
     let query_plan = plan::plan(input)?;
     ctx.set_query_plan(query_plan);
     Ok(())
 }
 
-fn lower_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = ctx.take_query_plan().expect("query_plan required");
     let input = ctx.input().as_ref().expect("input required");
     let node = lower::emit(&query_plan, input)?;
@@ -168,7 +168,7 @@ fn lower_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn enforce_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = ctx.take_query_plan().expect("query_plan required");
     let node_edge_col = query_plan.node_edge_mappings();
     ctx.set_query_plan(query_plan);
@@ -180,26 +180,26 @@ fn enforce_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn security_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
     let node = ctx.node_mut().as_mut().expect("node required");
     security::apply_security_context(node, &security_ctx, &ontology)
 }
 
-fn check_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = ctx.node().as_ref().expect("node required");
     check::check_ast(node, ctx.security_ctx())
 }
 
-fn hydrate_plan_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = ctx.input().as_ref().expect("input required");
     let plan = hydrate::generate_hydration_plan(input, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
 
-fn settings_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let input = ctx.input().as_ref().expect("input required");
     let query_type: &str = input.query_type.into();
     let has_cursor = input.cursor.is_some();
@@ -220,7 +220,7 @@ fn settings_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn codegen_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = ctx.take_result_ctx().expect("result_ctx required");
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
@@ -238,7 +238,7 @@ fn codegen_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
     Ok(())
 }
 
-fn duckdb_codegen_phase(ctx: &mut impl CompilerCtx) -> Result<()> {
+fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let result_context = ctx.take_result_ctx().expect("result_ctx required");
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
     let node = ctx.node().as_ref().expect("node required");

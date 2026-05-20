@@ -128,7 +128,7 @@ impl Parse for PipelineDecl {
             match key.to_string().as_str() {
                 "env" => env = parse_ident_list(&content)?,
                 "state" => state = parse_ident_list(&content)?,
-                "run" => run = parse_ident_list(&content)?,
+                "phases" | "run" => run = parse_ident_list(&content)?,
                 other => {
                     return Err(syn::Error::new(
                         key.span(),
