@@ -202,7 +202,7 @@ impl CompilerMetadata {
     ///
     /// Wildcards and empty type lists resolve to all declared edge tables.
     pub fn resolve_edge_tables(&self, types: &[String]) -> Vec<String> {
-        if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+        if crate::passes::normalize::is_wildcard(types) {
             let mut tables: Vec<String> = self.edge_tables.iter().cloned().collect();
             tables.sort();
             return tables;
@@ -829,8 +829,6 @@ pub struct InputPath {
 #[serde(rename_all = "snake_case")]
 pub enum PathType {
     Shortest,
-    AllShortest,
-    Any,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

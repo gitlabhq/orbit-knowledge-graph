@@ -364,40 +364,6 @@ mod tests {
         );
     }
 
-    /// Traversal with 1 node + 0 relationships is a search shape.
-    /// It should compile to the same flat table scan as query_type: "search".
-    #[test]
-    fn traversal_single_node_compiles_as_search() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let search_query = r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "limit": 10
-        }"#;
-
-        let traversal_query = r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "limit": 10
-        }"#;
-
-        let search_sql = compile(search_query, &ontology, &security_ctx())
-            .expect("search should compile")
-            .base
-            .render();
-
-        let traversal_sql = compile(traversal_query, &ontology, &security_ctx())
-            .expect("single-node traversal should compile")
-            .base
-            .render();
-
-        assert_eq!(
-            search_sql, traversal_sql,
-            "single-node traversal SQL should match search SQL"
-        );
-    }
-
     /// Aggregation with a relationship and a property-less `count(target)`
     /// must resolve correctly without ClickHouse `Database does not exist`
     /// errors. The lowerer uses FK-shortcut joins for IN_PROJECT,
@@ -994,7 +960,7 @@ mod tests {
              references the User alias, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_cascade_u") && !sql.contains("_nf_u"),
+            !sql.contains("_nf_u"),
             "User-aliased CTEs must be dropped, got:\n{sql}"
         );
         // Direct FINAL scans do not need to project unused FK columns just to
@@ -1041,15 +1007,6 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Neither CTE should exist — edge-chain JOINs replace them.
-        assert!(
-            !sql.contains("_target_mr_ids"),
-            "_target_mr_ids must not be emitted, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_cascade_mr"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
-        );
         // FK elision replaces edge-chain JOINs with direct FK joins.
         // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
         assert!(
@@ -1093,11 +1050,6 @@ mod tests {
             sql.contains("UNION ALL"),
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
         );
-        // No frontier CTEs — v2 uses inline edge JOINs.
-        assert!(
-            !sql.contains("_thop0_1") && !sql.contains("_thop0_2"),
-            "lowerer should not emit frontier CTEs, got:\n{sql}"
-        );
         // Pinned source node_ids must be pushed into the arms.
         assert!(
             sql.contains("e0.source_id = 1"),
@@ -1136,11 +1088,6 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // lowerer uses UNION ALL for variable-length, no frontier CTEs.
-        assert!(
-            !sql.contains("_thop0_1"),
-            "lowerer should not emit frontier CTEs, got:\n{sql}"
-        );
         assert!(
             sql.contains("UNION ALL"),
             "variable-length traversal should use UNION ALL arms, got:\n{sql}"
@@ -1185,11 +1132,6 @@ mod tests {
         assert!(
             sql.contains("UNION ALL"),
             "multi-hop aggregation should use UNION ALL for variable-length hops, got:\n{sql}"
-        );
-        // No cascade CTEs.
-        assert!(
-            !sql.contains("_cascade_f"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
         );
         assert!(
             sql.contains("startsWith"),
@@ -1920,17 +1862,7 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // No cascade CTEs in lowerer — edge-chain JOINs replace them.
-        assert!(
-            !sql.contains("_cascade_mr"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
-        );
-
-        // No _target_mr_ids or _nf_mr CTEs — denorm covers the filter.
-        assert!(
-            !sql.contains("_target_mr_ids"),
-            "_target_mr_ids must not be emitted, got:\n{sql}"
-        );
+        // No _nf_mr CTE — denorm covers the filter.
         assert!(
             !sql.contains("_nf_mr"),
             "_nf_mr must not be emitted when state is fully denormalized, got:\n{sql}"

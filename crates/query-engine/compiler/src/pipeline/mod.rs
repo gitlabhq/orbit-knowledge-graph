@@ -63,7 +63,7 @@ struct Step<E: PipelineEnv, S: PipelineState> {
 // Builder
 // ═════════════════════════════════════════════════════════════════════════════
 
-pub struct PipelineBuilder<E: PipelineEnv, S: PipelineState> {
+pub(crate) struct PipelineBuilder<E: PipelineEnv, S: PipelineState> {
     steps: Vec<Step<E, S>>,
     observer: Option<Arc<dyn PipelineObserver>>,
 }
@@ -78,11 +78,6 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
         StepBuilder { inner: self }
     }
 
-    pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {
-        self.observer = Some(Arc::new(obs));
-        self
-    }
-
     pub fn build(self) -> Pipeline<E, S> {
         Pipeline {
             steps: self.steps,
@@ -93,7 +88,7 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
 
 /// Configures the most recently added pass. Chain `.seal()` calls,
 /// then continue with `.add()` or `.build()`.
-pub struct StepBuilder<E: PipelineEnv, S: PipelineState> {
+pub(crate) struct StepBuilder<E: PipelineEnv, S: PipelineState> {
     inner: PipelineBuilder<E, S>,
 }
 
@@ -108,16 +103,8 @@ impl<E: PipelineEnv, S: PipelineState> StepBuilder<E, S> {
         self
     }
 
-    pub fn done(self) -> PipelineBuilder<E, S> {
-        self.inner
-    }
-
     pub fn pass<P: CompilerPass<E, S> + 'static>(self, pass: P) -> StepBuilder<E, S> {
         self.inner.pass(pass)
-    }
-
-    pub fn observe(self, obs: impl PipelineObserver + 'static) -> PipelineBuilder<E, S> {
-        self.inner.observe(obs)
     }
 
     pub fn build(self) -> Pipeline<E, S> {
@@ -135,7 +122,7 @@ pub struct Pipeline<E: PipelineEnv, S: PipelineState> {
 }
 
 impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
-    pub fn builder() -> PipelineBuilder<E, S> {
+    pub(crate) fn builder() -> PipelineBuilder<E, S> {
         PipelineBuilder {
             steps: Vec::new(),
             observer: None,
