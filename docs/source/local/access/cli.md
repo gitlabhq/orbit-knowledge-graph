@@ -63,58 +63,17 @@ in the manifest table.
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
 
-## Query the graph
-
-```shell
-orbit query '{
-  "query_type": "traversal",
-  "node": {
-    "id": "d",
-    "entity": "Definition",
-    "columns": ["name", "definition_type", "file_path"],
-    "filters": { "definition_type": "Method" }
-  },
-  "limit": 20
-}'
-```
-
-The query language is identical to Orbit Remote. See the
-[query language reference](../../remote/queries/) for full syntax.
-
-| Flag | Purpose |
-|------|---------|
-| `--raw` | Emit raw JSON instead of LLM-friendly text. |
-| `--ontology` | Override the ontology directory. Defaults to embedded. |
-
 ## Inspect the schema
 
 ```shell
-orbit schema --ontology
-orbit schema --ontology --expand Definition File
-orbit schema --query
+orbit schema
+orbit schema --raw
 ```
 
-`--ontology` describes the graph (entities, edges, properties).
-`--query` describes the query DSL (how to write queries).
+`orbit schema` reads `information_schema.columns` from the local DuckDB
+and prints every table and column. Pass `--raw` for JSON output.
 
-## Compile a query without running it
-
-```shell
-orbit compile --local '{
-  "query_type": "traversal",
-  "node": {
-    "id": "f",
-    "entity": "File",
-    "columns": ["path"],
-    "filters": {"language": "ruby"}
-  },
-  "limit": 5
-}'
-```
-
-Useful for debugging query DSL or seeing the generated DuckDB SQL.
-
-## Run raw SQL against the local graph
+## Run SQL against the local graph
 
 ```shell
 orbit sql 'SELECT count(*) FROM gl_definition'

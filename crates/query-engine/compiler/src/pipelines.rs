@@ -51,26 +51,6 @@ pub struct SecureEnv {
     security_ctx: SecurityContext,
 }
 
-#[derive(PipelineEnv)]
-pub struct LocalEnv {
-    ontology: Arc<Ontology>,
-    /// Local/CLI execution has no multi-tenant security boundary; running
-    /// as admin lets `HydratePlanPass` emit unrestricted column specs.
-    security_ctx: SecurityContext,
-}
-
-impl LocalEnv {
-    /// Convenience constructor that fixes `security_ctx` to an admin context,
-    /// so `admin_only` ontology fields remain accessible in local tooling.
-    #[must_use]
-    pub fn local(ontology: Arc<Ontology>) -> Self {
-        let security_ctx = SecurityContext::new(0, vec![])
-            .expect("empty traversal paths are always valid")
-            .with_role(true, None);
-        Self::new(ontology, security_ctx)
-    }
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
 // State
 // ═════════════════════════════════════════════════════════════════════════════
@@ -89,24 +69,6 @@ pub struct QueryState {
 
 impl QueryState {
     /// Extract the compiled output, consuming the state.
-    pub fn into_output(self) -> Result<CompiledQueryContext> {
-        self.output
-            .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
-    }
-}
-
-#[derive(PipelineState)]
-pub struct DuckDbState {
-    pub json: Option<String>,
-    pub input: Option<Input>,
-    pub query_plan: Option<QueryPlan>,
-    pub node: Option<Node>,
-    pub result_ctx: Option<ResultContext>,
-    pub hydration_plan: Option<HydrationPlan>,
-    pub output: Option<CompiledQueryContext>,
-}
-
-impl DuckDbState {
     pub fn into_output(self) -> Result<CompiledQueryContext> {
         self.output
             .ok_or_else(|| QueryError::PipelineInvariant("pipeline did not produce output".into()))
@@ -175,37 +137,5 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
         .pass(EnforcePass)
         .pass(SettingsPass)
         .pass(CodegenPass)
-        .build()
-}
-
-/// Local DuckDB hydration compilation pipeline.
-///
-/// ```text
-/// Input → Plan → Lower → Enforce → DuckDbCodegen
-/// ```
-pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
-    Pipeline::builder()
-        .pass(PlannerPass)
-        .pass(LowerPass)
-        .pass(EnforcePass)
-        .pass(DuckDbCodegenPass)
-        .build()
-}
-
-/// Local DuckDB compilation pipeline.
-///
-/// ```text
-/// JSON → Validate → Normalize → Plan → Lower → Enforce → HydratePlan → DuckDbCodegen
-/// ```
-pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
-    Pipeline::builder()
-        .pass(ValidatePass)
-        .seal(SealJson)
-        .pass(NormalizePass)
-        .pass(PlannerPass)
-        .pass(LowerPass)
-        .pass(EnforcePass)
-        .pass(HydratePlanPass)
-        .pass(DuckDbCodegenPass)
         .build()
 }
