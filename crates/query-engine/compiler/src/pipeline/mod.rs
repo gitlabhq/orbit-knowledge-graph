@@ -63,7 +63,7 @@ struct Step<E: PipelineEnv, S: PipelineState> {
 // Builder
 // ═════════════════════════════════════════════════════════════════════════════
 
-pub(crate) struct PipelineBuilder<E: PipelineEnv, S: PipelineState> {
+pub struct PipelineBuilder<E: PipelineEnv, S: PipelineState> {
     steps: Vec<Step<E, S>>,
     observer: Option<Arc<dyn PipelineObserver>>,
 }
@@ -88,7 +88,7 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
 
 /// Configures the most recently added pass. Chain `.seal()` calls,
 /// then continue with `.add()` or `.build()`.
-pub(crate) struct StepBuilder<E: PipelineEnv, S: PipelineState> {
+pub struct StepBuilder<E: PipelineEnv, S: PipelineState> {
     inner: PipelineBuilder<E, S>,
 }
 
@@ -122,7 +122,7 @@ pub struct Pipeline<E: PipelineEnv, S: PipelineState> {
 }
 
 impl<E: PipelineEnv, S: PipelineState> Pipeline<E, S> {
-    pub(crate) fn builder() -> PipelineBuilder<E, S> {
+    pub fn builder() -> PipelineBuilder<E, S> {
         PipelineBuilder {
             steps: Vec::new(),
             observer: None,
