@@ -23,10 +23,6 @@ Because GKG now emits its own billable usage events, the work falls under SOX IT
 - **Whole-repo scope.** The path taken by AI Gateway. Every change to the repository becomes a SOX-controlled change.
 - **Limited scope (folder / crate level).** Restrict SOX controls to a specific code surface.
 
-The narrow framing in the [!937 review thread](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539) noted that a naive folder boundary fails for GKG: `BillingObserver` plugs into the generic `PipelineObserver` / `MultiObserver` in `crates/query-engine/pipeline/`, and billing payload fields are populated from JWT claims parsed upstream of the billing module. A change in either could silently drop, duplicate, or corrupt billing events without touching billing code.
-
-Whole-repo scope on GKG was rejected by Knowledge Graph engineering: it would make every ontology change, every query-engine refactor, every parser tweak a SOX-controlled MR, with material velocity cost.
-
 ### Current state (post-MR !937 cleanup)
 
 The MR's original folder layout (`crates/gkg-server/src/billing/`) has since been refactored into an isolated crate. As of this ADR:
@@ -159,6 +155,7 @@ What stays the same:
 
 - Issue: [#507](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/507)
 - Implementing MR: [!937](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937) (merged)
+- SOX scoping discussion on !937: [review thread starting at note 3268652539](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/937#note_3268652539)
 - Quota check MR: [b3f415cf — feat(billing): add CustomersDot usage quota checks for mcp/rest queries](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/b3f415cf5b)
 - Rails JWT claim additions: [gitlab!232123](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/232123)
 - ITGC matrix: confidential Google Sheet (request access through the compliance team)
