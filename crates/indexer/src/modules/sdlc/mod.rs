@@ -1,5 +1,6 @@
 mod datalake;
 pub mod dispatch;
+mod entity_pipeline;
 mod handler;
 mod metrics;
 mod pipeline;
@@ -13,11 +14,12 @@ use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
+use entity_pipeline::{EntityPipeline, SimpleEntityPipeline};
 use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
 use metrics::SdlcMetrics;
-use pipeline::{EntityPipeline, Pipeline, SimpleEntityPipeline};
+use pipeline::Pipeline;
 use plan::build_plans;
 use tracing::info;
 
