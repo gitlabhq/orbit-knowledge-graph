@@ -350,7 +350,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
         trait_sigs.push(quote! { fn #name(&self) -> &Option<#ty>; });
         trait_sigs.push(quote! { fn #getter_mut(&mut self) -> &mut Option<#ty>; });
         trait_sigs.push(quote! { fn #setter(&mut self, value: #ty); });
-        trait_sigs.push(quote! { fn #taker(&mut self) -> #ty; });
+        trait_sigs.push(quote! { fn #taker(&mut self) -> Option<#ty>; });
     }
 
     out.extend(quote! {
@@ -469,14 +469,13 @@ pub fn generate(input: TokenStream) -> TokenStream {
                         );
                         self.#name = Some(value);
                     }
-                    fn #taker(&mut self) -> #ty {
+                    fn #taker(&mut self) -> Option<#ty> {
                         assert!(
                             matches!(self.current_phase, #(#mut_arms)|*),
                             "phase `{}` cannot mutate `{}` (allowed: {})",
                             self.current_phase, #name_str, #mut_allowed
                         );
                         self.#name.take()
-                            .unwrap_or_else(|| panic!("{} not yet populated", #name_str))
                     }
                 });
             } else {
@@ -489,7 +488,7 @@ pub fn generate(input: TokenStream) -> TokenStream {
                     fn #name(&self) -> &Option<#ty> { panic!(#msg) }
                     fn #getter_mut(&mut self) -> &mut Option<#ty> { panic!(#msg) }
                     fn #setter(&mut self, _: #ty) { panic!(#msg) }
-                    fn #taker(&mut self) -> #ty { panic!(#msg) }
+                    fn #taker(&mut self) -> Option<#ty> { panic!(#msg) }
                 });
             }
         }

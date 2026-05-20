@@ -267,7 +267,7 @@ mod ctx_tests {
 
     // Every phase takes &mut impl CompilerCtx — works with any pipeline
     fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
-        let input = ctx.take_input();
+        let input = ctx.take_input().expect("input required");
         ctx.set_input(Input(format!("normalized({})", input.0)));
         Ok(())
     }

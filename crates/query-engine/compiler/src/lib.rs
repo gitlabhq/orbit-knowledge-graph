@@ -41,8 +41,6 @@ pub mod types;
 // pipeline must come before pipelines — its macros.rs defines
 // `define_env_capabilities!` and `define_state_capabilities!` which
 // pipelines.rs invokes.
-// TODO: wire phase functions, then remove cfg gate
-#[cfg(any())]
 pub mod config;
 pub mod passes;
 pub mod pipeline;
@@ -94,6 +92,8 @@ pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, Travers
 use metrics::CountErr;
 use std::sync::Arc;
 
+use config::CompilerCtx as _;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,12 +115,18 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
-    let state = QueryState::from_json(json_input);
-    let pipeline = pipelines::clickhouse().seal();
-    pipeline
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
+    let mut pipeline_ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
+    pipeline_ctx.set_current_phase("validate_phase");
+    pipeline_ctx.set_json(json_input.to_string());
+    pipeline_ctx.set_current_phase("");
+    config::run_clickhouse(&mut pipeline_ctx)
+        .and_then(|()| {
+            pipeline_ctx.set_current_phase("codegen_phase");
+            let out = pipeline_ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })?;
+            Ok(out)
+        })
         .count_err()
 }
 
@@ -139,21 +145,33 @@ pub fn compile_input(
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::clone(ontology), ctx.clone());
     let is_hydration = input.query_type == QueryType::Hydration;
-    let state = QueryState::from_input(input);
 
-    let pipeline = if is_hydration {
-        pipelines::hydration()
+    let result = if is_hydration {
+        let mut pipeline_ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
+        pipeline_ctx.set_current_phase("restrict_phase");
+        pipeline_ctx.set_input(input);
+        pipeline_ctx.set_current_phase("");
+        config::run_ch_hydration(&mut pipeline_ctx).and_then(|()| {
+            pipeline_ctx.set_current_phase("codegen_phase");
+            pipeline_ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
     } else {
-        pipelines::from_input()
+        let mut pipeline_ctx = config::FromInputCtx::new(Arc::clone(ontology), ctx.clone());
+        pipeline_ctx.set_current_phase("restrict_phase");
+        pipeline_ctx.set_input(input);
+        pipeline_ctx.set_current_phase("");
+        config::run_from_input(&mut pipeline_ctx).and_then(|()| {
+            pipeline_ctx.set_current_phase("codegen_phase");
+            pipeline_ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
     };
 
-    pipeline
-        .seal()
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
-        .count_err()
+    result.count_err()
 }
 
 /// Compile a JSON query into DuckDB-dialect SQL for local/offline use.
@@ -168,17 +186,23 @@ pub fn compile_input(
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
     let mut ont = ontology.clone();
-    // Local mode uses a single DuckDB edge table. Collapse all edge routing
-    // so the compiler doesn't emit references to tables that don't exist locally.
     if let Some(local_table) = ontology.local_edge_table_name() {
         ont.collapse_edge_tables(local_table);
     }
-    let env = LocalEnv::local(Arc::new(ont));
-    let state = DuckDbState::from_json(json_input);
-    let pipeline = pipelines::duckdb().seal();
-    pipeline
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
+    let admin_ctx = SecurityContext::new(0, vec![])
+        .expect("empty traversal paths are always valid")
+        .with_role(true, None);
+    let mut pipeline_ctx = config::DuckdbCtx::new(Arc::new(ont), admin_ctx);
+    pipeline_ctx.set_current_phase("validate_phase");
+    pipeline_ctx.set_json(json_input.to_string());
+    pipeline_ctx.set_current_phase("");
+    config::run_duckdb(&mut pipeline_ctx)
+        .and_then(|()| {
+            pipeline_ctx.set_current_phase("duckdb_codegen_phase");
+            pipeline_ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
         .count_err()
 }
 
@@ -194,12 +218,20 @@ pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<Compiled
     if let Some(local_table) = ontology.local_edge_table_name() {
         ont.collapse_edge_tables(local_table);
     }
-    let env = LocalEnv::local(Arc::new(ont));
-    let state = DuckDbState::from_input(input);
-    let pipeline = pipelines::duckdb_hydration().seal();
-    pipeline
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
+    let admin_ctx = SecurityContext::new(0, vec![])
+        .expect("empty traversal paths are always valid")
+        .with_role(true, None);
+    let mut pipeline_ctx = config::DuckdbHydrationCtx::new(Arc::new(ont), admin_ctx);
+    pipeline_ctx.set_current_phase("plan_phase");
+    pipeline_ctx.set_input(input);
+    pipeline_ctx.set_current_phase("");
+    config::run_duckdb_hydration(&mut pipeline_ctx)
+        .and_then(|()| {
+            pipeline_ctx.set_current_phase("duckdb_codegen_phase");
+            pipeline_ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
         .count_err()
 }
 
