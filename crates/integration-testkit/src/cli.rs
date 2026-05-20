@@ -41,15 +41,17 @@ pub fn orbit_index(repo: &Path, data_dir: &Path) -> bool {
         .success()
 }
 
-pub fn orbit_query(query: &str, data_dir: &Path) -> Value {
+/// Run a raw SQL query via `orbit sql -F json`. Returns the JSON array of row
+/// objects produced by Arrow.
+pub fn orbit_sql(sql: &str, data_dir: &Path) -> Value {
     let out = orbit_cmd()
-        .args(["query", "--raw", query])
+        .args(["sql", "-F", "json", sql])
         .env("ORBIT_DATA_DIR", data_dir)
         .output()
         .unwrap();
     assert!(
         out.status.success(),
-        "query failed: {}",
+        "sql failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     serde_json::from_slice(&out.stdout).expect("invalid JSON")
@@ -57,26 +59,19 @@ pub fn orbit_query(query: &str, data_dir: &Path) -> Value {
 
 // ── JSON helpers ────────────────────────────────────────────────
 
-pub fn nodes(v: &Value) -> Vec<&Value> {
-    v["nodes"].as_array().unwrap().iter().collect()
+pub fn rows(v: &Value) -> Vec<&Value> {
+    v.as_array().map(|a| a.iter().collect()).unwrap_or_default()
 }
 
-pub fn nodes_where<'a>(v: &'a Value, field: &str, val: &str) -> Vec<&'a Value> {
-    nodes(v)
+pub fn rows_where<'a>(v: &'a Value, field: &str, val: &str) -> Vec<&'a Value> {
+    rows(v)
         .into_iter()
         .filter(|n| n[field].as_str() == Some(val))
         .collect()
 }
 
-pub fn edge_count(v: &Value) -> usize {
-    v["edges"].as_array().map_or(0, |a| a.len())
-}
-
-pub fn sorted_node_ids(v: &Value) -> Vec<i64> {
-    let mut ids: Vec<i64> = nodes(v)
-        .iter()
-        .map(|n| n["id"].as_str().unwrap().parse().unwrap())
-        .collect();
+pub fn sorted_ids(v: &Value) -> Vec<i64> {
+    let mut ids: Vec<i64> = rows(v).iter().map(|n| n["id"].as_i64().unwrap()).collect();
     ids.sort();
     ids
 }

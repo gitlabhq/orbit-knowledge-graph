@@ -14,7 +14,7 @@ use sqlparser::ast::{
     Expr, Function, GroupByExpr, LimitClause, ObjectName, OrderByKind, Query, Select, SelectItem,
     SetExpr, Statement, TableFactor, Visit, Visitor,
 };
-use sqlparser::dialect::{ClickHouseDialect, DuckDbDialect};
+use sqlparser::dialect::ClickHouseDialect;
 use sqlparser::parser::Parser;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,8 +130,6 @@ impl ParsedSql {
     pub fn parse_with_dialect(sql: &str, dialect: SqlDialect) -> Self {
         let statements = match dialect {
             SqlDialect::ClickHouse => Parser::parse_sql(&ClickHouseDialect {}, sql)
-                .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
-            SqlDialect::DuckDb => Parser::parse_sql(&DuckDbDialect {}, sql)
                 .unwrap_or_else(|e| panic!("failed to parse SQL:\n{sql}\n\nerror: {e}")),
         };
 

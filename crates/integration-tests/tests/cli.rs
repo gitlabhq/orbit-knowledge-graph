@@ -1,28 +1,22 @@
 //! CLI integration tests.
 //!
 //! Spawns real `orbit` processes (separate PIDs, separate DuckDB
-//! connections) to validate indexing, querying, worktree support,
-//! and concurrent access.
+//! connections) to validate indexing, schema introspection, worktree
+//! support, and concurrent access — all driven through raw SQL.
 //!
 //! Run with: `cargo nextest run --test cli`
 
-use std::collections::{BTreeSet, HashMap};
-use std::sync::LazyLock;
+use std::collections::BTreeSet;
 
 use integration_testkit::cli::{
-    create_test_repo, edge_count, git, init_repo_at, nodes, nodes_where, orbit_cmd, orbit_index,
-    orbit_query, sorted_node_ids,
+    create_test_repo, git, init_repo_at, orbit_cmd, orbit_index, orbit_sql, rows, rows_where,
+    sorted_ids,
 };
 use serde_json::Value;
 
-// ── Query fixtures ──────────────────────────────────────────────
-
-static QUERIES: LazyLock<HashMap<String, Value>> =
-    LazyLock::new(|| serde_json::from_str(include_str!("../fixtures/queries/cli.json")).unwrap());
-
-fn q(name: &str) -> String {
-    serde_json::to_string(&QUERIES[name]).unwrap()
-}
+const FILES_FULL: &str = "SELECT id, name, path, branch, commit_sha FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
+const FILES_SIMPLE: &str =
+    "SELECT id, name, path FROM gl_file WHERE name IS NOT NULL ORDER BY path LIMIT 50";
 
 // ── Worktree ────────────────────────────────────────────────────
 
@@ -71,48 +65,27 @@ fn worktree_tracking() {
     assert!(orbit_index(&wt_feat, dd));
     assert!(orbit_index(&wt_fix, dd));
 
-    let files = orbit_query(&q("files"), dd);
-    let trav = orbit_query(&q("traversal"), dd);
+    let files = orbit_sql(FILES_FULL, dd);
 
-    // Branches
-    assert!(!nodes_where(&files, "branch", &main_branch).is_empty());
-    assert!(!nodes_where(&files, "branch", "feature/tests").is_empty());
-    assert!(!nodes_where(&files, "branch", "fix/utils").is_empty());
+    assert!(!rows_where(&files, "branch", &main_branch).is_empty());
+    assert!(!rows_where(&files, "branch", "feature/tests").is_empty());
+    assert!(!rows_where(&files, "branch", "fix/utils").is_empty());
 
-    // Commits
-    assert!(!nodes_where(&files, "commit_sha", &main_sha).is_empty());
-    assert!(!nodes_where(&files, "commit_sha", &feat_sha).is_empty());
-    assert!(!nodes_where(&files, "commit_sha", &fix_sha).is_empty());
+    assert!(!rows_where(&files, "commit_sha", &main_sha).is_empty());
+    assert!(!rows_where(&files, "commit_sha", &feat_sha).is_empty());
+    assert!(!rows_where(&files, "commit_sha", &fix_sha).is_empty());
 
-    // Branch-specific files
-    assert_eq!(nodes_where(&files, "name", "tests.py").len(), 1);
-    assert_eq!(nodes_where(&files, "name", "main.py").len(), 3);
+    assert_eq!(rows_where(&files, "name", "tests.py").len(), 1);
+    assert_eq!(rows_where(&files, "name", "main.py").len(), 3);
 
-    // Content from correct worktree
-    let fix_utils: Vec<_> = nodes(&files)
-        .into_iter()
-        .filter(|n| n["name"] == "utils.py" && n["branch"] == "fix/utils")
-        .collect();
-    assert!(
-        fix_utils[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("patched")
+    let edges = orbit_sql(
+        "SELECT source_id, target_id FROM gl_edge WHERE relationship_kind = 'DEFINES' LIMIT 1",
+        dd,
     );
-
-    let feat_tests: Vec<_> = nodes(&files)
-        .into_iter()
-        .filter(|n| n["name"] == "tests.py")
-        .collect();
     assert!(
-        feat_tests[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("test_hello")
+        !rows(&edges).is_empty(),
+        "expected at least one DEFINES edge"
     );
-
-    // Traversal
-    assert!(edge_count(&trav) > 0);
 }
 
 // ── Concurrency ─────────────────────────────────────────────────
@@ -123,11 +96,10 @@ fn concurrent_readers() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let q = q("files_simple");
     let children: Vec<_> = (0..5)
         .map(|_| {
             orbit_cmd()
-                .args(["query", "--raw", &q])
+                .args(["sql", "-F", "json", FILES_SIMPLE])
                 .env("ORBIT_DATA_DIR", data_dir.path())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -145,9 +117,9 @@ fn concurrent_readers() {
         })
         .collect();
 
-    let baseline = sorted_node_ids(&results[0]);
+    let baseline = sorted_ids(&results[0]);
     for r in &results[1..] {
-        assert_eq!(baseline, sorted_node_ids(r));
+        assert_eq!(baseline, sorted_ids(r));
     }
 }
 
@@ -165,8 +137,8 @@ fn reader_during_writer() {
 
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let result = orbit_query(&q("files_simple"), data_dir.path());
-    assert!(!nodes(&result).is_empty());
+    let result = orbit_sql(FILES_SIMPLE, data_dir.path());
+    assert!(!rows(&result).is_empty());
 
     assert!(child.wait().unwrap().success());
 }
@@ -195,8 +167,8 @@ fn concurrent_writers() {
     }
     assert!(ok > 0, "at least one writer should succeed");
 
-    let result = orbit_query(&q("files_simple"), data_dir.path());
-    assert!(!nodes(&result).is_empty());
+    let result = orbit_sql(FILES_SIMPLE, data_dir.path());
+    assert!(!rows(&result).is_empty());
 }
 
 #[test]
@@ -207,8 +179,8 @@ fn reindex_idempotent() {
     assert!(orbit_index(&repo.path, data_dir.path()));
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let result = orbit_query(&q("files_simple"), data_dir.path());
-    assert_eq!(nodes(&result).len(), 2);
+    let result = orbit_sql(FILES_SIMPLE, data_dir.path());
+    assert_eq!(rows(&result).len(), 2);
 }
 
 #[test]
@@ -237,8 +209,8 @@ fn indexes_non_parsable_git_tree_files() {
 
     assert!(orbit_index(&repo, data_dir.path()));
 
-    let files = orbit_query(&q("files_simple"), data_dir.path());
-    let paths: Vec<_> = nodes(&files)
+    let files = orbit_sql(FILES_SIMPLE, data_dir.path());
+    let paths: Vec<_> = rows(&files)
         .into_iter()
         .filter_map(|node| node["path"].as_str().map(str::to_string))
         .collect();
@@ -246,7 +218,7 @@ fn indexes_non_parsable_git_tree_files() {
     assert_eq!(
         paths.len(),
         unique_paths.len(),
-        "duplicate File nodes: {paths:?}"
+        "duplicate File rows: {paths:?}"
     );
     assert_eq!(
         unique_paths,
@@ -262,17 +234,14 @@ fn indexes_non_parsable_git_tree_files() {
         ])
     );
 
-    let traversal = serde_json::json!({
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "d", "entity": "Directory", "filters": {"path": "config"}, "columns": ["id", "path"]},
-            {"id": "f", "entity": "File", "filters": {"path": "config/app.yml"}, "columns": ["id", "path"]}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "d", "to": "f"}],
-        "limit": 5
-    });
-    let result = orbit_query(&serde_json::to_string(&traversal).unwrap(), data_dir.path());
-    assert_eq!(edge_count(&result), 1);
+    let result = orbit_sql(
+        "SELECT count(*) AS c FROM gl_edge e \
+         JOIN gl_directory d ON d.id = e.source_id \
+         JOIN gl_file f ON f.id = e.target_id \
+         WHERE e.relationship_kind = 'CONTAINS' AND d.path = 'config' AND f.path = 'config/app.yml'",
+        data_dir.path(),
+    );
+    assert_eq!(rows(&result)[0]["c"].as_i64(), Some(1));
 }
 
 #[test]
@@ -281,11 +250,11 @@ fn sequential_read_consistency() {
     let repo = create_test_repo();
     assert!(orbit_index(&repo.path, data_dir.path()));
 
-    let baseline = sorted_node_ids(&orbit_query(&q("files_simple"), data_dir.path()));
+    let baseline = sorted_ids(&orbit_sql(FILES_SIMPLE, data_dir.path()));
     for _ in 0..10 {
         assert_eq!(
             baseline,
-            sorted_node_ids(&orbit_query(&q("files_simple"), data_dir.path()))
+            sorted_ids(&orbit_sql(FILES_SIMPLE, data_dir.path()))
         );
     }
 }
@@ -307,32 +276,28 @@ fn nested_repos_indexed_separately() {
     assert!(orbit_index(&parent, dd));
     assert!(orbit_index(&nested, dd));
 
-    let files = orbit_query(&q("files"), dd);
+    let files = orbit_sql(FILES_FULL, dd);
 
-    // Both repos indexed, files from each present
     assert!(
-        !nodes_where(&files, "name", "app.py").is_empty(),
+        !rows_where(&files, "name", "app.py").is_empty(),
         "parent repo file missing"
     );
     assert!(
-        !nodes_where(&files, "name", "helper.py").is_empty(),
+        !rows_where(&files, "name", "helper.py").is_empty(),
         "nested repo file missing"
     );
 
-    // Different project IDs (different canonical paths)
-    let app_id = nodes_where(&files, "name", "app.py")[0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let helper_id = nodes_where(&files, "name", "helper.py")[0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let app_id = rows_where(&files, "name", "app.py")[0]["id"]
+        .as_i64()
+        .unwrap();
+    let helper_id = rows_where(&files, "name", "helper.py")[0]["id"]
+        .as_i64()
+        .unwrap();
     assert_ne!(app_id, helper_id);
 }
 
 #[test]
-fn nested_repo_content_isolation() {
+fn nested_repos_have_distinct_projects() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let workspace = tempfile::TempDir::new().unwrap();
 
@@ -346,22 +311,16 @@ fn nested_repo_content_isolation() {
     assert!(orbit_index(&repo_a, dd));
     assert!(orbit_index(&repo_b, dd));
 
-    let files = orbit_query(&q("files"), dd);
-    let mains = nodes_where(&files, "name", "main.py");
-    assert_eq!(mains.len(), 2, "expected main.py from both repos");
-
-    // Content resolves from the correct repo
-    let contents: Vec<&str> = mains
-        .iter()
-        .map(|n| n["content"].as_str().unwrap())
-        .collect();
-    assert!(
-        contents.iter().any(|c| c.contains("version_a")),
-        "repo-a content missing"
+    let mains = orbit_sql(
+        "SELECT id, project_id, path FROM gl_file WHERE name = 'main.py' ORDER BY project_id",
+        dd,
     );
-    assert!(
-        contents.iter().any(|c| c.contains("version_b")),
-        "repo-b content missing"
+    let rows = rows(&mains);
+    assert_eq!(rows.len(), 2, "expected main.py from both repos");
+    assert_ne!(
+        rows[0]["project_id"].as_i64(),
+        rows[1]["project_id"].as_i64(),
+        "nested repos must have distinct project_ids"
     );
 }
 
@@ -380,30 +339,31 @@ fn reindex_nested_doesnt_affect_parent() {
     assert!(orbit_index(&parent, dd));
     assert!(orbit_index(&nested, dd));
 
-    let before = nodes_where(&orbit_query(&q("files_simple"), dd), "name", "app.py").len();
+    let before = rows_where(&orbit_sql(FILES_SIMPLE, dd), "name", "app.py").len();
 
-    // Re-index only the nested repo
     std::fs::write(nested.join("src/extra.py"), "def extra(): pass\n").unwrap();
     git(&nested, &["add", "-A"]);
     git(&nested, &["commit", "-m", "add extra"]);
     assert!(orbit_index(&nested, dd));
 
-    let files = orbit_query(&q("files_simple"), dd);
-    let after = nodes_where(&files, "name", "app.py").len();
+    let files = orbit_sql(FILES_SIMPLE, dd);
+    let after = rows_where(&files, "name", "app.py").len();
 
-    // Parent repo data unchanged
     assert_eq!(before, after, "parent files should not change");
-    // Nested repo has new file
     assert!(
-        !nodes_where(&files, "name", "extra.py").is_empty(),
+        !rows_where(&files, "name", "extra.py").is_empty(),
         "new nested file missing"
     );
 }
 
 // ── Schema introspection ────────────────────────────────────────
 
-fn run_schema(args: &[&str]) -> (String, String, bool) {
-    let out = orbit_cmd().args(args).output().expect("spawn orbit");
+fn run_cmd(args: &[&str], data_dir: &std::path::Path) -> (String, String, bool) {
+    let out = orbit_cmd()
+        .args(args)
+        .env("ORBIT_DATA_DIR", data_dir)
+        .output()
+        .expect("spawn orbit");
     (
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -412,136 +372,67 @@ fn run_schema(args: &[&str]) -> (String, String, bool) {
 }
 
 #[test]
-fn schema_default_is_local_scope() {
-    let (stdout, stderr, ok) = run_schema(&["schema", "--ontology"]);
-    assert!(ok, "orbit schema --ontology failed: {stderr}");
+fn schema_lists_duckdb_tables_and_columns() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
 
-    for want in ["Directory", "File", "Definition", "ImportedSymbol"] {
-        assert!(
-            stdout.contains(want),
-            "expected local entity {want} in output: {stdout}"
-        );
-    }
-    for forbidden in ["User", "Project", "MergeRequest", "WorkItem", "AUTHORED"] {
-        assert!(
-            !stdout.contains(forbidden),
-            "server-only {forbidden} leaked into local scope: {stdout}"
-        );
-    }
-    for want in ["CONTAINS", "DEFINES", "IMPORTS"] {
-        assert!(stdout.contains(want), "missing edge {want}: {stdout}");
-    }
-}
+    let (stdout, stderr, ok) = run_cmd(&["schema"], data_dir.path());
+    assert!(ok, "orbit schema failed: {stderr}");
 
-#[test]
-fn schema_default_is_toon_not_json() {
-    let (stdout, _, ok) = run_schema(&["schema", "--ontology"]);
-    assert!(ok);
-    assert!(
-        !stdout.trim_start().starts_with('{'),
-        "default should be TOON, got JSON: {stdout}"
-    );
-    assert!(stdout.contains("domains"));
-    assert!(stdout.contains("edges"));
-}
-
-#[test]
-fn schema_expand_file_shows_props() {
-    let (stdout, stderr, ok) = run_schema(&["schema", "--ontology", "--expand", "File"]);
-    assert!(ok, "stderr: {stderr}");
-    assert!(
-        stdout.contains("path:string"),
-        "missing path:string: {stdout}"
-    );
-    assert!(stdout.contains("props"), "missing props key: {stdout}");
+    for want in [
+        "gl_directory",
+        "gl_file",
+        "gl_definition",
+        "gl_imported_symbol",
+        "gl_edge",
+    ] {
+        assert!(stdout.contains(want), "missing table {want}: {stdout}");
+    }
+    for want in ["id", "name", "path", "project_id"] {
+        assert!(stdout.contains(want), "missing column {want}: {stdout}");
+    }
 }
 
 #[test]
 fn schema_raw_is_parseable_json() {
-    let (stdout, _, ok) = run_schema(&["schema", "--ontology", "--raw"]);
-    assert!(ok);
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (stdout, stderr, ok) = run_cmd(&["schema", "--raw"], data_dir.path());
+    assert!(ok, "orbit schema --raw failed: {stderr}");
+
     let v: Value = serde_json::from_str(&stdout).expect("parseable JSON");
-    assert!(v["domains"].is_array());
-    assert!(v["edges"].is_array());
-    let edges: Vec<&str> = v["edges"]
+    let tables: BTreeSet<&str> = v
         .as_array()
         .unwrap()
         .iter()
-        .map(|e| e.as_str().unwrap())
+        .map(|r| r["table_name"].as_str().unwrap())
         .collect();
-    for want in ["CONTAINS", "DEFINES", "IMPORTS"] {
-        assert!(edges.contains(&want), "missing {want} edge in {edges:?}");
-    }
+    assert!(tables.contains("gl_file"));
+    assert!(tables.contains("gl_edge"));
 }
 
 #[test]
-fn schema_all_includes_server_entities() {
-    let (stdout, _, ok) = run_schema(&["schema", "--ontology", "--all"]);
-    assert!(ok);
-    assert!(stdout.contains("User"), "--all should include User");
-    assert!(stdout.contains("AUTHORED"), "--all should include AUTHORED");
+fn schema_errors_when_db_missing() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let (_, stderr, ok) = run_cmd(&["schema"], data_dir.path());
+    assert!(!ok, "schema should fail without an indexed graph");
+    assert!(
+        stderr.contains("no local graph found"),
+        "expected missing-graph error: {stderr}"
+    );
 }
 
 #[test]
 fn debug_ddl_produces_clickhouse_statements() {
-    let (stdout, stderr, ok) = run_schema(&["debug", "ddl"]);
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let (stdout, stderr, ok) = run_cmd(&["debug", "ddl"], data_dir.path());
     assert!(ok, "debug ddl failed: {stderr}");
     assert!(
         stdout.contains("CREATE TABLE"),
         "expected DDL output, got: {}",
         &stdout.chars().take(200).collect::<String>()
     );
-}
-
-#[test]
-fn old_schema_subcommand_no_longer_emits_ddl() {
-    let (stdout, _, ok) = run_schema(&["schema", "--ontology"]);
-    assert!(ok);
-    assert!(
-        !stdout.contains("CREATE TABLE"),
-        "orbit schema must not emit DDL anymore: {stdout}"
-    );
-}
-
-#[test]
-fn schema_expand_without_value_errors() {
-    let (_, stderr, ok) = run_schema(&["schema", "--ontology", "--expand"]);
-    assert!(!ok, "--expand without a value should fail");
-    assert!(
-        stderr.contains("--expand") || stderr.contains("NODE"),
-        "stderr should mention the missing NODE value: {stderr}"
-    );
-}
-
-#[test]
-fn schema_bare_requires_flag() {
-    let (_, stderr, ok) = run_schema(&["schema"]);
-    assert!(
-        !ok,
-        "orbit schema without --ontology or --query should fail"
-    );
-    assert!(
-        stderr.contains("--ontology") || stderr.contains("--query"),
-        "stderr should hint at required flags: {stderr}"
-    );
-}
-
-#[test]
-fn schema_query_returns_dsl() {
-    let (stdout, stderr, ok) = run_schema(&["schema", "--query"]);
-    assert!(ok, "orbit schema --query failed: {stderr}");
-    assert!(stdout.contains("query_type"), "should contain query_type");
-    assert!(stdout.contains("traversal"), "should contain traversal");
-    assert!(
-        stdout.contains("NodeSelector"),
-        "should contain NodeSelector"
-    );
-}
-
-#[test]
-fn schema_query_raw_is_json() {
-    let (stdout, stderr, ok) = run_schema(&["schema", "--query", "--raw"]);
-    assert!(ok, "orbit schema --query --raw failed: {stderr}");
-    let v: Value = serde_json::from_str(&stdout).expect("should be parseable JSON");
-    assert!(v.is_object(), "should be a JSON object");
 }

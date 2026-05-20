@@ -65,12 +65,12 @@ pub use pipeline::{
 
 // Re-export env, state, and capability traits.
 pub use passes::{
-    CheckPass, CodegenPass, DuckDbCodegenPass, EnforcePass, HydratePlanPass, LowerPass,
-    NormalizePass, PlannerPass, SecurityPass, SettingsPass, ValidatePass,
+    CheckPass, CodegenPass, EnforcePass, HydratePlanPass, LowerPass, NormalizePass, PlannerPass,
+    SecurityPass, SettingsPass, ValidatePass,
 };
 pub use pipelines::{
-    DuckDbState, HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput,
-    HasResultCtx, HasSecurityCtx, LocalEnv, QueryState, SealInput, SealJson, SealNode, SecureEnv,
+    HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx,
+    HasSecurityCtx, QueryState, SealInput, SealJson, SealNode, SecureEnv,
 };
 
 // Re-export key types from pass modules.
@@ -148,53 +148,6 @@ pub fn compile_input(
 
     pipeline
         .seal()
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
-        .count_err()
-}
-
-/// Compile a JSON query into DuckDB-dialect SQL for local/offline use.
-///
-/// Skips security, enforce, optimize, and hydration — the output has no
-/// redaction metadata and `HydrationPlan::None`. Do not use this where
-/// multi-tenant authorization or column redaction is required.
-///
-/// ```text
-/// JSON → Validate → Normalize → Lower → DuckDbCodegen
-/// ```
-#[must_use = "the compiled query context should be used"]
-pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let mut ont = ontology.clone();
-    // Local mode uses a single DuckDB edge table. Collapse all edge routing
-    // so the compiler doesn't emit references to tables that don't exist locally.
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
-    let env = LocalEnv::local(Arc::new(ont));
-    let state = DuckDbState::from_json(json_input);
-    let pipeline = pipelines::duckdb().seal();
-    pipeline
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
-        .count_err()
-}
-
-/// Compile a pre-built Input into DuckDB-dialect SQL for local hydration.
-///
-/// Uses the local hydration pipeline (Lower → Enforce → DuckDbCodegen).
-/// No validation, normalization, security, or recursive hydration.
-/// The ontology is needed because Lower/Enforce may consult entity
-/// metadata for table resolution and column aliasing.
-#[must_use = "the compiled query context should be used"]
-pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let mut ont = ontology.clone();
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
-    let env = LocalEnv::local(Arc::new(ont));
-    let state = DuckDbState::from_input(input);
-    let pipeline = pipelines::duckdb_hydration().seal();
-    pipeline
         .execute(state, &env)
         .and_then(|s| s.into_output())
         .count_err()
