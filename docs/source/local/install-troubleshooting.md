@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Pin a version, force a reinstall, change the install directory, or delete the local Orbit graph.
+description: Pin a version, force a reinstall, or delete the local Orbit graph.
 title: Advanced installation and troubleshooting
 ---
 
@@ -76,30 +76,6 @@ Combine flags to reinstall a specific version:
 
 ```powershell
 .\install.ps1 -Version v0.59.1 -Force
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
-## Install to a custom directory
-
-The default install directories are `~/.local/bin` on macOS and Linux, and
-`%LOCALAPPDATA%\Programs\orbit` on Windows.
-
-{{< tabs >}}
-
-{{< tab title="macOS and Linux" >}}
-
-The installer does not currently accept a custom directory. Move the binary
-manually after installation if needed.
-
-{{< /tab >}}
-
-{{< tab title="Windows" >}}
-
-```powershell
-.\install.ps1 -InstallDir "C:\Tools\orbit"
 ```
 
 {{< /tab >}}
