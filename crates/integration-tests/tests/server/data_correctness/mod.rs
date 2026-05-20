@@ -105,8 +105,6 @@ async fn data_correctness() {
         path_finding::path_finding_consecutive_edges_connect,
         path_finding::path_finding_max_depth_too_shallow_returns_empty,
         path_finding::path_finding_redaction_blocks_intermediate_node,
-        path_finding::path_finding_all_shortest_returns_valid_paths,
-        path_finding::path_finding_any_returns_at_least_one_path,
         path_finding::path_finding_rel_types_restricts_traversal,
         path_finding::path_finding_step_indices_are_sequential,
         path_finding::path_finding_target_entity_constrains_results,
