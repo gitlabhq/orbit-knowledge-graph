@@ -116,6 +116,7 @@ impl Handler for EntityIndexingHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checkpoint::CheckpointStore;
     use crate::modules::sdlc::entity_pipeline::SimpleEntityPipeline;
     use crate::modules::sdlc::pipeline::Pipeline;
     use crate::modules::sdlc::plan::build_plans;
@@ -211,15 +212,43 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    fn build_handler_with_checkpoint_store(
+        checkpoint_store: Arc<MockCheckpointStore>,
+    ) -> EntityIndexingHandler {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let metrics = test_metrics();
+
+        let pipeline = Arc::new(Pipeline::new(
+            Arc::new(EmptyDatalake),
+            checkpoint_store,
+            metrics.clone(),
+            Default::default(),
+        ));
+
+        let mut pipelines: HashMap<String, Arc<dyn EntityPipeline>> = HashMap::new();
+        for plan in plans.global.into_iter().chain(plans.namespaced) {
+            let name = plan.name.clone();
+            pipelines.insert(
+                name,
+                Arc::new(SimpleEntityPipeline::new(plan, Arc::clone(&pipeline))),
+            );
+        }
+
+        EntityIndexingHandler::new(HandlerConfiguration::default(), pipelines, metrics)
+    }
+
     #[tokio::test]
     #[ignore = "enable before release to validate parity with GlobalHandler"]
-    async fn handle_all_global_entities() {
+    async fn handle_all_global_entities_writes_correct_checkpoints() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
         let entity_names: Vec<String> = plans.global.iter().map(|p| p.name.clone()).collect();
-        let handler = build_test_handler();
 
-        for entity_kind in entity_names {
+        let checkpoint_store = Arc::new(MockCheckpointStore::new());
+        let handler = build_handler_with_checkpoint_store(checkpoint_store.clone());
+
+        for entity_kind in &entity_names {
             let payload = serde_json::json!({
                 "dispatch_id": "20240121T000000",
                 "entity_kind": entity_kind,
@@ -232,17 +261,32 @@ mod tests {
             let result = handler.handle(test_handler_context(), envelope).await;
             assert!(result.is_ok(), "failed for global entity {entity_kind}");
         }
+
+        for entity_kind in &entity_names {
+            let key = format!("global.{entity_kind}");
+            let checkpoint = checkpoint_store.load(&key).await.unwrap();
+            assert!(
+                checkpoint.is_some(),
+                "missing checkpoint for {key} — pipeline did not run"
+            );
+            assert!(
+                checkpoint.unwrap().cursor_values.is_none(),
+                "checkpoint for {key} should be completed (no cursor)"
+            );
+        }
     }
 
     #[tokio::test]
     #[ignore = "enable before release to validate parity with NamespaceHandler"]
-    async fn handle_all_namespaced_entities() {
+    async fn handle_all_namespaced_entities_writes_correct_checkpoints() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1000, 1000, &Default::default());
         let entity_names: Vec<String> = plans.namespaced.iter().map(|p| p.name.clone()).collect();
-        let handler = build_test_handler();
 
-        for entity_kind in entity_names {
+        let checkpoint_store = Arc::new(MockCheckpointStore::new());
+        let handler = build_handler_with_checkpoint_store(checkpoint_store.clone());
+
+        for entity_kind in &entity_names {
             let payload = serde_json::json!({
                 "dispatch_id": "20240121T000000",
                 "entity_kind": entity_kind,
@@ -254,6 +298,25 @@ mod tests {
 
             let result = handler.handle(test_handler_context(), envelope).await;
             assert!(result.is_ok(), "failed for namespaced entity {entity_kind}");
+        }
+
+        for entity_kind in &entity_names {
+            let key = format!("ns.100.{entity_kind}");
+            let checkpoint = checkpoint_store.load(&key).await.unwrap();
+            assert!(
+                checkpoint.is_some(),
+                "missing checkpoint for {key} — pipeline did not run"
+            );
+            let checkpoint = checkpoint.unwrap();
+            assert!(
+                checkpoint.cursor_values.is_none(),
+                "checkpoint for {key} should be completed (no cursor)"
+            );
+            assert_eq!(
+                checkpoint.watermark.to_rfc3339(),
+                "2024-01-21T00:00:00+00:00",
+                "checkpoint watermark for {key} should match request"
+            );
         }
     }
 
