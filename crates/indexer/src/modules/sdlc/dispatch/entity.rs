@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use tracing::info;
+use tracing::debug;
 
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
@@ -27,7 +27,7 @@ impl ScheduledTask for EntityDispatcher {
     }
 
     async fn run(&self) -> Result<(), TaskError> {
-        info!("entity dispatcher run (no-op, pipelines not yet wired)");
+        debug!("entity dispatcher run (no-op, pipelines not yet wired)");
         self.metrics.record_run(self.name(), "success", 0.0);
         Ok(())
     }

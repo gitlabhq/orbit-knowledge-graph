@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use gkg_server_config::HandlerConfiguration;
-use tracing::info;
+use tracing::debug;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::EntityIndexingRequest;
@@ -44,7 +44,7 @@ impl Handler for EntityIndexingHandler {
             SerializationError::Json(err) => HandlerError::Deserialization(err),
         })?;
 
-        info!(
+        debug!(
             entity_kind = %request.entity_kind,
             scope = ?request.scope,
             "received entity indexing request (no pipelines registered yet)"
