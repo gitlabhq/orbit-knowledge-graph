@@ -4,7 +4,6 @@
 //!   per-phase runtime-enforced field access grants
 
 use proc_macro::TokenStream;
-use quote::{format_ident, quote};
 
 mod ssot;
 
