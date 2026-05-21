@@ -36,12 +36,24 @@ the GitLab CLI (`glab`) if you already use it.
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
 ```
 
+Open a new terminal, then verify:
+
+```shell
+orbit help
+```
+
 {{< /tab >}}
 
 {{< tab title="Windows" >}}
 
 ```powershell
 irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
+```
+
+Open a new terminal, then verify:
+
+```shell
+orbit help
 ```
 
 {{< /tab >}}
@@ -54,18 +66,18 @@ If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed:
 glab orbit local --install
 ```
 
+Verify:
+
+```shell
+glab orbit local help
+```
+
 See the [`glab orbit local` reference](https://docs.gitlab.com/cli/orbit/local/)
 for details.
 
 {{< /tab >}}
 
 {{< /tabs >}}
-
-Open a new terminal after the install completes, then verify:
-
-```shell
-orbit --help
-```
 
 ## Pick an access method
 
