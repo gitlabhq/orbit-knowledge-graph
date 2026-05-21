@@ -1010,7 +1010,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "path_finding",
-                    "path": {"type": "any", "from": "u", "to": "p", "max_depth": 2},
+                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [
                         {"id": "u", "entity": "User"},
                         {"id": "p", "entity": "Project"}
@@ -1107,7 +1107,7 @@ mod tests {
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
                     "query_type": "path_finding",
-                    "path": {"type": "any", "from": "u", "to": "p", "max_depth": 2},
+                    "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2},
                     "nodes": [
                         {"id": "u", "entity": "User"},
                         {"id": "p", "entity": "Project"}

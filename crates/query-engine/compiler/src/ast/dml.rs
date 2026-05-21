@@ -127,22 +127,13 @@ pub enum TableRef {
 /// - Inner: only matching rows from both sides
 /// - Left: all rows from left, matching from right (NULLs if no match)
 /// - Right: all rows from right, matching from left
-/// - Full: all rows from both sides
 /// - Cross: cartesian product, no ON condition
-/// - LeftSemi: rows from left that have at least one match in right
-/// - LeftAnti: rows from left that have no match in right
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
     Inner,
     Left,
-    Right,
-    Full,
     Cross,
-    #[strum(serialize = "LEFT SEMI")]
-    LeftSemi,
-    #[strum(serialize = "LEFT ANTI")]
-    LeftAnti,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -459,11 +450,6 @@ impl Expr {
     /// Rebuild an AND chain from conjuncts. Returns None if empty.
     pub fn conjoin(exprs: Vec<Expr>) -> Option<Expr> {
         exprs.into_iter().reduce(Expr::and)
-    }
-
-    /// Combine two expressions with OR.
-    pub fn or(left: Expr, right: Expr) -> Expr {
-        Expr::binary(Op::Or, left, right)
     }
 }
 

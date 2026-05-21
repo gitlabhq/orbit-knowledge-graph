@@ -162,7 +162,7 @@ pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
 }
 
 pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
-    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+    if super::normalize::is_wildcard(types) {
         None
     } else {
         Some(types.to_vec())
@@ -182,7 +182,7 @@ pub fn deleted_false(alias: &str) -> Expr {
 }
 
 pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
-    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+    if super::normalize::is_wildcard(types) {
         return None;
     }
     if types.len() == 1 {

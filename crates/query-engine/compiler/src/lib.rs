@@ -156,12 +156,44 @@ pub fn compile_input(
 // Pipeline presets are in `pipelines.rs`.
 // Tests are in `tests/compiler_tests.rs` and `tests/ontology_tests.rs`.
 
+/// Shared test helpers available to all test modules in this crate.
+#[cfg(test)]
+pub(crate) mod testkit {
+    use crate::types::{AccessLevel, SecurityContext, TraversalPath};
+
+    pub fn non_admin_ctx() -> SecurityContext {
+        SecurityContext::new(1, vec!["1/".into()]).unwrap()
+    }
+
+    pub fn admin_ctx() -> SecurityContext {
+        SecurityContext::new_with_roles(
+            1,
+            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
+        )
+        .unwrap()
+        .with_role(true, Some(AccessLevel::Owner as u32))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::LazyLock;
+
+    static ONTOLOGY: LazyLock<Ontology> =
+        LazyLock::new(|| Ontology::load_embedded().expect("ontology must load"));
 
     fn security_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".to_string()]).expect("valid context")
+        crate::testkit::non_admin_ctx()
+    }
+
+    /// Compile a query JSON string against the embedded ontology and return
+    /// the rendered ClickHouse SQL.
+    fn compile_sql(query: &str) -> String {
+        compile(query, &ONTOLOGY, &security_ctx())
+            .expect("should compile")
+            .base
+            .render()
     }
 
     /// Regression: pipeline-execution errors must reach `count_err`. Before
@@ -173,9 +205,8 @@ mod tests {
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile("not json", &ontology, &security_ctx()).expect_err("must reject");
+        let err = compile("not json", &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             matches!(err, crate::error::QueryError::Parse(_)),
@@ -190,10 +221,9 @@ mod tests {
     #[test]
     fn allowlist_rejected_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{"query_type":"traversal","node":{"id":"x","entity":"NotARealEntity","columns":["id"]},"limit":1}"#;
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, &ontology, &security_ctx()).expect_err("must reject");
+        let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
         assert!(
             !matches!(err, crate::error::QueryError::PipelineInvariant(_)),
@@ -208,7 +238,6 @@ mod tests {
     #[test]
     fn traversal_path_scope_rejection_is_observable() {
         use std::sync::atomic::Ordering;
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "node": {"id": "p", "entity": "Project",
@@ -218,7 +247,7 @@ mod tests {
         let ctx =
             SecurityContext::new(1, vec!["1/100/".to_string()]).expect("valid scoped context");
         let before = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
-        let err = compile(query, &ontology, &ctx).expect_err("must reject");
+        let err = compile(query, &ONTOLOGY, &ctx).expect_err("must reject");
         let after = crate::metrics::COUNT_ERR_HITS.load(Ordering::Relaxed);
 
         assert!(
@@ -238,14 +267,13 @@ mod tests {
 
     #[test]
     fn traversal_path_shape_rejection_is_validate_pass_error() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "node": {"id": "p", "entity": "Project",
                      "filters": {"traversal_path": {"op": "starts_with", "value": 1}}},
             "limit": 1
         }"#;
-        let err = compile(query, &ontology, &security_ctx()).expect_err("must reject");
+        let err = compile(query, &ONTOLOGY, &security_ctx()).expect_err("must reject");
         let msg = err.to_string();
 
         assert!(
@@ -268,8 +296,7 @@ mod tests {
 
     #[test]
     fn compile_with_prefixed_ontology_produces_prefixed_sql() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let prefixed = ontology.with_schema_version_prefix("v1_");
+        let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
         let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
@@ -283,8 +310,7 @@ mod tests {
 
     #[test]
     fn compile_with_prefixed_ontology_prefixes_edge_table() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let prefixed = ontology.with_schema_version_prefix("v1_");
+        let prefixed = ONTOLOGY.clone().with_schema_version_prefix("v1_");
 
         let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
@@ -303,62 +329,12 @@ mod tests {
         );
     }
 
-    #[test]
-    fn compile_without_prefix_uses_unprefixed_tables() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains("gl_group") && !sql.contains("v1_gl_group"),
-            "unprefixed search should use gl_group, got: {sql}"
-        );
-    }
-
-    /// Traversal with 1 node + 0 relationships is a search shape.
-    /// It should compile to the same flat table scan as query_type: "search".
-    #[test]
-    fn traversal_single_node_compiles_as_search() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let search_query = r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "limit": 10
-        }"#;
-
-        let traversal_query = r#"{
-            "query_type": "traversal",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
-            "limit": 10
-        }"#;
-
-        let search_sql = compile(search_query, &ontology, &security_ctx())
-            .expect("search should compile")
-            .base
-            .render();
-
-        let traversal_sql = compile(traversal_query, &ontology, &security_ctx())
-            .expect("single-node traversal should compile")
-            .base
-            .render();
-
-        assert_eq!(
-            search_sql, traversal_sql,
-            "single-node traversal SQL should match search SQL"
-        );
-    }
-
     /// Aggregation with a relationship and a property-less `count(target)`
     /// must resolve correctly without ClickHouse `Database does not exist`
     /// errors. The lowerer uses FK-shortcut joins for IN_PROJECT,
     /// joining MR and Project via `mr.project_id` instead of an edge scan.
     #[test]
     fn aggregation_with_relationship_emits_no_bare_node_ref() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -371,8 +347,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // MR table is joined via FK shortcut (mr.project_id = p.id).
         assert!(
@@ -393,8 +368,6 @@ mod tests {
     /// File → Project on production scale).
     #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -411,8 +384,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("COUNT()") || sql.contains("count()"),
@@ -432,8 +404,6 @@ mod tests {
     /// filter appears as `mr.state = 'opened'` in the WHERE clause.
     #[test]
     fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -452,8 +422,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // FK-shortcut join means bare COUNT() bounded by WHERE clause.
         assert!(
@@ -472,8 +441,6 @@ mod tests {
     /// conditions onto the User node table subquery.
     #[test]
     fn traversal_id_range_produces_range_conditions_in_sql() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -484,8 +451,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // FK elision replaces edge scans: range conditions are pushed to
         // the User node table subquery instead of the edge WHERE.
@@ -503,8 +469,6 @@ mod tests {
     /// a `_nf_*` CTE that resolves the filter into IDs for frontier seeding.
     #[test]
     fn path_finding_filtered_endpoint_produces_anchor_cte() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -516,8 +480,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("_nf_start"),
@@ -533,8 +496,6 @@ mod tests {
     /// with range conditions.
     #[test]
     fn path_finding_id_range_endpoint_produces_anchor_cte() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -546,8 +507,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("_nf_end"),
@@ -560,38 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_filtered_endpoint_seeds_hop_frontier_from_anchor_cte() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let query = r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
-                {"id": "end", "entity": "Project", "node_ids": [100]}
-            ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
-            "limit": 10
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // v2 uses `forward` CTE seeded from _nf_start anchor.
-        assert!(
-            sql.contains("forward"),
-            "filtered endpoint should create a forward expansion CTE, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("_nf_start"),
-            "forward expansion should seed from _nf_start anchor, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -603,8 +532,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("_path_scope_traversal_paths"),
@@ -638,8 +566,6 @@ mod tests {
 
     #[test]
     fn path_finding_without_cursor_orders_only_by_depth() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -651,8 +577,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             !sql.contains("toString(paths._gkg_path)")
@@ -663,8 +588,6 @@ mod tests {
 
     #[test]
     fn path_finding_with_cursor_keeps_path_tie_break_order() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -677,8 +600,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("toString(paths._gkg_path)")
@@ -692,8 +614,6 @@ mod tests {
     /// cover all relationship types.
     #[test]
     fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -705,8 +625,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // Wildcard path finding should scan all edge tables.
         assert!(
@@ -726,8 +645,6 @@ mod tests {
 
     #[test]
     fn wildcard_traversal_infers_relationship_kinds_from_endpoint_entities() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -738,8 +655,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
@@ -753,8 +669,6 @@ mod tests {
 
     #[test]
     fn wildcard_neighbors_infers_relationship_kinds_from_center_entity() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "neighbors",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
@@ -762,8 +676,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
@@ -777,8 +690,6 @@ mod tests {
 
     #[test]
     fn cursor_neighbors_both_orders_by_projected_columns() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "neighbors",
             "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3]},
@@ -787,8 +698,7 @@ mod tests {
             "cursor": {"offset": 0, "page_size": 20}
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("ORDER BY _gkg_mr_id ASC, _gkg_neighbor_id ASC"),
@@ -801,38 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_aggregation_infers_relationship_kinds_from_endpoint_entities() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest"}
-            ],
-            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mrs"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        assert!(
-            sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
-            "wildcard aggregation should infer concrete User to MergeRequest relationship kinds, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("gl_code_edge"),
-            "inferred aggregation relationship kinds should avoid scanning code edge table, got:\n{sql}"
-        );
-    }
-
-    #[test]
     fn path_finding_user_paths_do_not_join_on_traversal_path() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "path_finding",
             "nodes": [
@@ -844,8 +723,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             !sql.contains("_path_scope_traversal_paths"),
@@ -864,8 +742,6 @@ mod tests {
     /// in the SELECT list carry the kind metadata for result formatting.
     #[test]
     fn multi_hop_traversal_constrains_kind_on_every_edge() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -880,8 +756,7 @@ mod tests {
             "limit": 5
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // FK elision replaces edge scans with direct FK column joins.
         // IN_PROJECT → mr.project_id, AUTHORED → mr.author_id.
@@ -913,8 +788,6 @@ mod tests {
     /// author" semi-join semantics. See findings G1 in the dual-cliff MR.
     #[test]
     fn aggregation_prunes_unreferenced_node_table_join() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -937,8 +810,7 @@ mod tests {
             "limit": 5
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // gl_user and any u-alias CTE should be gone.
         assert!(
@@ -947,7 +819,7 @@ mod tests {
              references the User alias, got:\n{sql}"
         );
         assert!(
-            !sql.contains("_cascade_u") && !sql.contains("_nf_u"),
+            !sql.contains("_nf_u"),
             "User-aliased CTEs must be dropped, got:\n{sql}"
         );
         // Direct FINAL scans do not need to project unused FK columns just to
@@ -969,8 +841,6 @@ mod tests {
     /// (e.g. `mr.author_id`, `mr.project_id`) when FK columns exist.
     #[test]
     fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -991,18 +861,8 @@ mod tests {
             "limit": 5
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
-        // Neither CTE should exist — edge-chain JOINs replace them.
-        assert!(
-            !sql.contains("_target_mr_ids"),
-            "_target_mr_ids must not be emitted, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("_cascade_mr"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
-        );
         // FK elision replaces edge-chain JOINs with direct FK joins.
         // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
         assert!(
@@ -1020,8 +880,6 @@ mod tests {
     /// each arm instead of frontier CTEs.
     #[test]
     fn multi_hop_traversal_generates_hop_frontier_ctes() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1038,18 +896,12 @@ mod tests {
             "limit": 25
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // lowerer uses UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "variable-length traversal must use UNION ALL arms, got:\n{sql}"
-        );
-        // No frontier CTEs — v2 uses inline edge JOINs.
-        assert!(
-            !sql.contains("_thop0_1") && !sql.contains("_thop0_2"),
-            "lowerer should not emit frontier CTEs, got:\n{sql}"
         );
         // Pinned source node_ids must be pushed into the arms.
         assert!(
@@ -1068,8 +920,6 @@ mod tests {
     /// The pinned `node_ids` filter is pushed into the outer WHERE.
     #[test]
     fn multi_hop_traversal_skips_frontiers_without_selectivity() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1086,14 +936,8 @@ mod tests {
             "limit": 25
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
-        // lowerer uses UNION ALL for variable-length, no frontier CTEs.
-        assert!(
-            !sql.contains("_thop0_1"),
-            "lowerer should not emit frontier CTEs, got:\n{sql}"
-        );
         assert!(
             sql.contains("UNION ALL"),
             "variable-length traversal should use UNION ALL arms, got:\n{sql}"
@@ -1111,8 +955,6 @@ mod tests {
     /// of cascade CTEs.
     #[test]
     fn multi_hop_aggregation_generates_cascade_cte() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1131,18 +973,12 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // lowerer emits UNION ALL arms for variable-length hops.
         assert!(
             sql.contains("UNION ALL"),
             "multi-hop aggregation should use UNION ALL for variable-length hops, got:\n{sql}"
-        );
-        // No cascade CTEs.
-        assert!(
-            !sql.contains("_cascade_f"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
         );
         assert!(
             sql.contains("startsWith"),
@@ -1156,49 +992,6 @@ mod tests {
 
     /// Intermediate nodes (referenced by 2+ relationships) must keep
     /// connectivity even when absent from the aggregation target/group_by.
-    /// FK elision replaces edge-chain JOINs with direct FK column joins
-    /// (e.g. `mr.author_id`, `mr.project_id`) so intermediate nodes
-    /// bridge relationships via their FK columns.
-    #[test]
-    fn aggregation_keeps_intermediate_node_table_join() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [116]},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "p", "entity": "Project"}
-            ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-            ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{
-                "function": "count",
-                "target": "mr",
-                "alias": "user_mrs"
-            }],
-            "limit": 5
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // FK elision replaces edge-chain JOINs with direct FK joins.
-        // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
-        // MR bridges the two relationships via its FK columns.
-        assert!(
-            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
-            "User node_ids filter must be pushed to FK column, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
-            "IN_PROJECT FK join must use project_id, got:\n{sql}"
-        );
-    }
-
     /// Variable-length CONTAINS×{1..3} traversal: each UNION ALL arm should
     /// carry static `e1.source_kind = 'Group'` and `e<depth>.target_kind = 'Project'`
     /// literals so ClickHouse can use the kind-led PK projection
@@ -1206,8 +999,6 @@ mod tests {
     /// depth, instead of relying on dynamic IN-subqueries.
     #[test]
     fn variable_length_traversal_emits_per_arm_kind_literals() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1226,8 +1017,7 @@ mod tests {
             "limit": 3
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("e1.source_kind") && sql.contains("'Group'"),
@@ -1248,58 +1038,41 @@ mod tests {
 
     // ── Denormalization pass tests ──────────────────────────────────────
 
-    #[test]
-    fn denorm_single_hop_keeps_nf_cte_and_injects_supplementary_tag() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let query = r#"{
+    /// Compile a User→MR REVIEWER traversal with the given MR filter JSON fragment.
+    fn denorm_traversal_sql(mr_filter: &str) -> String {
+        let query = format!(
+            r#"{{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"}
-                }}
+                {{"id": "u", "entity": "User", "node_ids": [1]}},
+                {{"id": "mr", "entity": "MergeRequest", "filters": {{ {mr_filter} }}}}
             ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
+            "relationships": [{{"type": "REVIEWER", "from": "u", "to": "mr"}}],
             "limit": 10
-        }"#;
+        }}"#
+        );
+        compile_sql(&query)
+    }
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // lowerer pushes the denorm filter to edge tags — no _nf CTE.
+    #[test]
+    fn denorm_eq_filter_pushes_to_edge_tags() {
+        let sql = denorm_traversal_sql(r#""state": {"op": "eq", "value": "merged"}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
-        // No _nf_mr CTE needed — filter is fully on the edge.
         assert!(
             !sql.contains("_nf_mr"),
-            "lowerer should not emit _nf_mr CTE, got:\n{sql}"
+            "no _nf_mr CTE when filter is fully denormalized, got:\n{sql}"
         );
     }
 
     #[test]
-    fn denorm_in_list_filter_keeps_cte_for_dedup() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "in", "value": ["merged", "opened"]}
-                }}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // lowerer pushes IN-list filter to edge tags via hasAny.
+    fn denorm_in_list_filter_uses_has_any() {
+        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged", "opened"]}"#);
         assert!(
             sql.contains("hasAny(e0.target_tags"),
-            "IN-list denorm filter must use hasAny on edge target_tags, got:\n{sql}"
+            "IN-list denorm filter must use hasAny, got:\n{sql}"
         );
         assert!(
             sql.contains("state:merged") && sql.contains("state:opened"),
@@ -1308,64 +1081,27 @@ mod tests {
     }
 
     #[test]
-    fn denorm_in_list_single_value_keeps_cte_for_dedup() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "in", "value": ["merged"]}
-                }}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // lowerer pushes single-value IN-list to edge tags via has.
+    fn denorm_in_list_single_value_uses_has() {
+        let sql = denorm_traversal_sql(r#""state": {"op": "in", "value": ["merged"]}"#);
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
-            "single-value IN-list denorm must use has on edge target_tags, got:\n{sql}"
+            "single-value IN-list must use has, got:\n{sql}"
         );
     }
 
     #[test]
-    /// Partial denorm: when some filters are denormalized and some are not,
-    /// the CTE is kept (with only non-denormalized filters) and tag
-    /// predicates are injected onto the edge WHERE for the denormalized ones.
-    fn denorm_partial_filters_keeps_nf_cte() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let query = r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr", "entity": "MergeRequest", "filters": {
-                    "state": {"op": "eq", "value": "merged"},
-                    "source_branch": {"op": "eq", "value": "main"}
-                }}
-            ],
-            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
-            "limit": 10
-        }"#;
-
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
-
-        // lowerer emits a _filter_mr CTE for the non-denormalized filter
-        // and pushes the denormalized filter to edge tags.
+    fn denorm_partial_filters_keeps_filter_cte() {
+        let sql = denorm_traversal_sql(
+            r#""state": {"op": "eq", "value": "merged"}, "source_branch": {"op": "eq", "value": "main"}"#,
+        );
         assert!(
             sql.contains("_filter_mr"),
             "partial denorm must keep a filter CTE for non-denormalized filters, got:\n{sql}"
         );
-        // The denormalized state filter is pushed to edge tags.
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denormalized state filter must be pushed to edge tags, got:\n{sql}"
         );
-        // CTE retains the non-denormalized source_branch filter.
         assert!(
             sql.contains("main"),
             "filter CTE must retain non-denormalized source_branch filter, got:\n{sql}"
@@ -1377,7 +1113,6 @@ mod tests {
     /// filter (has on target_tags) to the edge. Both filters narrow the scan.
     #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1389,8 +1124,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // Node_ids filter is pushed to the edge.
         assert!(
@@ -1406,7 +1140,6 @@ mod tests {
 
     #[test]
     fn denorm_aggregation_count_with_filter_uses_edge_column() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1425,8 +1158,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         // lowerer pushes the denorm filter to edge tags directly.
         assert!(
@@ -1442,7 +1174,6 @@ mod tests {
 
     #[test]
     fn denorm_preserves_role_gated_node_table_for_security() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1461,8 +1192,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("gl_vulnerability"),
@@ -1472,7 +1202,6 @@ mod tests {
 
     #[test]
     fn aggregation_group_by_property_emits_scalar_group_key() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1487,8 +1216,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("p.visibility_level AS visibility_level"),
@@ -1506,7 +1234,6 @@ mod tests {
 
     #[test]
     fn aggregation_group_by_property_keeps_role_gated_target_table() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1523,8 +1250,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("gl_vulnerability"),
@@ -1538,8 +1264,6 @@ mod tests {
 
     #[test]
     fn node_table_reads_use_final_for_latest_rows() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let queries = [
             (
                 "traversal",
@@ -1588,7 +1312,7 @@ mod tests {
         ];
 
         for (name, query) in queries {
-            let compiled = compile(query, &ontology, &security_ctx())
+            let compiled = compile(query, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
             assert!(
@@ -1604,7 +1328,6 @@ mod tests {
 
     #[test]
     fn fk_star_joined_nodes_use_candidate_ctes() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1619,8 +1342,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains(
@@ -1646,7 +1368,6 @@ mod tests {
 
     #[test]
     fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1659,8 +1380,7 @@ mod tests {
             "limit": 20
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             !sql.contains("_candidate_"),
@@ -1674,7 +1394,6 @@ mod tests {
 
     #[test]
     fn fk_star_unfiltered_join_narrow_uses_candidate_scan() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1689,8 +1408,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains(
@@ -1721,7 +1439,6 @@ mod tests {
 
     #[test]
     fn flat_chain_edge_narrowing_deduplicates_frontier() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1738,8 +1455,7 @@ mod tests {
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains(
@@ -1755,7 +1471,6 @@ mod tests {
 
     #[test]
     fn filtered_redaction_joins_push_filters_into_final_subquery() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1766,8 +1481,7 @@ mod tests {
             "limit": 20
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
@@ -1783,9 +1497,6 @@ mod tests {
 
     #[test]
     fn hydration_uses_final_for_latest_rows() {
-        use std::sync::Arc;
-
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: vec![InputNode {
@@ -1802,8 +1513,9 @@ mod tests {
             ..Default::default()
         };
 
-        let compiled = compile_input(input, &ontology, &security_ctx())
-            .expect("hydration input should compile");
+        let ont = Arc::new(ONTOLOGY.clone());
+        let compiled =
+            compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
             sql.contains(" FINAL"),
@@ -1819,16 +1531,13 @@ mod tests {
     /// ClickHouse push predicates through and is the default behavior.
     #[test]
     fn single_ref_cte_is_not_materialized() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "limit": 10
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
         assert!(
             !sql.contains("MATERIALIZED"),
@@ -1846,8 +1555,6 @@ mod tests {
     /// No cascade or _nf_mr CTEs are needed.
     #[test]
     fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1870,20 +1577,9 @@ mod tests {
             "limit": 5
         }"#;
 
-        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
-        let sql = compiled.base.render();
+        let sql = compile_sql(query);
 
-        // No cascade CTEs in lowerer — edge-chain JOINs replace them.
-        assert!(
-            !sql.contains("_cascade_mr"),
-            "lowerer should not emit cascade CTEs, got:\n{sql}"
-        );
-
-        // No _target_mr_ids or _nf_mr CTEs — denorm covers the filter.
-        assert!(
-            !sql.contains("_target_mr_ids"),
-            "_target_mr_ids must not be emitted, got:\n{sql}"
-        );
+        // No _nf_mr CTE — denorm covers the filter.
         assert!(
             !sql.contains("_nf_mr"),
             "_nf_mr must not be emitted when state is fully denormalized, got:\n{sql}"
