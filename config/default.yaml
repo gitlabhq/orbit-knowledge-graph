@@ -53,7 +53,7 @@ engine:
   concurrency_groups:
     sdlc: 12
     code: 4
-  handlers:
+  topics:
     global-handler:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
@@ -62,30 +62,35 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
-      batch_size_overrides:
-        WorkItem: 50000
+    entity-handler:
+      concurrency_group: sdlc
+      max_attempts: 1  # re-dispatched every minute, no need to retry
+      retry_interval_secs: 60
     code-indexing-task:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
+      dead_letter_on_exhaustion: true
+    namespace-deletion:
+      concurrency_group: code
+      max_attempts: 1  # re-dispatched daily, no need to retry
+  handlers:
+    namespace-handler:
+      batch_size_overrides:
+        WorkItem: 50000
+    entity-handler:
+      batch_size_overrides:
+        WorkItem: 50000
+      # partition_overrides:
+      #   MergeRequest: 4
+      #   Job: 4
+    code-indexing-task:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 5000
-    entity-handler:
-      concurrency_group: sdlc
-      max_attempts: 1  # re-dispatched every minute, no need to retry
-      retry_interval_secs: 60
-      batch_size_overrides:
-        WorkItem: 50000
-      # partition_overrides:
-      #   MergeRequest: 4
-      #   Job: 4
-    namespace-deletion:
-      concurrency_group: code
-      max_attempts: 1  # re-dispatched daily, no need to retry
 
 schedule:
   tasks:

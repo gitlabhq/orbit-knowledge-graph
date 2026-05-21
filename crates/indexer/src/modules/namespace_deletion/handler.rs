@@ -4,29 +4,28 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{error, info, warn};
 
-use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::topic::NamespaceDeletionRequest;
-use crate::types::{Envelope, Event, SerializationError, Subscription};
-use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
-
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
+use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::topic::NamespaceDeletionRequest;
+use crate::types::{Envelope, SerializationError, Subscription};
 
 pub struct NamespaceDeletionHandler {
     store: Arc<dyn NamespaceDeletionStore>,
-    config: NamespaceDeletionHandlerConfig,
     metrics: DeletionMetrics,
+    subscription: Subscription,
 }
 
 impl NamespaceDeletionHandler {
     pub fn new(
         store: Arc<dyn NamespaceDeletionStore>,
-        config: NamespaceDeletionHandlerConfig,
+        metrics: DeletionMetrics,
+        subscription: Subscription,
     ) -> Self {
         Self {
             store,
-            config,
-            metrics: DeletionMetrics::new(),
+            metrics,
+            subscription,
         }
     }
 }
@@ -38,11 +37,7 @@ impl Handler for NamespaceDeletionHandler {
     }
 
     fn subscription(&self) -> Subscription {
-        NamespaceDeletionRequest::subscription()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config.engine
+        self.subscription.clone()
     }
 
     async fn handle(
@@ -165,7 +160,7 @@ mod tests {
     use crate::locking::LockService;
     use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{MockDestination, MockLockService, MockNatsServices};
-    use crate::types::Envelope;
+    use crate::types::{Envelope, Event};
 
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
@@ -181,7 +176,11 @@ mod tests {
     }
 
     fn make_handler(store: Arc<MockNamespaceDeletionStore>) -> NamespaceDeletionHandler {
-        NamespaceDeletionHandler::new(store, NamespaceDeletionHandlerConfig::default())
+        NamespaceDeletionHandler::new(
+            store,
+            DeletionMetrics::new(),
+            NamespaceDeletionRequest::subscription(),
+        )
     }
 
     fn envelope_for(namespace_id: i64, traversal_path: &str) -> Envelope {

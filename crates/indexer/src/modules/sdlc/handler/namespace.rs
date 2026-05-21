@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::types::{Envelope, Event, SerializationError, Subscription};
+use crate::types::{Envelope, SerializationError, Subscription};
 use async_trait::async_trait;
 use chrono::Utc;
-use gkg_server_config::{HandlerConfiguration, NamespaceHandlerConfig};
+use gkg_server_config::NamespaceHandlerConfig;
 use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;
@@ -19,6 +19,7 @@ pub struct NamespaceHandler {
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
     config: NamespaceHandlerConfig,
+    subscription: Subscription,
 }
 
 impl NamespaceHandler {
@@ -27,12 +28,14 @@ impl NamespaceHandler {
         pipeline: Arc<Pipeline>,
         metrics: SdlcMetrics,
         config: NamespaceHandlerConfig,
+        subscription: Subscription,
     ) -> Self {
         Self {
             plans,
             pipeline,
             metrics,
             config,
+            subscription,
         }
     }
 }
@@ -44,11 +47,7 @@ impl Handler for NamespaceHandler {
     }
 
     fn subscription(&self) -> Subscription {
-        NamespaceIndexingRequest::subscription()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config.engine
+        self.subscription.clone()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -128,6 +127,7 @@ mod tests {
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use crate::types::Event;
     use ontology::Ontology;
 
     #[tokio::test]
@@ -147,6 +147,7 @@ mod tests {
             pipeline,
             test_metrics(),
             NamespaceHandlerConfig::default(),
+            NamespaceIndexingRequest::subscription(),
         );
 
         let payload = serde_json::json!({

@@ -3,9 +3,11 @@
 //! These types are transport-agnostic and used throughout the ETL engine.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use gkg_server_config::SubscriptionConfig;
 use serde::{Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use uuid::Uuid;
@@ -18,13 +20,19 @@ pub enum SerializationError {
     Json(#[from] serde_json::Error),
 }
 
-/// A NATS JetStream subscription target: a stream name paired with a subject filter.
+/// A NATS JetStream subscription target with message processing policy.
+///
+/// Identity (Hash/Eq) uses only `stream` + `subject`. The remaining fields
+/// are message-level processing config applied at handler registration time.
 #[derive(Clone, Debug)]
 pub struct Subscription {
     pub stream: Arc<str>,
     pub subject: Arc<str>,
     pub manage_stream: bool,
     pub dead_letter_on_exhaustion: bool,
+    pub concurrency_group: Option<Arc<str>>,
+    pub max_attempts: Option<u32>,
+    pub retry_interval_secs: Option<u64>,
 }
 
 impl PartialEq for Subscription {
@@ -49,6 +57,9 @@ impl Subscription {
             subject: subject.into(),
             manage_stream: true,
             dead_letter_on_exhaustion: false,
+            concurrency_group: None,
+            max_attempts: None,
+            retry_interval_secs: None,
         }
     }
 
@@ -60,6 +71,22 @@ impl Subscription {
     pub fn dead_letter_on_exhaustion(mut self, value: bool) -> Self {
         self.dead_letter_on_exhaustion = value;
         self
+    }
+
+    pub fn with_config(mut self, config: &SubscriptionConfig) -> Self {
+        if let Some(ref group) = config.concurrency_group {
+            self.concurrency_group = Some(Arc::from(group.as_str()));
+        }
+        self.max_attempts = config.max_attempts;
+        self.retry_interval_secs = config.retry_interval_secs;
+        if config.dead_letter_on_exhaustion {
+            self.dead_letter_on_exhaustion = true;
+        }
+        self
+    }
+
+    pub fn retry_interval(&self) -> Option<Duration> {
+        self.retry_interval_secs.map(Duration::from_secs)
     }
 }
 

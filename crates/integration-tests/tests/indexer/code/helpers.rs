@@ -13,9 +13,7 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::GitlabClient;
-use gkg_server_config::{
-    CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, GitlabClientConfiguration,
-};
+use gkg_server_config::{CodeIndexingPipelineConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
@@ -25,6 +23,8 @@ use indexer::modules::code::{
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
+use indexer::topic::CodeIndexingTaskRequest;
+use indexer::types::Event;
 use integration_testkit::{TestContext, t};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -92,8 +92,8 @@ impl CodeIndexingDeps {
             Arc::clone(&self.repository_service),
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
-            CodeIndexingTaskHandlerConfig::default(),
             std::time::Duration::from_secs(60),
+            CodeIndexingTaskRequest::subscription(),
         )
     }
 }

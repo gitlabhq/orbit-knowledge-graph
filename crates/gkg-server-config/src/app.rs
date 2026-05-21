@@ -142,16 +142,16 @@ mod tests {
     use super::*;
     use crate::engine::EngineConfiguration;
 
-    /// Verifies the kebab-case handler config keys in YAML actually
-    /// deserialize into the correct Rust struct fields.
+    /// Verifies that topics (message-level config) and handlers (domain config)
+    /// deserialize correctly from kebab-case YAML keys.
     #[test]
-    fn handler_configs_deserialize_from_kebab_case_yaml() {
+    fn engine_config_deserializes_from_kebab_case_yaml() {
         let yaml = r#"
 max_concurrent_workers: 16
 concurrency_groups:
   sdlc: 12
   code: 4
-handlers:
+topics:
   global-handler:
     concurrency_group: sdlc
     max_attempts: 1
@@ -164,50 +164,47 @@ handlers:
     concurrency_group: code
     max_attempts: 5
     retry_interval_secs: 60
+    dead_letter_on_exhaustion: true
+  namespace-deletion:
+    concurrency_group: code
+    max_attempts: 1
+handlers:
+  code-indexing-task:
     pipeline:
       max_file_size_bytes: 10000000
       max_files: 200000
       worker_threads: 2
       max_concurrent_languages: 3
-  namespace-deletion:
-    concurrency_group: code
-    max_attempts: 1
 "#;
 
         let engine: EngineConfiguration =
             serde_yaml::from_str(yaml).expect("engine config should deserialize");
 
         assert_eq!(
-            engine
-                .handlers
-                .global_handler
-                .engine
+            engine.topics["global-handler"].concurrency_group.as_deref(),
+            Some("sdlc"),
+        );
+        assert_eq!(
+            engine.topics["namespace-handler"]
                 .concurrency_group
                 .as_deref(),
             Some("sdlc"),
         );
         assert_eq!(
-            engine
-                .handlers
-                .namespace_handler
-                .engine
-                .concurrency_group
-                .as_deref(),
-            Some("sdlc"),
-        );
-        assert_eq!(
-            engine
-                .handlers
-                .code_indexing_task
-                .engine
+            engine.topics["code-indexing-task"]
                 .concurrency_group
                 .as_deref(),
             Some("code"),
         );
+        assert_eq!(engine.topics["code-indexing-task"].max_attempts, Some(5));
+        assert!(engine.topics["code-indexing-task"].dead_letter_on_exhaustion);
         assert_eq!(
-            engine.handlers.code_indexing_task.engine.max_attempts,
-            Some(5)
+            engine.topics["namespace-deletion"]
+                .concurrency_group
+                .as_deref(),
+            Some("code"),
         );
+        assert_eq!(engine.topics["namespace-deletion"].max_attempts, Some(1));
         assert_eq!(
             engine
                 .handlers
@@ -231,19 +228,6 @@ handlers:
                 .pipeline
                 .max_concurrent_languages,
             3
-        );
-        assert_eq!(
-            engine
-                .handlers
-                .namespace_deletion
-                .engine
-                .concurrency_group
-                .as_deref(),
-            Some("code"),
-        );
-        assert_eq!(
-            engine.handlers.namespace_deletion.engine.max_attempts,
-            Some(1)
         );
     }
 

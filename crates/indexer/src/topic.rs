@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 
 pub const INDEXER_STREAM: &str = "GKG_INDEXER";
 
+pub const GLOBAL_HANDLER_TOPIC: &str = "global-handler";
+pub const NAMESPACE_HANDLER_TOPIC: &str = "namespace-handler";
+pub const ENTITY_HANDLER_TOPIC: &str = "entity-handler";
+pub const CODE_INDEXING_TASK_TOPIC: &str = "code-indexing-task";
+pub const NAMESPACE_DELETION_TOPIC: &str = "namespace-deletion";
+
 pub fn all_managed_subscriptions() -> Vec<Subscription> {
     vec![
         Subscription::new(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT),

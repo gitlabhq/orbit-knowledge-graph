@@ -20,7 +20,6 @@ use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
-use gkg_server_config::HandlerConfiguration;
 
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
@@ -174,7 +173,8 @@ pub struct MockHandler {
     subscription: Subscription,
     delay: Option<Duration>,
     error: Option<HandlerError>,
-    engine_config: HandlerConfiguration,
+    panic_message: Option<String>,
+    on_handle: Option<Arc<dyn Fn() + Send + Sync>>,
     invocations: Arc<AtomicUsize>,
     received: Arc<Mutex<Vec<Envelope>>>,
 }
@@ -186,7 +186,8 @@ impl MockHandler {
             subscription: Subscription::new(stream, subject),
             delay: None,
             error: None,
-            engine_config: HandlerConfiguration::default(),
+            panic_message: None,
+            on_handle: None,
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
         }
@@ -207,8 +208,13 @@ impl MockHandler {
         self
     }
 
-    pub fn with_engine_config(mut self, config: HandlerConfiguration) -> Self {
-        self.engine_config = config;
+    pub fn with_panic(mut self, message: &str) -> Self {
+        self.panic_message = Some(message.to_string());
+        self
+    }
+
+    pub fn with_on_handle(mut self, callback: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_handle = Some(Arc::new(callback));
         self
     }
 }
@@ -223,10 +229,6 @@ impl Handler for MockHandler {
         self.subscription.clone()
     }
 
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.engine_config
-    }
-
     async fn handle(
         &self,
         _context: HandlerContext,
@@ -235,8 +237,16 @@ impl Handler for MockHandler {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         self.received.lock().push(message);
 
+        if let Some(ref msg) = self.panic_message {
+            panic!("{msg}");
+        }
+
         if let Some(delay) = self.delay {
             tokio::time::sleep(delay).await;
+        }
+
+        if let Some(ref callback) = self.on_handle {
+            callback();
         }
 
         if let Some(ref error) = self.error {

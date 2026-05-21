@@ -36,7 +36,6 @@ use crate::{
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
 };
-use gkg_server_config::HandlerConfiguration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermanentAction {
@@ -133,8 +132,9 @@ impl HandlerContext {
 /// A message handler that processes events from a specific topic.
 ///
 /// Each handler subscribes to one topic and processes incoming messages.
-/// Engine behavior (retries, concurrency group) is configured per-handler
-/// via [`HandlerConfiguration`], accessed through [`engine_config()`](Handler::engine_config).
+/// Engine behavior (retries, concurrency, DLQ) is configured on the
+/// [`Subscription`] returned by [`subscription()`](Handler::subscription),
+/// not on the handler itself.
 #[async_trait]
 pub trait Handler: Send + Sync {
     /// Returns the unique name of this handler.
@@ -143,19 +143,17 @@ pub trait Handler: Send + Sync {
     fn name(&self) -> &str;
 
     /// Returns the subscription this handler listens on.
-    fn subscription(&self) -> Subscription;
-
-    /// Returns the engine configuration for this handler (retry policy, concurrency group).
     ///
-    /// The engine calls this directly — no HashMap lookup needed.
-    fn engine_config(&self) -> &HandlerConfiguration;
+    /// The subscription carries message-level processing policy (retry,
+    /// concurrency group, DLQ) applied at registration time.
+    fn subscription(&self) -> Subscription;
 
     /// Processes a message from the subscribed topic.
     ///
     /// # Errors
     ///
     /// Returns a [`HandlerError`] if processing fails. The engine will
-    /// retry or ack based on `engine_config()`.
+    /// retry or ack based on the subscription's config.
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
 }
 

@@ -31,7 +31,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Traits
 
-- **Handler**: Message processor (`name`, `topic`, `engine_config`, `handle`)
+- **Handler**: Message processor (`name`, `subscription`, `handle`)
 - **Destination**: Provides BatchWriter or StreamWriter
 - **Event**: Type-safe message serialization
 
@@ -87,11 +87,12 @@ Located in `testkit/`:
 ### Adding a handler
 
 1. Define event type implementing `Event`
-2. Create handler implementing `Handler` (including `engine_config()`)
-3. Add a typed config field to `HandlersConfiguration` in `configuration.rs`
-4. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+2. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
+3. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
+4. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
+5. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
 
 ### Concurrency
 
 - `max_concurrent_workers`: Global limit (default 16)
-- Per-handler concurrency groups configurable via `EngineConfiguration`
+- Per-subscription concurrency groups configured via `engine.topics` in YAML

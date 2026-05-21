@@ -22,6 +22,8 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
+use crate::types::Event;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
@@ -83,13 +85,18 @@ pub fn register_handlers(
         code_indexing_task_config.pipeline.clone(),
     ));
 
+    let mut subscription = CodeIndexingTaskRequest::subscription();
+    if let Some(topic_config) = config.engine.topics.get(CODE_INDEXING_TASK_TOPIC) {
+        subscription = subscription.with_config(topic_config);
+    }
+
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
         Arc::clone(&pipeline),
         Arc::clone(&repository_service),
         Arc::clone(&checkpoint_store),
         metrics,
-        code_indexing_task_config,
         config.nats.ack_wait(),
+        subscription,
     )));
 
     Ok(())

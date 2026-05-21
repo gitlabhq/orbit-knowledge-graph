@@ -13,8 +13,7 @@ use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServ
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::topic::CodeIndexingTaskRequest;
-use crate::types::{Envelope, Event, Subscription};
-use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
+use crate::types::{Envelope, Subscription};
 
 /// Sentinel branch value written to the checkpoint when the project is
 /// resolved as deleted from Rails (404) and we cannot determine its default
@@ -34,8 +33,8 @@ pub struct CodeIndexingTaskHandler {
     repository_service: Arc<dyn RepositoryService>,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
-    config: CodeIndexingTaskHandlerConfig,
     lock_ttl: Duration,
+    subscription: Subscription,
 }
 
 impl CodeIndexingTaskHandler {
@@ -44,16 +43,16 @@ impl CodeIndexingTaskHandler {
         repository_service: Arc<dyn RepositoryService>,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
-        config: CodeIndexingTaskHandlerConfig,
         lock_ttl: Duration,
+        subscription: Subscription,
     ) -> Self {
         Self {
             pipeline,
             repository_service,
             checkpoint_store,
             metrics,
-            config,
             lock_ttl,
+            subscription,
         }
     }
 }
@@ -65,11 +64,7 @@ impl Handler for CodeIndexingTaskHandler {
     }
 
     fn subscription(&self) -> Subscription {
-        CodeIndexingTaskRequest::subscription().dead_letter_on_exhaustion(true)
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config.engine
+        self.subscription.clone()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -286,6 +281,7 @@ mod tests {
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
+    use crate::types::Event;
     use chrono::Utc;
 
     fn test_metrics() -> CodeMetrics {
@@ -332,7 +328,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
-                CodeIndexingTaskHandlerConfig::default().pipeline,
+                gkg_server_config::CodeIndexingPipelineConfig::default(),
             ));
 
             let handler = CodeIndexingTaskHandler::new(
@@ -340,8 +336,8 @@ mod tests {
                 repo_service,
                 Arc::clone(&checkpoint_store),
                 metrics,
-                CodeIndexingTaskHandlerConfig::default(),
                 Duration::from_secs(60),
+                CodeIndexingTaskRequest::subscription(),
             );
 
             Self {
@@ -588,13 +584,6 @@ mod tests {
         let expected = CodeIndexingTaskRequest::subscription();
         assert_eq!(subscription.stream, expected.stream);
         assert_eq!(subscription.subject, expected.subject);
-    }
-
-    #[test]
-    fn handler_subscription_has_dead_letter_on_exhaustion() {
-        let ctx = TestContext::new();
-        let subscription = ctx.handler.subscription();
-        assert!(subscription.dead_letter_on_exhaustion);
     }
 
     #[test]
