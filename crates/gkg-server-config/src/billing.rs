@@ -8,4 +8,37 @@ pub struct BillingConfig {
     pub enabled: bool,
     #[serde(default)]
     pub collector_url: String,
+    #[serde(default)]
+    pub quota: QuotaConfig,
+}
+
+fn default_quota_timeout_ms() -> u64 {
+    1000
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct QuotaConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub customers_dot_url: String,
+    #[serde(default)]
+    pub api_user: Option<String>,
+    #[serde(default)]
+    pub api_token: Option<String>,
+    #[serde(default = "default_quota_timeout_ms")]
+    pub request_timeout_ms: u64,
+}
+
+impl Default for QuotaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            customers_dot_url: String::new(),
+            api_user: None,
+            api_token: None,
+            request_timeout_ms: default_quota_timeout_ms(),
+        }
+    }
 }

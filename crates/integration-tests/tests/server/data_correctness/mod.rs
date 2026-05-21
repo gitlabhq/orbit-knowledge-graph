@@ -48,6 +48,11 @@ async fn data_correctness() {
         search::search_filter_lte_on_datetime_returns_matching_rows,
         search::search_filter_lt_on_datetime_excludes_same_day_after_midnight,
         search::search_filter_is_not_null_on_datetime_returns_merged_rows,
+        // search: multi-filter range queries
+        search::search_multi_filter_date_window,
+        search::search_multi_filter_date_window_multiple_results,
+        search::search_multi_filter_empty_window_returns_empty,
+        search::search_multi_filter_mixed_with_single_filter,
         // traversal
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,
@@ -105,8 +110,6 @@ async fn data_correctness() {
         path_finding::path_finding_consecutive_edges_connect,
         path_finding::path_finding_max_depth_too_shallow_returns_empty,
         path_finding::path_finding_redaction_blocks_intermediate_node,
-        path_finding::path_finding_all_shortest_returns_valid_paths,
-        path_finding::path_finding_any_returns_at_least_one_path,
         path_finding::path_finding_rel_types_restricts_traversal,
         path_finding::path_finding_step_indices_are_sequential,
         path_finding::path_finding_target_entity_constrains_results,

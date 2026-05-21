@@ -243,76 +243,6 @@ pub(super) async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestCo
     );
 }
 
-pub(super) async fn path_finding_all_shortest_returns_valid_paths(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "all_shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    let pids = resp.path_ids();
-    assert!(
-        !pids.is_empty(),
-        "all_shortest should find at least one path from User 1 to Project 1000"
-    );
-
-    for &pid in pids.iter() {
-        let path = resp.path(pid);
-        assert_eq!(path.len(), 2, "path {pid}: User→Group→Project = 2 edges");
-
-        let first = path[0];
-        assert_eq!(first.from, "User");
-        assert_eq!(first.from_id, 1);
-
-        let last = path.last().unwrap();
-        assert_eq!(last.to, "Project");
-        assert_eq!(last.to_id, 1000);
-    }
-
-    resp.assert_referential_integrity();
-}
-
-pub(super) async fn path_finding_any_returns_at_least_one_path(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 3}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    let pids = resp.path_ids();
-    assert!(
-        !pids.is_empty(),
-        "any should find at least one path from User 1 to Project 1000"
-    );
-
-    for &pid in pids.iter() {
-        let path = resp.path(pid);
-        assert!(!path.is_empty(), "path {pid} should have at least one edge");
-        assert_eq!(path[0].from, "User");
-        assert_eq!(path[0].from_id, 1);
-        assert_eq!(path.last().unwrap().to, "Project");
-        assert_eq!(path.last().unwrap().to_id, 1000);
-    }
-    resp.assert_referential_integrity();
-}
-
 pub(super) async fn path_finding_rel_types_restricts_traversal(ctx: &TestContext) {
     // Only allow MEMBER_OF edges. The path User→Group→Project requires
     // a CONTAINS edge for the second hop, so no path should be found.
@@ -431,7 +361,7 @@ pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestCo
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2003}}
             ],
-            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 1,
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1,
                      "rel_types": ["AUTHORED"]}
         }"#,
         &allow_all(),

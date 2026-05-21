@@ -27,10 +27,10 @@ title: Schema reference
 Orbit Local indexes 4 node types - all in the source code domain. There is no
 SDLC layer, because Orbit Local does not connect to GitLab.
 
-To inspect the live schema at any time:
+To inspect the live DuckDB schema at any time:
 
 ```shell
-orbit schema --ontology
+orbit schema
 ```
 
 ## Source code

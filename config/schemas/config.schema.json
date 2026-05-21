@@ -18,7 +18,14 @@
       "$ref": "#/$defs/BillingConfig",
       "default": {
         "collector_url": "",
-        "enabled": false
+        "enabled": false,
+        "quota": {
+          "api_token": null,
+          "api_user": null,
+          "customers_dot_url": "",
+          "enabled": false,
+          "request_timeout_ms": 1000
+        }
       }
     },
     "bind_address": {
@@ -304,6 +311,16 @@
         "enabled": {
           "type": "boolean",
           "default": false
+        },
+        "quota": {
+          "$ref": "#/$defs/QuotaConfig",
+          "default": {
+            "api_token": null,
+            "api_user": null,
+            "customers_dot_url": "",
+            "enabled": false,
+            "request_timeout_ms": 1000
+          }
         }
       },
       "additionalProperties": false
@@ -1438,6 +1455,40 @@
       "additionalProperties": {
         "$ref": "#/$defs/QueryConfig"
       }
+    },
+    "QuotaConfig": {
+      "type": "object",
+      "properties": {
+        "api_token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "api_user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "customers_dot_url": {
+          "type": "string",
+          "default": ""
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "request_timeout_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 1000,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "ScheduleConfig": {
       "description": "Top-level schedule configuration.",

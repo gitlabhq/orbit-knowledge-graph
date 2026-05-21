@@ -354,6 +354,29 @@ analytics:
     environment: staging
 ```
 
+## Billing
+
+Controls Snowplow billing-event emission and the CDot quota gate that enforces GitLab credit limits on metered Orbit queries.
+
+### Billing events
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `billing.enabled` | `GKG_BILLING__ENABLED` | `false` | Enable Snowplow billing-event emission |
+| `billing.collector_url` | `GKG_BILLING__COLLECTOR_URL` | `""` | Snowplow collector endpoint |
+
+### Quota gate
+
+When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked against CDot before execution. Requests from namespaces with exhausted credits are rejected with `codes.ResourceExhausted`.
+
+| Config path | Env var | Default | Description |
+|-------------|---------|---------|-------------|
+| `billing.quota.enabled` | `GKG_BILLING__QUOTA__ENABLED` | `false` | Enable the CDot quota gate |
+| `billing.quota.customers_dot_url` | `GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
+| `billing.quota.request_timeout_ms` | `GKG_BILLING__QUOTA__REQUEST_TIMEOUT_MS` | `1000` | CDot request timeout in milliseconds |
+| `billing.quota.api_user` | `GKG_BILLING__QUOTA__API_USER` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
+| `billing.quota.api_token` | `GKG_BILLING__QUOTA__API_TOKEN` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+
 ## Health check
 
 | Config path | Default | Description |

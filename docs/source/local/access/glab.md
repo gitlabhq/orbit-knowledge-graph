@@ -92,27 +92,18 @@ glab orbit local index /path/to/your/repo
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
 
-## Run a query
+## Run SQL against the graph
 
 ```shell
-echo '{"query_type":"traversal","node":{"id":"d","entity":"Definition","columns":["name","definition_type"],"filters":{"definition_type":"Method"}},"limit":10}' \
-  | glab orbit local query -
+glab orbit local sql 'SELECT count(*) FROM gl_definition'
+echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 ```
-
-Pass a file path or `-` for stdin. The query language is identical to Orbit
-Remote.
-
-| Flag | Purpose |
-|------|---------|
-| `--format llm` | Compact text optimized for AI agent consumption. |
-| `--format raw` | Structured JSON, suitable for piping to `jq`. |
 
 ## Inspect the schema
 
 ```shell
 glab orbit local schema
-glab orbit local schema --expand Definition File
-glab orbit local schema --query
+glab orbit local schema --raw
 ```
 
 ## Run as an MCP server

@@ -1794,75 +1794,6 @@ async fn search_wildcard_columns(ctx: &TestContext) {
 // Path finding — type variations
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn path_finding_all_shortest(ctx: &TestContext) {
-    let value = run_pipeline(
-        ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "all_shortest", "from": "start", "to": "end", "max_depth": 3}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    assert_eq!(value["query_type"], "path_finding");
-
-    let nodes = value["nodes"].as_array().unwrap();
-    assert!(!nodes.is_empty());
-    assert!(node_ids(nodes, "User").contains(&1));
-    assert!(node_ids(nodes, "Project").contains(&1000));
-
-    for node in nodes {
-        assert!(node["id"].is_string());
-        assert!(node["type"].is_string());
-    }
-
-    let edges = value["edges"].as_array().unwrap();
-    assert!(!edges.is_empty());
-    for edge in edges {
-        assert!(edge["path_id"].is_i64());
-        assert!(edge["step"].is_i64());
-        assert!(edge["from_id"].is_string());
-        assert!(edge["to_id"].is_string());
-    }
-}
-
-async fn path_finding_any(ctx: &TestContext) {
-    let value = run_pipeline(
-        ctx,
-        r#"{
-            "query_type": "path_finding",
-            "nodes": [
-                {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000]}
-            ],
-            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 3}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    assert_eq!(value["query_type"], "path_finding");
-
-    let nodes = value["nodes"].as_array().unwrap();
-    if !nodes.is_empty() {
-        assert!(node_ids(nodes, "User").contains(&1));
-        assert!(node_ids(nodes, "Project").contains(&1000));
-
-        let edges = value["edges"].as_array().unwrap();
-        for edge in edges {
-            assert!(edge["path_id"].is_i64());
-            assert!(edge["step"].is_i64());
-            assert!(edge["from_id"].is_string());
-            assert!(edge["to_id"].is_string());
-        }
-    }
-}
-
 async fn path_finding_with_rel_types(ctx: &TestContext) {
     // Only follow MEMBER_OF edges — should find User→Group but not Group→Project (CONTAINS)
     let value = run_pipeline(
@@ -2688,8 +2619,6 @@ async fn graph_formatter_e2e() {
         no_alias_aggregation_with_sort,
         // Path finding — type variations
         path_finding_exact_path,
-        path_finding_all_shortest,
-        path_finding_any,
         path_finding_with_rel_types,
         path_finding_redaction_blocks_path,
         path_finding_max_depth,

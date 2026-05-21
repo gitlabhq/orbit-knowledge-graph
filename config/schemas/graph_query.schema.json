@@ -316,12 +316,12 @@
         },
         "filters": {
           "type": "object",
-          "description": "Property filters. Keys are property names, values are Filter objects. Limited to prevent query complexity explosion.",
+          "description": "Property filters. Keys are property names, values are Filter objects or arrays of PropertyFilter objects (AND-combined, for ranges). Limited to prevent query complexity explosion.",
           "propertyNames": {
             "$ref": "#/$defs/Identifier"
           },
           "additionalProperties": {
-            "$ref": "#/$defs/Filter"
+            "$ref": "#/$defs/FilterEntry"
           },
           "maxProperties": 10,
           "default": {}
@@ -400,6 +400,24 @@
         {
           "$ref": "#/$defs/PropertyFilter",
           "description": "Advanced operator-based filter"
+        }
+      ]
+    },
+    "FilterEntry": {
+      "description": "One or more filters on a single property. Use an array to express ranges (e.g., date windows). Array entries are AND-combined.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Filter",
+          "description": "Single filter (backward compatible)"
+        },
+        {
+          "type": "array",
+          "description": "Multiple filters AND-combined on the same property. Each element must use an explicit operator.",
+          "items": {
+            "$ref": "#/$defs/PropertyFilter"
+          },
+          "minItems": 1,
+          "maxItems": 10
         }
       ]
     },
@@ -516,7 +534,7 @@
             "$ref": "#/$defs/Identifier"
           },
           "additionalProperties": {
-            "$ref": "#/$defs/Filter"
+            "$ref": "#/$defs/FilterEntry"
           },
           "maxProperties": 5,
           "default": {}

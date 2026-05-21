@@ -31,7 +31,7 @@ use crate::proto::{
     invoke_agent_command_response,
 };
 use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
-use gkg_billing::BillingTracker;
+use gkg_billing::{BillingTracker, QuotaCheckInputs, QuotaService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
@@ -65,6 +65,7 @@ pub struct KnowledgeGraphServiceImpl {
     cluster_health: Arc<ClusterHealthChecker>,
     graph_status: GraphStatusService,
     stream_timeout_secs: u64,
+    quota: Arc<QuotaService>,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -89,7 +90,13 @@ impl KnowledgeGraphServiceImpl {
             cluster_health,
             graph_status,
             stream_timeout_secs,
+            quota: Arc::new(QuotaService::disabled()),
         }
+    }
+
+    pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
+        self.quota = quota;
+        self
     }
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
@@ -273,6 +280,8 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         ctx.record_in_current_span();
         let coding_agent = ctx.coding_agent().map(String::from);
         let claims = ctx.claims;
+
+        self.quota.check(&QuotaCheckInputs::from(&claims)).await?;
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);

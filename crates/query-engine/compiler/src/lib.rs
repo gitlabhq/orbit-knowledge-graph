@@ -145,61 +145,6 @@ pub fn compile_input(
     result.count_err()
 }
 
-/// Compile a JSON query into DuckDB-dialect SQL for local/offline use.
-///
-/// Skips security, enforce, optimize, and hydration — the output has no
-/// redaction metadata and `HydrationPlan::None`. Do not use this where
-/// multi-tenant authorization or column redaction is required.
-///
-/// ```text
-/// JSON → Validate → Normalize → Lower → DuckDbCodegen
-/// ```
-#[must_use = "the compiled query context should be used"]
-pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let mut ont = ontology.clone();
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
-    let admin_ctx = SecurityContext::new(0, vec![])
-        .expect("empty traversal paths are always valid")
-        .with_role(true, None);
-    let mut ctx = config::DuckdbCtx::new(Arc::new(ont), admin_ctx);
-    ctx.set_json(json_input.to_string());
-    config::run_duckdb(&mut ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-        .count_err()
-}
-
-/// Compile a pre-built Input into DuckDB-dialect SQL for local hydration.
-///
-/// Uses the local hydration pipeline (Lower → Enforce → DuckDbCodegen).
-/// No validation, normalization, security, or recursive hydration.
-/// The ontology is needed because Lower/Enforce may consult entity
-/// metadata for table resolution and column aliasing.
-#[must_use = "the compiled query context should be used"]
-pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let mut ont = ontology.clone();
-    if let Some(local_table) = ontology.local_edge_table_name() {
-        ont.collapse_edge_tables(local_table);
-    }
-    let admin_ctx = SecurityContext::new(0, vec![])
-        .expect("empty traversal paths are always valid")
-        .with_role(true, None);
-    let mut ctx = config::DuckdbHydrationCtx::new(Arc::new(ont), admin_ctx);
-    ctx.set_input(input);
-    config::run_duckdb_hydration(&mut ctx)
-        .and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-        .count_err()
-}
-
 // Pipeline presets are in `pipelines.rs`.
 // Tests are in `tests/compiler_tests.rs` and `tests/ontology_tests.rs`.
 
@@ -1637,6 +1582,31 @@ mod tests {
         assert!(
             sql.contains("mr.state = 'merged'") || sql.contains("state = 'merged'"),
             "state filter must be applied on MR node table, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn multi_filter_range_compiles_both_predicates() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "node_ids": [1],
+                     "filters": {
+                         "created_at": [
+                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
+                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                         ]
+                     },
+                     "columns": ["id", "created_at"]},
+            "limit": 10
+        }"#;
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains(">=") && sql.contains("<"),
+            "both range predicates must appear in SQL, got:\n{sql}"
         );
     }
 }

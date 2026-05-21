@@ -610,3 +610,137 @@ pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ct
         n.prop_str("merged_at").is_some()
     });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-filter range queries (array of PropertyFilter on a single property)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Date window via multi-filter: merged_at >= 2024-04-01 AND < 2024-07-01.
+/// Only MR 2004 (merged_at 2024-06-10) falls within [April, July).
+pub(super) async fn search_multi_filter_date_window(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": [
+                             {"op": "gte", "value": "2024-04-01T00:00:00Z"},
+                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                         ]
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("MergeRequest", &[2004]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at")
+            .is_some_and(|s| ("2024-04-01".."2024-07-01").contains(&s))
+    });
+}
+
+/// Wider window: merged_at >= 2024-01-01 AND < 2024-07-01 captures both
+/// MR 2002 (2024-03-15) and MR 2004 (2024-06-10).
+pub(super) async fn search_multi_filter_date_window_multiple_results(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": [
+                             {"op": "gte", "value": "2024-01-01T00:00:00Z"},
+                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                         ]
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2002, 2004]);
+    resp.assert_node_absent("MergeRequest", 2005);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at")
+            .is_some_and(|s| ("2024-01-01".."2024-07-01").contains(&s))
+    });
+}
+
+/// Zero-width window: merged_at >= 2024-07-01 AND < 2024-07-01 matches nothing.
+pub(super) async fn search_multi_filter_empty_window_returns_empty(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "merged_at"],
+                     "filters": {
+                         "merged_at": [
+                             {"op": "gte", "value": "2024-07-01T00:00:00Z"},
+                             {"op": "lt", "value": "2024-07-01T00:00:00Z"}
+                         ]
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "merged_at".into(),
+    });
+    resp.assert_node_count(0);
+}
+
+/// Single-filter backward compat: a bare filter value still works
+/// alongside the new array syntax on a different property.
+pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": "merged",
+                         "merged_at": [
+                             {"op": "gte", "value": "2024-06-01T00:00:00Z"}
+                         ]
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2005]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some_and(|s| s >= "2024-06-01")
+    });
+}

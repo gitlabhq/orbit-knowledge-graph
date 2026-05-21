@@ -109,7 +109,7 @@ graph LR
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
-| ClickHouse | Columnar OLAP database storing the datalake and the property graph |
+| ClickHouse | Columnar OLAP database storing the data lake and the property graph |
 | Rails internal API | Proxies repository operations: project info lookups, archive downloads, and blob streaming for content resolution (length-delimited protobuf) |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the

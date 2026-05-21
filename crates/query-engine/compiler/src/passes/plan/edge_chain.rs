@@ -265,7 +265,11 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.min_hops,
                 max_hops: rel.max_hops,
                 fk,
-                filters: rel.filters.clone().into_iter().collect(),
+                filters: rel
+                    .filters
+                    .iter()
+                    .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
+                    .collect(),
                 join_prev: None,
             }
         })
@@ -287,7 +291,11 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     hydration: HydrationStrategy::Skip,
                     has_traversal_path: n.has_traversal_path,
                     redaction_id_column: n.redaction_id_column.clone(),
-                    filters: n.filters.clone().into_iter().collect(),
+                    filters: n
+                        .filters
+                        .iter()
+                        .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
+                        .collect(),
                     node_ids: n.node_ids.clone(),
                     id_range: n.id_range.clone(),
                     columns: n.columns.clone(),

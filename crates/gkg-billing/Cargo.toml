@@ -12,10 +12,19 @@ labkit = { workspace = true }
 labkit-events = { workspace = true }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
+moka = { workspace = true }
 opentelemetry = { workspace = true }
 query-engine = { path = "../query-engine" }
+rand = { workspace = true }
+reqwest = { workspace = true }
 serde_json = { workspace = true }
+tonic = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 
 [lints.rust]
 unsafe_code = "forbid"

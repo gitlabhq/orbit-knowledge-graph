@@ -8,7 +8,9 @@ use opentelemetry::KeyValue;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
-use crate::constants::{CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, normalize_realm};
+use crate::constants::{
+    CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, feature_qualified_name, normalize_realm,
+};
 use crate::inputs::BillingInputs;
 use crate::metrics::{
     METRICS, REASON_EVENT_BUILD_FAILED, REASON_REALM_MISSING, REASON_REALM_UNRECOGNIZED,
@@ -102,7 +104,7 @@ impl BillingObserver {
 
         builder = builder.metadata(json!({
             "query_type": self.query_type,
-            "feature_qualified_name": format!("orbit-{}", self.inputs.source_type),
+            "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
         }));
 
         match builder.build() {

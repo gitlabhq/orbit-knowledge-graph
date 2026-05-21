@@ -87,10 +87,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             reads_state: [node, input]
             mutates: [result_ctx, query_config, hydration_plan, output]
         }
-        duckdb_codegen {
-            reads_state: [node, input]
-            mutates: [result_ctx, hydration_plan, output]
-        }
     }
 
     pipelines {
@@ -108,16 +104,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
-        }
-        duckdb {
-            env: [ontology, security_ctx]
-            state: [json, input, query_plan, node, result_ctx, hydration_plan, output]
-            phases: [validate, normalize, plan, lower, enforce, hydrate_plan, duckdb_codegen]
-        }
-        duckdb_hydration {
-            env: [ontology, security_ctx]
-            state: [input, query_plan, node, result_ctx, output]
-            phases: [plan, lower, enforce, duckdb_codegen]
         }
     }
 }
@@ -227,23 +213,6 @@ fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
     let node = ctx.node().as_ref().expect("node required");
     let input = ctx.input().as_ref().expect("input required");
     let base = codegen::codegen(node, result_context, query_config)?;
-    let query_type = input.query_type;
-    let input = input.clone();
-    ctx.set_output(CompiledQueryContext {
-        query_type,
-        base,
-        hydration,
-        input,
-    });
-    Ok(())
-}
-
-fn duckdb_codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let result_context = ctx.take_result_ctx().expect("result_ctx required");
-    let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = ctx.node().as_ref().expect("node required");
-    let input = ctx.input().as_ref().expect("input required");
-    let base = codegen::duckdb::codegen(node, result_context)?;
     let query_type = input.query_type;
     let input = input.clone();
     ctx.set_output(CompiledQueryContext {

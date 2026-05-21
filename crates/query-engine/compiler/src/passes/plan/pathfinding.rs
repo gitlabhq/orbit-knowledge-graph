@@ -70,7 +70,11 @@ fn node_plan_from(node: &InputNode) -> NodePlan {
         table: node.table.clone(),
         selectivity: Selectivity::from_node(node),
         hydration: HydrationStrategy::Skip,
-        filters: node.filters.clone().into_iter().collect(),
+        filters: node
+            .filters
+            .iter()
+            .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
+            .collect(),
         node_ids: node.node_ids.clone(),
         id_range: node.id_range.clone(),
         has_traversal_path: node.has_traversal_path,
