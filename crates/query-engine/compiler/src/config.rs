@@ -134,8 +134,7 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let security_ctx = ctx.security_ctx().clone();
-    let input = require(ctx.input_mut().take(), "input")?;
-    let mut input = input;
+    let mut input = require(ctx.take_input(), "input")?;
     restrict::restrict(&mut input, &ontology, &security_ctx)?;
     ctx.set_input(input);
     Ok(())
