@@ -288,7 +288,6 @@ fn split_columns(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AccessLevel, TraversalPath};
     use ontology::{Field, FieldSource, VirtualSource};
 
     fn db_field(name: &str) -> Field {
@@ -474,7 +473,6 @@ mod tests {
     // `node.columns`).
 
     use crate::input::{DynamicColumnMode, Input, InputNode, QueryType};
-    use crate::types::SecurityContext;
     use ontology::{DataType, Ontology};
 
     fn user_ontology() -> Ontology {
@@ -495,18 +493,7 @@ mod tests {
             .unwrap()
     }
 
-    fn non_admin_ctx() -> SecurityContext {
-        SecurityContext::new(1, vec!["1/".into()]).unwrap()
-    }
-
-    fn admin_ctx() -> SecurityContext {
-        SecurityContext::new_with_roles(
-            1,
-            vec![TraversalPath::new("1/", AccessLevel::Owner as u32)],
-        )
-        .unwrap()
-        .with_role(true, Some(AccessLevel::Owner as u32))
-    }
+    use crate::testkit::{admin_ctx, non_admin_ctx};
 
     fn neighbors_input(mode: DynamicColumnMode) -> Input {
         Input {

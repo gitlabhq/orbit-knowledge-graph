@@ -78,11 +78,6 @@ impl<E: PipelineEnv, S: PipelineState> PipelineBuilder<E, S> {
         StepBuilder { inner: self }
     }
 
-    pub fn observe(mut self, obs: impl PipelineObserver + 'static) -> Self {
-        self.observer = Some(Arc::new(obs));
-        self
-    }
-
     pub fn build(self) -> Pipeline<E, S> {
         Pipeline {
             steps: self.steps,
@@ -108,16 +103,8 @@ impl<E: PipelineEnv, S: PipelineState> StepBuilder<E, S> {
         self
     }
 
-    pub fn done(self) -> PipelineBuilder<E, S> {
-        self.inner
-    }
-
     pub fn pass<P: CompilerPass<E, S> + 'static>(self, pass: P) -> StepBuilder<E, S> {
         self.inner.pass(pass)
-    }
-
-    pub fn observe(self, obs: impl PipelineObserver + 'static) -> PipelineBuilder<E, S> {
-        self.inner.observe(obs)
     }
 
     pub fn build(self) -> Pipeline<E, S> {

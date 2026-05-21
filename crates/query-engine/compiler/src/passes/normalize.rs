@@ -285,7 +285,7 @@ fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
     }
 }
 
-fn is_wildcard(types: &[String]) -> bool {
+pub(crate) fn is_wildcard(types: &[String]) -> bool {
     types.is_empty() || (types.len() == 1 && types[0] == "*")
 }
 
