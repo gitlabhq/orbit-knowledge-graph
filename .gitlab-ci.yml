@@ -1062,6 +1062,11 @@ e2e:
   after_script:
     - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
+    # Dump pod/helm/node state BEFORE teardown wipes the namespaces. When
+    # `setup.sh` (helmfile sync) fails on readiness timeout, test.sh never
+    # runs and its diagnostics block is skipped — this is the only chance
+    # to capture pod describe / events / node pressure.
+    - E2E_SHA="${CI_COMMIT_SHORT_SHA}" bash e2e/scripts/dump-diagnostics.sh || true
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
   artifacts:
     when: always
