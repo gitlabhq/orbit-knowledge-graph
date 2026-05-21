@@ -12,7 +12,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, HandlerConfiguration, NatsConfiguration,
+    ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
 };
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
@@ -64,15 +64,6 @@ impl Handler for TestHandler {
 
     fn subscription(&self) -> Subscription {
         test_subscription()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        static CONFIG: HandlerConfiguration = HandlerConfiguration {
-            concurrency_group: None,
-            max_attempts: None,
-            retry_interval_secs: None,
-        };
-        &CONFIG
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -394,15 +385,6 @@ impl Handler for PanickingHandler {
         panic_subscription()
     }
 
-    fn engine_config(&self) -> &HandlerConfiguration {
-        static CONFIG: HandlerConfiguration = HandlerConfiguration {
-            concurrency_group: None,
-            max_attempts: None,
-            retry_interval_secs: None,
-        };
-        &CONFIG
-    }
-
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         if self.should_panic.load(Ordering::SeqCst) {
             panic!("intentional panic in handler");
@@ -529,7 +511,12 @@ async fn subject_is_unblocked_after_handler_panic() {
 use indexer::handler::PermanentAction;
 
 fn permanent_error_subscription(stream: &str, subject: &str) -> Subscription {
-    Subscription::new(stream, subject).dead_letter_on_exhaustion(true)
+    Subscription::new(stream, subject).with_config(&SubscriptionConfig {
+        max_attempts: Some(5),
+        retry_interval_secs: Some(1),
+        dead_letter_on_exhaustion: true,
+        ..Default::default()
+    })
 }
 
 struct PermanentErrorHandler {
@@ -558,15 +545,6 @@ impl Handler for PermanentErrorHandler {
 
     fn subscription(&self) -> Subscription {
         permanent_error_subscription(&self.stream, &self.subject)
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        static CONFIG: HandlerConfiguration = HandlerConfiguration {
-            concurrency_group: None,
-            max_attempts: Some(5),
-            retry_interval_secs: Some(1),
-        };
-        &CONFIG
     }
 
     async fn handle(

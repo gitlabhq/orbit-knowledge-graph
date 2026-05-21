@@ -11,23 +11,24 @@ use serde::{Deserialize, Serialize};
 
 // ── Base config types ────────────────────────────────────────────────
 
-/// Per-handler engine configuration (retry policy, concurrency group).
+/// Per-subscription message processing policy (retry, concurrency, DLQ).
 ///
-/// Each handler embeds this via `#[serde(flatten)]` in its own typed config struct.
-/// The engine reads it via `handler.engine_config()`.
+/// Lives under `engine.topics.<name>` in YAML. Applied to the `Subscription`
+/// at handler registration time, so all handlers sharing a subscription
+/// share the same processing policy.
 ///
-/// Retries are opt-in: a handler with no retry config will ack on failure.
+/// Retries are opt-in: a subscription with no retry config will ack on failure.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct HandlerConfiguration {
-    /// Which concurrency group this handler belongs to.
+pub struct SubscriptionConfig {
+    /// Which concurrency group this subscription belongs to.
     /// Maps to a named semaphore in `EngineConfiguration::concurrency_groups`.
     #[serde(default)]
     pub concurrency_group: Option<String>,
 
     /// Maximum total attempts (including the first delivery) before giving up.
     ///
-    /// `max_attempts: 1` means the handler runs once with no retries.
+    /// `max_attempts: 1` means the message is processed once with no retries.
     /// `max_attempts: 5` means 1 initial attempt + 4 retries.
     ///
     /// When absent, failures are acked immediately (retries are opt-in).
@@ -38,9 +39,13 @@ pub struct HandlerConfiguration {
     /// When absent, nacks use immediate redelivery.
     #[serde(default)]
     pub retry_interval_secs: Option<u64>,
+
+    /// Route exhausted retries to the dead letter queue.
+    #[serde(default)]
+    pub dead_letter_on_exhaustion: bool,
 }
 
-impl HandlerConfiguration {
+impl SubscriptionConfig {
     /// Returns the retry interval as a [`Duration`], if configured.
     pub fn retry_interval(&self) -> Option<Duration> {
         self.retry_interval_secs.map(Duration::from_secs)
@@ -145,10 +150,8 @@ impl Default for DatalakeRetryConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct GlobalHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
 
@@ -159,7 +162,6 @@ pub struct GlobalHandlerConfig {
 impl Default for GlobalHandlerConfig {
     fn default() -> Self {
         Self {
-            engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
         }
@@ -171,10 +173,8 @@ fn default_max_concurrent_entities() -> usize {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct NamespaceHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
 
@@ -190,7 +190,6 @@ pub struct NamespaceHandlerConfig {
 impl Default for NamespaceHandlerConfig {
     fn default() -> Self {
         Self {
-            engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
             max_concurrent_entities: default_max_concurrent_entities(),
@@ -199,10 +198,8 @@ impl Default for NamespaceHandlerConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct EntityHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
 
@@ -216,7 +213,6 @@ pub struct EntityHandlerConfig {
 impl Default for EntityHandlerConfig {
     fn default() -> Self {
         Self {
-            engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
@@ -267,20 +263,15 @@ impl Default for CodeIndexingPipelineConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct CodeIndexingTaskHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
     #[serde(default)]
     pub pipeline: CodeIndexingPipelineConfig,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct NamespaceDeletionHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-}
-
-/// Typed per-handler configuration for all registered handlers.
+/// Typed per-handler domain configuration (batch sizes, pipeline settings).
+///
+/// Engine-level config (retry, concurrency, DLQ) lives in `topics`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(deny_unknown_fields)]
@@ -293,8 +284,6 @@ pub struct HandlersConfiguration {
     pub entity_handler: EntityHandlerConfig,
     #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
-    #[serde(default)]
-    pub namespace_deletion: NamespaceDeletionHandlerConfig,
 }
 
 // ── Dispatcher / scheduler config types ──────────────────────────────
@@ -472,6 +461,7 @@ impl IndexerModule {
 ///
 /// - `max_concurrent_workers`: 16
 /// - `concurrency_groups`: empty
+/// - `topics`: empty (no retry/DLQ by default)
 /// - `handlers`: defaults for all handlers
 /// - `modules`: all variants of [`IndexerModule`] (universal indexer)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -482,11 +472,16 @@ pub struct EngineConfiguration {
     pub max_concurrent_workers: usize,
 
     /// Named concurrency groups with their limits.
-    /// Handlers reference these by name via `HandlerConfiguration::concurrency_group`.
+    /// Subscriptions reference these by name via `SubscriptionConfig::concurrency_group`.
     #[serde(default)]
     pub concurrency_groups: HashMap<String, usize>,
 
-    /// Per-handler configuration.
+    /// Per-subscription message processing policy (retry, concurrency, DLQ).
+    /// Keyed by a human-readable label matching topic name constants.
+    #[serde(default)]
+    pub topics: HashMap<String, SubscriptionConfig>,
+
+    /// Per-handler domain configuration (batch sizes, pipeline settings).
     #[serde(default)]
     pub handlers: HandlersConfiguration,
 
@@ -506,6 +501,7 @@ impl Default for EngineConfiguration {
         EngineConfiguration {
             max_concurrent_workers: Self::default_max_concurrent_workers(),
             concurrency_groups: HashMap::new(),
+            topics: HashMap::new(),
             handlers: HandlersConfiguration::default(),
             datalake_retry: DatalakeRetryConfig::default(),
             modules: IndexerModule::all(),

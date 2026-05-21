@@ -3,9 +3,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::types::{Envelope, Event, SerializationError, Subscription};
+use crate::types::{Envelope, SerializationError, Subscription};
 use async_trait::async_trait;
-use gkg_server_config::{GlobalHandlerConfig, HandlerConfiguration};
 use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;
@@ -17,7 +16,7 @@ pub struct GlobalHandler {
     plans: Vec<PipelinePlan>,
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
-    config: GlobalHandlerConfig,
+    subscription: Subscription,
 }
 
 impl GlobalHandler {
@@ -25,13 +24,13 @@ impl GlobalHandler {
         plans: Vec<PipelinePlan>,
         pipeline: Arc<Pipeline>,
         metrics: SdlcMetrics,
-        config: GlobalHandlerConfig,
+        subscription: Subscription,
     ) -> Self {
         Self {
             plans,
             pipeline,
             metrics,
-            config,
+            subscription,
         }
     }
 }
@@ -43,11 +42,7 @@ impl Handler for GlobalHandler {
     }
 
     fn subscription(&self) -> Subscription {
-        GlobalIndexingRequest::subscription()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config.engine
+        self.subscription.clone()
     }
 
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
@@ -100,6 +95,8 @@ mod tests {
     use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use crate::topic::GlobalIndexingRequest;
+    use crate::types::Event;
     use ontology::Ontology;
 
     #[tokio::test]
@@ -118,7 +115,7 @@ mod tests {
             plans.global,
             pipeline,
             test_metrics(),
-            GlobalHandlerConfig::default(),
+            GlobalIndexingRequest::subscription(),
         );
 
         let payload = serde_json::json!({

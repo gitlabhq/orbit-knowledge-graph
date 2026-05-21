@@ -56,44 +56,27 @@
         },
         "handlers": {
           "code-indexing-task": {
-            "concurrency_group": null,
-            "max_attempts": null,
             "pipeline": {
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
               "worker_threads": 0
-            },
-            "retry_interval_secs": null
+            }
           },
           "entity-handler": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
             "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "partition_overrides": {},
-            "retry_interval_secs": null
+            "partition_overrides": {}
           },
           "global-handler": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
-            "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "retry_interval_secs": null
-          },
-          "namespace-deletion": {
-            "concurrency_group": null,
-            "max_attempts": null,
-            "retry_interval_secs": null
+            "datalake_batch_size": 500000
           },
           "namespace-handler": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
             "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "max_concurrent_entities": 3,
-            "retry_interval_secs": null
+            "max_concurrent_entities": 3
           }
         },
         "max_concurrent_workers": 16,
@@ -101,7 +84,8 @@
           "sdlc",
           "code",
           "namespace_deletion"
-        ]
+        ],
+        "topics": {}
       }
     },
     "gitlab": {
@@ -390,27 +374,8 @@
       "additionalProperties": false
     },
     "CodeIndexingTaskHandlerConfig": {
-      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
-        "concurrency_group": {
-          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "default": null,
-          "minimum": 0
-        },
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
@@ -420,18 +385,9 @@
             "per_file_timeout_ms": 5000,
             "worker_threads": 0
           }
-        },
-        "retry_interval_secs": {
-          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "DatalakeRetryConfig": {
       "description": "Tuning for the SDLC datalake extract retry loop.\n\nThe first attempt uses the datalake's configured `max_block_size`\n(typically `datalake_batch_size`). After a failure, subsequent attempts\nseed at `halving_initial_block_size` and halve on each retry, with\n`halving_min_block_size` as the floor.",
@@ -485,11 +441,11 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `topics`: empty (no retry/DLQ by default)\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
-          "description": "Named concurrency groups with their limits.\nHandlers reference these by name via `HandlerConfiguration::concurrency_group`.",
+          "description": "Named concurrency groups with their limits.\nSubscriptions reference these by name via `SubscriptionConfig::concurrency_group`.",
           "type": "object",
           "additionalProperties": {
             "type": "integer",
@@ -507,48 +463,31 @@
           }
         },
         "handlers": {
-          "description": "Per-handler configuration.",
+          "description": "Per-handler domain configuration (batch sizes, pipeline settings).",
           "$ref": "#/$defs/HandlersConfiguration",
           "default": {
             "code-indexing-task": {
-              "concurrency_group": null,
-              "max_attempts": null,
               "pipeline": {
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "per_file_timeout_ms": 5000,
                 "worker_threads": 0
-              },
-              "retry_interval_secs": null
+              }
             },
             "entity-handler": {
               "batch_size_overrides": {},
-              "concurrency_group": null,
               "datalake_batch_size": 500000,
-              "max_attempts": null,
-              "partition_overrides": {},
-              "retry_interval_secs": null
+              "partition_overrides": {}
             },
             "global-handler": {
               "batch_size_overrides": {},
-              "concurrency_group": null,
-              "datalake_batch_size": 500000,
-              "max_attempts": null,
-              "retry_interval_secs": null
-            },
-            "namespace-deletion": {
-              "concurrency_group": null,
-              "max_attempts": null,
-              "retry_interval_secs": null
+              "datalake_batch_size": 500000
             },
             "namespace-handler": {
               "batch_size_overrides": {},
-              "concurrency_group": null,
               "datalake_batch_size": 500000,
-              "max_attempts": null,
-              "max_concurrent_entities": 3,
-              "retry_interval_secs": null
+              "max_concurrent_entities": 3
             }
           }
         },
@@ -570,6 +509,14 @@
           "items": {
             "$ref": "#/$defs/IndexerModule"
           }
+        },
+        "topics": {
+          "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\nKeyed by a human-readable label matching topic name constants.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/SubscriptionConfig"
+          },
+          "default": {}
         }
       },
       "additionalProperties": false
@@ -589,7 +536,6 @@
       }
     },
     "EntityHandlerConfig": {
-      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
         "batch_size_overrides": {
@@ -601,28 +547,10 @@
           },
           "default": {}
         },
-        "concurrency_group": {
-          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
         "datalake_batch_size": {
           "type": "integer",
           "format": "uint64",
           "default": 500000,
-          "minimum": 0
-        },
-        "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "default": null,
           "minimum": 0
         },
         "partition_overrides": {
@@ -633,18 +561,9 @@
             "minimum": 0
           },
           "default": {}
-        },
-        "retry_interval_secs": {
-          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "GitlabConfig": {
       "type": "object",
@@ -688,7 +607,6 @@
       }
     },
     "GlobalHandlerConfig": {
-      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
         "batch_size_overrides": {
@@ -700,41 +618,14 @@
           },
           "default": {}
         },
-        "concurrency_group": {
-          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
         "datalake_batch_size": {
           "type": "integer",
           "format": "uint64",
           "default": 500000,
           "minimum": 0
-        },
-        "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "default": null,
-          "minimum": 0
-        },
-        "retry_interval_secs": {
-          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "GrpcConfig": {
       "type": "object",
@@ -797,62 +688,42 @@
       "additionalProperties": false
     },
     "HandlersConfiguration": {
-      "description": "Typed per-handler configuration for all registered handlers.",
+      "description": "Typed per-handler domain configuration (batch sizes, pipeline settings).\n\nEngine-level config (retry, concurrency, DLQ) lives in `topics`.",
       "type": "object",
       "properties": {
         "code-indexing-task": {
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
-            "concurrency_group": null,
-            "max_attempts": null,
             "pipeline": {
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
               "worker_threads": 0
-            },
-            "retry_interval_secs": null
+            }
           }
         },
         "entity-handler": {
           "$ref": "#/$defs/EntityHandlerConfig",
           "default": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
             "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "partition_overrides": {},
-            "retry_interval_secs": null
+            "partition_overrides": {}
           }
         },
         "global-handler": {
           "$ref": "#/$defs/GlobalHandlerConfig",
           "default": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
-            "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "retry_interval_secs": null
-          }
-        },
-        "namespace-deletion": {
-          "$ref": "#/$defs/NamespaceDeletionHandlerConfig",
-          "default": {
-            "concurrency_group": null,
-            "max_attempts": null,
-            "retry_interval_secs": null
+            "datalake_batch_size": 500000
           }
         },
         "namespace-handler": {
           "$ref": "#/$defs/NamespaceHandlerConfig",
           "default": {
             "batch_size_overrides": {},
-            "concurrency_group": null,
             "datalake_batch_size": 500000,
-            "max_attempts": null,
-            "max_concurrent_entities": 3,
-            "retry_interval_secs": null
+            "max_concurrent_entities": 3
           }
         }
       },
@@ -980,40 +851,6 @@
         }
       }
     },
-    "NamespaceDeletionHandlerConfig": {
-      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
-      "type": "object",
-      "properties": {
-        "concurrency_group": {
-          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "default": null,
-          "minimum": 0
-        },
-        "retry_interval_secs": {
-          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
-        }
-      }
-    },
     "NamespaceDeletionSchedulerConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
@@ -1043,7 +880,6 @@
       }
     },
     "NamespaceHandlerConfig": {
-      "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
         "batch_size_overrides": {
@@ -1055,28 +891,10 @@
           },
           "default": {}
         },
-        "concurrency_group": {
-          "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
         "datalake_batch_size": {
           "type": "integer",
           "format": "uint64",
           "default": 500000,
-          "minimum": 0
-        },
-        "max_attempts": {
-          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the handler runs once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "default": null,
           "minimum": 0
         },
         "max_concurrent_entities": {
@@ -1085,18 +903,9 @@
           "format": "uint",
           "default": 3,
           "minimum": 0
-        },
-        "retry_interval_secs": {
-          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "default": null,
-          "minimum": 0
         }
-      }
+      },
+      "additionalProperties": false
     },
     "NamespaceTarget": {
       "description": "A namespace with lists of deployments and/or statefulsets to monitor.",
@@ -1582,6 +1391,46 @@
           "default": "siphon_stream_main_db"
         }
       }
+    },
+    "SubscriptionConfig": {
+      "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\n\nLives under `engine.topics.<name>` in YAML. Applied to the `Subscription`\nat handler registration time, so all handlers sharing a subscription\nshare the same processing policy.\n\nRetries are opt-in: a subscription with no retry config will ack on failure.",
+      "type": "object",
+      "properties": {
+        "concurrency_group": {
+          "description": "Which concurrency group this subscription belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "dead_letter_on_exhaustion": {
+          "description": "Route exhausted retries to the dead letter queue.",
+          "type": "boolean",
+          "default": false
+        },
+        "max_attempts": {
+          "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
+        "retry_interval_secs": {
+          "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": null,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
     },
     "TableCleanupConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",

@@ -1,23 +1,17 @@
 use async_trait::async_trait;
-use gkg_server_config::HandlerConfiguration;
 use tracing::debug;
 
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::EntityIndexingRequest;
-use crate::types::{Envelope, Event, SerializationError, Subscription};
+use crate::types::{Envelope, SerializationError, Subscription};
 
 pub struct EntityIndexingHandler {
     subscription: Subscription,
-    config: HandlerConfiguration,
 }
 
 impl EntityIndexingHandler {
-    pub fn new(config: HandlerConfiguration) -> Self {
-        let subscription = EntityIndexingRequest::subscription();
-        Self {
-            subscription,
-            config,
-        }
+    pub fn new(subscription: Subscription) -> Self {
+        Self { subscription }
     }
 }
 
@@ -29,10 +23,6 @@ impl Handler for EntityIndexingHandler {
 
     fn subscription(&self) -> Subscription {
         self.subscription.clone()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config
     }
 
     async fn handle(
@@ -61,6 +51,7 @@ mod tests {
 
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
+    use crate::types::Event;
 
     fn test_handler_context() -> HandlerContext {
         let destination = Arc::new(MockDestination::new());
@@ -76,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_deserializes_and_returns_ok() {
-        let handler = EntityIndexingHandler::new(HandlerConfiguration::default());
+        let handler = EntityIndexingHandler::new(EntityIndexingRequest::subscription());
 
         let payload = serde_json::json!({
             "entity_kind": "User",
@@ -92,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_namespaced_request() {
-        let handler = EntityIndexingHandler::new(HandlerConfiguration::default());
+        let handler = EntityIndexingHandler::new(EntityIndexingRequest::subscription());
 
         let payload = serde_json::json!({
             "entity_kind": "MergeRequest",

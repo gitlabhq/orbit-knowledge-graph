@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
 use common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, handler_context};
-use gkg_server_config::NamespaceDeletionHandlerConfig;
 use indexer::handler::Handler;
 use indexer::modules::namespace_deletion::{
-    ClickHouseNamespaceDeletionStore, NamespaceDeletionHandler, NamespaceDeletionStore,
+    ClickHouseNamespaceDeletionStore, DeletionMetrics, NamespaceDeletionHandler,
+    NamespaceDeletionStore,
 };
 use indexer::topic::NamespaceDeletionRequest;
-use indexer::types::Envelope;
+use indexer::types::{Envelope, Event};
 
 const DELETED_NAMESPACE_PATH: &str = "1/100/";
 const SIBLING_NAMESPACE_PATH: &str = "1/200/";
@@ -120,7 +120,11 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
     let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
         datalake, graph, ontology,
     ));
-    let handler = NamespaceDeletionHandler::new(store, NamespaceDeletionHandlerConfig::default());
+    let handler = NamespaceDeletionHandler::new(
+        store,
+        DeletionMetrics::new(),
+        NamespaceDeletionRequest::subscription(),
+    );
 
     let request = NamespaceDeletionRequest {
         namespace_id: DELETED_NAMESPACE_ID,

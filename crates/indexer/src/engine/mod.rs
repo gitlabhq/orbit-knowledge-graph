@@ -44,10 +44,10 @@ use tracing::{Instrument, debug, error, info, warn};
 
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
-use crate::nats::{NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
+use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
 use destination::Destination;
 use gkg_server_config::EngineConfiguration;
-use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
+use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use metrics::EngineMetrics;
 use types::{Envelope, Subscription};
 use worker_pool::WorkerPool;
@@ -231,7 +231,9 @@ impl Engine {
                         message,
                         self.registry.handlers_for(&subscription),
                         HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
+                        self.broker.clone(),
                         runtime.clone(),
+                        subscription.clone(),
                         topic_name.clone(),
                     ).instrument(span));
                 }
@@ -254,15 +256,15 @@ impl Engine {
         configuration: &EngineConfiguration,
     ) -> Result<(), EngineError> {
         for subscription in &self.registry.subscriptions() {
-            for handler in self.registry.handlers_for(subscription) {
-                if let Some(group) = &handler.engine_config().concurrency_group
-                    && !configuration.concurrency_groups.contains_key(group)
-                {
-                    return Err(EngineError::InvalidConfig(format!(
-                        "handler '{}' references unknown concurrency group '{group}'",
-                        handler.name(),
-                    )));
-                }
+            if let Some(group) = &subscription.concurrency_group
+                && !configuration
+                    .concurrency_groups
+                    .contains_key(group.as_ref())
+            {
+                return Err(EngineError::InvalidConfig(format!(
+                    "subscription '{}.{}' references unknown concurrency group '{group}'",
+                    subscription.stream, subscription.subject,
+                )));
             }
         }
         Ok(())
@@ -276,6 +278,22 @@ impl Engine {
     }
 }
 
+enum HandlerTaskOutcome {
+    Ok,
+    RetryRequested,
+    TransientError(String),
+    Exhausted(String),
+    Dropped(String),
+}
+
+#[derive(Debug)]
+enum HandlersOutcome {
+    Success,
+    Failed { retry_delay: Option<Duration> },
+    Exhausted { error: String },
+    Dropped { error: String },
+}
+
 struct EngineRuntime {
     worker_pool: WorkerPool,
     metrics: Arc<EngineMetrics>,
@@ -285,7 +303,9 @@ async fn process_message(
     message: NatsMessage,
     handlers: Vec<Arc<dyn Handler>>,
     context: HandlerContext,
+    broker: Arc<NatsBroker>,
     runtime: Arc<EngineRuntime>,
+    subscription: Subscription,
     topic_name: String,
 ) {
     let topic_label = KeyValue::new("topic", topic_name.clone());
@@ -297,19 +317,53 @@ async fn process_message(
     }
 
     let message_start = Instant::now();
-    let retry_delay = run_handlers(&handlers, &context, &message.envelope, &runtime).await;
+    let outcome = run_handlers(
+        &handlers,
+        &context,
+        &message.envelope,
+        &runtime,
+        &subscription,
+    )
+    .await;
 
-    let outcome_label = if let Some(delay) = retry_delay {
-        info!("message nacked, handler requested retry");
-        if let Err(error) = message.nack_with_delay(delay).await {
-            warn!(%error, "failed to nack message");
+    let outcome_label = match outcome {
+        HandlersOutcome::Success => {
+            if let Err(error) = message.ack().await {
+                warn!(%error, "failed to ack message");
+            }
+            "ack"
         }
-        "nack"
-    } else {
-        if let Err(error) = message.ack().await {
-            warn!(%error, "failed to ack message");
+        HandlersOutcome::Failed { retry_delay } => {
+            info!("message nacked, handler failure");
+            let nack_result = match retry_delay {
+                Some(delay) => message.nack_with_delay(delay).await,
+                None => message.nack().await,
+            };
+            if let Err(error) = nack_result {
+                warn!(%error, "failed to nack message");
+            }
+            "nack"
         }
-        "ack"
+        HandlersOutcome::Dropped { error } => {
+            warn!(%error, "permanent failure, message dropped");
+            if let Err(term_error) = message.term_ack().await {
+                warn!(%term_error, "failed to term-ack dropped message");
+            }
+            "term"
+        }
+        HandlersOutcome::Exhausted { error } => {
+            if subscription.dead_letter_on_exhaustion {
+                match message.to_dlq(&broker, &subscription, &error).await {
+                    DlqResult::Published => "dead_letter",
+                    DlqResult::Nacked => "nack",
+                }
+            } else {
+                if let Err(term_error) = message.term_ack().await {
+                    warn!(%term_error, "failed to term-ack exhausted message");
+                }
+                "term"
+            }
+        }
     };
 
     runtime
@@ -320,15 +374,19 @@ async fn process_message(
         .record_message_duration(&topic_label, message_start.elapsed().as_secs_f64());
 }
 
-/// Runs all handlers concurrently. Returns `Some(delay)` if any handler
-/// wants a retry (failed under its retry limit), `None` if all handlers
-/// either succeeded or exhausted their retries.
+/// Runs all handlers concurrently and aggregates their outcomes.
+///
+/// Precedence: Exhausted > Dropped > RetryRequested > TransientError > Success.
+/// Retry policy (max_attempts, retry_interval) is read from the subscription,
+/// not from individual handlers.
 async fn run_handlers(
     handlers: &[Arc<dyn Handler>],
     context: &HandlerContext,
     envelope: &Envelope,
     runtime: &Arc<EngineRuntime>,
-) -> Option<Duration> {
+    subscription: &Subscription,
+) -> HandlersOutcome {
+    let concurrency_group = subscription.concurrency_group.clone();
     let mut tasks = tokio::task::JoinSet::new();
 
     for handler in handlers {
@@ -336,21 +394,19 @@ async fn run_handlers(
         let context = context.clone();
         let envelope = envelope.clone();
         let runtime = runtime.clone();
+        let concurrency_group = concurrency_group.clone();
 
         tasks.spawn(async move {
-            let handler_config = handler.engine_config();
-            let concurrency_group = handler_config.concurrency_group.as_deref();
-
             let Some(_permit) = runtime
                 .worker_pool
-                .acquire_handler_slot(concurrency_group)
+                .acquire_handler_slot(concurrency_group.as_deref())
                 .await
             else {
                 warn!(
                     handler = handler.name(),
                     "worker pool semaphore closed, skipping handler"
                 );
-                return None;
+                return HandlerTaskOutcome::RetryRequested;
             };
 
             let handler_start = Instant::now();
@@ -361,7 +417,7 @@ async fn run_handlers(
                 .record_handler_duration(handler.name(), handler_start.elapsed().as_secs_f64());
 
             let Err(error) = result else {
-                return None;
+                return HandlerTaskOutcome::Ok;
             };
 
             runtime
@@ -369,43 +425,81 @@ async fn run_handlers(
                 .record_handler_error(handler.name(), error.error_kind());
 
             if error.is_permanent() {
-                warn!(handler = handler.name(), %error, "permanent failure");
-                return None;
+                let action = match &error {
+                    HandlerError::Permanent { action, .. } => *action,
+                    HandlerError::Deserialization(_) => PermanentAction::DeadLetter,
+                    _ => unreachable!("is_permanent() returned true"),
+                };
+                warn!(
+                    handler = handler.name(),
+                    subject = %envelope.subject,
+                    %error,
+                    "permanent failure, skipping retries"
+                );
+                let error = error.to_string();
+                return match action {
+                    PermanentAction::DeadLetter => HandlerTaskOutcome::Exhausted(error),
+                    PermanentAction::Drop => HandlerTaskOutcome::Dropped(error),
+                };
             }
 
-            let Some(max_attempts) = handler_config.max_attempts else {
-                warn!(handler = handler.name(), %error, "handler failed with no retry config");
-                return None;
-            };
-
-            if envelope.attempt >= max_attempts {
-                warn!(handler = handler.name(), %max_attempts, %error, "retry attempts exhausted");
-                return None;
-            }
-
-            error!(handler = handler.name(), %error, "handler failed, requesting retry");
-            handler_config.retry_interval()
+            error!(handler = handler.name(), %error, "handler failed");
+            HandlerTaskOutcome::TransientError(error.to_string())
         });
     }
 
-    let mut retry_delay: Option<Duration> = None;
+    let mut exhausted_error: Option<String> = None;
+    let mut dropped_error: Option<String> = None;
+    let mut has_retry_requested = false;
+    let mut transient_error: Option<String> = None;
 
     while let Some(result) = tasks.join_next().await {
         match result {
-            Ok(Some(delay)) => {
-                retry_delay = Some(match retry_delay {
-                    Some(existing) => existing.max(delay),
-                    None => delay,
-                });
+            Ok(HandlerTaskOutcome::Ok) => {}
+            Ok(HandlerTaskOutcome::RetryRequested) => {
+                has_retry_requested = true;
             }
-            Ok(None) => {}
-            Err(error) => {
-                warn!(%error, "handler task panicked");
+            Ok(HandlerTaskOutcome::TransientError(error)) => {
+                transient_error.get_or_insert(error);
+            }
+            Ok(HandlerTaskOutcome::Exhausted(error)) => {
+                exhausted_error.get_or_insert(error);
+            }
+            Ok(HandlerTaskOutcome::Dropped(error)) => {
+                dropped_error.get_or_insert(error);
+            }
+            Err(join_error) => {
+                warn!(%join_error, "handler task panicked");
+                exhausted_error.get_or_insert_with(|| format!("handler panicked: {join_error}"));
             }
         }
     }
 
-    retry_delay
+    if let Some(error) = exhausted_error {
+        return HandlersOutcome::Exhausted { error };
+    }
+    if let Some(error) = dropped_error {
+        return HandlersOutcome::Dropped { error };
+    }
+    if has_retry_requested {
+        return HandlersOutcome::Failed { retry_delay: None };
+    }
+    if let Some(error) = transient_error {
+        return match subscription.max_attempts {
+            None => HandlersOutcome::Success,
+            Some(max_attempts) if envelope.attempt >= max_attempts => {
+                warn!(
+                    attempt = envelope.attempt,
+                    max_attempts, "retry attempts exhausted"
+                );
+                HandlersOutcome::Exhausted { error }
+            }
+            Some(_) => HandlersOutcome::Failed {
+                retry_delay: subscription.retry_interval(),
+            },
+        };
+    }
+    HandlersOutcome::Success
 }
 
 #[cfg(test)]
@@ -415,8 +509,8 @@ mod tests {
     use crate::testkit::mocks::{
         MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
-    use gkg_server_config::HandlerConfiguration;
-    use handler::HandlerError;
+    use gkg_server_config::SubscriptionConfig;
+    use handler::{HandlerError, PermanentAction};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn test_context() -> HandlerContext {
@@ -441,52 +535,82 @@ mod tests {
     #[tokio::test]
     async fn handler_failure_under_retry_limit_requests_retry() {
         let handler = MockHandler::new("stream", "subject")
-            .with_error(HandlerError::Processing("boom".into()))
-            .with_engine_config(HandlerConfiguration {
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
                 max_attempts: Some(3),
                 retry_interval_secs: Some(5),
                 ..Default::default()
             });
-        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&EngineConfiguration::default());
-        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
-        assert_eq!(retry, Some(Duration::from_secs(5)));
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(5))),
+            "expected Failed with 5s delay, got {outcome:?}"
+        );
     }
 
     #[tokio::test]
-    async fn handler_failure_at_retry_limit_acks() {
-        let handler = MockHandler::new("stream", "subject")
-            .with_error(HandlerError::Processing("boom".into()))
-            .with_engine_config(HandlerConfiguration {
-                max_attempts: Some(3),
-                retry_interval_secs: Some(5),
-                ..Default::default()
-            });
-        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
-
-        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
-        let runtime = test_runtime(&EngineConfiguration::default());
-        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
-
-        assert_eq!(retry, None, "exhausted handler should not request retry");
-    }
-
-    #[tokio::test]
-    async fn handler_failure_without_retry_config_acks() {
+    async fn handler_failure_at_retry_limit_returns_exhausted() {
         let handler = MockHandler::new("stream", "subject")
             .with_error(HandlerError::Processing("boom".into()));
         let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "expected Exhausted, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn handler_failure_without_retry_config_succeeds() {
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()));
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&EngineConfiguration::default());
-        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
-        assert_eq!(
-            retry, None,
-            "handler without retry config should not request retry"
+        assert!(
+            matches!(outcome, HandlersOutcome::Success),
+            "subscription without retry config should succeed (retries are opt-in), got {outcome:?}"
         );
     }
 
@@ -499,12 +623,20 @@ mod tests {
             .with_name("slow-b")
             .with_delay(Duration::from_millis(100));
         let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler_a), Arc::new(handler_b)];
+        let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
         let runtime = test_runtime(&EngineConfiguration::default());
 
         let start = Instant::now();
-        run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
         let elapsed = start.elapsed();
 
         assert!(
@@ -531,10 +663,18 @@ mod tests {
         };
 
         let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(failing), Arc::new(counting)];
+        let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
         let runtime = test_runtime(&EngineConfiguration::default());
-        run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
         assert_eq!(
             call_count.load(Ordering::SeqCst),
@@ -562,15 +702,27 @@ mod tests {
         };
 
         let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(panicking), Arc::new(counting)];
+        let subscription = Subscription::new("stream", "subject");
 
         let envelope = TestEnvelopeFactory::simple("payload");
         let runtime = test_runtime(&EngineConfiguration::default());
-        run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
         assert_eq!(
             call_count.load(Ordering::SeqCst),
             1,
             "non-panicking handler should still complete"
+        );
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "panic should produce Exhausted outcome, got {outcome:?}"
         );
     }
 
@@ -578,25 +730,122 @@ mod tests {
     async fn retry_requested_when_any_handler_wants_it() {
         let retrying = MockHandler::new("stream", "subject")
             .with_name("retrying")
-            .with_error(HandlerError::Processing("transient".into()))
-            .with_engine_config(HandlerConfiguration {
+            .with_error(HandlerError::Processing("transient".into()));
+
+        let succeeding = MockHandler::new("stream", "subject").with_name("succeeding");
+
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(retrying), Arc::new(succeeding)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
                 max_attempts: Some(3),
                 retry_interval_secs: Some(10),
                 ..Default::default()
             });
 
-        let succeeding = MockHandler::new("stream", "subject").with_name("succeeding");
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
-        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(retrying), Arc::new(succeeding)];
+        assert!(
+            matches!(outcome, HandlersOutcome::Failed { retry_delay } if retry_delay == Some(Duration::from_secs(10))),
+            "should nack when any handler wants a retry, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn permanent_dead_letter_error_returns_exhausted() {
+        let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Permanent {
+            message: "fatal error".into(),
+            action: PermanentAction::DeadLetter,
+        });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+
+        let envelope = TestEnvelopeFactory::simple("payload");
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "permanent DeadLetter should produce Exhausted, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn permanent_drop_error_returns_dropped() {
+        let handler = MockHandler::new("stream", "subject").with_error(HandlerError::Permanent {
+            message: "poison pill".into(),
+            action: PermanentAction::Drop,
+        });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+
+        let envelope = TestEnvelopeFactory::simple("payload");
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Dropped { .. }),
+            "permanent Drop should produce Dropped, got {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn exhausted_takes_precedence_over_retry() {
+        let exhausting = MockHandler::new("stream", "subject")
+            .with_name("exhausting")
+            .with_error(HandlerError::Permanent {
+                message: "fatal".into(),
+                action: PermanentAction::DeadLetter,
+            });
+
+        let retrying = MockHandler::new("stream", "subject")
+            .with_name("retrying")
+            .with_error(HandlerError::Processing("transient".into()));
+
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(exhausting), Arc::new(retrying)];
+        let subscription =
+            Subscription::new("stream", "subject").with_config(&SubscriptionConfig {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(10),
+                ..Default::default()
+            });
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&EngineConfiguration::default());
-        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        let outcome = run_handlers(
+            &handlers,
+            &test_context(),
+            &envelope,
+            &runtime,
+            &subscription,
+        )
+        .await;
 
-        assert_eq!(
-            retry,
-            Some(Duration::from_secs(10)),
-            "should nack when any handler wants a retry"
+        assert!(
+            matches!(outcome, HandlersOutcome::Exhausted { .. }),
+            "Exhausted should take precedence over retry, got {outcome:?}"
         );
     }
 }

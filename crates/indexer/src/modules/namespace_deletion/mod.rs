@@ -6,6 +6,7 @@ pub(crate) mod store;
 
 pub use dispatch::NamespaceDeletionScheduler;
 pub use handler::NamespaceDeletionHandler;
+pub use metrics::DeletionMetrics;
 pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 
 use std::sync::Arc;
@@ -13,6 +14,8 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::topic::{NAMESPACE_DELETION_TOPIC, NamespaceDeletionRequest};
+use crate::types::Event;
 
 pub fn register_handlers(
     registry: &HandlerRegistry,
@@ -28,8 +31,13 @@ pub fn register_handlers(
         ontology,
     ));
 
+    let mut subscription = NamespaceDeletionRequest::subscription();
+    if let Some(topic_config) = config.engine.topics.get(NAMESPACE_DELETION_TOPIC) {
+        subscription = subscription.with_config(topic_config);
+    }
+
     let handler =
-        NamespaceDeletionHandler::new(store, config.engine.handlers.namespace_deletion.clone());
+        NamespaceDeletionHandler::new(store, metrics::DeletionMetrics::new(), subscription);
 
     registry.register_handler(Box::new(handler));
     Ok(())

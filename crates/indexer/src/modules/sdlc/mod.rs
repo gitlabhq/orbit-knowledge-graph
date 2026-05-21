@@ -11,6 +11,11 @@ use crate::IndexerConfig;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use crate::topic::{
+    ENTITY_HANDLER_TOPIC, EntityIndexingRequest, GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest,
+    NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
+};
+use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
 use handler::entity::EntityIndexingHandler;
 use handler::global::GlobalHandler;
@@ -65,20 +70,29 @@ pub async fn register_handlers(
     ));
 
     if !plans.global.is_empty() {
+        let mut subscription = GlobalIndexingRequest::subscription();
+        if let Some(topic_config) = config.engine.topics.get(GLOBAL_HANDLER_TOPIC) {
+            subscription = subscription.with_config(topic_config);
+        }
         registry.register_handler(Box::new(GlobalHandler::new(
             plans.global,
             Arc::clone(&pipeline),
             metrics.clone(),
-            global_handler_config,
+            subscription,
         )));
     }
 
     if !plans.namespaced.is_empty() {
+        let mut subscription = NamespaceIndexingRequest::subscription();
+        if let Some(topic_config) = config.engine.topics.get(NAMESPACE_HANDLER_TOPIC) {
+            subscription = subscription.with_config(topic_config);
+        }
         registry.register_handler(Box::new(NamespaceHandler::new(
             plans.namespaced,
             Arc::clone(&pipeline),
             metrics.clone(),
             namespace_handler_config,
+            subscription,
         )));
     }
 
@@ -90,13 +104,14 @@ pub async fn register_entity_handlers(
     config: &IndexerConfig,
     _ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let entity_config = &config.engine.handlers.entity_handler;
-
     info!("registering entity indexing handler (no pipelines yet)");
 
-    registry.register_handler(Box::new(EntityIndexingHandler::new(
-        entity_config.engine.clone(),
-    )));
+    let mut subscription = EntityIndexingRequest::subscription();
+    if let Some(topic_config) = config.engine.topics.get(ENTITY_HANDLER_TOPIC) {
+        subscription = subscription.with_config(topic_config);
+    }
+
+    registry.register_handler(Box::new(EntityIndexingHandler::new(subscription)));
 
     Ok(())
 }

@@ -29,11 +29,11 @@ pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfi
 pub use engine::{
     CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, DatalakeRetryConfig,
     EngineConfigError, EngineConfiguration, EntityDispatcherConfig, EntityHandlerConfig,
-    GlobalDispatcherConfig, GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration,
-    IndexerModule, MigrationCompletionConfig, NamespaceCodeBackfillDispatcherConfig,
-    NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
-    NamespaceHandlerConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
-    SiphonCodeIndexingTaskDispatcherConfig, TableCleanupConfig,
+    GlobalDispatcherConfig, GlobalHandlerConfig, HandlersConfiguration, IndexerModule,
+    MigrationCompletionConfig, NamespaceCodeBackfillDispatcherConfig,
+    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, NamespaceHandlerConfig,
+    ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
+    SiphonCodeIndexingTaskDispatcherConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;

@@ -44,10 +44,12 @@ Indexes git repositories via the Rails internal API. Fetches archives on code in
 
 ### Handlers
 
-A handler listens on one subscription and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered). Each handler provides its own `engine_config()` controlling retry policy and concurrency group.
+A handler listens on one subscription and processes messages from it. Return `Ok(())` to ack, return an error to nack (the message gets redelivered). Retry policy and concurrency groups are configured at the subscription level (via `engine.topics` in YAML), not on the handler.
 
 ```rust
-pub struct UserCreatedHandler;
+pub struct UserCreatedHandler {
+    subscription: Subscription,
+}
 
 #[async_trait]
 impl Handler for UserCreatedHandler {
@@ -56,11 +58,7 @@ impl Handler for UserCreatedHandler {
     }
 
     fn subscription(&self) -> Subscription {
-        Subscription::new("users", "user.created")
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.config.engine
+        self.subscription.clone()
     }
 
     async fn handle(

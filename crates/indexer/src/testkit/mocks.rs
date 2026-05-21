@@ -20,7 +20,6 @@ use crate::nats::{
     KvEntry, KvPutOptions, KvPutResult, NatsError, NatsMessage, NatsServices, NoopAcker,
 };
 use crate::types::{Envelope, MessageId, Subscription};
-use gkg_server_config::HandlerConfiguration;
 
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
@@ -176,7 +175,6 @@ pub struct MockHandler {
     error: Option<HandlerError>,
     panic_message: Option<String>,
     on_handle: Option<Arc<dyn Fn() + Send + Sync>>,
-    engine_config: HandlerConfiguration,
     invocations: Arc<AtomicUsize>,
     received: Arc<Mutex<Vec<Envelope>>>,
 }
@@ -190,7 +188,6 @@ impl MockHandler {
             error: None,
             panic_message: None,
             on_handle: None,
-            engine_config: HandlerConfiguration::default(),
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
         }
@@ -220,11 +217,6 @@ impl MockHandler {
         self.on_handle = Some(Arc::new(callback));
         self
     }
-
-    pub fn with_engine_config(mut self, config: HandlerConfiguration) -> Self {
-        self.engine_config = config;
-        self
-    }
 }
 
 #[async_trait]
@@ -235,10 +227,6 @@ impl Handler for MockHandler {
 
     fn subscription(&self) -> Subscription {
         self.subscription.clone()
-    }
-
-    fn engine_config(&self) -> &HandlerConfiguration {
-        &self.engine_config
     }
 
     async fn handle(
