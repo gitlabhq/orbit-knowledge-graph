@@ -107,21 +107,11 @@ pub fn compile(
         .count_err()
 }
 
-/// Compile from a pre-built `Input`. Used for internal query types (Hydration)
-/// that bypass JSON schema validation.
-///
-/// For hydration queries (`QueryType::Hydration`), skips security, check, and
-/// hydrate plan passes but applies dedup (argMax) — codegen defaults to
-/// `HydrationPlan::None`. For all other query types, runs the full secure pipeline.
-///
-/// The real ontology must be passed so `RestrictPass` can enforce
-/// `admin_only` on pre-built hydration inputs as defense-in-depth against
-/// bugs in upstream plan-building.
 /// Compile a pre-built hydration `Input` into ClickHouse SQL.
 ///
 /// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
-/// Skips security, check, and hydrate plan passes. Codegen defaults to
-/// `HydrationPlan::None`.
+/// Skips validation, normalization, security, check, and hydrate plan passes.
+/// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
     ontology: &Arc<Ontology>,

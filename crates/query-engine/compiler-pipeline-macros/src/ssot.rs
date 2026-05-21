@@ -354,47 +354,59 @@ pub fn generate(input: TokenStream) -> TokenStream {
             let mut_arms: Vec<_> = mut_phases.iter().map(|p| quote! { #p }).collect();
             let mut_allowed = mut_phases.join(", ");
 
+            // Generate guard expressions. When no phases grant access,
+            // always deny during pipeline execution (avoids empty matches!()).
+            let read_guard = if read_arms.is_empty() {
+                quote! {
+                    panic!(
+                        "phase `{}` cannot read `{}` (no phase has access)",
+                        self.current_phase, #name_str
+                    );
+                }
+            } else {
+                quote! {
+                    assert!(
+                        matches!(self.current_phase, #(#read_arms)|*),
+                        "phase `{}` cannot read `{}` (allowed: {})",
+                        self.current_phase, #name_str, #read_allowed
+                    );
+                }
+            };
+
+            let mut_guard = if mut_arms.is_empty() {
+                quote! {
+                    panic!(
+                        "phase `{}` cannot mutate `{}` (no phase has access)",
+                        self.current_phase, #name_str
+                    );
+                }
+            } else {
+                quote! {
+                    assert!(
+                        matches!(self.current_phase, #(#mut_arms)|*),
+                        "phase `{}` cannot mutate `{}` (allowed: {})",
+                        self.current_phase, #name_str, #mut_allowed
+                    );
+                }
+            };
+
             if pipeline.state.contains(name) {
                 // Pipeline has this state field — generate guarded accessors
                 trait_impls.push(quote! {
                     fn #name(&self) -> &Option<#ty> {
-                        if !self.current_phase.is_empty() {
-                            assert!(
-                                matches!(self.current_phase, #(#read_arms)|*),
-                                "phase `{}` cannot read `{}` (allowed: {})",
-                                self.current_phase, #name_str, #read_allowed
-                            );
-                        }
+                        if !self.current_phase.is_empty() { #read_guard }
                         &self.#name
                     }
                     fn #getter_mut(&mut self) -> &mut Option<#ty> {
-                        if !self.current_phase.is_empty() {
-                            assert!(
-                                matches!(self.current_phase, #(#mut_arms)|*),
-                                "phase `{}` cannot mutate `{}` (allowed: {})",
-                                self.current_phase, #name_str, #mut_allowed
-                            );
-                        }
+                        if !self.current_phase.is_empty() { #mut_guard }
                         &mut self.#name
                     }
                     fn #setter(&mut self, value: #ty) {
-                        if !self.current_phase.is_empty() {
-                            assert!(
-                                matches!(self.current_phase, #(#mut_arms)|*),
-                                "phase `{}` cannot mutate `{}` (allowed: {})",
-                                self.current_phase, #name_str, #mut_allowed
-                            );
-                        }
+                        if !self.current_phase.is_empty() { #mut_guard }
                         self.#name = Some(value);
                     }
                     fn #taker(&mut self) -> Option<#ty> {
-                        if !self.current_phase.is_empty() {
-                            assert!(
-                                matches!(self.current_phase, #(#mut_arms)|*),
-                                "phase `{}` cannot mutate `{}` (allowed: {})",
-                                self.current_phase, #name_str, #mut_allowed
-                            );
-                        }
+                        if !self.current_phase.is_empty() { #mut_guard }
                         self.#name.take()
                     }
                 });

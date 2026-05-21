@@ -13,7 +13,7 @@ use gkg_server_config::QueryConfig;
 use ontology::Ontology;
 
 use crate::ast::Node;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
@@ -24,6 +24,11 @@ use crate::passes::{
     validate,
 };
 use crate::types::SecurityContext;
+
+/// Unwrap an `Option<T>` from ctx, returning `PipelineInvariant` if `None`.
+fn require<T>(opt: Option<T>, field: &str) -> Result<T> {
+    opt.ok_or_else(|| QueryError::PipelineInvariant(format!("{field} not yet populated")))
+}
 
 compiler_pipeline_macros::define_compiler_ctx! {
     env {
@@ -108,7 +113,7 @@ compiler_pipeline_macros::define_compiler_ctx! {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let json = ctx.take_json().expect("json required");
+    let json = require(ctx.take_json(), "json")?;
     let ontology = ctx.ontology();
     let v = validate::Validator::new(ontology);
     let value = v.check_json(&json)?;
@@ -121,7 +126,7 @@ fn validate(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = ctx.take_input().expect("input required");
+    let input = require(ctx.take_input(), "input")?;
     ctx.set_input(normalize::normalize(input, ctx.ontology())?);
     Ok(())
 }
@@ -129,33 +134,37 @@ fn normalize(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
     let ontology = ctx.ontology().clone();
     let security_ctx = ctx.security_ctx().clone();
-    let input = ctx.input_mut().as_mut().expect("input required");
-    restrict::restrict(input, &ontology, &security_ctx)
+    let input = require(ctx.input_mut().take(), "input")?;
+    let mut input = input;
+    restrict::restrict(&mut input, &ontology, &security_ctx)?;
+    ctx.set_input(input);
+    Ok(())
 }
 
 fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = ctx.input_mut().as_mut().expect("input required");
-    let query_plan = plan::plan(input)?;
+    let mut input = require(ctx.take_input(), "input")?;
+    let query_plan = plan::plan(&mut input)?;
+    ctx.set_input(input);
     ctx.set_query_plan(query_plan);
     Ok(())
 }
 
 fn lower(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = ctx.take_query_plan().expect("query_plan required");
-    let input = ctx.input().as_ref().expect("input required");
-    let node = lower::emit(&query_plan, input)?;
+    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let node = lower::emit(&query_plan, &input)?;
     ctx.set_query_plan(query_plan);
     ctx.set_node(node);
     Ok(())
 }
 
 fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let query_plan = ctx.take_query_plan().expect("query_plan required");
+    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     let node_edge_col = query_plan.node_edge_mappings();
     ctx.set_query_plan(query_plan);
-    let mut node = ctx.take_node().expect("node required");
-    let input = ctx.input().as_ref().expect("input required");
-    let result_context = enforce::enforce_return(&mut node, input, &node_edge_col)?;
+    let mut node = require(ctx.take_node(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let result_context = enforce::enforce_return(&mut node, &input, &node_edge_col)?;
     ctx.set_node(node);
     ctx.set_result_ctx(result_context);
     Ok(())
@@ -164,35 +173,38 @@ fn enforce(ctx: &mut impl CompilerCtx) -> Result<()> {
 fn security(ctx: &mut impl CompilerCtx) -> Result<()> {
     let security_ctx = ctx.security_ctx().clone();
     let ontology = ctx.ontology().clone();
-    let node = ctx.node_mut().as_mut().expect("node required");
-    security::apply_security_context(node, &security_ctx, &ontology)
+    let mut node = require(ctx.take_node(), "node")?;
+    security::apply_security_context(&mut node, &security_ctx, &ontology)?;
+    ctx.set_node(node);
+    Ok(())
 }
 
 fn check(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let node = ctx.node().as_ref().expect("node required");
-    check::check_ast(node, ctx.security_ctx())
+    let node = require(ctx.node().clone(), "node")?;
+    check::check_ast(&node, ctx.security_ctx())
 }
 
 fn hydrate_plan(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = ctx.input().as_ref().expect("input required");
-    let plan = hydrate::generate_hydration_plan(input, ctx.ontology(), ctx.security_ctx());
+    let input = require(ctx.input().clone(), "input")?;
+    let plan = hydrate::generate_hydration_plan(&input, ctx.ontology(), ctx.security_ctx());
     ctx.set_hydration_plan(plan);
     Ok(())
 }
 
 fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let input = ctx.input().as_ref().expect("input required");
+    let input = require(ctx.input().clone(), "input")?;
     let query_type: &str = input.query_type.into();
     let has_cursor = input.cursor.is_some();
     let mut config = settings::resolve(query_type, has_cursor);
 
-    if let Node::Query(q) = ctx.node().as_ref().expect("node required")
+    let node = require(ctx.node().clone(), "node")?;
+    if let Node::Query(q) = &node
         && q.ctes.iter().any(|c| c.materialized)
     {
         config.compiler_derived.enable_materialized_cte = true;
     }
 
-    let query_plan = ctx.take_query_plan().expect("query_plan required");
+    let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hops.len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
@@ -202,14 +214,13 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
 }
 
 fn codegen(ctx: &mut impl CompilerCtx) -> Result<()> {
-    let result_context = ctx.take_result_ctx().expect("result_ctx required");
+    let result_context = require(ctx.take_result_ctx(), "result_ctx")?;
     let query_config = ctx.take_query_config().unwrap_or_default();
     let hydration = ctx.take_hydration_plan().unwrap_or(HydrationPlan::None);
-    let node = ctx.node().as_ref().expect("node required");
-    let input = ctx.input().as_ref().expect("input required");
-    let base = codegen::codegen(node, result_context, query_config)?;
+    let node = require(ctx.node().clone(), "node")?;
+    let input = require(ctx.input().clone(), "input")?;
+    let base = codegen::codegen(&node, result_context, query_config)?;
     let query_type = input.query_type;
-    let input = input.clone();
     ctx.set_output(CompiledQueryContext {
         query_type,
         base,
