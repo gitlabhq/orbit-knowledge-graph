@@ -2,6 +2,7 @@
 
 use crate::error::{QueryError, Result};
 use regex::Regex;
+use serde::Deserialize;
 use std::sync::LazyLock;
 
 /// Matches paths like "1/", "1/2/", "123/456/789/"
@@ -12,6 +13,21 @@ static TRAVERSAL_PATH_REGEX: LazyLock<Regex> =
 /// explicit per-path role. Matches the historical behavior where Rails only
 /// published Reporter+ paths and GKG treated every path uniformly.
 pub const DEFAULT_PATH_ACCESS_LEVEL: u32 = 20;
+
+/// Deployment realm from the JWT `realm` claim. Values match
+/// `CloudConnector.gitlab_realm` in Rails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Realm {
+    /// GitLab.com (SaaS).
+    #[serde(alias = "saas")]
+    SaaS,
+    /// Customer-hosted GitLab instance.
+    #[serde(rename = "self-managed", alias = "self_managed")]
+    SelfManaged,
+    /// GitLab-managed single-tenant instance.
+    #[serde(alias = "dedicated")]
+    Dedicated,
+}
 
 /// GitLab access levels as sent in the JWT `min_access_level` field.
 /// Values match `Gitlab::Access` constants in Rails.
@@ -84,6 +100,11 @@ pub struct SecurityContext {
     pub traversal_paths: Vec<TraversalPath>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
+    /// Deployment realm from the JWT.
+    pub realm: Option<Realm>,
+    /// Whether the user is a GitLab team member (from the JWT
+    /// `is_gitlab_team_member` claim). Only meaningful on SaaS.
+    pub is_gitlab_team_member: bool,
 }
 
 impl SecurityContext {
@@ -118,12 +139,24 @@ impl SecurityContext {
             traversal_paths,
             admin: false,
             access_level: None,
+            realm: None,
+            is_gitlab_team_member: false,
         })
     }
 
     pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {
         self.admin = admin;
         self.access_level = min_access_level.and_then(AccessLevel::from_u32);
+        self
+    }
+
+    pub fn with_realm(mut self, realm: Option<Realm>) -> Self {
+        self.realm = realm;
+        self
+    }
+
+    pub fn with_team_member(mut self, is_gitlab_team_member: bool) -> Self {
+        self.is_gitlab_team_member = is_gitlab_team_member;
         self
     }
 

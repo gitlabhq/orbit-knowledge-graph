@@ -91,6 +91,7 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            is_gitlab_team_member: None,
         };
 
         let token = encode(
