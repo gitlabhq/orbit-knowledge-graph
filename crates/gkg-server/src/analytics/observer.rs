@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::gkg::GkgEvent;
+use query_engine::compiler::QueryInfo;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
@@ -20,6 +21,7 @@ pub(crate) struct AnalyticsObserver {
     coding_agent: Option<String>,
     schema_version: String,
     errored: Cell<bool>,
+    query_info: Option<QueryInfo>,
 }
 
 impl AnalyticsObserver {
@@ -39,12 +41,18 @@ impl AnalyticsObserver {
             coding_agent,
             schema_version,
             errored: Cell::new(false),
+            query_info: None,
         }
     }
 }
 
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
+
+    fn set_query_dimensions(&mut self, info: QueryInfo) {
+        self.query_info = Some(info);
+    }
+
     fn compiled(&mut self, _elapsed: Duration) {}
     fn executed(&mut self, _elapsed: Duration, _batch_count: usize) {}
     fn authorized(&mut self, _elapsed: Duration) {}
@@ -69,6 +77,12 @@ impl PipelineObserver for AnalyticsObserver {
         else {
             return;
         };
+
+        // TODO: Once the Iglu schema is bumped and labkit-rs supports
+        // query_info context fields, wire self.query_info into the event
+        // here. For now it is captured but not yet forwarded to Snowplow.
+        let _info = &self.query_info;
+
         tracker.track(GkgEvent::query_executed(common, query));
     }
 }

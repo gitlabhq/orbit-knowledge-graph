@@ -5,6 +5,7 @@ use std::time::Duration;
 use gkg_observability::billing::events as spec;
 use labkit_events::BillingEvent;
 use opentelemetry::KeyValue;
+use query_engine::compiler::QueryInfo;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
@@ -33,6 +34,7 @@ pub struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
     inputs: BillingInputs,
     query_type: &'static str,
+    query_info: Option<QueryInfo>,
     errored: Cell<bool>,
 }
 
@@ -42,6 +44,7 @@ impl BillingObserver {
             tracker,
             inputs,
             query_type: "unknown",
+            query_info: None,
             errored: Cell::new(false),
         }
     }
@@ -102,10 +105,16 @@ impl BillingObserver {
             builder = builder.deployment_type(dt.as_str());
         }
 
-        builder = builder.metadata(json!({
+        let mut metadata = json!({
             "query_type": self.query_type,
             "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
-        }));
+        });
+        if let Some(ref info) = self.query_info {
+            if let serde_json::Value::Object(ref mut map) = metadata {
+                map.insert("query_info".to_string(), json!(info));
+            }
+        }
+        builder = builder.metadata(metadata);
 
         match builder.build() {
             Ok(event) => Some(event),
@@ -126,6 +135,10 @@ impl BillingObserver {
 impl PipelineObserver for BillingObserver {
     fn set_query_type(&mut self, query_type: &'static str) {
         self.query_type = query_type;
+    }
+
+    fn set_query_dimensions(&mut self, info: QueryInfo) {
+        self.query_info = Some(info);
     }
 
     fn compiled(&mut self, _elapsed: Duration) {}
