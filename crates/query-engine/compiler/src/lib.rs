@@ -38,12 +38,8 @@ pub mod input;
 pub mod metrics;
 pub mod types;
 
-// pipeline must come before pipelines — its macros.rs defines
-// `define_env_capabilities!` and `define_state_capabilities!` which
-// pipelines.rs invokes.
+pub mod config;
 pub mod passes;
-pub mod pipeline;
-pub mod pipelines;
 
 pub use ast::ddl;
 pub use ast::{Expr, Insert, JoinType, Node, Op, OrderExpr, Query, SelectExpr, TableRef};
@@ -59,21 +55,7 @@ pub use input::{
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
-pub use pipeline::{
-    CompilerPass, Pipeline, PipelineEnv, PipelineObserver, PipelineState, Seal, SealedPipeline,
-};
 
-// Re-export env, state, and capability traits.
-pub use passes::{
-    CheckPass, CodegenPass, EnforcePass, HydratePlanPass, LowerPass, NormalizePass, PlannerPass,
-    SecurityPass, SettingsPass, ValidatePass,
-};
-pub use pipelines::{
-    HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasResultCtx,
-    HasSecurityCtx, QueryState, SealInput, SealJson, SealNode, SecureEnv,
-};
-
-// Re-export key types from pass modules.
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,
@@ -90,6 +72,8 @@ pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, Travers
 
 use metrics::CountErr;
 use std::sync::Arc;
+
+use config::CompilerCtx as _;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
@@ -112,44 +96,35 @@ pub fn compile(
     ontology: &Ontology,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
-    let state = QueryState::from_json(json_input);
-    let pipeline = pipelines::clickhouse().seal();
-    pipeline
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
+    let mut ctx = config::ClickhouseCtx::new(Arc::new(ontology.clone()), ctx.clone());
+    ctx.set_json(json_input.to_string());
+    config::run_clickhouse(&mut ctx)
+        .and_then(|()| {
+            ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
         .count_err()
 }
 
-/// Compile from a pre-built `Input`. Used for internal query types (Hydration)
-/// that bypass JSON schema validation.
+/// Compile a pre-built hydration `Input` into ClickHouse SQL.
 ///
-/// For hydration queries (`QueryType::Hydration`), skips security, check, and
-/// hydrate plan passes but applies dedup (argMax) — codegen defaults to
-/// `HydrationPlan::None`. For all other query types, runs the full secure pipeline.
-///
-/// The real ontology must be passed so `RestrictPass` can enforce
-/// `admin_only` on pre-built hydration inputs as defense-in-depth against
-/// bugs in upstream plan-building.
+/// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
+/// Skips validation, normalization, security, check, and hydrate plan passes.
+/// Codegen defaults to `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::clone(ontology), ctx.clone());
-    let is_hydration = input.query_type == QueryType::Hydration;
-    let state = QueryState::from_input(input);
-
-    let pipeline = if is_hydration {
-        pipelines::hydration()
-    } else {
-        pipelines::from_input()
-    };
-
-    pipeline
-        .seal()
-        .execute(state, &env)
-        .and_then(|s| s.into_output())
+    let mut ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
+    ctx.set_input(input);
+    config::run_ch_hydration(&mut ctx)
+        .and_then(|()| {
+            ctx.take_output().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
         .count_err()
 }
 
