@@ -51,20 +51,19 @@ Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
 
 ### Extended hook points
 
-These files live outside `gkg-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review.
+These components live outside `gkg-billing` but can change billing correctness without touching billing code. Each is in scope for SOX review. The exact file paths are enforced via `.gitlab/CODEOWNERS`; update both this table and CODEOWNERS when the hook-point surface changes.
 
-| Path | Why in scope |
+| Hook point | Why in scope |
 |---|---|
-| `crates/query-engine/pipeline/src/observer.rs` | `PipelineObserver` trait, `MultiObserver` composition, and the `finish()` / `record_error()` semantics that determine whether a billing event is emitted for a given query outcome. A silent change to dispatch order, error propagation, or the success/error gate would drop or duplicate events without touching `gkg-billing`. |
-| `crates/gkg-server/src/auth/claims.rs` | `Claims` struct definitions. The billing payload's `realm`, `organization_id`, `subject`, `instance_id`, `unique_instance_id`, `instance_version`, `global_user_id`, `host_name`, `root_namespace_id`, `deployment_type`, `feature_qualified_name`, and `feature_enablement_type` are all sourced from this struct via the adapter. Renaming or dropping any of these silently nulls the corresponding billing field. |
-| `crates/gkg-server/src/auth/validator.rs` | JWT validation gate. Determines whether `Claims` are constructed at all for a request and therefore whether a billable call can reach the pipeline. |
-| `crates/gkg-server/src/auth/authz.rs` | Authorization gate. If a query is rejected before reaching the pipeline, `BillingObserver::finish()` is never called — the file directly controls the emission gate. |
-| `crates/gkg-server/src/pipeline/service.rs` | Where `BillingObserver::new()` is constructed and `BillingInputs::from(&claims)` is called. Directly imports `gkg_billing` types. Changing how the observer is constructed or the inputs are passed silently alters what goes into billing events. |
-| `crates/gkg-server/src/grpc/service.rs` | Wires the tracker into the pipeline by calling `pipeline.with_billing(tracker)`. Removing or reordering this call silently stops emission for all gRPC queries. |
-| `crates/gkg-server/src/main.rs` | Tracker startup. Constructs `SnowplowBillingTracker` from `BillingConfig`, sets `batch_size`, and wires it into the gRPC service. Misconfiguration here silently loses events. |
-| `crates/gkg-server/src/pipeline/stages/security.rs` | Pipeline security stage. Influences whether the pipeline proceeds far enough to call `finish()`. |
-| `crates/gkg-server-config/src/billing.rs` | `BillingConfig` struct. The `enabled: bool` and `collector_url` fields gate emission entirely. |
-| `config/default.yaml` (the `billing:` and `quota:` sections only) | Default config for the above. Out-of-tree environment overrides (K8s secrets, `GKG_BILLING__*` env vars) are themselves controlled by infrastructure access policy, but the in-tree defaults are SOX-scoped. |
+| **Pipeline observer interface** | Defines `finish()` / `record_error()` semantics and `MultiObserver` dispatch order. Changes here determine whether billing events fire at all for a given query outcome. |
+| **JWT claims struct** | Source of all billing payload fields (`realm`, `root_namespace_id`, `instance_id`, etc.). Renaming or removing a field silently nulls it in emitted events. |
+| **JWT validation gate** | Determines whether claims are constructed at all for a request, and therefore whether a billable call can reach the pipeline. |
+| **Authorization gate** | Controls whether a query reaches the pipeline. If a request is rejected here, no billing event is emitted. |
+| **Billing observer construction** | Where `BillingObserver` is instantiated and `BillingInputs` are populated from claims. The actual point where billing data is assembled and attached to the pipeline. |
+| **Pipeline billing wiring** | Where the billing tracker is wired into the query pipeline. Removing or reordering this silently stops emission. |
+| **Tracker startup** | Constructs the Snowplow billing tracker from config and wires it into the service. Misconfiguration here silently loses all events. |
+| **Pipeline security gate** | Controls whether the pipeline proceeds far enough to reach `finish()`. |
+| **Billing config struct** | Contains the `enabled` flag and `collector_url`. These fields gate emission entirely. |
 
 ### Out of scope (intentionally)
 
