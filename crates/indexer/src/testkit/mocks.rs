@@ -174,6 +174,8 @@ pub struct MockHandler {
     subscription: Subscription,
     delay: Option<Duration>,
     error: Option<HandlerError>,
+    panic_message: Option<String>,
+    on_handle: Option<Arc<dyn Fn() + Send + Sync>>,
     engine_config: HandlerConfiguration,
     invocations: Arc<AtomicUsize>,
     received: Arc<Mutex<Vec<Envelope>>>,
@@ -186,6 +188,8 @@ impl MockHandler {
             subscription: Subscription::new(stream, subject),
             delay: None,
             error: None,
+            panic_message: None,
+            on_handle: None,
             engine_config: HandlerConfiguration::default(),
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
@@ -204,6 +208,16 @@ impl MockHandler {
 
     pub fn with_error(mut self, error: HandlerError) -> Self {
         self.error = Some(error);
+        self
+    }
+
+    pub fn with_panic(mut self, message: &str) -> Self {
+        self.panic_message = Some(message.to_string());
+        self
+    }
+
+    pub fn with_on_handle(mut self, callback: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_handle = Some(Arc::new(callback));
         self
     }
 
@@ -235,8 +249,16 @@ impl Handler for MockHandler {
         self.invocations.fetch_add(1, Ordering::SeqCst);
         self.received.lock().push(message);
 
+        if let Some(ref msg) = self.panic_message {
+            panic!("{msg}");
+        }
+
         if let Some(delay) = self.delay {
             tokio::time::sleep(delay).await;
+        }
+
+        if let Some(ref callback) = self.on_handle {
+            callback();
         }
 
         if let Some(ref error) = self.error {
