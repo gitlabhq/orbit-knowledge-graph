@@ -84,6 +84,11 @@ pub struct SecurityContext {
     pub traversal_paths: Vec<TraversalPath>,
     pub admin: bool,
     pub access_level: Option<AccessLevel>,
+    /// Deployment realm from the JWT (`"SaaS"`, `"self-managed"`, `"Dedicated"`).
+    pub realm: Option<String>,
+    /// Whether the user is a GitLab team member (from the JWT
+    /// `is_gitlab_team_member` claim). Only meaningful on SaaS.
+    pub is_gitlab_team_member: bool,
 }
 
 impl SecurityContext {
@@ -118,12 +123,24 @@ impl SecurityContext {
             traversal_paths,
             admin: false,
             access_level: None,
+            realm: None,
+            is_gitlab_team_member: false,
         })
     }
 
     pub fn with_role(mut self, admin: bool, min_access_level: Option<u32>) -> Self {
         self.admin = admin;
         self.access_level = min_access_level.and_then(AccessLevel::from_u32);
+        self
+    }
+
+    pub fn with_realm(mut self, realm: Option<String>) -> Self {
+        self.realm = realm;
+        self
+    }
+
+    pub fn with_team_member(mut self, is_gitlab_team_member: bool) -> Self {
+        self.is_gitlab_team_member = is_gitlab_team_member;
         self
     }
 

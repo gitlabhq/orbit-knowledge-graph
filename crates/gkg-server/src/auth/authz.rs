@@ -26,7 +26,11 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
     };
 
     SecurityContext::new_with_roles(org_id, traversal_paths)
-        .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
+        .map(|sc| {
+            sc.with_role(claims.admin, claims.min_access_level)
+                .with_realm(claims.realm.clone())
+                .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -62,6 +66,7 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            is_gitlab_team_member: None,
         }
     }
 
