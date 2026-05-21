@@ -645,7 +645,7 @@ pub(super) async fn search_multi_filter_date_window(ctx: &TestContext) {
     });
     resp.assert_filter("MergeRequest", "merged_at", |n| {
         n.prop_str("merged_at")
-            .is_some_and(|s| s >= "2024-04-01" && s < "2024-07-01")
+            .is_some_and(|s| ("2024-04-01".."2024-07-01").contains(&s))
     });
 }
 
@@ -681,7 +681,7 @@ pub(super) async fn search_multi_filter_date_window_multiple_results(ctx: &TestC
     });
     resp.assert_filter("MergeRequest", "merged_at", |n| {
         n.prop_str("merged_at")
-            .is_some_and(|s| s >= "2024-01-01" && s < "2024-07-01")
+            .is_some_and(|s| ("2024-01-01".."2024-07-01").contains(&s))
     });
 }
 
