@@ -1,3 +1,17 @@
+## [0.61.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.60.0...v0.61.0) (2026-05-21)
+
+### Features
+
+* **e2e:** surface deploy-time failures in diagnostics dump ([170052d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/170052d54afccef1de78963d908ac5da666c192f)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **indexer:** escape NATS `>` wildcard in durable name ([3ac0f93](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3ac0f93bfbf95d835213f9e2828956c3a6e0bfa6)) by Bohdan Parkhomchuk
+
+### Other
+
+* **observability:** document billing event metrics ([7380bf6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7380bf6d3a3e1ab1b0ee10d7167f9780eafe5348)) by Sharmad Nachnolkar
+
 ## [0.60.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.59.1...v0.60.0) (2026-05-20)
 
 ### Features
