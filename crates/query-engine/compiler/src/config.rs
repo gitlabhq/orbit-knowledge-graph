@@ -95,11 +95,6 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [json, input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [validate, normalize, restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
         }
-        from_input {
-            env: [ontology, security_ctx]
-            state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
-            phases: [restrict, plan, lower, enforce, security, check, hydrate_plan, settings, codegen]
-        }
         ch_hydration {
             env: [ontology, security_ctx]
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]

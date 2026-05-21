@@ -117,32 +117,25 @@ pub fn compile(
 /// The real ontology must be passed so `RestrictPass` can enforce
 /// `admin_only` on pre-built hydration inputs as defense-in-depth against
 /// bugs in upstream plan-building.
+/// Compile a pre-built hydration `Input` into ClickHouse SQL.
+///
+/// Runs the hydration pipeline: Restrict → Plan → Lower → Enforce → Settings → Codegen.
+/// Skips security, check, and hydrate plan passes. Codegen defaults to
+/// `HydrationPlan::None`.
 pub fn compile_input(
     input: Input,
     ontology: &Arc<Ontology>,
     ctx: &SecurityContext,
 ) -> Result<CompiledQueryContext> {
-    let is_hydration = input.query_type == QueryType::Hydration;
-
-    let result = if is_hydration {
-        let mut ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
-        ctx.set_input(input);
-        config::run_ch_hydration(&mut ctx).and_then(|()| {
+    let mut ctx = config::ChHydrationCtx::new(Arc::clone(ontology), ctx.clone());
+    ctx.set_input(input);
+    config::run_ch_hydration(&mut ctx)
+        .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
             })
         })
-    } else {
-        let mut ctx = config::FromInputCtx::new(Arc::clone(ontology), ctx.clone());
-        ctx.set_input(input);
-        config::run_from_input(&mut ctx).and_then(|()| {
-            ctx.take_output().ok_or_else(|| {
-                error::QueryError::PipelineInvariant("pipeline did not produce output".into())
-            })
-        })
-    };
-
-    result.count_err()
+        .count_err()
 }
 
 // Pipeline presets are in `pipelines.rs`.
