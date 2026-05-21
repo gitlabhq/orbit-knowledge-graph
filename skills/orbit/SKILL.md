@@ -114,10 +114,12 @@ several wrong-looking-correct shapes. Two traps come up often:
   ways that affect `aggregation` counts. When `recipes.md` shows a
   single-node form for your question, use it.
 - **`HAS_LATEST_DIFF` vs `HAS_DIFF` for file history.** `HAS_LATEST_DIFF`
-  only points at the **most recent** diff snapshot of an MR. Questions
-  like "every MR that ever touched this file" need `HAS_DIFF` (all
-  snapshots) — using `HAS_LATEST_DIFF` here can undercount historical
-  coverage by 80%+ on long-lived files. See
+  only points at the **most recent** diff snapshot of an MR (joined via
+  `MergeRequest.latest_merge_request_diff_id`). Questions like "every MR
+  that ever touched this file" need `HAS_DIFF` (all snapshots, joined
+  via `MergeRequestDiff.merge_request_id`) — using `HAS_LATEST_DIFF`
+  here can substantially undercount historical coverage on long-lived
+  files. See
   [`recipes.md`](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
 - **Inheritance trees can be incomplete.** `Definition` indexing is known
   to under-cover large class hierarchies (e.g. `ApplicationRecord`) and

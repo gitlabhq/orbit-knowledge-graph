@@ -185,17 +185,20 @@ Pipeline node:
 
 > **Use `HAS_DIFF`, not `HAS_LATEST_DIFF`, for historical-coverage questions.**
 > `HAS_LATEST_DIFF` only links a merge request to its **most recent** diff
-> snapshot. An MR that touched a file in an earlier revision but not in
-> its final diff is invisible through `HAS_LATEST_DIFF`. For questions
-> like "every MR that ever touched file X", traverse
+> snapshot (via `MergeRequest.latest_merge_request_diff_id`). An MR that
+> touched a file in an earlier revision but not in its final diff is
+> invisible through `HAS_LATEST_DIFF`. For questions like "every MR that
+> ever touched file X", traverse
 > `MergeRequest --HAS_DIFF--> MergeRequestDiff --HAS_FILE-->
-> MergeRequestDiffFile` (the one-to-N edge over all snapshots).
-> Using `HAS_LATEST_DIFF` here can undercount by 80%+ on long-lived files.
+> MergeRequestDiffFile` (the one-to-N edge over all snapshots, joined
+> via `MergeRequestDiff.merge_request_id`). Using `HAS_LATEST_DIFF` here
+> can substantially undercount on long-lived files.
 
-`MergeRequestDiffFile.new_path` differs from `old_path` only on renames,
-so for stable file lookups (and to keep the same row shape across an
-MR's history) filter and group by `old_path` — see the
-[ontology note on the two columns](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml):
+`MergeRequestDiffFile.old_path` is the preferred column for file
+lookups (`new_path` differs from `old_path` only on renames). Filtering
+and grouping by `old_path` keeps the same row identity across an MR's
+history — see the canonical field descriptions on
+[`merge_request_diff_file.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml):
 
 ```json
 {
