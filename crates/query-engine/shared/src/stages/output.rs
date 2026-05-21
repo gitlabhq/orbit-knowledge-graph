@@ -5,9 +5,8 @@ use serde_json::json;
 use crate::types::{HydrationOutput, PaginationMeta, PipelineOutput, QueryExecutionLog};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-/// Traversal path prefix for the GitLab org namespace. Users whose
-/// security context includes a path starting with this prefix get
-/// compiled SQL in the response for debugging.
+/// Traversal path for the top-level GitLab org group. Only direct
+/// members of this group with Reporter+ access get compiled SQL.
 const GITLAB_ORG_PATH_PREFIX: &str = "1/9970/";
 
 #[derive(Clone)]
@@ -73,20 +72,30 @@ impl PipelineStage for OutputStage {
     }
 }
 
-/// Debug SQL output is available to direct members of the top-level GitLab
-/// org group (traversal path exactly `1/9970/`, Reporter+) and instance admins.
-/// Sub-group or project-only members don't qualify -- this prevents
+/// Debug SQL output requires direct membership in the top-level GitLab org
+/// group (traversal path exactly `1/9970/`) with Reporter+ access on that
+/// path. Sub-group or project-only members don't qualify -- this prevents
 /// external contributors invited to a single project from seeing compiled SQL.
+///
+/// Access level is derived from the per-path `access_levels` populated by
+/// Rails (via `TraversalPathClaim`), not the top-level `min_access_level`
+/// JWT field which may be absent. The minimum across all access levels on
+/// the GitLab org path must be at least Reporter.
+///
+/// Instance admins do not bypass this check -- debug SQL requires explicit
+/// GitLab org membership.
 fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
     ctx.security_context.as_ref().is_some_and(|sc| {
-        let direct_gitlab_org_member = sc
-            .traversal_paths
+        sc.traversal_paths
             .iter()
-            .any(|tp| tp.path == GITLAB_ORG_PATH_PREFIX);
-        let reporter_or_above = sc
-            .access_level
-            .is_some_and(|level| level >= compiler::AccessLevel::Reporter);
-        sc.admin || (direct_gitlab_org_member && reporter_or_above)
+            .find(|tp| tp.path == GITLAB_ORG_PATH_PREFIX)
+            .is_some_and(|tp| {
+                tp.access_levels
+                    .iter()
+                    .copied()
+                    .min()
+                    .is_some_and(|min_level| min_level >= compiler::AccessLevel::Reporter as u32)
+            })
     })
 }
 
@@ -117,55 +126,84 @@ mod tests {
 
     #[test]
     fn external_user_denied() {
-        let sc = SecurityContext::new(1, vec!["1/12345/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
+        let sc =
+            SecurityContext::new_with_roles(1, vec![compiler::TraversalPath::new("1/12345/", 20)])
+                .unwrap();
         let ctx = make_ctx(Some(sc));
         assert!(!can_see_debug_sql(&ctx));
     }
 
     #[test]
     fn gitlab_org_subgroup_member_denied() {
-        let sc = SecurityContext::new(1, vec!["1/9970/555/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
-        let ctx = make_ctx(Some(sc));
-        assert!(!can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn gitlab_org_direct_member_without_access_level_denied() {
-        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_role(false, None);
+        let sc = SecurityContext::new_with_roles(
+            1,
+            vec![compiler::TraversalPath::new("1/9970/555/", 20)],
+        )
+        .unwrap();
         let ctx = make_ctx(Some(sc));
         assert!(!can_see_debug_sql(&ctx));
     }
 
     #[test]
     fn gitlab_org_direct_member_guest_denied() {
-        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_role(false, Some(10));
+        let sc =
+            SecurityContext::new_with_roles(1, vec![compiler::TraversalPath::new("1/9970/", 10)])
+                .unwrap();
         let ctx = make_ctx(Some(sc));
         assert!(!can_see_debug_sql(&ctx));
     }
 
     #[test]
     fn gitlab_org_direct_member_reporter_allowed() {
-        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
+        let sc =
+            SecurityContext::new_with_roles(1, vec![compiler::TraversalPath::new("1/9970/", 20)])
+                .unwrap();
         let ctx = make_ctx(Some(sc));
         assert!(can_see_debug_sql(&ctx));
     }
 
     #[test]
-    fn admin_always_allowed() {
+    fn gitlab_org_direct_member_developer_allowed() {
+        let sc =
+            SecurityContext::new_with_roles(1, vec![compiler::TraversalPath::new("1/9970/", 30)])
+                .unwrap();
+        let ctx = make_ctx(Some(sc));
+        assert!(can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn admin_without_gitlab_org_membership_denied() {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_role(true, None);
         let ctx = make_ctx(Some(sc));
+        assert!(!can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn admin_with_gitlab_org_reporter_allowed() {
+        let sc =
+            SecurityContext::new_with_roles(1, vec![compiler::TraversalPath::new("1/9970/", 20)])
+                .unwrap()
+                .with_role(true, None);
+        let ctx = make_ctx(Some(sc));
         assert!(can_see_debug_sql(&ctx));
+    }
+
+    #[test]
+    fn multiple_paths_uses_gitlab_org_path_access_level() {
+        let sc = SecurityContext::new_with_roles(
+            1,
+            vec![
+                compiler::TraversalPath::new("1/12345/", 30),
+                compiler::TraversalPath::new("1/9970/", 10),
+            ],
+        )
+        .unwrap();
+        let ctx = make_ctx(Some(sc));
+        assert!(
+            !can_see_debug_sql(&ctx),
+            "Guest on gitlab-org path should deny even with Developer on other paths"
+        );
     }
 }

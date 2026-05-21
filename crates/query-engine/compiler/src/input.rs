@@ -33,8 +33,7 @@ pub struct QueryOptions {
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
     /// When true, includes compiled ClickHouse SQL in the response metadata.
-    /// Only honored for authorized users (instance admins and direct GitLab
-    /// org members with Reporter+ access).
+    /// Only honored for direct GitLab org members with Reporter+ access.
     #[serde(default)]
     pub include_debug_sql: bool,
 }

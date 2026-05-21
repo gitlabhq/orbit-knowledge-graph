@@ -804,7 +804,7 @@
         },
         "include_debug_sql": {
           "type": "boolean",
-          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
+          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for direct GitLab org members with Reporter+ access. Defaults to false.",
           "default": false
         }
       },
