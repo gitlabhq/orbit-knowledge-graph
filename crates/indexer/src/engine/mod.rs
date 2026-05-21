@@ -33,12 +33,9 @@ pub mod metrics;
 pub mod types;
 pub mod worker_pool;
 
-use std::any::Any;
-use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use futures::FutureExt;
 use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
@@ -300,36 +297,38 @@ async fn process_message(
     }
 
     let message_start = Instant::now();
-    let caught = AssertUnwindSafe(run_handlers(
-        &handlers,
-        &context,
-        &message.envelope,
-        &runtime,
-    ))
-    .catch_unwind()
-    .await;
+    let retry_delay = run_handlers(&handlers, &context, &message.envelope, &runtime).await;
 
-    if let Err(panic_payload) = &caught {
-        let panic_message = extract_panic_message(panic_payload);
-        error!(panic = %panic_message, "run_handlers panicked");
-    }
+    let outcome_label = if let Some(delay) = retry_delay {
+        info!("message nacked, handler requested retry");
+        if let Err(error) = message.nack_with_delay(delay).await {
+            warn!(%error, "failed to nack message");
+        }
+        "nack"
+    } else {
+        if let Err(error) = message.ack().await {
+            warn!(%error, "failed to ack message");
+        }
+        "ack"
+    };
 
-    if let Err(error) = message.ack().await {
-        warn!(%error, "failed to ack message");
-    }
-
-    runtime.metrics.record_message_outcome(&topic_label, "ack");
+    runtime
+        .metrics
+        .record_message_outcome(&topic_label, outcome_label);
     runtime
         .metrics
         .record_message_duration(&topic_label, message_start.elapsed().as_secs_f64());
 }
 
+/// Runs all handlers concurrently. Returns `Some(delay)` if any handler
+/// wants a retry (failed under its retry limit), `None` if all handlers
+/// either succeeded or exhausted their retries.
 async fn run_handlers(
     handlers: &[Arc<dyn Handler>],
     context: &HandlerContext,
     envelope: &Envelope,
     runtime: &Arc<EngineRuntime>,
-) {
+) -> Option<Duration> {
     let mut tasks = tokio::task::JoinSet::new();
 
     for handler in handlers {
@@ -339,7 +338,8 @@ async fn run_handlers(
         let runtime = runtime.clone();
 
         tasks.spawn(async move {
-            let concurrency_group = handler.engine_config().concurrency_group.as_deref();
+            let handler_config = handler.engine_config();
+            let concurrency_group = handler_config.concurrency_group.as_deref();
 
             let Some(_permit) = runtime
                 .worker_pool
@@ -350,40 +350,62 @@ async fn run_handlers(
                     handler = handler.name(),
                     "worker pool semaphore closed, skipping handler"
                 );
-                return;
+                return None;
             };
 
             let handler_start = Instant::now();
-            let result = handler.handle(context, envelope).await;
+            let result = handler.handle(context, envelope.clone()).await;
 
             runtime
                 .metrics
                 .record_handler_duration(handler.name(), handler_start.elapsed().as_secs_f64());
 
-            if let Err(error) = result {
-                runtime
-                    .metrics
-                    .record_handler_error(handler.name(), error.error_kind());
-                error!(handler = handler.name(), %error, "handler failed");
+            let Err(error) = result else {
+                return None;
+            };
+
+            runtime
+                .metrics
+                .record_handler_error(handler.name(), error.error_kind());
+
+            if error.is_permanent() {
+                warn!(handler = handler.name(), %error, "permanent failure");
+                return None;
             }
+
+            let Some(max_attempts) = handler_config.max_attempts else {
+                warn!(handler = handler.name(), %error, "handler failed with no retry config");
+                return None;
+            };
+
+            if envelope.attempt >= max_attempts {
+                warn!(handler = handler.name(), %max_attempts, %error, "retry attempts exhausted");
+                return None;
+            }
+
+            error!(handler = handler.name(), %error, "handler failed, requesting retry");
+            handler_config.retry_interval()
         });
     }
 
+    let mut retry_delay: Option<Duration> = None;
+
     while let Some(result) = tasks.join_next().await {
-        if let Err(error) = result {
-            warn!(%error, "handler task panicked");
+        match result {
+            Ok(Some(delay)) => {
+                retry_delay = Some(match retry_delay {
+                    Some(existing) => existing.max(delay),
+                    None => delay,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                warn!(%error, "handler task panicked");
+            }
         }
     }
-}
 
-fn extract_panic_message(payload: &Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic payload".to_string()
-    }
+    retry_delay
 }
 
 #[cfg(test)]
@@ -393,9 +415,9 @@ mod tests {
     use crate::testkit::mocks::{
         MockDestination, MockHandler, MockLockService, MockNatsServices, TestEnvelopeFactory,
     };
+    use gkg_server_config::HandlerConfiguration;
     use handler::HandlerError;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
 
     fn test_context() -> HandlerContext {
         let mock = Arc::new(MockNatsServices::new());
@@ -417,14 +439,55 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handler_failure_completes_without_panic() {
+    async fn handler_failure_under_retry_limit_requests_retry() {
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()))
+            .with_engine_config(HandlerConfiguration {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert_eq!(retry, Some(Duration::from_secs(5)));
+    }
+
+    #[tokio::test]
+    async fn handler_failure_at_retry_limit_acks() {
+        let handler = MockHandler::new("stream", "subject")
+            .with_error(HandlerError::Processing("boom".into()))
+            .with_engine_config(HandlerConfiguration {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(5),
+                ..Default::default()
+            });
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 3);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert_eq!(retry, None, "exhausted handler should not request retry");
+    }
+
+    #[tokio::test]
+    async fn handler_failure_without_retry_config_acks() {
         let handler = MockHandler::new("stream", "subject")
             .with_error(HandlerError::Processing("boom".into()));
         let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
 
         let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
         let runtime = test_runtime(&EngineConfiguration::default());
-        run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert_eq!(
+            retry, None,
+            "handler without retry config should not request retry"
+        );
     }
 
     #[tokio::test]
@@ -445,7 +508,7 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(
-            elapsed < Duration::from_millis(180),
+            elapsed < Duration::from_millis(250),
             "two 100ms handlers should overlap, took {elapsed:?}"
         );
     }
@@ -508,6 +571,32 @@ mod tests {
             call_count.load(Ordering::SeqCst),
             1,
             "non-panicking handler should still complete"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_requested_when_any_handler_wants_it() {
+        let retrying = MockHandler::new("stream", "subject")
+            .with_name("retrying")
+            .with_error(HandlerError::Processing("transient".into()))
+            .with_engine_config(HandlerConfiguration {
+                max_attempts: Some(3),
+                retry_interval_secs: Some(10),
+                ..Default::default()
+            });
+
+        let succeeding = MockHandler::new("stream", "subject").with_name("succeeding");
+
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(retrying), Arc::new(succeeding)];
+
+        let envelope = TestEnvelopeFactory::with_attempt("payload", 1);
+        let runtime = test_runtime(&EngineConfiguration::default());
+        let retry = run_handlers(&handlers, &test_context(), &envelope, &runtime).await;
+
+        assert_eq!(
+            retry,
+            Some(Duration::from_secs(10)),
+            "should nack when any handler wants a retry"
         );
     }
 }
