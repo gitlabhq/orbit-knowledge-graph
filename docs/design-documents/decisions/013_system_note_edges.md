@@ -124,11 +124,15 @@ for batch in extract():       # paginated, watermark-bounded, traversal-path-sco
 
 Dedup key: `(system_note_metadata.id, edge_kind, source_kind, source_id, target_kind, target_id)`. ReplacingMergeTree handles re-processing idempotency. The two-stage `IN (…)` resolution pattern is precedented at `config/ontology/nodes/core/project.yaml:115-121` and `config/ontology/nodes/core/group.yaml:101-107` (both resolve in the inverse direction `source_id → path` via `siphon_routes`).
 
+**Default-project resolution for unqualified refs.** Each `siphon_notes` row carries `noteable_id` and `noteable_type`. The handler resolves that pair to the source entity's `project_id` (via `siphon_merge_requests` / `siphon_issues` / `siphon_work_items`) and looks up that project's `traversal_path` from `siphon_routes`; the resulting path becomes the scope for unqualified GFM references on that row (`!N`, `#N`, short SHAs). The bench harness's `--default-project` flag is a harness-only artefact — the production handler derives the default per-row from the noteable, and does **not** call Gitaly to validate commit SHAs.
+
+**Future resolver shape: graph-DB dictionaries.** Once the graph DB carries a projected, licensed-namespaces-only view of routes, the path-resolution step can be replaced by `dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', PROJECT_ID, '0/')` — a strictly cheaper shape than the `siphon_routes` IN-list. This is left as a v2 lever (see [Future optimization: graph-DB-side lookup dictionaries](#future-optimization-graph-db-side-lookup-dictionaries)).
+
 ### Mode A / Mode B
 
 Both modes operate exclusively on **system-authored notes** — they read `siphon_notes` with `WHERE system = true AND _siphon_deleted = false`. The current `config/ontology/nodes/core/note.yaml` ETL is the exact inverse (`where: "system = false"`, feeding the user-note `Note` node table); the system-notes handler is the first ETL that consumes the complementary half of the `siphon_notes` table.
 
-- **Mode A (preferred, production default):** join `siphon_notes` to `siphon_system_note_metadata` on `note_id` and filter `snm.action IN (TARGET_ACTIONS)`. The `system = true` constraint is implicit on the join (the join target only contains system rows) but is still emitted on `siphon_notes` for query-shape clarity. This is the shape the handler is designed for.
+- **Mode A (preferred, production default):** join `siphon_notes` to `siphon_system_note_metadata` on `note_id` and filter `snm.action IN (TARGET_ACTIONS)`. The join is needed because `siphon_system_note_metadata` carries only `(note_id, action, commit_count, description_version_id)` — the body, noteable (`noteable_id`, `noteable_type`), and author live on `siphon_notes`. The `system = true` constraint is implicit on the join (the join target only contains system rows) but is still emitted on `siphon_notes` for query-shape clarity. This is the shape the handler is designed for.
 - **Mode B (degraded fallback):** if `siphon_system_note_metadata` is not yet replicated, the handler reads `siphon_notes WHERE system = true` and dispatches by body content: lifecycle actions are detected by exact equality (`notes.note = 'closed'`, `'merged'`, `'reopened'`), and cross-reference actions are detected with an anchored regex on the body prefix (`^"mentioned in "`, `^"marked this issue as related to "`, etc.). The `system = true` filter is **load-bearing for Mode B's precision claim**: it scopes the prefix-regex away from arbitrary user-typed notes that happen to start with `"mentioned in "`. Mode B is still slower than Mode A (no metadata-based pre-filter) and is intended only to unblock staging benchmarks and demos while the Siphon-side MR is in flight.
 
 The handler reads its mode from config; production deployment uses Mode A.
@@ -185,10 +189,7 @@ Three-layer defence:
 4. Add the CI drift check `scripts/check-system-note-actions.sh` + lefthook hook (model: `scripts/check-goon-format-version.sh`).
 5. Add new edge YAML: `config/ontology/edges/{mentions.yaml, adds_commit.yaml, merged_at_commit.yaml, reopened.yaml}`. `RELATED_TO`, `CLOSED`, `MERGED` get a documented comment that the system-notes handler is an additional emitter; no YAML schema change.
 6. Register the new edge kinds in `config/ontology/schema.yaml`.
-7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration depends on which dispatch model is live when the implementation MR lands:
-
-    - **Post-!1341 (entity dispatch, expected target):** insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341). The single shared handler routes by `entity_kind` automatically. The scaffold in !1341 already commits the wire format, the `EntityIndexingHandler` shell, and the `entity-handler` config block — only the pipeline trait and registration entry are stacked follow-ups.
-    - **Pre-!1341 (current `main`):** register as a separate `Handler` next to `NamespaceHandler` / `GlobalHandler`, with its own NATS subscription. This wrapper is temporary; the registration code is <30 lines and is deleted once !1341 plus its `EntityPipeline` follow-up land.
+7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration: insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341, now merged). The single shared handler routes by `entity_kind` automatically.
 
     Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
 8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
@@ -205,23 +206,17 @@ Three-layer defence:
 9. Bump `config/SCHEMA_VERSION` (currently 44 → 45).
 10. Update `docs/design-documents/data_model.md`, `docs/design-documents/indexing/sdlc_indexing.md`, `AGENTS.md`, and `CLAUDE.md` in the same MR (per the AGENTS.md design-doc sync rule).
 11. Integration test `crates/integration-tests/tests/indexer/sdlc/notes.rs::materialises_cross_reference_edges`, plus a lifecycle test ported from the closed !1109. The full source of the !1109 lifecycle test is preserved alongside the research package at [`dgruzd/droid-workspace/task/2685`](https://gitlab.com/dgruzd/droid-workspace/-/tree/main/task/2685/) so future implementers do not need to spelunk a closed-MR branch.
-12. Feature flag (config-driven) defaulting to off; staging-only first. The flag is handler-config-driven and lives where the rest of the handler config lives in whichever dispatch model is current:
+12. Feature flag (config-driven) defaulting to off; staging-only first. The flag is handler-config-driven and lives where the rest of the handler config lives under ADR 014's entity-dispatch model:
 
     ```yaml
-    # Post-!1341 (entity dispatch — target shape)
     handlers:
       entity-handler:
         batch_size_overrides:
           SystemNote: 100000     # ~13s of resolver budget per pass on local GDK
         # No partition_overrides for v1; see "Out of scope".
-
-    # Pre-!1341 (current main — temporary wrapper)
-    handlers:
-      namespace-handler:
-        enable-system-notes: false  # opt-in, staging only
     ```
 
-    The post-!1341 form is the target shape. `HandlersConfiguration` uses `deny_unknown_fields` (`crates/gkg-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
+    `HandlersConfiguration` uses `deny_unknown_fields` (`crates/gkg-server-config/src/engine.rs`), so the SystemNote-specific knobs must fit inside `entity-handler.batch_size_overrides` (the map key is the entity kind) rather than introducing a new top-level config block. Toggling between staging-on and staging-off is a config push, no code change.
 
 ## POC results
 
@@ -305,6 +300,12 @@ Both fixes are localised to `crates/xtask/src/system_notes_bench/`; the parser a
 
 **Why not Option D — Siphon-side precomputation.** Siphon's table-mapping config supports only `TransformationType: "ignore"` (`pkg/siphon/table_mapping_config.go`). A reference-extraction primitive would be a net-new Go feature in a repo GKG does not own, carrying the same parser-drift risk as Option A but in a codebase where our reviewers cannot land fixes. No offsetting benefit; unconditionally dominated by Option A.
 
+**Option E — Cached HTML DOM parsing (future evolution path).** Rails resolves GFM references at note *insert time* and caches the rendered HTML in `notes.note_html` (and `description_html` on issues / MRs / work items). Each resolved reference is emitted as an `<a>` element with `data-` attributes (`data-reference-type`, `data-project`, `data-issue` / `data-merge-request` / `data-commit` / `data-work-item`) — a stable machine-readable contract that the Rails redactor already relies on. An alternative extraction shape is: read `note_html` instead of `note`, walk the DOM (e.g. `lol_html` streaming, or `scraper`), and extract `(reference_type, target_id, target_path)` tuples directly from the `<a data-…>` attributes — falling back to body-parse when `note_html` is `NULL` or stale.
+
+Why not in v1: (a) `notes.note_html` replication via Siphon has not been verified — `siphon_notes.note` is the known quantity; (b) the POC's 1.74M notes/sec/core throughput against body text is a measured baseline, while DOM-walk throughput on a `note_html` payload (10–50× larger per row) is unmeasured; (c) Option E still needs `siphon_system_note_metadata` for the lifecycle subset (`closed` / `merged` / `reopened`, which render no `<a>`), so it does not eliminate the Siphon coordination item on the critical path; (d) Option A's body-template surface, while less stable than the HTML render surface, is small (16 actions, vendored constant + CI drift check).
+
+When we would flip: if Benchmark 4 (`gitlab-org` end-to-end) shows the body-parse regex path is too brittle at production scale, *or* the graph-completeness epic expands scope to user notes (`system = false`) and entity descriptions — Option E is a strict superset of Option A's coverage there, and the noteable-driven default-project resolution becomes free (Rails has already resolved `data-project` at render time). The implementation MR's POC harness (`crates/xtask/src/system_notes_bench/`) can be extended cheaply with a `parse-html` subcommand to microbench `note` vs `note_html` extraction on the existing 75k GDK corpus once Siphon replication of `note_html` is confirmed. Option E is therefore documented here as a future evolution path, not a v1 option.
+
 **Why not the per-action ClickHouse VIEW approach (MR !1109's pattern).** Works for 3 lifecycle actions (the !1109 scope). Does not scale to 10+ cross-reference actions × 3 noteable types ≈ 30 views, each materializing redundant projections of `siphon_notes ⋈ siphon_system_note_metadata`. A single Rust handler with one inline `WHERE snm.action IN (…)` is the cleaner shape. Adam's guidance ("skip indexes, not projections") for new Siphon tables argues against introducing many derivative views in `fixtures/siphon.sql` as a matter of project style.
 
 **Why not split into two MRs (lifecycle first, cross-references second).** This is the open question the ADR review should settle. The case for one MR (the current recommendation): both slices share the same Siphon prerequisite, the same handler module, the same `SCHEMA_VERSION` bump, and the same staging cycle; splitting forces two reviews of largely-overlapping code. The case for two MRs: smaller code per review, lifecycle ships visible value to dashboards faster, lower risk that a regex bug in cross-reference parsing blocks the lifecycle ship. The handler is feature-flagged per action, so the two-MR plan is recoverable from the one-MR codebase by toggling flags.
@@ -325,8 +326,20 @@ What gets harder:
 - The handler is the first non-ontology-driven SDLC handler outside `modules/code/` and `modules/namespace_deletion/`. It departs from the documented "ontology first" convention and the deviation needs to be motivated in code comments + AGENTS.md.
 - Mode B is dead code if Analytics replication lands cleanly; carrying it adds test surface that exists purely as a fallback.
 
+### Future optimization: graph-DB-side lookup dictionaries
+
+The current resolver runs against the **analytics DB** (`siphon_routes`, `siphon_merge_requests`, `siphon_issues`, `siphon_work_items`) because that is where the source rows live. @ahegyi and @michaelangeloio both raised, from different angles, the same structural question: the resolver workload is a hot-path lookup against a relatively small projected set (licensed namespaces' routes plus per-entity `(project_id, iid) → id` tuples), and the **graph DB** is the more natural home for that lookup once a projected view exists there.
+
+Two concrete shapes have been proposed:
+
+- **ClickHouse `DICTIONARY` (`project_traversal_paths_dict`).** Replaces the `siphon_routes` IN-list with `dictGetOrDefault('project_traversal_paths_dict', 'traversal_path', PROJECT_ID, '0/')` — a constant-time per-row lookup that avoids the table scan dimension entirely. Pre-requisite: the dictionary must be defined and refreshed in the graph DB (cadence, ownership, and source query are open questions for @ahegyi).
+- **Load-routes-once (in-memory).** The handler loads the licensed-namespaces route table once per pass into an in-process `HashMap<path, traversal_path>` and resolves per-row in memory. Cheaper than even a dictionary for small route counts; bounded only by per-worker memory and route-table size.
+
+Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,000 against GDK, well inside the ≤50 ms per-batch budget. The trigger to revisit is **either Benchmark 4 failing the 10-minute wall-clock criterion against `gitlab-org`, or >2× growth in route-lookup latency observed at staging scale**. Both shapes are graph-DB-resident, so they are not blocked on Siphon coordination.
+
 ## Out of scope
 
+- **Intra-batch parallelism (rayon / per-row parallel parse).** Not pursued in v1: pure-CPU parse is ~4 s for the full 6.7M `gitlab-org` corpus at 1.74M notes/sec/core — it is not the bottleneck. Horizontal partitioning via ADR 014's `partition_overrides.SystemNote: N` is the lever once we outgrow a single worker.
 - **`@`-mention edges** (`*_user_mentions` tables). Separate effort, separate Siphon prerequisite.
 - **Resource state / label / milestone events.** Tracked under #482 with dedicated `resource_*_events` Siphon replication.
 - **Banzai HTML rendering.** The parser only extracts GFM references from plain text; `lib/banzai/reference_parser/*_parser.rb` (HTML-AST-based) is explicitly *not* what we port.
