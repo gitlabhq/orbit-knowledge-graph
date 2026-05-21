@@ -109,10 +109,10 @@ impl BillingObserver {
             "query_type": self.query_type,
             "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
         });
-        if let Some(ref info) = self.query_info {
-            if let serde_json::Value::Object(ref mut map) = metadata {
-                map.insert("query_info".to_string(), json!(info));
-            }
+        if let Some(ref info) = self.query_info
+            && let serde_json::Value::Object(ref mut map) = metadata
+        {
+            map.insert("query_info".to_string(), json!(info));
         }
         builder = builder.metadata(metadata);
 

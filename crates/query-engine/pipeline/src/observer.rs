@@ -125,7 +125,7 @@ mod tests {
         fn handle(&self) -> CountingObserverHandle {
             CountingObserverHandle {
                 set_query_type_calls: Arc::clone(&self.set_query_type_calls),
-                set_query_shape_calls: Arc::clone(&self.set_query_shape_calls),
+                set_query_dimensions_calls: Arc::clone(&self.set_query_dimensions_calls),
                 compiled_calls: Arc::clone(&self.compiled_calls),
                 executed_calls: Arc::clone(&self.executed_calls),
                 authorized_calls: Arc::clone(&self.authorized_calls),
