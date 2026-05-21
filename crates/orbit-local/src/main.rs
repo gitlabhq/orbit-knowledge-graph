@@ -1,8 +1,6 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-mod content;
-mod local_pipeline;
 mod sql;
 mod sql_format;
 mod workspace;
@@ -11,10 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gitalisk_core::repository::gitalisk_repository::IterFileOptions;
 use ontology::Ontology;
-use query_engine::compiler::SecurityContext;
-use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,13 +33,6 @@ fn generate_local_ddl(ontology: &Ontology) -> String {
     }
     ddl.push_str(duckdb_client::MANIFEST_DDL);
     ddl
-}
-
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
-enum OutputFormat {
-    #[default]
-    Pretty,
-    Json,
 }
 
 #[derive(Serialize)]
@@ -148,20 +136,6 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
-    Query {
-        /// JSON query payload
-        #[arg(value_name = "JSON")]
-        json: String,
-
-        /// Path to ontology directory (default: config/ontology)
-        #[arg(long, short)]
-        ontology: Option<PathBuf>,
-
-        /// Output raw JSON graph (default is LLM-friendly text)
-        #[arg(long)]
-        raw: bool,
-    },
     /// Run a raw read-only SQL query against the local DuckDB graph.
     Sql {
         /// SQL query, or `-` to read from stdin.
@@ -180,55 +154,13 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
-    /// Compile a query to SQL without executing it
-    Compile {
-        /// JSON query payload
-        #[arg(value_name = "JSON")]
-        json: String,
-
-        /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
-        #[arg(long, short, num_args = 1..)]
-        traversal_paths: Vec<String>,
-
-        /// Path to ontology directory (default: config/ontology)
-        #[arg(long, short)]
-        ontology: Option<PathBuf>,
-
-        /// Output format: pretty (default) or json
-        #[arg(long, default_value = "pretty")]
-        format: OutputFormat,
-
-        /// Compile for local DuckDB instead of ClickHouse
-        #[arg(long)]
-        local: bool,
-    },
-    /// Describe the graph schema. Requires --ontology or --query.
+    /// Describe the schema of the local DuckDB graph.
     Schema {
-        /// Show the graph ontology (entities, edges, properties).
-        #[arg(long, conflicts_with = "query")]
-        ontology: bool,
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
 
-        /// Show the query DSL schema (how to write queries).
-        #[arg(long, conflicts_with = "ontology")]
-        query: bool,
-
-        /// Expand one or more entities to show their properties and edges.
-        /// Pass `*` to expand every entity. Only valid with --ontology.
-        #[arg(long, short = 'e', value_name = "NODE", num_args = 1.., requires = "ontology")]
-        expand: Vec<String>,
-
-        /// Include the full server ontology (debugging aid). Default is
-        /// restricted to entities present in the local DuckDB.
-        /// Only valid with --ontology.
-        #[arg(long, requires = "ontology")]
-        all: bool,
-
-        /// Path to ontology directory (default: embedded).
-        /// Only valid with --ontology.
-        #[arg(long, short = 'p', value_name = "PATH", requires = "ontology")]
-        ontology_path: Option<PathBuf>,
-
-        /// Emit JSON instead of the default LLM-friendly TOON format.
+        /// Emit JSON instead of the default table view.
         #[arg(long)]
         raw: bool,
     },
@@ -293,50 +225,13 @@ async fn main() -> Result<()> {
 
             run_index(path, threads, stats).await
         }
-        Commands::Query {
-            json,
-            ontology,
-            raw,
-        } => {
-            let output = run_local_query(json, ontology)?;
-            if raw {
-                let formatted = formatters::GraphFormatter.format(&output);
-                println!("{}", serde_json::to_string(&formatted)?);
-            } else {
-                let formatted = formatters::GoonFormatter.format(&output);
-                println!("{}", serde_json::to_string_pretty(&formatted)?);
-            }
-            Ok(())
-        }
         Commands::Sql {
             query,
             file,
             format,
             db,
         } => sql::run(query, file, format, db),
-        Commands::Compile {
-            json,
-            traversal_paths,
-            ontology,
-            format,
-            local,
-        } => run_compile(json, traversal_paths, ontology, format, local),
-        Commands::Schema {
-            ontology,
-            query,
-            expand,
-            all,
-            ontology_path,
-            raw,
-        } => {
-            if query {
-                run_query_dsl_schema(raw)
-            } else if ontology {
-                run_schema_introspect(expand, raw, all, ontology_path)
-            } else {
-                anyhow::bail!("specify --ontology or --query (see: orbit schema --help)")
-            }
-        }
+        Commands::Schema { db, raw } => run_schema(db, raw),
         Commands::Debug { command } => match command {
             DebugCommands::Ddl {
                 ontology,
@@ -359,47 +254,36 @@ async fn main() -> Result<()> {
     }
 }
 
-fn run_schema_introspect(
-    expand: Vec<String>,
-    raw: bool,
-    all: bool,
-    ontology_path: Option<PathBuf>,
-) -> Result<()> {
-    let ont = match ontology_path {
-        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
-        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+/// Describe the local DuckDB schema by reading `information_schema` from the
+/// graph database. Skips DuckDB's own `*_schema` namespaces.
+fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
+    let db_path = match db {
+        Some(p) => p,
+        None => workspace::Workspace::open_default()?.db_path(),
     };
-
-    let scope = if all {
-        ontology::introspection::IntrospectionScope::All
-    } else {
-        ontology::introspection::IntrospectionScope::Local
-    };
-
-    let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
-
-    if raw {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-    } else {
-        let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
-            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
-        println!("{toon}");
+    if !db_path.exists() {
+        anyhow::bail!(
+            "no local graph found at {}. Run `orbit index` first.",
+            db_path.display()
+        );
     }
-    Ok(())
-}
 
-fn run_query_dsl_schema(raw: bool) -> Result<()> {
-    let condensed =
-        ontology::query_dsl::condensed_query_schema().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = duckdb_client::DuckDbClient::open_read_only(&db_path)
+        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let sql = "SELECT table_name, column_name, data_type \
+               FROM information_schema.columns \
+               WHERE table_schema = 'main' \
+               ORDER BY table_name, ordinal_position";
+    let batches = client
+        .query_arrow(sql)
+        .context("failed to read information_schema.columns")?;
 
+    let stdout = std::io::stdout().lock();
     if raw {
-        println!("{}", serde_json::to_string_pretty(&condensed)?);
+        sql_format::write_json(stdout, &batches)
     } else {
-        let toon = toon_format::encode(&condensed, &toon_format::EncodeOptions::default())
-            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
-        println!("{toon}");
+        sql_format::write_table(stdout, &batches)
     }
-    Ok(())
 }
 
 fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
@@ -850,124 +734,4 @@ fn build_index_output(
         database_path: result.database_path.clone(),
         detailed,
     }
-}
-
-#[derive(Serialize)]
-struct CompileResult {
-    input: Value,
-    sql: String,
-    params: HashMap<String, Value>,
-    rendered_sql: String,
-}
-
-/// Parse a single query JSON and load the ontology.
-fn parse_query_input(
-    json_input: &str,
-    ontology_path: Option<PathBuf>,
-) -> Result<(Value, Ontology)> {
-    let ontology = match ontology_path {
-        Some(path) => Ontology::load_from_dir(&path)
-            .with_context(|| format!("failed to load ontology from {}", path.display()))?,
-        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
-    };
-
-    let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
-    if value.get("query_type").is_none() {
-        anyhow::bail!("JSON must contain a \"query_type\" field");
-    }
-
-    Ok((value, ontology))
-}
-
-fn run_local_query(
-    json_input: String,
-    ontology_path: Option<PathBuf>,
-) -> Result<query_engine::shared::PipelineOutput> {
-    let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
-    let ontology = Arc::new(ontology);
-
-    let store = workspace::Workspace::open_default()?;
-    let db_path = store.db_path();
-    if !db_path.exists() {
-        anyhow::bail!(
-            "no local graph found at {}. Run `orbit index` first.",
-            db_path.display()
-        );
-    }
-
-    let project_roots = store.project_roots()?;
-
-    local_pipeline::run(&json_input, ontology, &db_path, project_roots).context("query failed")
-}
-
-fn run_compile(
-    json_input: String,
-    traversal_paths: Vec<String>,
-    ontology_path: Option<PathBuf>,
-    format: OutputFormat,
-    local: bool,
-) -> Result<()> {
-    let (input, ontology) = parse_query_input(&json_input, ontology_path)?;
-
-    let security_ctx = if local {
-        None
-    } else {
-        let first_path = traversal_paths
-            .first()
-            .context("--traversal-paths required for server compilation")?;
-        let org_id: i64 = first_path
-            .split('/')
-            .next()
-            .context("traversal path is empty")?
-            .parse()
-            .context("first segment of traversal path must be a valid org ID")?;
-        Some(
-            SecurityContext::new(org_id, traversal_paths)
-                .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?,
-        )
-    };
-
-    let compile_result = if local {
-        query_engine::compiler::compile_local(&json_input, &ontology)
-    } else {
-        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap())
-    };
-
-    match compile_result {
-        Ok(result) => {
-            let rendered_sql = result.base.render();
-            let output = CompileResult {
-                input,
-                sql: result.base.sql,
-                params: result
-                    .base
-                    .params
-                    .into_iter()
-                    .map(|(k, v)| (k, v.value))
-                    .collect(),
-                rendered_sql,
-            };
-
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                }
-                OutputFormat::Pretty => {
-                    println!("**SQL:**\n```sql\n{}\n```\n", output.sql);
-                    if !output.params.is_empty() {
-                        println!(
-                            "**Params:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&output.params)?
-                        );
-                    }
-                    println!("**Rendered SQL:**\n```sql\n{}\n```", output.rendered_sql);
-                }
-            }
-        }
-        Err(e) => {
-            anyhow::bail!("compilation failed: {e}");
-        }
-    }
-
-    Ok(())
 }

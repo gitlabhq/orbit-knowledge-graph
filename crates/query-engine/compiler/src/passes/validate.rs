@@ -281,10 +281,10 @@ impl<'a> Validator<'a> {
                     rel.types.len()
                 )));
             }
-            if rel.filters.len() > MAX_FILTERS_PER_REL {
+            let rel_filter_count: usize = rel.filters.values().map(|v| v.len()).sum();
+            if rel_filter_count > MAX_FILTERS_PER_REL {
                 return Err(QueryError::LimitExceeded(format!(
-                    "relationship filter count ({}) must not exceed {MAX_FILTERS_PER_REL}",
-                    rel.filters.len()
+                    "relationship filter count ({rel_filter_count}) must not exceed {MAX_FILTERS_PER_REL}",
                 )));
             }
         }
@@ -310,10 +310,10 @@ impl<'a> Validator<'a> {
                     node.id
                 )));
             }
-            if node.filters.len() > MAX_FILTERS_PER_NODE {
+            let node_filter_count: usize = node.filters.values().map(|v| v.len()).sum();
+            if node_filter_count > MAX_FILTERS_PER_NODE {
                 return Err(QueryError::LimitExceeded(format!(
-                    "filter count ({}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
-                    node.filters.len(),
+                    "filter count ({node_filter_count}) for node \"{}\" must not exceed {MAX_FILTERS_PER_NODE}",
                     node.id
                 )));
             }
@@ -326,19 +326,21 @@ impl<'a> Validator<'a> {
                     node.id
                 )));
             }
-            for (prop, filter) in &node.filters {
-                if let Some(FilterOp::In) = filter.op {
-                    let len = filter
-                        .value
-                        .as_ref()
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.len())
-                        .unwrap_or(0);
-                    if len > MAX_IN_VALUES {
-                        return Err(QueryError::LimitExceeded(format!(
-                            "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
-                            node.id
-                        )));
+            for (prop, filters) in &node.filters {
+                for filter in filters {
+                    if let Some(FilterOp::In) = filter.op {
+                        let len = filter
+                            .value
+                            .as_ref()
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(0);
+                        if len > MAX_IN_VALUES {
+                            return Err(QueryError::LimitExceeded(format!(
+                                "IN filter on \"{prop}\" for node \"{}\" has {len} values, must not exceed {MAX_IN_VALUES}",
+                                node.id
+                            )));
+                        }
                     }
                 }
             }
@@ -363,7 +365,7 @@ impl<'a> Validator<'a> {
             let Some(entity) = node.entity.as_deref() else {
                 continue;
             };
-            for (prop, filter) in &node.filters {
+            for (prop, filters) in &node.filters {
                 let is_traversal_path_filter = prop == TRAVERSAL_PATH_COLUMN
                     && self
                         .ontology
@@ -381,30 +383,34 @@ impl<'a> Validator<'a> {
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;
                 };
-                if is_traversal_path_filter {
-                    Self::check_traversal_path_filter(
-                        &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-                        filter,
-                    )?;
+                for filter in filters {
+                    if is_traversal_path_filter {
+                        Self::check_traversal_path_filter(
+                            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(entity, prop, filter, data_type)?;
                 }
-                self.check_one_filter(entity, prop, filter, data_type)?;
             }
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
-            for (prop, filter) in &rel.filters {
+            for (prop, filters) in &rel.filters {
                 let Some(data_type) = self.ontology.get_edge_column_type(prop) else {
                     return Err(QueryError::Validation(format!(
                         "relationship[{i}] filter on unknown edge column \"{prop}\""
                     )));
                 };
-                if prop == TRAVERSAL_PATH_COLUMN {
-                    Self::check_traversal_path_filter(
-                        &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-                        filter,
-                    )?;
+                for filter in filters {
+                    if prop == TRAVERSAL_PATH_COLUMN {
+                        Self::check_traversal_path_filter(
+                            &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+                            filter,
+                        )?;
+                    }
+                    self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
                 }
-                self.check_one_filter(&format!("relationship[{i}]"), prop, filter, data_type)?;
             }
         }
 
@@ -419,13 +425,19 @@ impl<'a> Validator<'a> {
             let Some(entity) = node.entity.clone() else {
                 continue;
             };
-            for (prop, filter) in node.filters.iter_mut() {
-                filter.data_type = self.ontology.get_field_type(&entity, prop);
+            for (prop, filters) in node.filters.iter_mut() {
+                let dt = self.ontology.get_field_type(&entity, prop);
+                for filter in filters {
+                    filter.data_type = dt;
+                }
             }
         }
         for rel in &mut input.relationships {
-            for (prop, filter) in rel.filters.iter_mut() {
-                filter.data_type = self.ontology.get_edge_column_type(prop);
+            for (prop, filters) in rel.filters.iter_mut() {
+                let dt = self.ontology.get_edge_column_type(prop);
+                for filter in filters {
+                    filter.data_type = dt;
+                }
             }
         }
     }
@@ -2634,6 +2646,37 @@ mod tests {
         assert!(
             validator.check_references(&input).is_ok(),
             "filter on filterable:true field should pass"
+        );
+    }
+
+    #[test]
+    fn accepts_multi_filter_range() {
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "u", "entity": "User",
+                         "node_ids": [1],
+                         "filters": {"created_at": [
+                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
+                             {"op": "lt", "value": "2026-05-01T00:00:00Z"}
+                         ]}}
+            }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_multi_filter_type_mismatch() {
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "u", "entity": "User",
+                         "node_ids": [1],
+                         "filters": {"created_at": [
+                             {"op": "gte", "value": "2026-04-01T00:00:00Z"},
+                             {"op": "lt", "value": 12345}
+                         ]}}
+            }"#,
+            "not a string",
         );
     }
 }

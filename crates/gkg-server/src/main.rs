@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_billing::SnowplowBillingTracker;
+use gkg_billing::{QuotaService, SnowplowBillingTracker};
 use gkg_server::analytics::SnowplowAnalyticsTracker;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
@@ -220,6 +220,28 @@ async fn run_webserver(
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
+    }
+
+    if config.billing.quota.enabled {
+        if config.billing.quota.customers_dot_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
+                 set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
+            ));
+        }
+        if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
+            return Err(anyhow::anyhow!(
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set — \
+                 set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN"
+            ));
+        }
+        info!(
+            customers_dot_url = %config.billing.quota.customers_dot_url,
+            "initializing usage quota gate"
+        );
+        let quota = QuotaService::from_config(&config.billing)
+            .map_err(|e| anyhow::anyhow!("quota service initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_quota(Arc::new(quota));
     }
 
     if config.analytics.enabled {

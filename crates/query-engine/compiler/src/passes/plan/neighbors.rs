@@ -27,7 +27,11 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         table: center_node.table.clone(),
         selectivity: Selectivity::from_node(center_node),
         hydration: HydrationStrategy::Skip,
-        filters: center_node.filters.clone().into_iter().collect(),
+        filters: center_node
+            .filters
+            .iter()
+            .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
+            .collect(),
         node_ids: center_node.node_ids.clone(),
         id_range: center_node.id_range.clone(),
         has_traversal_path: center_node.has_traversal_path,

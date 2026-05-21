@@ -48,6 +48,11 @@ async fn data_correctness() {
         search::search_filter_lte_on_datetime_returns_matching_rows,
         search::search_filter_lt_on_datetime_excludes_same_day_after_midnight,
         search::search_filter_is_not_null_on_datetime_returns_merged_rows,
+        // search: multi-filter range queries
+        search::search_multi_filter_date_window,
+        search::search_multi_filter_date_window_multiple_results,
+        search::search_multi_filter_empty_window_returns_empty,
+        search::search_multi_filter_mixed_with_single_filter,
         // traversal
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,

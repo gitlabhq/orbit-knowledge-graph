@@ -1,3 +1,42 @@
+## [0.61.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.60.0...v0.61.0) (2026-05-21)
+
+### Features
+
+* **e2e:** surface deploy-time failures in diagnostics dump ([170052d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/170052d54afccef1de78963d908ac5da666c192f)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **indexer:** escape NATS `>` wildcard in durable name ([3ac0f93](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3ac0f93bfbf95d835213f9e2828956c3a6e0bfa6)) by Bohdan Parkhomchuk
+
+### Other
+
+* **observability:** document billing event metrics ([7380bf6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7380bf6d3a3e1ab1b0ee10d7167f9780eafe5348)) by Sharmad Nachnolkar
+
+## [0.60.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.59.1...v0.60.0) (2026-05-20)
+
+### Features
+
+* **indexer:** scaffold entity-level SDLC indexing (ADR 014) ([c37f7fc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c37f7fc2aa02f159b92a010a68a9e38920aab4c5)) by Jean-Gabriel Doyon
+* **orbit-local:** drop query DSL, expose DuckDB directly ([55f4680](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/55f468012e25ac89e62b811f600cfc0f63e0bf31)) by Michael Angelo Rivera
+* **query-dsl:** allow multiple filters per property for range queries ([18fbd7a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/18fbd7acd21c88fade9de8d05e81bb1aea0f5916)) by Michael Usachenko
+
+### Fixes
+
+* **compiler:** remove dead QueryOptions fields and compiler_query_options.json ([9b47222](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9b472221cb3f278c1486ed13805753e5054cd894)) by Michael Usachenko
+* **deps:** regenerate Cargo.lock for sqlparser 0.62.0 ([c6f2ed1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c6f2ed17ccdb429efc14087d2a67d2be16145194)) by Michael Angelo Rivera
+* **e2e:** disable envoy-gateway to allow concurrent runs ([de1b78a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/de1b78a79b02555682e26c4f282ff508567750cf)) by Bohdan Parkhomchuk
+* **nats-client:** self-heal KV bucket config and Drop-safe indexing locks ([231f750](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/231f75065d21bdaf24f5f27972638a39e5d3415d)) by Michael Angelo Rivera
+* **ontology:** expose edge variants instead of flattened source/target lists ([7aba9ac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7aba9ac2404f21641e025ae83d62a44d822e7370)) by Jean-Gabriel Doyon
+
+### Other
+
+* **compiler:** remove dead code, stale options, and unused dep ([26ef3d5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/26ef3d566f7eaf3413e4e07e02ece971abc378c1)) by Michael Usachenko
+* **deps:** update rust crate arrow to v58.3.0 ([baca5b4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/baca5b4185910b5b0741e256020a77fb6f3a9c74)) by GitLab Renovate Bot
+* **deps:** update rust crate sqlparser to 0.62.0 ([14d2e1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14d2e1f5fe625577ffd6fb09209767e123cdc789)) by GitLab Renovate Bot
+* fix datalake typo to data lake ([41e80fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/41e80fa37b1c7f07c5ba62dc8a234524d5b57621)) by Bob Singh
+* remove more dead code across crates ([2168035](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/21680356478c00b4698ebbb7ea2eba03ef1e1922)) by Michael Angelo Rivera
+* **skill:** fetch DSL from /orbit/schema/dsl via `remote dsl` ([cf1c946](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cf1c946d47303cddab16fdb954c008e6a719fdb4)) by Michael Angelo Rivera
+
 ## [0.59.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.59.0...v0.59.1) (2026-05-19)
 
 ### Fixes

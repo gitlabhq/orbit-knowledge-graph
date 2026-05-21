@@ -559,3 +559,34 @@ async fn in_progress_prevents_redelivery() {
 
     message.ack().await.expect("failed to ack");
 }
+
+// Regression: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/753
+#[tokio::test]
+async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
+    let (_container, url) = start_nats_container().await;
+
+    let config = NatsConfiguration {
+        url,
+        auto_create_streams: true,
+        consumer_name: Some("gkg-indexer".to_string()),
+        ..Default::default()
+    };
+    let broker = connect_broker(&config).await;
+
+    let subscription = Subscription::new("test_entity_stream", "sdlc.entity.indexing.requested.>");
+
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("ensure streams");
+
+    let result = broker
+        .subscribe(&subscription, Arc::new(EngineMetrics::new()))
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "subscribing to a `>` subject must produce a legal durable name; got: {:?}",
+        result.err(),
+    );
+}

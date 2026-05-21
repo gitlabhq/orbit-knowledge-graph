@@ -90,7 +90,7 @@ fn enforce_traversal_path_filters(
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     for node in &input.nodes {
-        let (Some(entity), Some(traversal_path_filter)) = (
+        let (Some(entity), Some(tp_filters)) = (
             node.entity.as_deref(),
             node.filters.get(TRAVERSAL_PATH_COLUMN),
         ) else {
@@ -107,23 +107,27 @@ fn enforce_traversal_path_filters(
             .map(|r| r.required_role.as_access_level())
             .unwrap_or(DEFAULT_PATH_ACCESS_LEVEL);
         let eligible_paths = security_ctx.paths_at_least(min_role);
-        validate_traversal_path_filter_scope(
-            &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
-            traversal_path_filter,
-            &eligible_paths,
-        )?;
+        for tp_filter in tp_filters {
+            validate_traversal_path_filter_scope(
+                &format!("filter on \"{TRAVERSAL_PATH_COLUMN}\" for {entity}"),
+                tp_filter,
+                &eligible_paths,
+            )?;
+        }
     }
 
     for (i, rel) in input.relationships.iter().enumerate() {
-        let Some(traversal_path_filter) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
+        let Some(tp_filters) = rel.filters.get(TRAVERSAL_PATH_COLUMN) else {
             continue;
         };
         let eligible_paths = security_ctx.paths_at_least(DEFAULT_PATH_ACCESS_LEVEL);
-        validate_traversal_path_filter_scope(
-            &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
-            traversal_path_filter,
-            &eligible_paths,
-        )?;
+        for tp_filter in tp_filters {
+            validate_traversal_path_filter_scope(
+                &format!("relationship[{i}] filter on \"{TRAVERSAL_PATH_COLUMN}\""),
+                tp_filter,
+                &eligible_paths,
+            )?;
+        }
     }
 
     Ok(())
@@ -344,11 +348,11 @@ mod tests {
         let mut filters = HashMap::new();
         filters.insert(
             field.to_string(),
-            InputFilter {
+            vec![InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(value),
                 ..Default::default()
-            },
+            }],
         );
         Input {
             query_type: QueryType::Traversal,
@@ -365,7 +369,7 @@ mod tests {
 
     fn input_with_traversal_path_filter(entity: &str, filter: InputFilter) -> Input {
         let mut filters = HashMap::new();
-        filters.insert(TRAVERSAL_PATH_COLUMN.to_string(), filter);
+        filters.insert(TRAVERSAL_PATH_COLUMN.to_string(), vec![filter]);
         Input {
             query_type: QueryType::Traversal,
             nodes: vec![InputNode {
@@ -495,7 +499,10 @@ mod tests {
             relationships: vec![crate::input::InputRelationship {
                 filters: HashMap::from([(
                     TRAVERSAL_PATH_COLUMN.to_string(),
-                    traversal_path_filter(FilterOp::Eq, Value::String("2/".into())),
+                    vec![traversal_path_filter(
+                        FilterOp::Eq,
+                        Value::String("2/".into()),
+                    )],
                 )]),
                 ..rel("_g", "_h")
             }],
@@ -829,11 +836,11 @@ mod tests {
         let mut input = user_only_aggregation(AggFunction::Count, None);
         input.nodes[0].filters.insert(
             "username".into(),
-            InputFilter {
+            vec![InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(Value::String("bob".into())),
                 ..Default::default()
-            },
+            }],
         );
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
         assert!(err.to_string().contains("traversal_path"));
@@ -935,11 +942,11 @@ mod tests {
         let mut filters = HashMap::new();
         filters.insert(
             field.to_string(),
-            InputFilter {
+            vec![InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(value),
                 ..Default::default()
-            },
+            }],
         );
         Input {
             query_type: QueryType::Traversal,

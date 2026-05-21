@@ -20,12 +20,64 @@ title: Get started with Orbit Local
 
 {{< /history >}}
 
-> [!note]
-> Orbit Local is experimental. Until packaged binaries ship,
-> you must build from source.
+Orbit Local runs on your machine. Install the `orbit` binary, pick the access
+method that matches how you work, then run your first query.
 
-Orbit Local runs on your machine. Pick the access method that matches how you
-work, then run your first query.
+## Install
+
+Install the `orbit` binary directly with the one-line installer, or through
+the GitLab CLI (`glab`) if you already use it.
+
+{{< tabs >}}
+
+{{< tab title="macOS and Linux" >}}
+
+```shell
+curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+```
+
+Open a new terminal, then verify:
+
+```shell
+orbit help
+```
+
+{{< /tab >}}
+
+{{< tab title="Windows" >}}
+
+```powershell
+irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
+```
+
+Open a new terminal, then verify:
+
+```shell
+orbit help
+```
+
+{{< /tab >}}
+
+{{< tab title="GitLab CLI (glab)" >}}
+
+If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed:
+
+```shell
+glab orbit local --install
+```
+
+Verify:
+
+```shell
+glab orbit local help
+```
+
+See the [`glab orbit local` reference](https://docs.gitlab.com/cli/orbit/local/)
+for details.
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Pick an access method
 
@@ -60,7 +112,7 @@ Next:
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
 - Wire it into your AI agent: see [Connect via MCP](access/mcp.md) for the
   manual config. (`glab orbit setup` is planned to automate this.)
-- Learn the query DSL: [Query language reference](../remote/queries/).
+- Browse the table layout: [Schema reference](schema.md).
 
 ## Billing
 

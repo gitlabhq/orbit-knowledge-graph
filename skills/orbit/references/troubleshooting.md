@@ -98,15 +98,13 @@ has no matches.
 - `cursor.offset + cursor.page_size > limit`.
 
 **Fix:** validate against the live DSL schema, which is authoritative and
-always current:
+always current. Fetch it from `/api/v4/orbit/schema/dsl`:
 
 ```bash
-glab orbit remote tools | jq '.[] | select(.name=="query_graph") | .description' -r
+glab orbit remote dsl
 ```
 
-The `description` field embeds the full JSON Schema (inside a `<toon>` block
-for compact transport — still parseable). Full field reference in
-[`query_language.md`](query_language.md).
+Full field reference in [`query_language.md`](query_language.md).
 
 ## Service unavailable
 

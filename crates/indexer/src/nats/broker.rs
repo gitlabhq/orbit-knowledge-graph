@@ -369,10 +369,7 @@ impl NatsBroker {
 
         let durable_name = format!(
             "dispatch-{}",
-            subscription
-                .subject
-                .replace('.', "-")
-                .replace('*', "wildcard")
+            escape_subject_for_durable(&subscription.subject)
         );
 
         let consumer_config = ConsumerConfig {
@@ -414,12 +411,11 @@ impl NatsBroker {
     ) -> Result<PullConsumer, NatsError> {
         let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
 
-        let durable_name = self.config.consumer_name.as_ref().map(|base| {
-            format!(
-                "{base}-{}",
-                subject.replace('.', "-").replace('*', "wildcard")
-            )
-        });
+        let durable_name = self
+            .config
+            .consumer_name
+            .as_ref()
+            .map(|base| format!("{base}-{}", escape_subject_for_durable(subject)));
 
         let consumer_config = ConsumerConfig {
             filter_subject: subject.to_string(),
@@ -442,6 +438,13 @@ impl NatsBroker {
     }
 }
 
+fn escape_subject_for_durable(subject: &str) -> String {
+    subject
+        .replace('.', "-")
+        .replace('*', "wildcard")
+        .replace('>', "deep")
+}
+
 fn is_per_subject_limit_error(error: &PublishError) -> bool {
     use std::error::Error as _;
     let Some(source) = error.source() else {
@@ -451,4 +454,36 @@ fn is_per_subject_limit_error(error: &PublishError) -> bool {
         return api_error.error_code() == ErrorCode::STREAM_STORE_FAILED;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::escape_subject_for_durable;
+
+    #[test]
+    fn escapes_each_forbidden_character_distinctly() {
+        assert_eq!(escape_subject_for_durable("a.b.c"), "a-b-c");
+        assert_eq!(escape_subject_for_durable("a.*.c"), "a-wildcard-c");
+        assert_eq!(escape_subject_for_durable("a.>"), "a-deep");
+        assert_eq!(
+            escape_subject_for_durable("sdlc.entity.indexing.requested.>"),
+            "sdlc-entity-indexing-requested-deep",
+        );
+    }
+
+    #[test]
+    fn escaped_output_is_a_legal_durable_name() {
+        for subject in [
+            "sdlc.entity.indexing.requested.>",
+            "sdlc.namespace.indexing.requested.*.*",
+            "code.task.indexing.requested.*.*",
+            "sdlc.global.indexing.requested",
+        ] {
+            let escaped = escape_subject_for_durable(subject);
+            assert!(
+                !escaped.contains('.') && !escaped.contains('*') && !escaped.contains('>'),
+                "escaped durable name '{escaped}' from '{subject}' still contains a forbidden char",
+            );
+        }
+    }
 }
