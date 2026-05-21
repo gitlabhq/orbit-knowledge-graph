@@ -169,6 +169,16 @@ The circuit breaker wraps external service calls (initially ClickHouse) and trac
 | `gkg.circuit_breaker.calls.rejected` | Counter | count | `service` | Calls rejected because the circuit was open |
 | `gkg.circuit_breaker.calls` | Counter | count | `service`, `outcome` (success/failure) | Classified call outcomes through the circuit breaker |
 
+*Billing event metrics:*
+
+The billing observer instruments the path from a successful query to a Snowplow billing event handed to the labkit tracker. Used to detect when the emission pipeline silently fails — for example, the realm claim disappears from JWTs upstream, or the tracker refuses events at enqueue. All three series are pre-registered at zero on startup so `rate(...) == 0` alerts compare against an actual zero rather than an absent series.
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.billing.events.emitted` | Counter | count | | Billing events handed to the Snowplow tracker after a successful query |
+| `gkg.billing.events.dropped` | Counter | count | `reason` (realm_missing / realm_unrecognized / event_build_failed) | Billing events not emitted because event construction failed |
+| `gkg.billing.events.rejected` | Counter | count | | Billing events refused by the labkit tracker at enqueue (queue full or shutdown). HTTP delivery failures occur in labkit's background loop and are not surfaced through this counter. |
+
 **Shared Infrastructure Metrics:**
 
 - Disk and Memory usage per container
