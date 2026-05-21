@@ -14,7 +14,7 @@ use ontology::Ontology;
 
 use crate::ast::Node;
 use crate::error::Result;
-use crate::input::{Input, QueryType};
+use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
