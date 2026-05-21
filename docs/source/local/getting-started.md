@@ -74,9 +74,6 @@ Open a new terminal after the install completes, then verify:
 orbit --help
 ```
 
-To pin a specific version, reinstall, or delete the local graph, see
-[advanced installation and troubleshooting](install-troubleshooting.md).
-
 ## Pick an access method
 
 | Method | Best for | Setup |
