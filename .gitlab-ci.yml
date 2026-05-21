@@ -464,6 +464,23 @@ check_docs_markdown:
     # Check links
     - lychee --offline --include-fragments docs/source/**/*.md
 
+check_docs_i18n_markdown:
+  stage: docs
+  extends:
+    - .mr-only-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.23-vale-3.14.1-markdownlint2-0.22.1-lychee-0.24.2
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+      changes:
+        - docs-locale/**/*
+  script:
+    # Lint prose
+    - vale --minAlertLevel error docs-locale/*/source/
+    # Lint Markdown
+    - markdownlint-cli2 'docs-locale/*/source/**/*.md'
+    # Check links
+    - lychee --offline --include-fragments docs-locale/*/source/**/*.md
+
 docs_hugo_build:
   image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.150.1
   stage: docs
