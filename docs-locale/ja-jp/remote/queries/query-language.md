@@ -1,4 +1,3 @@
-```markdown
 ---
 stage: Analytics
 group: Knowledge Graph
@@ -461,4 +460,3 @@ Orbit は SQL をコンパイルする前に、広範または曖昧なクエリ
 | `cascade_distinct` | カスケードおよびホップフロンティア CTE で `SELECT DISTINCT` を出力します。 |
 
 ほとんどの呼び出し元はパフォーマンスオプションを未設定のままにしてください。
-```

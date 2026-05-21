@@ -1,22 +1,3 @@
-I'll follow the translation workflow:
-
-1. First, check for existing translations
-2. Load resources
-3. Check translation memory
-4. Translate
-
-Let me start by checking if a translated version already exists and loading the required resources.
-
-**Step 1: Check for existing translation**
-
-The target file would be at: `docs/source/remote/access/glab.md` in the `ja-jp` locale directory. Since this appears to be a new translation request with no locale directory prefix shown, I'll proceed to load resources.
-
-**Step 2 & 3: Load resources and check translation memory**
-
-I'll now load the Japanese translation rules and termbase, then proceed with the translation.
-
-Based on the loaded resources (termbase, translation rules, markdown parsing rules), here is the complete translated file:
-
 ---
 stage: Analytics
 group: Knowledge Graph

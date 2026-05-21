@@ -1,46 +1,3 @@
-I'll follow the translation workflow systematically.
-
-## Step 1: Check for existing translations
-
-The target file would be at `docs/source/local/how-it-works.md` in the ja-jp locale. Since this appears to be a new translation request with no existing file mentioned, I'll proceed.
-
-## Step 2: Query Translation Memory
-
-Loading the specialist roster and checking git history for specialist edits on this file. Since this appears to be a new file with no prior ja-jp version, I'll proceed to resource loading.
-
-## Step 3: Load Resources
-
-Loading ja-jp termbase and translation rules as specified.
-
-## Step 4: Translate
-
-Applying ja-jp termbase, translation rules, markdown parsing rules, and website translation rules.
-
-Key decisions:
-- `Orbit Local`, `Orbit Remote`, `orbit index`, `orbit sql`, `DuckDB`, `rust-analyzer`, `tree-sitter` → preserve verbatim (product/tool names, commands)
-- `~/.orbit/graph.duckdb` → preserve verbatim (file path)
-- `.gitignore` → preserve verbatim (filename)
-- `SDLC` → preserve verbatim (technical acronym)
-- `NDJSON`, `CSV`, `JSON` → preserve verbatim
-- Tier/Offering/Status values: `Free`, `Premium`, `Ultimate` per termbase; `GitLab.com`, `GitLab Self-Managed`, `GitLab Dedicated` per termbase
-- `experiment` → 実験 per termbase
-- `merge requests`, `pipelines` → マージリクエスト、パイプライン per termbase
-- `repository` → リポジトリ per termbase
-- `branch` → ブランチ per termbase
-- `module` → モジュール per termbase
-- `import` → インポート per termbase
-- `indexing` → インデックス作成 per termbase
-- `pipeline` → パイプライン per termbase
-- `query`/`queries` → クエリ/クエリする per termbase
-- `read-only` → 読み取り専用 per termbase
-- `language` → 言語 per termbase
-- `processing` → 処理 per termbase
-- Heading anchors: preserve English anchors from source
-- History block: translate display text, preserve URLs
-
----
-
-```markdown
 ---
 stage: Analytics
 group: Knowledge Graph
@@ -115,4 +72,3 @@ Ruby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C
 ## 課金 {#billing}
 
 Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。
-```
