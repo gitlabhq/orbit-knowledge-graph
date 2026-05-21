@@ -40,8 +40,6 @@ curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/insta
 
 {{< tab title="Windows" >}}
 
-In PowerShell:
-
 ```powershell
 irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
 ```
