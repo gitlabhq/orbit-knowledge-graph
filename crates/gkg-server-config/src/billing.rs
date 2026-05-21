@@ -16,6 +16,10 @@ fn default_quota_timeout_ms() -> u64 {
     1000
 }
 
+fn default_fallback_ttl_secs() -> u64 {
+    3600
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QuotaConfig {
@@ -29,6 +33,8 @@ pub struct QuotaConfig {
     pub api_token: Option<String>,
     #[serde(default = "default_quota_timeout_ms")]
     pub request_timeout_ms: u64,
+    #[serde(default = "default_fallback_ttl_secs")]
+    pub fallback_cache_ttl_secs: u64,
 }
 
 impl Default for QuotaConfig {
@@ -39,6 +45,7 @@ impl Default for QuotaConfig {
             api_user: None,
             api_token: None,
             request_timeout_ms: default_quota_timeout_ms(),
+            fallback_cache_ttl_secs: default_fallback_ttl_secs(),
         }
     }
 }

@@ -10,7 +10,7 @@ use gkg_server_config::BillingConfig;
 use tonic::Status;
 use tracing::{info, warn};
 
-use crate::constants::{METERED_SOURCE_TYPES, QUOTA_DEFAULT_TTL_SECS, QUOTA_MAX_CACHE_ENTRIES};
+use crate::constants::{METERED_SOURCE_TYPES, QUOTA_MAX_CACHE_ENTRIES};
 use cache::QuotaCache;
 use client::{QuotaClient, QuotaDecision};
 pub use inputs::QuotaCheckInputs;
@@ -45,7 +45,7 @@ impl QuotaService {
             cfg.api_user.as_deref().unwrap_or(""),
             cfg.api_token.as_deref().unwrap_or(""),
             Duration::from_millis(cfg.request_timeout_ms),
-            Duration::from_secs(QUOTA_DEFAULT_TTL_SECS),
+            Duration::from_secs(cfg.fallback_cache_ttl_secs),
         )?;
         let cache = QuotaCache::new(Arc::new(client), QUOTA_MAX_CACHE_ENTRIES);
 
@@ -159,6 +159,7 @@ mod tests {
                 api_user: Some("test@example.com".into()),
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
+                fallback_cache_ttl_secs: 3_600,
             },
         }
     }
@@ -185,6 +186,7 @@ mod tests {
                 api_user: Some("test@example.com".into()),
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
+                fallback_cache_ttl_secs: 3_600,
             },
         };
         let svc = QuotaService::from_config(&cfg).unwrap();
@@ -220,6 +222,7 @@ mod tests {
                 api_user: None,
                 api_token: None,
                 request_timeout_ms: 5_000,
+                fallback_cache_ttl_secs: 3_600,
             },
         };
         let svc = QuotaService::from_config(&cfg).unwrap();
