@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::gkg::GkgEvent;
+use labkit_events::StructuredEvent;
 
 const APP_ID: &str = "gkg-server";
 
 pub trait AnalyticsTracker: Send + Sync {
-    fn track(&self, event: GkgEvent);
+    fn track(&self, event: StructuredEvent);
 }
 
 pub struct SnowplowAnalyticsTracker {
@@ -25,16 +25,16 @@ impl SnowplowAnalyticsTracker {
 }
 
 impl AnalyticsTracker for SnowplowAnalyticsTracker {
-    fn track(&self, event: GkgEvent) {
-        if let Err(e) = self.tracker.track_gkg_event(event) {
-            tracing::error!(error = %e, "failed to track gkg analytics event");
+    fn track(&self, event: StructuredEvent) {
+        if let Err(e) = self.tracker.track_structured_event(event) {
+            tracing::error!(error = %e, "failed to track analytics event");
         }
     }
 }
 
 #[cfg(feature = "testkit")]
 pub struct InMemoryAnalyticsTracker {
-    events: parking_lot::Mutex<Vec<GkgEvent>>,
+    events: parking_lot::Mutex<Vec<StructuredEvent>>,
 }
 
 #[cfg(feature = "testkit")]
@@ -49,7 +49,7 @@ impl InMemoryAnalyticsTracker {
         self.events.lock().len()
     }
 
-    pub fn drain(&self) -> Vec<GkgEvent> {
+    pub fn drain(&self) -> Vec<StructuredEvent> {
         std::mem::take(&mut *self.events.lock())
     }
 }
@@ -63,7 +63,7 @@ impl Default for InMemoryAnalyticsTracker {
 
 #[cfg(feature = "testkit")]
 impl AnalyticsTracker for InMemoryAnalyticsTracker {
-    fn track(&self, event: GkgEvent) {
+    fn track(&self, event: StructuredEvent) {
         self.events.lock().push(event);
     }
 }

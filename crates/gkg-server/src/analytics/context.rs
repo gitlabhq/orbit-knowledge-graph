@@ -128,22 +128,29 @@ mod tests {
         assert_eq!(leaf_namespace_ids(&claims), vec![22]);
     }
 
-    /// Inspect the JSON `data` of a context built via `build_*`. The
-    /// `to_self_describing_json` method is `pub(crate)` in labkit_events, so
-    /// we round-trip through `GkgEvent` and read its public `contexts()`.
+    /// Inspect the JSON `data` of a context built via `build_*`. We
+    /// round-trip through `StructuredEvent` and read its public `contexts()`.
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        use labkit_events::gkg::GkgEvent;
+        use labkit_events::StructuredEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
         let query = build_query(claims, tool, None).unwrap();
-        let event = GkgEvent::query_executed(common, query);
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
         event.contexts()[1].data.clone()
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        use labkit_events::gkg::GkgEvent;
+        use labkit_events::StructuredEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
         let query = build_query(claims, "query_graph", None).unwrap();
-        let event = GkgEvent::query_executed(common, query);
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
         event.contexts()[0].data.clone()
     }
 
@@ -172,11 +179,15 @@ mod tests {
 
     #[test]
     fn build_query_passes_through_coding_agent() {
-        use labkit_events::gkg::GkgEvent;
+        use labkit_events::StructuredEvent;
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
         let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
-        let event = GkgEvent::query_executed(common, query);
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
         let data = event.contexts()[1].data.clone();
         assert_eq!(data["coding_agent"], "claude-code");
     }
