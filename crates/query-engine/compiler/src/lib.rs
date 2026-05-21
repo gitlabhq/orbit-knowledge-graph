@@ -68,7 +68,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, TraversalPath};
+pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath};
 
 use metrics::CountErr;
 use std::sync::Arc;

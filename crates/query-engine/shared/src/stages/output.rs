@@ -78,10 +78,10 @@ impl PipelineStage for OutputStage {
 fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
     ctx.security_context
         .as_ref()
-        .is_some_and(|sc| match sc.realm.as_deref() {
-            Some("SaaS") => sc.is_gitlab_team_member,
-            Some("self-managed") | Some("Dedicated") => sc.admin,
-            _ => false,
+        .is_some_and(|sc| match sc.realm {
+            Some(compiler::Realm::SaaS) => sc.is_gitlab_team_member,
+            Some(compiler::Realm::SelfManaged) | Some(compiler::Realm::Dedicated) => sc.admin,
+            None => false,
         })
 }
 
@@ -108,7 +108,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
             .with_role(admin, Some(20))
-            .with_realm(Some("SaaS".into()))
+            .with_realm(Some(compiler::Realm::SaaS))
             .with_team_member(team_member);
         make_ctx(Some(sc))
     }
@@ -117,7 +117,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_role(admin, None)
-            .with_realm(Some("self-managed".into()));
+            .with_realm(Some(compiler::Realm::SelfManaged));
         make_ctx(Some(sc))
     }
 
@@ -161,7 +161,7 @@ mod tests {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_role(true, None)
-            .with_realm(Some("Dedicated".into()));
+            .with_realm(Some(compiler::Realm::Dedicated));
         assert!(can_see_debug_sql(&make_ctx(Some(sc))));
     }
 
@@ -169,17 +169,7 @@ mod tests {
     fn dedicated_non_admin_denied() {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_realm(Some("Dedicated".into()));
-        assert!(!can_see_debug_sql(&make_ctx(Some(sc))));
-    }
-
-    #[test]
-    fn unknown_realm_denied() {
-        let sc = SecurityContext::new(1, vec!["1/".into()])
-            .unwrap()
-            .with_role(true, Some(50))
-            .with_team_member(true)
-            .with_realm(Some("unknown".into()));
+            .with_realm(Some(compiler::Realm::Dedicated));
         assert!(!can_see_debug_sql(&make_ctx(Some(sc))));
     }
 
