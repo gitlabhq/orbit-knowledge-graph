@@ -32,9 +32,6 @@ the GitLab CLI (`glab`) if you already use it.
 
 {{< tab title="macOS and Linux" >}}
 
-The installer downloads the latest release, verifies its SHA-256 checksum,
-and adds `orbit` to `~/.local/bin`.
-
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
 ```
@@ -43,8 +40,7 @@ curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/insta
 
 {{< tab title="Windows" >}}
 
-In PowerShell. The installer downloads the latest release, verifies its
-SHA-256 checksum, and adds `orbit.exe` to `%LOCALAPPDATA%\Programs\orbit`.
+In PowerShell:
 
 ```powershell
 irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 | iex
@@ -54,8 +50,7 @@ irm https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.ps1 |
 
 {{< tab title="GitLab CLI (glab)" >}}
 
-If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed, it
-can download, verify, and keep `orbit` up to date for you.
+If you already have [`glab`](https://gitlab.com/gitlab-org/cli) installed:
 
 ```shell
 glab orbit local --install
