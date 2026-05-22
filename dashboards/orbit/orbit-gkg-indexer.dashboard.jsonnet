@@ -393,8 +393,9 @@ local schedulerErrors = o.metric('gkg_scheduler_task_errors_total');
 local deletionTableDur = o.metric('gkg_indexer_namespace_deletion_table_duration_seconds');
 local deletionTableErrors = o.metric('gkg_indexer_namespace_deletion_table_errors_total');
 
-local NS_DEL_SEL = SEL + ', task="dispatch.namespace_deletion"';
-local CLEANUP_SEL = SEL + ', task="maintenance.table_cleanup"';
+local DSP_SEL = o.GKG_DSP_SEL;
+local NS_DEL_SEL = DSP_SEL + ', task="dispatch.namespace_deletion"';
+local CLEANUP_SEL = DSP_SEL + ', task="maintenance.table_cleanup"';
 
 local dataDeletionPanels = [
   // Namespace deletion
@@ -442,7 +443,7 @@ local reference =
   + o.sectionCollapsed('Code pipeline (reference)', o.metricsInDomain('indexer.code'), DS, SEL)
   + o.sectionCollapsed('SDLC pipeline (reference)', o.metricsInDomain('indexer.sdlc'), DS, SEL)
   + [o.rowCollapsed('Data deletion')] + dataDeletionPanels
-  + o.sectionCollapsed('Scheduler (reference)', o.metricsInDomain('indexer.scheduler'), DS, SEL);
+  + o.sectionCollapsed('Scheduler (reference)', o.metricsInDomain('indexer.scheduler'), DS, DSP_SEL);
 
 local items =
   health
