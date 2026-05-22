@@ -1,0 +1,32 @@
+# GitLab Knowledge Graph (Orbit) CODEOWNERS
+#
+# Default rule: the Orbit team owns every file in the repository. SOX scope
+# for billing emission is enumerated in ADR 013 (see
+# docs/design-documents/decisions/013_billing_sox_scope.md) and enforced
+# through the required section below.
+
+* @gitlab-org/orbit/team
+
+[SOX Billing] @gitlab-org/orbit/team
+# Primary scope: the isolated billing crate and the single adapter seam
+# between gkg-server and gkg-billing. See ADR 013.
+/crates/gkg-billing/                              @gitlab-org/orbit/team
+/crates/gkg-server/src/billing_adapter.rs         @gitlab-org/orbit/team
+
+# Extended hook points: paths outside gkg-billing whose behavior can
+# silently change billing correctness. Keep this list in sync with the
+# "Extended hook points" table in ADR 013.
+/crates/query-engine/pipeline/src/observer.rs     @gitlab-org/orbit/team
+/crates/gkg-server/src/auth/claims.rs             @gitlab-org/orbit/team
+/crates/gkg-server/src/auth/validator.rs          @gitlab-org/orbit/team
+/crates/gkg-server/src/auth/authz.rs              @gitlab-org/orbit/team
+/crates/gkg-server/src/pipeline/service.rs        @gitlab-org/orbit/team
+/crates/gkg-server/src/grpc/service.rs            @gitlab-org/orbit/team
+/crates/gkg-server/src/grpc/server.rs             @gitlab-org/orbit/team
+/crates/gkg-server/src/main.rs                    @gitlab-org/orbit/team
+/crates/gkg-server-config/src/billing.rs          @gitlab-org/orbit/team
+
+# Changes to the ADR itself or this CODEOWNERS file must go through the
+# same controlled-merge approval as the in-scope code.
+/.gitlab/CODEOWNERS                               @gitlab-org/orbit/team
+/docs/design-documents/decisions/013_billing_sox_scope.md @gitlab-org/orbit/team
