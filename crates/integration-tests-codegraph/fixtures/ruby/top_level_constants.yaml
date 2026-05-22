@@ -293,21 +293,16 @@ tests:
       - { row: { n: 18 } }
 
   # ══════════════════════════════════════════════════════════════
-  # REFERENCE RESOLUTION — pinned to current behavior
+  # REFERENCE RESOLUTION — qualified refs resolve to Constants
   # ══════════════════════════════════════════════════════════════
   #
-  # ContextUser uses three qualified constant references. Today the
-  # Ruby DSL declares `reference("scope_resolution")` so the ref is
-  # extracted, but the linker's `scope_fqn_walk` / `global_name`
-  # strategies only resolve top-level type-containers, not Constants
-  # at the leaf of a qualified FQN. The methods do get indexed as
-  # Definitions; what is missing is the Calls edge to the Constant.
-  #
-  # These tests pin that behavior so a future linker change that adds
-  # constant lookup to the import strategies has to update the count
-  # in one place. The Definitions themselves are unaffected.
+  # `reference("scope_resolution")` extracts `Foo::Bar::MAX`-shaped
+  # refs verbatim. The linker now tries a direct by_fqn lookup for
+  # any ref name containing the separator, so absolute qualified
+  # references resolve to non-type-container Definitions (Constants,
+  # leaf Methods) — not just top-level type containers like Classes.
 
-  - name: "ContextUser methods are indexed (even though their refs to constants don't resolve yet)"
+  - name: "ContextUser methods are indexed"
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/constant_users.rb'
@@ -319,11 +314,32 @@ tests:
       - { row: { fqn: "ContextUser::default_label" } }
       - { row: { fqn: "ContextUser::deep_value" } }
 
-  - name: "Calls edges from ContextUser methods to Constant Definitions (current: none)"
+  - name: "qualified constant reference resolves to the Constant Definition"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.file_path = 'lib/constant_users.rb'
-        AND callee.definition_type = 'Constant'
-      RETURN count(*) AS n
+      WHERE caller.fqn = 'ContextUser::allowed_refs'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
     assert:
-      - { row: { n: 0 } }
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "second qualified constant reference (string-valued) also resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ContextUser::default_label'
+        AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "deeply nested constant reference resolves across module chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ContextUser::deep_value'
+        AND callee.fqn = 'Outer::Middle::Inner::DEEP_CONST'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
