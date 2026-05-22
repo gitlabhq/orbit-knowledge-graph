@@ -241,7 +241,11 @@ mod tests {
                 types: vec!["AUTHORED".into()],
                 from: "u".into(),
                 to: "mr".into(),
-                ..Default::default()
+                min_hops: 1,
+                max_hops: 1,
+                direction: crate::input::Direction::Outgoing,
+                filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -330,7 +334,9 @@ mod tests {
                 to: "p".into(),
                 min_hops: 1,
                 max_hops: 3,
-                ..Default::default()
+                direction: crate::input::Direction::Outgoing,
+                filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -351,7 +357,7 @@ mod tests {
             base: ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
-                result_context: ResultContext::new(QueryType::Traversal),
+                result_context: ResultContext::new(),
                 query_config: QueryConfig::default(),
                 dialect: SqlDialect::ClickHouse,
             },

@@ -137,6 +137,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     struct CountingObserverHandle {
         set_query_type_calls: Arc<AtomicUsize>,
         set_query_info_calls: Arc<AtomicUsize>,

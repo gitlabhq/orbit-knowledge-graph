@@ -160,9 +160,7 @@ mod tests {
             base: compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),
                 params: Default::default(),
-                result_context: compiler::passes::enforce::ResultContext::new(
-                    compiler::input::QueryType::Traversal,
-                ),
+                result_context: compiler::passes::enforce::ResultContext::new(),
                 query_config: Default::default(),
                 dialect: compiler::passes::codegen::SqlDialect::ClickHouse,
             },

@@ -56,7 +56,7 @@ pub(crate) fn build_common(
     let data = OrbitCommonData {
         deployment_type: gkg_analytics::deployment_type(config.deployment.kind),
         environment: gkg_analytics::deployment_env(config),
-        correlation_id: correlation_id.as_ref().map(|id| id.as_str()),
+        correlation_id: correlation_id.as_deref(),
         instance_id: claims.instance_id.as_deref(),
         unique_instance_id: claims.unique_instance_id.as_deref(),
         host_name: claims.host_name.as_deref(),
