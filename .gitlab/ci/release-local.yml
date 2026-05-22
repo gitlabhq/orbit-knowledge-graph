@@ -188,9 +188,20 @@ verify-static-link-linux-amd64:
   variables:
     PLATFORM: linux
     ARCH: x86_64
-    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+    # The build image's /opt/cargo/config.toml sets per-target rustflags
+    # (linker=clang, -fuse-ld=mold). Env RUSTFLAGS would *replace* (not merge
+    # with) those, so we'd lose -fuse-ld=mold. Use CARGO_ENCODED_RUSTFLAGS via
+    # individual -C flags joined with the recommended unit separator. Keep
+    # mold + clang from the image, append static-link flags.
+    RUSTFLAGS: "-C link-arg=-fuse-ld=mold -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   script:
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils
+    # libstdc++.a is not in debian:bookworm-slim by default; without it,
+    # -static-libstdc++ silently falls back to dynamic linking. Install the
+    # static archive (and file/binutils for verification).
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils libstdc++-12-dev
+    - echo "=== confirming static archive present ==="
+    - find /usr/lib -name 'libstdc++.a' 2>/dev/null
+    - find /usr/lib -name 'libgcc_eh.a' 2>/dev/null
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true
     - BIN="target/x86_64-unknown-linux-gnu/release/orbit"
