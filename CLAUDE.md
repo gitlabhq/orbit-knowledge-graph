@@ -39,6 +39,7 @@ List these directories and read the relevant owner before you act:
 - `docs/dev/` for runbooks, the crate map, and the reference index.
 - Before working in a crate, check for and read `crates/<crate>/AGENTS.md`.
 - `docs/design-documents/decisions/013_billing_sox_scope.md` documents the SOX scope for billing emission — read it before touching `crates/gkg-billing/`, `billing_adapter.rs`, or the hook points enumerated in `.gitlab/CODEOWNERS`.
+- **SOX billing surface:** if you add or move a file that can affect billing correctness outside `crates/gkg-billing/` — any file that controls whether events fire, what data they contain, or whether quota checks run — add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules and update the hook-points table in `docs/design-documents/decisions/013_billing_sox_scope.md` in the same MR.
 
 Do not create a GitLab issue or epic until the author approves the draft.
 Read `CONTRIBUTING.md` for engineering, documentation, issue, and MR
