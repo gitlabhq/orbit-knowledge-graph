@@ -16,5 +16,6 @@ mod tracker;
 pub use inputs::BillingInputs;
 pub use metrics::register as register_metrics;
 pub use observer::BillingObserver;
+pub use quota::register_metrics as register_quota_metrics;
 pub use quota::{QuotaCheckInputs, QuotaService};
 pub use tracker::{BillingTracker, SnowplowBillingTracker};

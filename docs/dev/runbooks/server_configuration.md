@@ -377,9 +377,28 @@ When enabled, every metered Orbit query (`mcp`, `rest` source types) is checked 
 |-------------|---------|---------|-------------|
 | `billing.quota.enabled` | `GKG_BILLING__QUOTA__ENABLED` | `false` | Enable the CDot quota gate |
 | `billing.quota.customers_dot_url` | `GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL` | `""` | CDot base URL (e.g. `https://customers.gitlab.com`) |
-| `billing.quota.request_timeout_ms` | `GKG_BILLING__QUOTA__REQUEST_TIMEOUT_MS` | `1000` | CDot request timeout in milliseconds |
-| `billing.quota.api_user` | `GKG_BILLING__QUOTA__API_USER` | None | CDot admin email. Mounted from `/etc/secrets/billing/quota/api_user`. |
-| `billing.quota.api_token` | `GKG_BILLING__QUOTA__API_TOKEN` | None | CDot admin token. Mounted from `/etc/secrets/billing/quota/api_token`. |
+| `billing.quota.request_timeout_ms` | `GKG_BILLING__QUOTA__REQUEST_TIMEOUT_MS` | `1000` | Timeout for CDot HEAD requests in milliseconds |
+
+#### CDot admin credentials (secret-mounted)
+
+`api_user` and `api_token` authenticate GKG against CDot's `/api/v1/consumers/resolve` endpoint. They must **not** be set via YAML config file. Inject them as Kubernetes secret mounts at `/etc/secrets/billing/quota/api_user` and `/etc/secrets/billing/quota/api_token`, which map to `billing.quota.api_user` and `billing.quota.api_token` respectively.
+
+In production these are sourced from Vault via External Secrets Operator and mounted by the Helm chart through `secrets.existingSecret`. For local development use env vars:
+
+```shell
+GKG_BILLING__QUOTA__API_USER=admin@example.com
+GKG_BILLING__QUOTA__API_TOKEN=<token>
+```
+
+Example quota gate config for staging:
+
+```yaml
+billing:
+  quota:
+    enabled: true
+    customers_dot_url: "https://customers.stg.gitlab.com"
+    request_timeout_ms: 2000
+```
 
 ## Health check
 

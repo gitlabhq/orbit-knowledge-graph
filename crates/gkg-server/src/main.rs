@@ -223,15 +223,18 @@ async fn run_webserver(
     }
 
     if config.billing.quota.enabled {
+        gkg_billing::register_quota_metrics();
         if config.billing.quota.customers_dot_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
                 "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
                  set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
             ));
         }
-        if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
+        if config.billing.quota.api_user.trim().is_empty()
+            || config.billing.quota.api_token.trim().is_empty()
+        {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set — \
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is empty — \
                  set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN"
             ));
         }

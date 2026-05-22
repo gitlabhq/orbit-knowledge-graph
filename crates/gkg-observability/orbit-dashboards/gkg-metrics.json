@@ -31,6 +31,59 @@
       "domain": "billing.events"
     },
     {
+      "otel_name": "gkg.billing.quota.bypassed",
+      "prom_name": "gkg_billing_quota_bypassed_total",
+      "description": "Requests that bypassed the quota gate because their source_type is not in the metered set (mcp/rest), labelled by source_type.",
+      "kind": "counter",
+      "labels": [
+        "source_type"
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.cache.entries",
+      "prom_name": "gkg_billing_quota_cache_entries",
+      "description": "Current number of entries in the per-pod quota decision cache. Approaches the QUOTA_MAX_CACHE_ENTRIES ceiling under sustained load from many distinct namespaces.",
+      "kind": "observable_gauge",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.cdot.duration",
+      "prom_name": "gkg_billing_quota_cdot_duration_seconds",
+      "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "outcome"
+      ],
+      "buckets": [
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
+      "otel_name": "gkg.billing.quota.decisions",
+      "prom_name": "gkg_billing_quota_decisions_total",
+      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+      "kind": "counter",
+      "labels": [
+        "decision",
+        "cache",
+        "source_type"
+      ],
+      "stability": "stable",
+      "domain": "billing.quota"
+    },
+    {
       "otel_name": "gkg.circuit_breaker.calls",
       "prom_name": "gkg_circuit_breaker_calls_total",
       "description": "Classified call outcomes through the circuit breaker.",
