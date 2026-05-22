@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use arrow::array::{Array, Int64Array};
-use gkg_utils::arrow::ArrowUtils;
+use arrow::array::{Array, Int64Array, ListArray};
 use serde_json::Value;
 use tracing::debug;
 
@@ -113,16 +112,27 @@ async fn compute_partition_ranges(
         return Ok(Vec::new());
     }
 
-    let (where_clause, params) = match traversal_path {
+    let (scope, params) = match traversal_path {
         Some(path) => (
-            " WHERE startsWith(traversal_path, {traversal_path:String})".to_string(),
+            "startsWith(traversal_path, {traversal_path:String})",
             serde_json::json!({ "traversal_path": path }),
         ),
-        None => (String::new(), Value::Null),
+        None => ("1=1", Value::Null),
     };
 
+    // ClickHouse assembles the half-open cut points [min, q1, …, q_{N-1}, max+1]
+    // already sorted, deduped, and typed Int64 so the Rust side is one ListArray
+    // read.
+    let fractions = (1..count)
+        .map(|i| format!("{}", i as f64 / count as f64))
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
-        "SELECT min({column}) AS min_val, max({column}) AS max_val FROM {table}{where_clause}"
+        "SELECT arraySort(arrayDistinct(arrayConcat( \
+            [toInt64(min({column}))], \
+            arrayMap(x -> toInt64(x), quantilesTDigest({fractions})({column})), \
+            [toInt64(max({column})) + 1] \
+         ))) AS cuts FROM {table} WHERE {scope}"
     );
 
     let batches = datalake
@@ -130,52 +140,39 @@ async fn compute_partition_ranges(
         .await
         .map_err(|err| HandlerError::Processing(format!("partition probe failed: {err}")))?;
 
-    let Some(batch) = batches.into_iter().next() else {
-        return Ok(Vec::new());
-    };
-    if batch.num_rows() == 0 {
-        return Ok(Vec::new());
-    }
+    let cuts = batches
+        .first()
+        .and_then(|b| b.column(0).as_any().downcast_ref::<ListArray>().cloned())
+        .filter(|list| list.len() > 0 && !list.is_null(0))
+        .and_then(|list| list.value(0).as_any().downcast_ref::<Int64Array>().cloned())
+        .map(|arr| arr.iter().flatten().collect::<Vec<i64>>())
+        .unwrap_or_default();
 
-    let min: Option<i64> = ArrowUtils::get_column_by_index::<Int64Array>(&batch, 0)
-        .filter(|arr| !arr.is_null(0))
-        .map(|arr| arr.value(0));
-    let max: Option<i64> = ArrowUtils::get_column_by_index::<Int64Array>(&batch, 1)
-        .filter(|arr| !arr.is_null(0))
-        .map(|arr| arr.value(0));
-
-    let (Some(min), Some(max)) = (min, max) else {
-        return Ok(Vec::new());
-    };
-
-    let span = max.saturating_sub(min);
-    if span < count as i64 {
-        debug!(min, max, count, "skipping partitioning: span too small");
+    // Need at least one inner cut: cuts = [min, max+1] alone means the source is
+    // smaller than the requested partition count (the +1 prevents a degenerate
+    // single-partition split that'd just thrash the engine for no parallelism).
+    if cuts.len() < 3 {
+        debug!(
+            ?cuts,
+            count, "skipping partitioning: insufficient distinct cuts"
+        );
         return Ok(Vec::new());
     }
 
-    let count_i64 = count as i64;
-    let step = (span + count_i64) / count_i64;
-
-    let mut assignments = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        let lower = min + step * i as i64;
-        let upper = (lower + step).min(max + 1);
-        if lower >= upper {
-            break;
-        }
-        assignments.push(PartitionAssignment {
-            index: i,
-            total: count,
+    let total = (cuts.len() - 1) as u32;
+    Ok(cuts
+        .windows(2)
+        .enumerate()
+        .map(|(i, w)| PartitionAssignment {
+            index: i as u32,
+            total,
             column: column.to_string(),
             bounds: PartitionBounds::Range {
-                lower_bound: lower.to_string(),
-                upper_bound: upper.to_string(),
+                lower_bound: w[0].to_string(),
+                upper_bound: w[1].to_string(),
             },
-        });
-    }
-
-    Ok(assignments)
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -188,18 +185,19 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
 
-    struct MinMaxDatalake {
-        min_val: i64,
-        max_val: i64,
+    /// Test datalake that returns a single `cuts: List<Int64>` column — the
+    /// already-sorted/deduped cut points the production SQL produces. Empty
+    /// vec models a probe over an empty scope.
+    struct ProbeDatalake {
+        cuts: Vec<i64>,
         captured_sql: Mutex<String>,
         captured_params: Mutex<Value>,
     }
 
-    impl MinMaxDatalake {
-        fn new(min_val: i64, max_val: i64) -> Self {
+    impl ProbeDatalake {
+        fn new(cuts: Vec<i64>) -> Self {
             Self {
-                min_val,
-                max_val,
+                cuts,
                 captured_sql: Mutex::new(String::new()),
                 captured_params: Mutex::new(Value::Null),
             }
@@ -207,7 +205,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl DatalakeQuery for MinMaxDatalake {
+    impl DatalakeQuery for ProbeDatalake {
         async fn query_arrow(
             &self,
             _sql: &str,
@@ -226,26 +224,23 @@ mod tests {
             *self.captured_sql.lock().unwrap() = sql.to_string();
             *self.captured_params.lock().unwrap() = params;
 
-            let schema = Arc::new(Schema::new(vec![
-                Field::new("min_val", DataType::Int64, false),
-                Field::new("max_val", DataType::Int64, false),
-            ]));
+            let inner_field = Arc::new(Field::new("item", DataType::Int64, true));
+            let list_field = Field::new("cuts", DataType::List(inner_field.clone()), false);
+            let schema = Arc::new(Schema::new(vec![list_field]));
+            let values = Arc::new(Int64Array::from(self.cuts.clone()));
+            let offsets =
+                arrow::buffer::OffsetBuffer::new(vec![0i32, self.cuts.len() as i32].into());
+            let list = ListArray::new(inner_field, offsets, values, None);
             Ok(vec![
-                RecordBatch::try_new(
-                    schema,
-                    vec![
-                        Arc::new(Int64Array::from(vec![self.min_val])),
-                        Arc::new(Int64Array::from(vec![self.max_val])),
-                    ],
-                )
-                .unwrap(),
+                RecordBatch::try_new(schema, vec![Arc::new(list)]).unwrap(),
             ])
         }
     }
 
     #[tokio::test]
-    async fn even_split_yields_disjoint_ranges() {
-        let datalake = MinMaxDatalake::new(0, 99);
+    async fn quantile_cuts_yield_disjoint_ranges() {
+        // ClickHouse-side: cuts = sorted([min=0, 25, 50, 75, max+1=100]).
+        let datalake = ProbeDatalake::new(vec![0, 25, 50, 75, 100]);
         let ranges = compute_partition_ranges(&datalake, "t", "id", 4, None)
             .await
             .unwrap();
@@ -253,14 +248,49 @@ mod tests {
         assert_eq!(ranges.len(), 4);
         assert_eq!(ranges[0].bounds.lower_bound(), "0");
         assert_eq!(ranges[0].bounds.upper_bound(), "25");
-        assert_eq!(ranges[1].bounds.lower_bound(), "25");
-        assert_eq!(ranges[1].bounds.upper_bound(), "50");
         assert_eq!(ranges[3].bounds.upper_bound(), "100");
+        assert_eq!(ranges[3].total, 4);
+    }
+
+    #[tokio::test]
+    async fn clustered_data_produces_dense_partitions() {
+        // Sparse-id pathology: data clusters low + one outlier. Quantiles land
+        // in the dense cluster, so partitions sit where rows live.
+        let datalake = ProbeDatalake::new(vec![1, 2, 3, 4, 10000, 100000]);
+        let ranges = compute_partition_ranges(&datalake, "t", "id", 5, None)
+            .await
+            .unwrap();
+
+        let bounds: Vec<(&str, &str)> = ranges
+            .iter()
+            .map(|r| (r.bounds.lower_bound(), r.bounds.upper_bound()))
+            .collect();
+        assert_eq!(
+            bounds,
+            vec![
+                ("1", "2"),
+                ("2", "3"),
+                ("3", "4"),
+                ("4", "10000"),
+                ("10000", "100000"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn skips_when_too_few_distinct_cuts() {
+        // ClickHouse arrayDistinct already collapsed everything to one inner
+        // cut (min, max+1). Not worth partitioning — fall back to single query.
+        let datalake = ProbeDatalake::new(vec![5, 11]);
+        let ranges = compute_partition_ranges(&datalake, "t", "id", 5, None)
+            .await
+            .unwrap();
+        assert!(ranges.is_empty());
     }
 
     #[tokio::test]
     async fn count_of_one_returns_empty() {
-        let datalake = MinMaxDatalake::new(0, 100);
+        let datalake = ProbeDatalake::new(vec![]);
         let ranges = compute_partition_ranges(&datalake, "t", "id", 1, None)
             .await
             .unwrap();
@@ -268,8 +298,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn span_smaller_than_count_returns_empty() {
-        let datalake = MinMaxDatalake::new(1, 1);
+    async fn empty_probe_returns_empty() {
+        let datalake = ProbeDatalake::new(vec![]);
         let ranges = compute_partition_ranges(&datalake, "t", "id", 4, None)
             .await
             .unwrap();
@@ -277,13 +307,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn traversal_path_scopes_min_max_probe() {
-        let datalake = MinMaxDatalake::new(0, 100);
+    async fn probe_sql_uses_quantiles_tdigest_and_scopes_by_traversal_path() {
+        let datalake = ProbeDatalake::new(vec![0, 25, 50, 75, 101]);
         let _ = compute_partition_ranges(&datalake, "t", "id", 4, Some("42/100/"))
             .await
             .unwrap();
 
         let sql = datalake.captured_sql.lock().unwrap().clone();
+        assert!(
+            sql.contains("quantilesTDigest"),
+            "expected quantilesTDigest in: {sql}"
+        );
         assert!(
             sql.contains("startsWith(traversal_path"),
             "expected traversal_path scoping in: {sql}"
