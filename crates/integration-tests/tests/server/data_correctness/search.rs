@@ -823,6 +823,7 @@ pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
     )
     .await;
 
+    resp.assert_node_count(6);
     resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
 }
 
@@ -847,6 +848,7 @@ pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestConte
     .await;
 
     resp.assert_node_count(3);
+    resp.assert_node_order("MergeRequest", &[2002, 2004, 2005]);
     resp.assert_filter("MergeRequest", "state", |n| {
         n.prop_str("state") == Some("merged")
     });
