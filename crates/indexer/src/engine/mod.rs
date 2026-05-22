@@ -40,7 +40,7 @@ use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::{Instrument, debug, error, info, warn};
+use tracing::{Instrument, error, info, warn};
 
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
@@ -313,12 +313,15 @@ async fn process_message(
     topic_name: String,
 ) {
     let topic_label = KeyValue::new("topic", topic_name.clone());
+    let subject = message.envelope.subject.clone();
+    let handler_count = handlers.len();
 
-    debug!("message received");
-
-    if message.envelope.attempt > 1 {
-        info!("message retry received");
-    }
+    info!(
+        %subject,
+        handlers = handler_count,
+        attempt = message.envelope.attempt,
+        "message received"
+    );
 
     let message_start = Instant::now();
     let outcome = run_handlers(
@@ -370,12 +373,21 @@ async fn process_message(
         }
     };
 
+    let elapsed = message_start.elapsed();
     runtime
         .metrics
         .record_message_outcome(&topic_label, outcome_label);
     runtime
         .metrics
-        .record_message_duration(&topic_label, message_start.elapsed().as_secs_f64());
+        .record_message_duration(&topic_label, elapsed.as_secs_f64());
+
+    info!(
+        %subject,
+        outcome = outcome_label,
+        elapsed_ms = elapsed.as_millis() as u64,
+        handlers = handler_count,
+        "message processed"
+    );
 }
 
 /// Runs all handlers concurrently and aggregates their outcomes.
