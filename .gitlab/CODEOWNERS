@@ -1,24 +1,14 @@
-# GitLab Knowledge Graph (Orbit) CODEOWNERS
-#
-# Default rule: the Orbit team owns every file in the repository. SOX scope
-# for billing emission is enumerated in ADR 013 (see
-# docs/design-documents/decisions/013_billing_sox_scope.md) and enforced
-# through the required section below.
+# SOX scope for billing emission: see ADR 013
+# (docs/design-documents/decisions/013_billing_sox_scope.md).
 
 * @gitlab-org/orbit/team
 
 [SOX Billing] @gitlab-org/orbit/team
-# Primary scope: the isolated billing crate and the gkg-server modules
-# that wire billing into auth, the query pipeline, and service startup.
-# See ADR 013 for the rationale and the list of in-scope hook points.
 /crates/gkg-billing/                 @gitlab-org/orbit/team
 /crates/gkg-server-config/           @gitlab-org/orbit/team
 /crates/gkg-server/src/auth/         @gitlab-org/orbit/team
 /crates/gkg-server/src/pipeline/     @gitlab-org/orbit/team
 /crates/gkg-server/src/grpc/         @gitlab-org/orbit/team
 /crates/query-engine/pipeline/       @gitlab-org/orbit/team
-
-# Changes to the ADR itself or this CODEOWNERS file must go through the
-# same controlled-merge approval as the in-scope code.
 /.gitlab/CODEOWNERS                  @gitlab-org/orbit/team
 /docs/design-documents/decisions/    @gitlab-org/orbit/team
