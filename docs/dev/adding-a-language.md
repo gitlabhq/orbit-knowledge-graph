@@ -299,11 +299,12 @@ The macro generates `dispatch_language`, `lang_ctx_for`, and
 documented in
 [`integration-tests-codegraph/README.md`](../../crates/integration-tests-codegraph/README.md).
 
-Write at least three:
+Write at least three covering these areas (names are suggestions — existing
+languages use varied names like `resolution.yaml`, `simple_call.yaml`):
 
-1. **`definitions.yaml`** — scope rules produce `Definition` nodes.
-1. **`imports.yaml`** — import rules produce `ImportedSymbol` nodes.
-1. **`call_resolution.yaml`** — resolver wires calls across files.
+1. **Definitions** — scope rules produce `Definition` nodes.
+1. **Imports** — import rules produce `ImportedSymbol` nodes.
+1. **Cross-file call resolution** — resolver wires calls across files.
 
 #### Example: `definitions.yaml`
 
