@@ -3,12 +3,11 @@ use std::collections::HashSet;
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
-use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
     ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
 };
-use super::{ExtractQuery, PipelinePlan, Plans, SOURCE_DATA_TABLE, Transformation};
+use super::{Plan, Plans, SOURCE_DATA_TABLE, Transformation};
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
 
@@ -59,9 +58,9 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
-fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> PipelinePlan {
+fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Plan {
     let node_destination = input.extract.destination_table.clone();
-    let extract_query = lower_extract_plan(input.extract, batch_size);
+    let mut plan = lower_extract_plan(input.extract, batch_size);
 
     let dict_columns = ontology
         .get_node(&input.name)
@@ -85,11 +84,9 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
         transforms.push(lower_fk_edge_transform(fk_edge, ontology));
     }
 
-    PipelinePlan {
-        name: input.name,
-        extract_query,
-        transforms,
-    }
+    plan.name = input.name;
+    plan.transforms = transforms;
+    plan
 }
 
 /// Resolve the ORDER BY and dictionary-encode columns for an edge table
@@ -209,10 +206,10 @@ fn lower_standalone_edge_plan(
     input: StandaloneEdgePlan,
     batch_size: u64,
     ontology: &Ontology,
-) -> PipelinePlan {
+) -> Plan {
     let destination_table = input.extract.destination_table.clone();
     let name = plan_name(&input.relationship_kind, &input.extract.source);
-    let extract_query = lower_extract_plan(input.extract, batch_size);
+    let mut plan = lower_extract_plan(input.extract, batch_size);
     let meta = edge_table_metadata(&input.relationship_kind, ontology);
 
     let transform_query = Query {
@@ -231,15 +228,13 @@ fn lower_standalone_edge_plan(
         limit: None,
     };
 
-    PipelinePlan {
-        name,
-        extract_query,
-        transforms: vec![Transformation {
-            query: transform_query,
-            destination_table,
-            dict_encode_columns: meta.dict_columns,
-        }],
-    }
+    plan.name = name;
+    plan.transforms = vec![Transformation {
+        query: transform_query,
+        destination_table,
+        dict_encode_columns: meta.dict_columns,
+    }];
+    plan
 }
 
 fn plan_name(relationship_kind: &str, source: &ExtractSource) -> String {
@@ -395,7 +390,10 @@ fn lower_edge_select(
     cols
 }
 
-fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
+/// Converts an [`ExtractPlan`] into a [`Plan`] with the extraction skeleton
+/// (select, from, static filters) but no name or transforms — the caller
+/// fills those in.
+fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
     let mut select: Vec<SelectExpr> = input.columns.iter().map(lower_extract_column).collect();
 
     select.push(SelectExpr::new(
@@ -415,70 +413,19 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
     let traversal_filter =
         lower_traversal_filter(input.namespaced, input.traversal_path_filter.as_deref());
 
-    let where_clause = Expr::and_all([
-        Some(watermark_where(&input.watermark)),
+    let static_filters = input.additional_where.map(Expr::raw);
+
+    Plan {
+        name: String::new(),
+        select,
+        from,
+        static_filters,
+        watermark_column: input.watermark,
+        sort_key: input.order_by,
+        batch_size,
         traversal_filter,
-        input.additional_where.map(Expr::raw),
-    ]);
-
-    if let Some(enrichment) = input.enrichment {
-        // CTE-based enrichment: build the entire SQL as a raw template.
-        // The _batch CTE contains the base extract query with pagination.
-        // Enrichment CTEs do point lookups by FK from _batch.
-        // The outer SELECT LEFT JOINs _batch against enrichment CTEs.
-
-        // _batch CTE inner SELECT (base columns only, no enriched).
-        let base_select: Vec<String> = select.iter().map(codegen::emit_select_expr).collect();
-
-        let base_where = where_clause
-            .as_ref()
-            .map(codegen::emit_expr_to_string)
-            .unwrap_or_default();
-
-        let from_sql = match &from {
-            TableRef::Scan { table, .. } => table.clone(),
-            TableRef::Raw(r) => r.clone(),
-        };
-
-        let order_by_sql = input.order_by.join(", ");
-
-        // Outer SELECT: _batch.col AS col for base, enriched as-is.
-        let outer_cols: Vec<String> = select
-            .iter()
-            .map(|s| {
-                let name = s.alias.as_deref().unwrap_or(match &s.expr {
-                    Expr::Column { column, .. } => column.as_str(),
-                    Expr::Raw(r) => r.as_str(),
-                    _ => "?",
-                });
-                format!("_batch.{name} AS {name}")
-            })
-            .chain(enrichment.select_exprs.iter().cloned())
-            .collect();
-
-        let template = format!(
-            "WITH _batch AS (\
-             SELECT {base_select} FROM {from_sql} \
-             WHERE {base_where}{{CURSOR}} \
-             ORDER BY {order_by_sql} LIMIT {batch_size}\
-             ), {cte_defs} \
-             SELECT {outer_select} FROM _batch {joins}",
-            base_select = base_select.join(", "),
-            cte_defs = enrichment.cte_defs.join(", "),
-            outer_select = outer_cols.join(", "),
-            joins = enrichment.join_clauses.join(" "),
-        );
-
-        ExtractQuery::raw(template, input.order_by, batch_size)
-    } else {
-        let base_query = Query {
-            select,
-            from,
-            where_clause,
-            order_by: vec![],
-            limit: None,
-        };
-        ExtractQuery::new(base_query, input.order_by, batch_size)
+        transforms: vec![],
+        enrichment: input.enrichment,
     }
 }
 
@@ -508,9 +455,6 @@ fn lower_extract_column(column: &ExtractColumn) -> SelectExpr {
             Expr::func("toString", vec![Expr::col("", name)]),
             name.clone(),
         ),
-        // Clamp Postgres dates outside ClickHouse Date32 range (1900-01-01..2299-12-31)
-        // to NULL so a single bad row cannot poison the Arrow batch. Using >=/<= (rather
-        // than BETWEEN) lets NULL inputs short-circuit to NULL, matching Nullable(Date32).
         ExtractColumn::DateClamp(name) => SelectExpr::new(
             Expr::raw(format!(
                 "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL)"
@@ -518,22 +462,6 @@ fn lower_extract_column(column: &ExtractColumn) -> SelectExpr {
             name.clone(),
         ),
     }
-}
-
-fn watermark_where(watermark: &str) -> Expr {
-    Expr::and_all([
-        Some(Expr::binary(
-            Op::Gt,
-            Expr::raw(watermark.to_string()),
-            Expr::param("last_watermark", "String"),
-        )),
-        Some(Expr::binary(
-            Op::Le,
-            Expr::raw(watermark.to_string()),
-            Expr::param("watermark", "String"),
-        )),
-    ])
-    .unwrap()
 }
 
 #[cfg(test)]
@@ -597,14 +525,14 @@ mod tests {
             .iter()
             .find(|p| p.name == "WorkItem")
             .expect("WorkItem plan should exist");
-        assert_eq!(work_item.extract_query.batch_size(), 50_000);
+        assert_eq!(work_item.batch_size, 50_000);
 
         let group = plans
             .namespaced
             .iter()
             .find(|p| p.name == "Group")
             .expect("Group plan should exist");
-        assert_eq!(group.extract_query.batch_size(), 1_000_000);
+        assert_eq!(group.batch_size, 1_000_000);
     }
 
     #[test]
@@ -686,17 +614,36 @@ mod tests {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1_000_000);
 
-        // Find a standalone edge plan whose extract SQL references siphon_issue_assignees.
+        use chrono::Utc;
+        use std::collections::BTreeMap;
+
         let plan = plans
             .namespaced
             .iter()
-            .find(|p| p.extract_query.to_sql().contains("siphon_issue_assignees"))
+            .find(|p| {
+                let sql = p
+                    .prepare()
+                    .with_base_conditions(&BTreeMap::from([(
+                        "traversal_path".to_string(),
+                        "1/2/".to_string(),
+                    )]))
+                    .with_watermark(&Utc::now(), &Utc::now())
+                    .to_sql();
+                sql.contains("siphon_issue_assignees")
+            })
             .unwrap_or_else(|| {
                 let names: Vec<_> = plans.namespaced.iter().map(|p| &p.name).collect();
                 panic!("no plan with siphon_issue_assignees found; plans: {names:?}")
             });
 
-        let sql = plan.extract_query.to_sql();
+        let sql = plan
+            .prepare()
+            .with_base_conditions(&BTreeMap::from([(
+                "traversal_path".to_string(),
+                "1/2/".to_string(),
+            )]))
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
         eprintln!("ASSIGNED WorkItem extract SQL:\n{sql}");
 
         // CTE-based: _batch CTE wraps the base query, enrichment CTE does point lookups.
@@ -964,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_query_table_etl_includes_all_columns() {
+    fn extract_plan_produces_plan_with_correct_fields() {
         let extract = ExtractPlan {
             destination_table: "gl_user".to_string(),
             columns: vec![
@@ -981,7 +928,41 @@ mod tests {
             enrichment: None,
         };
 
-        let sql = lower_extract_plan(extract, 1000).to_sql();
+        let plan = lower_extract_plan(extract, 1000);
+
+        assert_eq!(plan.watermark_column, "_siphon_replicated_at");
+        assert_eq!(plan.sort_key, vec!["id"]);
+        assert_eq!(plan.batch_size, 1000);
+        assert!(plan.traversal_filter.is_none());
+        assert!(plan.static_filters.is_none());
+        assert!(plan.enrichment.is_none());
+    }
+
+    #[test]
+    fn extract_plan_table_etl_sql_via_prepared_query() {
+        use chrono::Utc;
+
+        let extract = ExtractPlan {
+            destination_table: "gl_user".to_string(),
+            columns: vec![
+                ExtractColumn::Bare("id".to_string()),
+                ExtractColumn::Bare("name".to_string()),
+            ],
+            source: ExtractSource::Table("siphon_user".to_string()),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+            namespaced: false,
+            traversal_path_filter: None,
+            additional_where: None,
+            enrichment: None,
+        };
+
+        let plan = lower_extract_plan(extract, 1000);
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
 
         assert!(sql.contains("SELECT id, name,"), "sql: {sql}");
         assert!(
@@ -996,6 +977,8 @@ mod tests {
 
     #[test]
     fn extract_query_clamps_date_columns_to_date32_range() {
+        use chrono::Utc;
+
         let extract = ExtractPlan {
             destination_table: "gl_work_item".to_string(),
             columns: vec![ExtractColumn::DateClamp("due_date".to_string())],
@@ -1009,7 +992,11 @@ mod tests {
             enrichment: None,
         };
 
-        let sql = lower_extract_plan(extract, 1000).to_sql();
+        let plan = lower_extract_plan(extract, 1000);
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
 
         assert!(
             sql.contains("if(due_date >= toDate('1900-01-01') AND due_date <= toDate('2299-12-31'), due_date, NULL) AS due_date"),
@@ -1019,6 +1006,8 @@ mod tests {
 
     #[test]
     fn extract_query_query_etl_uses_structured_fields() {
+        use chrono::Utc;
+
         let extract = ExtractPlan {
             destination_table: "gl_project".to_string(),
             columns: vec![
@@ -1042,7 +1031,13 @@ mod tests {
             enrichment: None,
         };
 
-        let sql = lower_extract_plan(extract, 500).to_sql();
+        let plan = lower_extract_plan(extract, 500);
+        let conditions = BTreeMap::from([("traversal_path".to_string(), "1/2/".to_string())]);
+        let sql = plan
+            .prepare()
+            .with_base_conditions(&conditions)
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
 
         assert!(sql.contains("project.id AS id"), "sql: {sql}");
         assert!(

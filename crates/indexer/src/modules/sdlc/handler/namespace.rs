@@ -11,11 +11,11 @@ use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
-use crate::modules::sdlc::plan::PipelinePlan;
+use crate::modules::sdlc::plan::Plan;
 use crate::topic::NamespaceIndexingRequest;
 
 pub struct NamespaceHandler {
-    plans: Vec<PipelinePlan>,
+    plans: Vec<Plan>,
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
     config: NamespaceHandlerConfig,
@@ -24,7 +24,7 @@ pub struct NamespaceHandler {
 
 impl NamespaceHandler {
     pub fn new(
-        plans: Vec<PipelinePlan>,
+        plans: Vec<Plan>,
         pipeline: Arc<Pipeline>,
         metrics: SdlcMetrics,
         config: NamespaceHandlerConfig,
