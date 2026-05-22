@@ -101,7 +101,7 @@ pub(super) async fn run_query_with_security(
 
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
-    server_extensions.insert(Arc::new(resolver_registry));
+    server_extensions.insert(resolver_registry);
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
