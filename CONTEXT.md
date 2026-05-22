@@ -29,7 +29,7 @@ A data model where typed **Nodes** carry properties and typed directed **Relatio
 _Avoid_: knowledge graph (too vague), graph database (refers to the storage layer)
 
 **Node**:
-A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated ClickHouse table. Called `entity` in the **Query DSL**.
+A typed entity in the property graph representing a GitLab object (e.g., Project, MergeRequest, File, Definition). Each node type is defined in the **Ontology** and stored in a dedicated table (ClickHouse in **Orbit Remote**, DuckDB in **Orbit Local**). Called `entity` in the **Query DSL**.
 _Avoid_: vertex
 
 **Relationship**:
@@ -103,21 +103,3 @@ _Avoid_: enrichment, decoration
 **GOON (Graph Object Output Notation)**:
 A line-oriented text format for representing graph query results compactly. Designed for LLM consumption — measured at −11% cost, −15% duration, and +4.8pp correctness vs raw JSON on Haiku 4.5 (ADR 012). Used when queries specify `format=llm`.
 _Avoid_: LLM format, text format
-
-## Example dialogue
-
-> **New engineer**: "I'm looking at a bug where a user can't see their issues in the graph. Where do I start?"
->
-> **Domain expert**: "First check whether the **Namespace** is indexed — look for their root group in `siphon_knowledge_graph_enabled_namespaces`. If it is, the **SDLC Data** pipeline should have created **WorkItem** nodes for those issues."
->
-> **New engineer**: "Wait, issues? I don't see an Issue node type anywhere."
->
-> **Domain expert**: "Right — there's no Issue node. Everything is a **WorkItem** now. Filter by `work_item_type = 'issue'` on the **WorkItem** node."
->
-> **New engineer**: "OK, the WorkItems exist. But the query returns empty for this user."
->
-> **Domain expert**: "That's authorization. The **Query DSL** compiles to SQL that filters on **Traversal Path** — the user needs Reporter+ on a **Namespace** that's an ancestor of those WorkItems. Check the JWT claims for their authorized paths. If the paths look right, it might be **Redaction** — Rails is denying access at the per-resource level, maybe confidential issues."
->
-> **New engineer**: "How would I test that locally?"
->
-> **Domain expert**: "Use **Orbit Local** to index the repo into DuckDB — that skips authorization entirely. If the data shows up there, you know it's a permissions issue, not an indexing issue."
