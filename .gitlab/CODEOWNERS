@@ -1,0 +1,16 @@
+# SOX scope for billing emission: see ADR 013
+# (docs/design-documents/decisions/013_billing_sox_scope.md).
+
+[SOX Billing] @gitlab-org/orbit/team
+/crates/gkg-billing/
+/crates/gkg-server-config/
+/crates/gkg-server/src/auth/
+/crates/gkg-server/src/pipeline/
+/crates/gkg-server/src/grpc/
+/crates/gkg-server/src/billing_adapter.rs
+/crates/gkg-server/src/main.rs
+/crates/query-engine/pipeline/
+/.gitlab/CODEOWNERS
+
+[Architecture] @gitlab-org/orbit/team
+/docs/design-documents/decisions/
