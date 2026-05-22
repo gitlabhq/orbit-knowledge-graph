@@ -12,7 +12,8 @@ use compiler::constants::{
     HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
 };
 use compiler::{
-    ColumnSelection, DynamicEntityColumns, HydrationTemplate, Input, InputNode, QueryType,
+    ColumnSelection, DynamicEntityColumns, FilterOp, HydrationTemplate, Input, InputFilter,
+    InputNode, QueryType,
 };
 use gkg_utils::arrow::{ArrowUtils, ColumnValue};
 use pipeline::PipelineError;
@@ -459,4 +460,51 @@ pub fn hydrate_dynamic(
     }
 
     Ok((nodes, total_ids))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-hydration virtual column filtering
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Evaluate a single [`InputFilter`] against a [`ColumnValue`].
+fn eval_virtual_filter(value: Option<&ColumnValue>, filter: &InputFilter) -> bool {
+    let op = filter.op.unwrap_or(FilterOp::Eq);
+    match op {
+        FilterOp::IsNull => value.is_none() || matches!(value, Some(ColumnValue::Null)),
+        FilterOp::IsNotNull => value.is_some() && !matches!(value, Some(ColumnValue::Null)),
+        _ => {
+            let Some(ColumnValue::String(cv_str)) = value else {
+                return false;
+            };
+            let filter_str = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            match op {
+                FilterOp::Eq => cv_str == filter_str,
+                FilterOp::Contains => cv_str.to_lowercase().contains(&filter_str.to_lowercase()),
+                FilterOp::StartsWith => cv_str.starts_with(filter_str),
+                FilterOp::EndsWith => cv_str.ends_with(filter_str),
+                _ => true,
+            }
+        }
+    }
+}
+
+/// Apply virtual-column filters to static hydration results.
+/// Rows that fail any virtual filter predicate are removed.
+pub fn apply_virtual_filters_static(result: &mut QueryResult, templates: &[HydrationTemplate]) {
+    let filters: Vec<_> = templates
+        .iter()
+        .flat_map(|t| {
+            t.virtual_filters
+                .iter()
+                .map(move |(col, f)| (format!("{}_{col}", t.node_alias), f))
+        })
+        .collect();
+    if filters.is_empty() {
+        return;
+    }
+    result.retain_rows(|row| {
+        filters
+            .iter()
+            .all(|(col_key, filter)| eval_virtual_filter(row.get(col_key), filter))
+    });
 }

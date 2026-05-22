@@ -360,6 +360,16 @@ impl<'a> Validator<'a> {
     /// Relationship filters are validated against the fixed edge table schema.
     /// Unknown edge columns are rejected (fail closed) since they would
     /// produce broken SQL at runtime.
+    /// Operators supported for in-memory evaluation on virtual columns.
+    const VIRTUAL_FILTER_OPS: &'static [FilterOp] = &[
+        FilterOp::Eq,
+        FilterOp::Contains,
+        FilterOp::StartsWith,
+        FilterOp::EndsWith,
+        FilterOp::IsNull,
+        FilterOp::IsNotNull,
+    ];
+
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {
@@ -379,6 +389,21 @@ impl<'a> Validator<'a> {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
                     )));
+                }
+                let is_virtual = self
+                    .ontology
+                    .check_field_flag(entity, prop, |f| f.is_virtual());
+                if is_virtual {
+                    for filter in filters {
+                        let op = filter.op.unwrap_or(FilterOp::Eq);
+                        if !Self::VIRTUAL_FILTER_OPS.contains(&op) {
+                            return Err(QueryError::Validation(format!(
+                                "filter on \"{prop}\" for {entity}: operator \"{op:?}\" is not \
+                                 supported on virtual columns (only eq, contains, starts_with, \
+                                 ends_with, is_null, is_not_null)"
+                            )));
+                        }
+                    }
                 }
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;

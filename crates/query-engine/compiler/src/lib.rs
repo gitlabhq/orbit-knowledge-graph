@@ -51,7 +51,8 @@ pub use constants::{
 };
 pub use error::{QueryError, Result};
 pub use input::{
-    ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
+    ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
+    QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
@@ -1594,25 +1595,58 @@ mod tests {
     }
 
     #[test]
-    fn filter_on_virtual_column_rejected() {
+    fn filter_on_virtual_column_compiles_without_sql_predicate() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "f", "entity": "File",
+                         "node_ids": [1],
+                         "filters": {"content": {"op": "eq", "value": "x"}},
+                         "columns": ["path", "content"]},
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("virtual column filter should compile");
+
+        let sql = compiled.base.render();
+        assert!(
+            !sql.contains("content"),
+            "virtual column 'content' must not appear in SQL, got:\n{sql}"
+        );
+
+        // Virtual filter should be carried on the hydration plan.
+        if let compiler::HydrationPlan::Static(templates) = &compiled.hydration {
+            assert!(
+                templates.iter().any(|t| !t.virtual_filters.is_empty()),
+                "hydration plan should carry virtual filters"
+            );
+        } else {
+            panic!("expected static hydration plan");
+        }
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejects_unsupported_op() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let err = compile(
             r#"{
                 "query_type": "traversal",
                 "node": {"id": "f", "entity": "File",
                          "node_ids": [1],
-                         "filters": {"content": {"op": "eq", "value": "x"}}},
+                         "filters": {"content": {"op": "gt", "value": "x"}}},
                 "limit": 5
             }"#,
             &ontology,
             &security_ctx(),
         )
-        .expect_err("filter on virtual column should be rejected");
+        .expect_err("unsupported op on virtual column should be rejected");
 
-        let msg = err.to_string();
         assert!(
-            msg.contains("not filterable") || msg.contains("rejected"),
-            "filter on virtual column 'content' should be rejected, got: {msg}"
+            err.to_string().contains("not supported on virtual"),
+            "expected unsupported op error, got: {err}"
         );
     }
 }

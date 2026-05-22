@@ -239,6 +239,12 @@ impl QueryResult {
         &mut self.rows
     }
 
+    /// Remove authorized rows that do not satisfy `predicate`.
+    /// Used for post-hydration filtering (e.g. virtual column filters).
+    pub fn retain_rows(&mut self, mut predicate: impl FnMut(&QueryResultRow) -> bool) {
+        self.rows.retain(|row| !row.authorized || predicate(row));
+    }
+
     pub fn ctx(&self) -> &ResultContext {
         &self.ctx
     }
