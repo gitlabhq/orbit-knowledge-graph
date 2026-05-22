@@ -139,3 +139,4 @@ Design docs live in `docs/design-documents/` and must describe the current repos
   - `AGENTS.md` / `CLAUDE.md` for agent-facing architecture summaries and doc-sync rules
 - **If your MR changes the architecture but no design doc changed, assume the documentation is incomplete and fix it before merging.**
 - **When you introduce a new domain concept** (new node type, relationship type, query feature, pipeline concept), check `CONTEXT.md` and add or update the term if it's missing. Only add terms that are domain-specific and would confuse a new team member — not implementation details.
+- **Before writing documentation, design docs, or MR descriptions, consult `CONTEXT.md` for canonical terminology.** Use the canonical terms, not the aliases listed under _Avoid_.
