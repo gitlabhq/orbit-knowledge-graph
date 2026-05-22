@@ -200,7 +200,6 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 
 The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
 
-- **Ruby** uses native Prism bindings for high-fidelity AST parsing.
 - **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, treats JSX/TSX component opening elements as call sites while ignoring intrinsic tags, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
 - **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
 - **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
