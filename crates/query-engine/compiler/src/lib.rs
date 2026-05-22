@@ -1645,7 +1645,7 @@ mod tests {
         .expect_err("unsupported op on virtual column should be rejected");
 
         assert!(
-            err.to_string().contains("not supported on virtual"),
+            err.to_string().contains("not supported on this virtual"),
             "expected unsupported op error, got: {err}"
         );
     }
