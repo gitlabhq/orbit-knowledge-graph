@@ -1,51 +1,40 @@
 # Adding a new language to the code indexer
 
-**Audience:** contributors adding a new language to the v2 code indexer in
-`gitlab-org/orbit/knowledge-graph`.
-
-This guide walks through every file you must touch, the
-[`DslLanguage`](../../crates/code-graph/src/v2/dsl/types.rs) trait surface, the
-declarative `define_languages!` and `register_v2_pipelines!` macros, the YAML
-fixture format, and the common traps. The most-recent worked example is the
-[initial C-language MR (`04433eef`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/04433eef78da872995e5df7927e88ab436c63416);
-mirror its file-by-file structure when in doubt.
+Canonical worked example:
+[C-language MR !1133](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1133).
+Mirror its structure when in doubt.
 
 ## Prerequisites
 
 ```shell
-# One-time toolchain setup.
 mise install                # rustc, cargo, nextest, lefthook, etc.
 mise trust                  # in fresh worktrees
-
-# Sanity-check the workspace builds and passes fast tests.
 mise build
-mise test:fast              # ~30s; excludes Docker-based suites
+mise test:fast              # ~30 s; no Docker required
 ```
 
-You do **not** need a GDK, ClickHouse, or NATS for code-indexer work. The v2
-pipeline tests run entirely in-process against an in-memory graph.
+No GDK, ClickHouse, or NATS needed. The v2 pipeline tests run in-process
+against an in-memory graph.
 
-## The v2 indexer at a glance
+## Architecture overview
 
-The code indexer turns source files into a property graph of `Definition`,
-`File`, `Directory`, and `ImportedSymbol` nodes connected by `Contains`,
-`Defines`, `Imports`, `Calls`, and `Extends` edges. Everything happens inside a
-single Rust crate:
+The code indexer produces **Code Graph** nodes (`Definition`, `File`,
+`Directory`, `ImportedSymbol`) connected by relationships (`Contains`,
+`Defines`, `Imports`, `Calls`, `Extends`):
 
 ```plaintext
 crates/
   code-graph/
     src/v2/
       langs/
-        generic/      # tree-sitter-backed DSL languages
-                      # C, C++, C#, Go, Java, Kotlin, Python, Ruby
-        custom/       # bespoke pipelines (JS/TS via OXC, Rust via rust-analyzer)
-      registry.rs     # register_v2_pipelines! { ... } — one line per language
-      config/lang.rs  # define_languages! { ... } — Language enum + metadata
+        generic/      # tree-sitter DSL languages (C, C++, C#, Go, Java, Kotlin, Python, Ruby)
+        custom/       # JS/TS via OXC, Rust via rust-analyzer
+      registry.rs     # register_v2_pipelines! — one line per language
+      config/lang.rs  # define_languages! — Language enum + metadata
       pipeline.rs     # GenericPipeline<Dsl, Rules>, FamilyPipeline
       dsl/            # ScopeRule / ReferenceRule / ImportRule builders
       linker/         # ResolutionRules, HasRules, CodeGraph
-    treesitter-visit/ # separate sub-crate: SupportLang enum + grammar loading
+    treesitter-visit/ # sub-crate: SupportLang enum + grammar loading
 
   integration-tests-codegraph/
     fixtures/<lang>/  # YAML test fixtures, one directory per language
@@ -53,39 +42,33 @@ crates/
     README.md         # fixture format reference
 ```
 
-For hackathon-scale contributions, you almost always want the **generic DSL
-path**. It's how Go is implemented in ~310 lines: declarative scope, reference,
-and import rules over a tree-sitter grammar. The custom pipelines exist because
-JavaScript and Rust have ecosystem-specific module resolution requirements;
-they should not be your starting point.
+Use the **generic DSL path** for new languages. Go is ~310 lines of declarative
+scope, reference, and import rules. Custom pipelines (JS, Rust) exist for
+ecosystem-specific module resolution — not a starting point.
 
-## What "adding a language" actually delivers
+## Files touched
 
-A typical generic-language MR touches the following files (sizes from the C and
-C++ MRs):
+Sizes from the C and C++ MRs. All paths relative to `crates/`.
 
-| File | What changes | Approx LoC |
+| File | Change | LoC |
 |---|---|---:|
-| `crates/code-graph/treesitter-visit/Cargo.toml` | +1 optional `tree-sitter-<lang>` dep; +1 entry in `builtin-parser` feature list | +2 |
-| `crates/code-graph/treesitter-visit/src/languages.rs` | +1 `SupportLang::<Lang>` variant; +1 `LanguageExt::get_ts_language` arm | +8 |
-| `crates/code-graph/src/v2/config/lang.rs` | +1 row inside `define_languages! { ... }` | +7 |
-| `crates/code-graph/src/v2/langs/generic/<lang>.rs` | New file: `<Lang>Dsl` and `<Lang>Rules` | 240–500 |
-| `crates/code-graph/src/v2/langs/generic/mod.rs` | +1 `pub mod <lang>;` | +1 |
-| `crates/code-graph/src/v2/registry.rs` | +2 `use` lines; +1 entry in `register_v2_pipelines! { ... }` | +3 |
-| `crates/integration-tests-codegraph/fixtures/<lang>/*.yaml` | 3+ new fixtures: definitions, imports, cross-file call | ~150 |
-| `crates/integration-tests-codegraph/tests/suites.rs` | **+1 `yaml_test!(...)` line per fixture** (see [traps](#common-traps)) | +N |
-| `docs/design-documents/indexing/code_indexing.md` | List the new language under the tree-sitter parser bullet | +2 |
-| `code-indexing-benchmark.yaml` (optional) | A representative benchmark repo for the new language | +20 |
+| `treesitter-visit/Cargo.toml` | +1 optional `tree-sitter-<lang>` dep; +1 `builtin-parser` feature entry | +2 |
+| `treesitter-visit/src/languages.rs` | +1 `SupportLang` variant; +1 `get_ts_language` arm | +8 |
+| `code-graph/src/v2/config/lang.rs` | +1 `define_languages!` row | +7 |
+| `code-graph/src/v2/langs/generic/<lang>.rs` | `<Lang>Dsl` + `<Lang>Rules` | 240–500 |
+| `code-graph/src/v2/langs/generic/mod.rs` | +1 `pub mod` | +1 |
+| `code-graph/src/v2/registry.rs` | +2 `use`; +1 `register_v2_pipelines!` row | +3 |
+| `integration-tests-codegraph/fixtures/<lang>/*.yaml` | 3+ fixtures | ~150 |
+| `integration-tests-codegraph/tests/suites.rs` | **+1 `yaml_test!` per fixture** | +N |
+| `docs/design-documents/indexing/code_indexing.md` | Add language to tree-sitter bullet | +2 |
 
-**Total:** ~700–1,400 LoC across roughly 12–16 files for a clean addition.
+Total: ~700–1,400 LoC across 12–16 files.
 
-## The `DslLanguage` trait surface
+## `DslLanguage` trait
 
-The trait lives at
 [`crates/code-graph/src/v2/dsl/types.rs:427`](../../crates/code-graph/src/v2/dsl/types.rs#L427).
-Only `name()` and `language()` are required; everything else has a sensible
-default. A minimum-viable language also implements `scopes()` — otherwise no
-definitions are emitted.
+Only `name()` and `language()` are required. Implement `scopes()` too —
+without it, no definitions are emitted.
 
 ```rust
 pub trait DslLanguage: Send + Sync + Default {
@@ -97,7 +80,7 @@ pub trait DslLanguage: Send + Sync + Default {
     fn imports()      -> Vec<ImportRule>     { vec![] }
     fn chain_config() -> Option<ChainConfig> { None  }
     fn package_node() -> Option<(&'static str, Extract)> { None }
-    fn file_scope()   -> bool                { false }   // since the C MR
+    fn file_scope()   -> bool                { false }
     fn hooks()        -> LanguageHooks       { LanguageHooks::default() }
     fn bindings()     -> Vec<BindingRule>    { vec![] }
     fn branches()     -> Vec<BranchRule>     { vec![] }
@@ -107,31 +90,28 @@ pub trait DslLanguage: Send + Sync + Default {
 }
 ```
 
-| Method | Purpose | When you need it |
+| Method | Purpose | When needed |
 |---|---|---|
-| `name()` | Lowercase string identifier (`"c"`, `"go"`) | always |
-| `language()` | Which `Language` variant this DSL implements | always |
-| `scopes()` | Grammar node kinds that produce `Definition` nodes | always (otherwise no definitions) |
-| `refs()` | Grammar node kinds that produce call or reference edges | recommended |
-| `imports()` | Grammar node kinds that produce `ImportedSymbol` nodes | recommended |
-| `bindings()` | Local-variable bindings tracked through SSA | only if calls flow through aliases |
-| `branches()`, `loops()`, `ssa_config()` | Control-flow boundaries for SSA | optional refinement |
-| `hooks()` | Per-language hooks (return-statement kinds, module scoping, import-path resolution) | optional |
-| `chain_config()` | How `obj.field.method()` chains are interpreted | needed for member access |
-| `package_node()` | Grammar node that names the file's package or namespace | needed for module-style FQN scoping |
-| `file_scope()` | Use the filename (without extension) as the root scope | true for languages without module declarations (C, Bash, single-file Lua) |
+| `name()` | Lowercase identifier (`"c"`, `"go"`) | always |
+| `language()` | `Language` variant | always |
+| `scopes()` | Node kinds that produce `Definition` nodes | always |
+| `refs()` | Node kinds that produce call/reference edges | recommended |
+| `imports()` | Node kinds that produce `ImportedSymbol` nodes | recommended |
+| `bindings()` | Local-variable bindings for SSA | if calls flow through aliases |
+| `branches()`, `loops()`, `ssa_config()` | Control-flow boundaries for SSA | optional |
+| `hooks()` | Return-statement kinds, module scoping, import-path resolution | optional |
+| `chain_config()` | How `obj.field.method()` chains resolve | for member access |
+| `package_node()` | Node naming the file's package/namespace | for module-style FQN scoping |
+| `file_scope()` | Use filename (minus extension) as root scope | for languages without module declarations (C, Bash) |
 
-`scope(...)`, `reference(...)`, `field(...)`, `child_of_kind(...)`, `text(...)`,
-`has_descendant(...)`, and `when(...)` are builders defined in
-[`crates/code-graph/src/v2/dsl/extractors.rs`](../../crates/code-graph/src/v2/dsl/extractors.rs)
-and [`crates/code-graph/src/v2/dsl/types.rs`](../../crates/code-graph/src/v2/dsl/types.rs).
-For languages that cannot be expressed by a single node-kind match (Elixir, for
-example, where every construct is a `call` node), `scope_fn(...)` accepts a
-custom label-picker function instead.
+Builders — `scope(...)`, `reference(...)`, `field(...)`, `child_of_kind(...)`,
+`text(...)`, `has_descendant(...)`, `when(...)` — are in
+[`extractors.rs`](../../crates/code-graph/src/v2/dsl/extractors.rs) and
+[`types.rs`](../../crates/code-graph/src/v2/dsl/types.rs).
+For grammars where every construct shares a kind (Elixir: everything is `call`),
+use `scope_fn(...)` with a custom label-picker.
 
-## Background: `LanguageFamily`
-
-`crates/code-graph/src/v2/config/lang.rs` defines:
+## `LanguageFamily`
 
 ```rust
 pub enum LanguageFamily {
@@ -141,24 +121,20 @@ pub enum LanguageFamily {
 }
 ```
 
-When two or more languages share an FQN space, the indexer can run them as a
-single family pipeline against a shared `CodeGraph`. **New languages should be
-`Standalone`** — only opt into a family if the new language genuinely shares an
-FQN or include space with an already-supported language. The `family()` method
-on `Language` is hand-written; you do not need to touch it unless you are
-adding a family member.
+**New languages should be `Standalone`.** Only use a family if the language
+shares an FQN or include space with an existing language. See
+[C++ MR !1140](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1140)
+for a family-pipeline example.
 
-## Step-by-step: a new generic language
+## Step-by-step
 
-The cleanest reference is the
-[C-language MR `04433eef`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/04433eef78da872995e5df7927e88ab436c63416)
-(May 3 2026). Read it once end-to-end before you start. The C++ MR
-[`05eac493`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/05eac493)
-covers the same shape and demonstrates how to opt into a `LanguageFamily`.
+Read
+[C MR !1133](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1133)
+end-to-end before starting.
 
 ### Step 1 — Wire the tree-sitter grammar
 
-In `crates/code-graph/treesitter-visit/Cargo.toml`:
+`crates/code-graph/treesitter-visit/Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -171,17 +147,15 @@ builtin-parser = [
 ]
 ```
 
-Check crates.io for the **exact constant name** the grammar exports. Most
-grammars export `LANGUAGE`, but a few do not — `tree-sitter-php`, for example,
-exports `LANGUAGE_PHP` and `LANGUAGE_PHP_ONLY`. Using the wrong constant
-produces a confusing compile error.
+Check crates.io for the **exact constant** the grammar exports. Most export
+`LANGUAGE`, but some differ — `tree-sitter-php` exports `LANGUAGE_PHP`.
 
-In `crates/code-graph/treesitter-visit/src/languages.rs`:
+`crates/code-graph/treesitter-visit/src/languages.rs`:
 
 ```rust
 pub enum SupportLang {
     // ...
-    Lang,                 // <- add your variant
+    Lang,
 }
 
 impl LanguageExt for SupportLang {
@@ -197,52 +171,46 @@ impl LanguageExt for SupportLang {
 }
 ```
 
-Verify the grammar loads:
+Verify:
 
 ```shell
 cargo check -p treesitter-visit --features builtin-parser
 ```
 
-Once it does, use the AST CLI to explore the grammar's actual node kinds —
-treat its output as the contract you are coding against:
+Then explore the grammar's node kinds with the AST CLI:
 
 ```shell
 cargo run -p treesitter-visit --features cli --bin ast -- examples/hello.lang
 ```
 
-### Step 2 — Declare the language with `define_languages!`
+### Step 2 — Declare the language
 
-`crates/code-graph/src/v2/config/lang.rs` is a **declarative table**. The
-`Language` enum, file extensions, FQN separator, language names, and the
-`SupportLang` mapping all come from one macro invocation. Adding a language is
-a single row:
+Add one row to `define_languages!` in `crates/code-graph/src/v2/config/lang.rs`:
 
 ```rust
 Lang => {
     support_lang: Lang,
-    extensions: ["xx", "yy"],          // file extensions (no leading dot)
-    exclude: [],                        // suffix exclusions (Go uses ["_test.go"])
+    extensions: ["xx", "yy"],          // no leading dot
+    exclude: [],                        // Go uses ["_test.go"], JS uses [".min.js"]
     separator: "::",                    // FQN separator
     names: ["lang", "lang-alias"],      // canonical names for query matching
 },
 ```
 
-Pick `separator` based on how the language constructs FQNs:
+FQN separator conventions:
 
 - `"."` — module-based (Java, Python, Kotlin, C#, Go)
 - `"::"` — namespace-based (C, C++, Ruby, Rust)
-- `"\\"` — PHP-style namespaces
+- `"\\"` — PHP
 
-`define_languages!` auto-generates `file_extensions()`, `exclude_extensions()`,
-`fqn_separator()`, `names()`, `to_support_lang()`, and `parse_ast()`. Nothing
-else in `config/lang.rs` needs to change for a `Standalone` language.
+The macro generates `file_extensions()`, `exclude_extensions()`,
+`fqn_separator()`, `names()`, `to_support_lang()`, and `parse_ast()`.
 
 ### Step 3 — Implement `DslLanguage` and `HasRules`
 
-Create `crates/code-graph/src/v2/langs/generic/<lang>.rs` with this skeleton.
-Read [`go.rs`](../../crates/code-graph/src/v2/langs/generic/go.rs) as a
-self-contained, ~310-line reference that covers all the major DSL features
-without language-specific gymnastics.
+Create `crates/code-graph/src/v2/langs/generic/<lang>.rs`. Use
+[`go.rs`](../../crates/code-graph/src/v2/langs/generic/go.rs) (~310 lines)
+as reference.
 
 ```rust
 use crate::v2::config::Language;
@@ -265,7 +233,6 @@ impl DslLanguage for LangDsl {
         vec![
             scope("function_definition", "Function").def_kind(DefKind::Function),
             scope("class_definition", "Class").def_kind(DefKind::Class),
-            // one entry per language construct that creates a definition
         ]
     }
 
@@ -275,13 +242,11 @@ impl DslLanguage for LangDsl {
 
     fn imports() -> Vec<ImportRule> {
         vec![
-            // Many languages have a single import_declaration node;
-            // start there and refine after the first fixture passes.
+            // start with a single import_declaration node;
+            // refine after the first fixture passes
         ]
     }
 
-    // Opt in only when the language has no module/namespace construct
-    // (C, Bash, single-file Lua scripts). Makes the filename the root scope.
     fn file_scope() -> bool { false }
 }
 
@@ -298,7 +263,7 @@ impl HasRules for LangRules {
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
             vec![ImportStrategy::ExplicitImport, ImportStrategy::SameFile],
             ReceiverMode::None,
-            ".",   // FQN separator — MUST match the one in define_languages!
+            ".",   // FQN separator — MUST match define_languages!
             &[],
             None,
         )
@@ -306,7 +271,7 @@ impl HasRules for LangRules {
 }
 ```
 
-Add the module to `crates/code-graph/src/v2/langs/generic/mod.rs`:
+Add to `crates/code-graph/src/v2/langs/generic/mod.rs`:
 
 ```rust
 pub mod lang;
@@ -314,9 +279,7 @@ pub mod lang;
 
 ### Step 4 — Register the pipeline
 
-`crates/code-graph/src/v2/registry.rs` uses the declarative
-`register_v2_pipelines!` macro. Adding a language is two `use` lines plus one
-row inside the macro:
+`crates/code-graph/src/v2/registry.rs`:
 
 ```rust
 use crate::v2::langs::generic::lang::{LangDsl, LangRules};
@@ -324,25 +287,23 @@ use crate::v2::langs::generic::lang::{LangDsl, LangRules};
 register_v2_pipelines! {
     // ...existing entries...
     Lang    => [GenericPipeline<LangDsl, LangRules>],
-    // ...
 }
 ```
 
-The macro auto-generates `dispatch_language`, `lang_ctx_for`, and
-`dispatch_by_tag`. You do not need to touch any of the generated dispatch
-functions.
+The macro generates `dispatch_language`, `lang_ctx_for`, and
+`dispatch_by_tag`.
 
 ### Step 5 — Write fixtures
 
-Fixtures live in `crates/integration-tests-codegraph/fixtures/<lang>/*.yaml`.
-The harness and assertion vocabulary are documented in
-[`crates/integration-tests-codegraph/README.md`](../../crates/integration-tests-codegraph/README.md).
+`crates/integration-tests-codegraph/fixtures/<lang>/*.yaml`. Format
+documented in
+[`integration-tests-codegraph/README.md`](../../crates/integration-tests-codegraph/README.md).
 
-Ship at least three fixtures so each layer of the pipeline is exercised:
+Write at least three:
 
-1. **`definitions.yaml`** — proves your scope rules fire.
-2. **`imports.yaml`** — proves your import rules produce `ImportedSymbol` nodes.
-3. **`call_resolution.yaml`** — proves the resolver wires up end-to-end across files.
+1. **`definitions.yaml`** — scope rules produce `Definition` nodes.
+1. **`imports.yaml`** — import rules produce `ImportedSymbol` nodes.
+1. **`call_resolution.yaml`** — resolver wires calls across files.
 
 #### Example: `definitions.yaml`
 
@@ -389,19 +350,15 @@ tests:
       - { row: { target: "util.helper" } }
 ```
 
-The full assertion vocabulary (`row`, `row_count`, `empty`, `match`, `unique`,
-`no_nulls`, `column_values`, `count_equals`, `count_gte`, `where`, `not`) is
-documented in the
+Full assertion vocabulary (`row`, `row_count`, `empty`, `match`, `unique`,
+`no_nulls`, `column_values`, `count_equals`, `count_gte`, `where`, `not`):
 [fixtures README](../../crates/integration-tests-codegraph/README.md).
 
-### Step 6 — Register each fixture in `tests/suites.rs`
+### Step 6 — Register fixtures in `tests/suites.rs`
 
-> **This is the single biggest trap.** Fixture files are **not** auto-discovered.
-> A YAML file dropped into `fixtures/<lang>/` is silently inert until you
-> register it. Forgetting this step is the most common cause of "my fixture
-> passes locally but CI thinks nothing tested it."
+> **Fixtures are not auto-discovered.** A YAML file in `fixtures/<lang>/`
+> does nothing until registered here. This is the most commonly missed step.
 
-Add one `yaml_test!` line per fixture in
 `crates/integration-tests-codegraph/tests/suites.rs`:
 
 ```rust
@@ -410,145 +367,107 @@ yaml_test!(lang_imports,          "lang/imports.yaml");
 yaml_test!(lang_call_resolution,  "lang/call_resolution.yaml");
 ```
 
-The naming convention is `<lang>_<fixture_name>` so the test list stays
-greppable. The C-language MR registers two fixtures
-([`c_resolution`, `c_hardcore`](../../crates/integration-tests-codegraph/tests/suites.rs))
-and is a good template.
+Convention: `<lang>_<fixture_name>`.
 
-### Step 7 — Run the tests locally
+### Step 7 — Run tests
 
 ```shell
-# Just your language's fixtures
-cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'
-
-# Full code-graph integration suite
-cargo nextest run -p integration-tests-codegraph
-
-# Workspace lint — must be clean for CI to accept the MR
-mise lint:code
-mise lint:code:fix              # auto-fix what it can
+cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'  # just yours
+cargo nextest run -p integration-tests-codegraph                     # full suite
+mise lint:code                                                       # must pass for CI
+mise lint:code:fix                                                   # auto-fix
 ```
 
-`cargo nextest` parallelises by default. When debugging a single fixture,
-`--no-fail-fast --retries 0` gives you the cleanest output.
+For debugging: `--no-fail-fast --retries 0`.
 
 ### Step 8 — Update the design doc
 
 In
 [`docs/design-documents/indexing/code_indexing.md`](../design-documents/indexing/code_indexing.md),
-find the **Parser architecture** subsection and add your language to the
-tree-sitter grammar bullet:
+add the language to the tree-sitter bullet under **Parser architecture**:
 
 ```diff
 - - **Python, Kotlin, Java, C#, Go, Ruby, C, and C++** use tree-sitter grammars.
 + - **Python, Kotlin, Java, C#, Go, Ruby, C, C++, and <Lang>** use tree-sitter grammars.
 ```
 
-If your language has notable dispatch quirks (excluded extensions, multiple
-file extensions), mention them in the surrounding paragraph.
-
 ### Step 9 — Open the MR
 
-- Use a conventional-commit title: `feat(code-graph): add <Lang> language support`
-- Reference the tracking issue with `Closes #NNN` in the description
-- CI gates the MR on: `cargo fmt`, clippy with all features, ontology schema,
-  agent file sync, markdownlint / Vale / lychee for docs, the unit and
-  integration suites, and the code-indexer benchmark
+- Title: `feat(code-graph): add <Lang> language support`
+- Body: `Closes #NNN`
+- CI checks: `cargo fmt`, clippy (all features), ontology schema, agent file
+  sync, markdownlint/Vale/lychee, unit + integration tests
 
-## Minimum-viable-language checklist
+## Pre-flight checklist
 
-Use this as a pre-flight checklist before you open the MR:
-
-- [ ] tree-sitter grammar added to `treesitter-visit/Cargo.toml` + `builtin-parser` feature
-- [ ] `SupportLang::<Lang>` variant + dispatch added to `treesitter-visit/src/languages.rs`
-- [ ] `Language::<Lang>` row added to `define_languages!` in `code-graph/src/v2/config/lang.rs`
-- [ ] `<Lang>Dsl` implements `DslLanguage` (scopes at minimum, refs and imports recommended)
+- [ ] tree-sitter grammar in `treesitter-visit/Cargo.toml` + `builtin-parser` feature
+- [ ] `SupportLang` variant + dispatch in `treesitter-visit/src/languages.rs`
+- [ ] `Language` row in `define_languages!`
+- [ ] `<Lang>Dsl` implements `DslLanguage` (scopes + refs + imports)
 - [ ] `<Lang>Rules` implements `HasRules`
-- [ ] `pub mod <lang>;` added to `langs/generic/mod.rs`
-- [ ] Pipeline registered in `register_v2_pipelines!` in `registry.rs`
-- [ ] At least 3 fixtures: definitions, imports, cross-file call resolution
-- [ ] **Each fixture registered with `yaml_test!(...)` in `tests/suites.rs`**
-- [ ] `cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'` is green
-- [ ] `mise lint:code` is clean
-- [ ] `docs/design-documents/indexing/code_indexing.md` lists the new language
-- [ ] MR title is in conventional-commit form
+- [ ] `pub mod <lang>;` in `langs/generic/mod.rs`
+- [ ] Pipeline registered in `register_v2_pipelines!`
+- [ ] 3+ fixtures (definitions, imports, call resolution)
+- [ ] **Each fixture registered in `tests/suites.rs`**
+- [ ] `cargo nextest run -p integration-tests-codegraph -E 'test(<lang>)'` green
+- [ ] `mise lint:code` clean
+- [ ] `code_indexing.md` updated
+- [ ] MR title in conventional-commit form
 
 ## Common traps
 
-### Fixtures must be registered in `tests/suites.rs`
+### FQN-separator mismatch
 
-Already called out above; worth repeating because it is the most-frequently
-missed step. Without a `yaml_test!(name, "path.yaml")` line in
-`crates/integration-tests-codegraph/tests/suites.rs`, the YAML file is dead
-code. `cargo nextest` will not pick it up. CI will pass. The MR will look done.
-Nothing was tested.
+The separator appears in both `define_languages!` (`separator: "::"`) and
+`ResolutionRules::new(...)`. **They must match.** A mismatch silently breaks
+cross-file call resolution.
 
-### FQN-separator mismatch between `define_languages!` and `ResolutionRules::new(...)`
+### `SupportLang` vs `Language`
 
-The separator string appears in two places: in the `define_languages!` row
-(`separator: "::"`) and as a parameter to `ResolutionRules::new(...)` inside
-your `HasRules::rules()` impl. **They must be identical.** If the table says
-`"::"` and the rules pass `"."`, FQNs come out malformed and call resolution
-silently fails to match anything across files.
-
-### `SupportLang` and `Language` are distinct enums
-
-`SupportLang` (in `treesitter-visit`) is the tree-sitter grammar dispatcher.
-`Language` (in `code-graph::v2::config`) is the indexer's language identity.
-You add a variant to both. They are connected via the `support_lang:` field in
-`define_languages!`, but they cannot be merged — `treesitter-visit` is a
-separate sub-crate for compile-time isolation.
+Two separate enums. `SupportLang` (in `treesitter-visit`) dispatches the
+tree-sitter grammar. `Language` (in `code-graph::v2::config`) is the indexer's
+identity. Add a variant to both. Connected via `support_lang:` in
+`define_languages!`.
 
 ### `file_scope()` for module-less languages
 
-Languages with no `package` / `namespace` / `module` declaration (C, Bash,
-single-file Lua scripts) should opt into `fn file_scope() -> bool { true }`.
-The indexer then uses the filename (without extension) as the root scope, so
-`util.c::helper` resolves correctly. Languages that already have explicit
-module constructs (PHP, Swift, Elixir) should leave `file_scope()` at its
-default of `false`.
+Languages without `package`/`namespace`/`module` declarations (C, Bash)
+should return `true`. The filename (minus extension) becomes the root scope,
+so `util.c::helper` resolves correctly.
 
-### Tree-sitter node names are not what you think
+### Tree-sitter node names
 
-Always verify against the grammar's `grammar.js` (or the AST CLI) before you
-write a scope rule. Common surprises:
+Always verify with the AST CLI or `grammar.js`. Surprises:
 
-- Bash function names are `word` nodes, not `identifier`.
-- Swift collapses `class`, `struct`, `enum`, and `extension` into a single
-  `class_declaration` kind, disambiguated by a child keyword token.
-- Lua emits a single `function_declaration` kind for global, local, `M.x`, and
-  `obj:method` forms. Distinguish via children, not kind.
-- Elixir parses **everything** as a `call` node — `defmodule`, `def`, `alias`,
-  `import`, `use` all share the same kind. Use `scope_fn(...)` or
-  `when(...)` predicates that inspect the `identifier` child.
+- Bash: function names are `word`, not `identifier`
+- Swift: `class`, `struct`, `enum`, `extension` all share `class_declaration`
+- Lua: one `function_declaration` for global, local, `M.x`, and `obj:method`
+- Elixir: everything is `call` — `defmodule`, `def`, `alias`, `import`, `use`
 
-### Excluded extensions matter
+Use `scope_fn(...)` or `when(...)` predicates for disambiguation.
 
-Go declares `exclude: ["_test.go"]` so test files don't pollute the production
-call graph. If your language has a common test-file naming convention, exclude
-it. JavaScript excludes `.min.js`. Match the prevailing style.
+### Excluded extensions
+
+Go excludes `["_test.go"]`, JS excludes `[".min.js"]`. If the language has a
+test-file convention, exclude it.
 
 ## When the DSL is not enough
 
-Some languages cannot be expressed declaratively. Symptoms:
+Signs a language needs a custom pipeline:
 
-- Resolving method calls requires whole-program type inference
-  (e.g. plain JavaScript without TypeScript annotations).
-- Module resolution needs a build-system manifest (Cargo, npm workspaces,
-  Maven).
-- The language uses macros or compile-time code generation extensively (Rust).
+- Method calls require whole-program type inference
+- Module resolution needs a build-system manifest (Cargo, npm, Maven)
+- Extensive macros or code generation (Rust)
 
-In those cases the language gets its own pipeline under
-`crates/code-graph/src/v2/langs/custom/`. **This is out of scope for a
-hackathon contribution.** File a follow-up issue scoped to "improve
-\<Lang\> resolution beyond definitions" and ship the definitions-only generic
-DSL pass first — it is still a meaningful, mergeable contribution.
+Custom pipelines live under `crates/code-graph/src/v2/langs/custom/`. Out of
+scope for a hackathon contribution — ship the generic DSL pass first and file
+a follow-up issue.
 
-## Where to ask for help
+## Links
 
 - Hackathon parent issue:
-  [knowledge-graph#626](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/626)
-- Language-support tracking issues: PHP
+  [#626](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/626)
+- Language tracking issues: PHP
   [#339](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/339),
   Shell [#340](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/340),
   PowerShell [#341](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/341),
@@ -557,6 +476,6 @@ DSL pass first — it is still a meaningful, mergeable contribution.
   Swift [#344](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/344),
   COBOL [#345](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/345),
   Scala [#751](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/751)
-- Worked examples in `git log`:
-  [`04433eef`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/04433eef) (C, canonical reference) and
-  [`05eac493`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/commit/05eac493) (C++, family-pipeline example)
+- Worked examples:
+  [C MR !1133](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1133) (canonical reference),
+  [C++ MR !1140](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1140) (family-pipeline example)
