@@ -188,24 +188,42 @@ verify-static-link-linux-amd64:
   variables:
     PLATFORM: linux
     ARCH: x86_64
-    # Override the linker driver: g++ (rather than clang). g++ honors
-    # -static-libstdc++ / -static-libgcc consistently regardless of where
-    # -lstdc++ appears in the link command, because it processes the flag
-    # as a driver-level option and rewrites the implicit/explicit C++
-    # standard library link request. The libduckdb-sys build script emits
-    # cargo:rustc-link-lib=stdc++ which becomes -lstdc++ on the link line;
-    # g++ then sees -static-libstdc++ and resolves it against libstdc++.a.
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "g++"
-    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+    # Earlier attempts with RUSTFLAGS=-static-libstdc++ (with both clang and
+    # g++ as the linker driver) left libstdc++.so.6 in the final ldd output.
+    # The driver-level flag is unreliable when *other* link args (-lstdc++
+    # injected by libduckdb-sys's build script) precede the driver's own
+    # transformations. Use a thin wrapper script as the linker that rewrites
+    # any -lstdc++ to -l:libstdc++.a (forcing the static archive) and any
+    # -lgcc_s to -l:libgcc_eh.a before invoking g++. This is the most
+    # robust path: regardless of where -lstdc++ appears in the link command,
+    # it lands as an explicit static-archive reference.
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "/tmp/static-cxx-linker.sh"
   script:
-    # libstdc++.a is not in debian:bookworm-slim by default; without it,
-    # -static-libstdc++ silently falls back to dynamic linking. Install the
-    # static archive (and file/binutils for verification).
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils libstdc++-12-dev g++
-    - echo "=== confirming linker driver + static archive ==="
-    - which g++ && g++ --version | head -1
+    - echo "=== confirming static archives present ==="
     - find /usr/lib -name 'libstdc++.a' 2>/dev/null
     - find /usr/lib -name 'libgcc_eh.a' 2>/dev/null
+    # Write a linker wrapper that pins libstdc++/libgcc to their static
+    # archives. cc-rs from libduckdb-sys emits -lstdc++; rewrite each one
+    # to -l:libstdc++.a (a literal-archive form ld accepts). Drop -lgcc_s
+    # and replace with -l:libgcc_eh.a + -l:libgcc.a so the unwinder is
+    # statically present.
+    - |
+      cat > /tmp/static-cxx-linker.sh <<'EOF'
+      #!/usr/bin/env bash
+      # Rewrite link args to force static libstdc++ / libgcc.
+      args=()
+      for arg in "$@"; do
+        case "$arg" in
+          -lstdc++)  args+=("-l:libstdc++.a") ;;
+          -lgcc_s)   args+=("-l:libgcc_eh.a" "-l:libgcc.a") ;;
+          *)         args+=("$arg") ;;
+        esac
+      done
+      exec g++ "${args[@]}"
+      EOF
+      chmod +x /tmp/static-cxx-linker.sh
+    - cat /tmp/static-cxx-linker.sh
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true
     - BIN="target/x86_64-unknown-linux-gnu/release/orbit"
