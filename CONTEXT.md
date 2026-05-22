@@ -101,14 +101,14 @@ Fetching properties for **Nodes** discovered dynamically during query execution.
 _Avoid_: enrichment, decoration
 
 **GOON (Graph Object Output Notation)**:
-A line-oriented text format for representing graph query results compactly. Designed for LLM consumption — validated to deliver ~11% cost reduction and +4.8pp correctness improvement over raw JSON. Used when queries specify `format=llm`. Specified in ADR 012.
+A line-oriented text format for representing graph query results compactly. Designed for LLM consumption — measured at −11% cost, −15% duration, and +4.8pp correctness vs raw JSON on Haiku 4.5 (ADR 012). Used when queries specify `format=llm`.
 _Avoid_: LLM format, text format
 
 ## Example dialogue
 
 > **New engineer**: "I'm looking at a bug where a user can't see their issues in the graph. Where do I start?"
 >
-> **Domain expert**: "First check whether the **Namespace** is indexed — look for their root group in `knowledge_graph_enabled_namespaces`. If it is, the **SDLC Data** pipeline should have created **WorkItem** nodes for those issues."
+> **Domain expert**: "First check whether the **Namespace** is indexed — look for their root group in `siphon_knowledge_graph_enabled_namespaces`. If it is, the **SDLC Data** pipeline should have created **WorkItem** nodes for those issues."
 >
 > **New engineer**: "Wait, issues? I don't see an Issue node type anywhere."
 >
