@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -59,7 +58,7 @@ impl Handler for GlobalHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: "global".to_string(),
-            base_conditions: BTreeMap::new(),
+            traversal_path: None,
         };
 
         let result = self

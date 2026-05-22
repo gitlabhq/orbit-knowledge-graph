@@ -1,4 +1,4 @@
-use arrow::array::{BooleanArray, StringArray, UInt64Array};
+use arrow::array::{BooleanArray, Int64Array, StringArray, UInt64Array};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -104,4 +104,54 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     let username = ArrowUtils::get_column_by_name::<StringArray>(&usernames[0], "username")
         .expect("username column");
     assert_eq!(username.value(0), "new_user");
+}
+
+/// Validates keyset cursor resume: a saved cursor_values=["2"] must cause the
+/// extract query's DNF (`id > '2'`) to skip rows with id ≤ 2 and process the rest.
+/// This exercises the single-column cursor path that no other integration test
+/// covers (all others start with cursor_values='null').
+pub async fn resumes_from_saved_cursor_skipping_processed_users(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User', '2024-01-19 00:00:00.000000', '[\"2\"]')",
+        t("checkpoint")
+    ))
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_users (
+            id, username, email, name, first_name, last_name, state,
+            public_email, preferred_language, last_activity_on, private_profile,
+            admin, auditor, external, user_type, created_at, updated_at, _siphon_replicated_at
+        ) VALUES
+        (1, 'alice', 'a@t', 'Alice', 'A', 'L', 'active', '', 'en', '2024-01-01',
+         false, false, false, false, 0, '2023-01-01', '2024-01-01', '2024-01-20 12:00:00'),
+        (2, 'bob', 'b@t', 'Bob', 'B', 'L', 'active', '', 'en', '2024-01-01',
+         false, false, false, false, 0, '2023-01-01', '2024-01-01', '2024-01-20 12:00:00'),
+        (3, 'charlie', 'c@t', 'Charlie', 'C', 'L', 'active', '', 'en', '2024-01-01',
+         false, false, false, false, 0, '2023-01-01', '2024-01-01', '2024-01-20 12:00:00'),
+        (4, 'dave', 'd@t', 'Dave', 'D', 'L', 'active', '', 'en', '2024-01-01',
+         false, false, false, false, 0, '2023-01-01', '2024-01-01', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    global_handler(ctx)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let processed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        processed,
+        vec![3, 4],
+        "saved cursor at id=2 must skip users 1-2 and process 3-4"
+    );
 }

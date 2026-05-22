@@ -29,6 +29,7 @@ async fn global_indexing() {
         &ctx,
         global::processes_and_transforms_users,
         global::uses_watermark_for_incremental_processing,
+        global::resumes_from_saved_cursor_skipping_processed_users,
     );
 }
 
@@ -110,5 +111,6 @@ async fn namespace_indexing() {
         security::processes_security_scans,
         security::processes_security_scan_finding_edges,
         watermarking::uses_watermark_for_incremental_processing,
+        watermarking::resumes_from_saved_cursor_skipping_processed_groups,
     );
 }

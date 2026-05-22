@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -20,7 +19,10 @@ use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{Cursor, Plan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{
+    Cursor, CursorFilter, Plan, SOURCE_DATA_TABLE, Transformation, TraversalPathFilter,
+    WatermarkFilter,
+};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
@@ -31,7 +33,7 @@ const MAX_RETRIES: u32 = 3;
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub watermark: DateTime<Utc>,
     pub position_key: String,
-    pub base_conditions: BTreeMap<String, String>,
+    pub traversal_path: Option<String>,
 }
 
 pub(in crate::modules::sdlc) struct Pipeline {
@@ -68,9 +70,8 @@ impl Pipeline {
         let mut futures = FuturesUnordered::new();
 
         let traversal_path = context
-            .base_conditions
-            .get("traversal_path")
-            .cloned()
+            .traversal_path
+            .clone()
             .unwrap_or_else(|| "global".to_string());
 
         for plan in plans {
@@ -125,8 +126,17 @@ impl Pipeline {
 
         let base_query = plan
             .prepare()
-            .with_base_conditions(&context.base_conditions)
-            .with_watermark(&checkpoint.watermark, &context.watermark);
+            .with(WatermarkFilter {
+                column: &plan.watermark_column,
+                last: checkpoint.watermark,
+                current: context.watermark,
+            })
+            .with(
+                context
+                    .traversal_path
+                    .as_deref()
+                    .map(|path| TraversalPathFilter { path }),
+            );
         let params = base_query.params();
 
         let mut total_rows: u64 = 0;
@@ -136,7 +146,13 @@ impl Pipeline {
         let mut batches = self
             .extract_batch(
                 &plan.name,
-                &base_query.clone().with_cursor(&cursor).to_sql(),
+                &base_query
+                    .clone()
+                    .with(CursorFilter {
+                        sort_key: &plan.sort_key,
+                        values: cursor.values(),
+                    })
+                    .to_sql(),
                 params.clone(),
             )
             .await?;
@@ -165,7 +181,13 @@ impl Pipeline {
                 .await?;
 
             if has_more {
-                let next_sql = base_query.clone().with_cursor(&cursor).to_sql();
+                let next_sql = base_query
+                    .clone()
+                    .with(CursorFilter {
+                        sort_key: &plan.sort_key,
+                        values: cursor.values(),
+                    })
+                    .to_sql();
                 let (write_result, extract_result) = tokio::join!(
                     self.drain_writes(write_futures),
                     self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
@@ -326,7 +348,7 @@ impl Pipeline {
         for transform in transforms {
             let transform_start = Instant::now();
             let mut result_batches = self
-                .execute_transform(session, &transform.to_sql())
+                .execute_transform(session, &transform.sql)
                 .await
                 .map_err(|err| {
                     HandlerError::Processing(format!(
@@ -456,7 +478,6 @@ mod tests {
     use super::*;
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
-    use crate::modules::sdlc::plan::ast::{Expr, Query, SelectExpr, TableRef};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -470,37 +491,22 @@ mod tests {
     }
 
     fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
-        let transform_query = Query {
-            select: vec![
-                SelectExpr::bare(Expr::col("", "id")),
-                SelectExpr::bare(Expr::col("", "name")),
-            ],
-            from: TableRef::scan(SOURCE_DATA_TABLE, None),
-            where_clause: None,
-            order_by: vec![],
-            limit: None,
-        };
-
         Plan {
             name: name.to_string(),
-            select: vec![
-                SelectExpr::bare(Expr::col("", "id")),
-                SelectExpr::bare(Expr::col("", "name")),
-                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
-                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
-            ],
-            from: TableRef::scan("source_table", None),
-            static_filters: None,
+            extract_template: "SELECT id, name, _siphon_replicated_at AS _version, \
+                 _siphon_deleted AS _deleted \
+                 FROM source_table \
+                 WHERE 1=1 {{filters}} \
+                 ORDER BY id LIMIT {{batch_size}}"
+                .to_string(),
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
-            traversal_filter: None,
             transforms: vec![Transformation {
-                query: transform_query,
+                sql: format!("SELECT id, name FROM {SOURCE_DATA_TABLE}"),
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
             }],
-            enrichment: None,
         }
     }
 
@@ -508,7 +514,7 @@ mod tests {
         PipelineContext {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             position_key: "test".to_string(),
-            base_conditions: BTreeMap::new(),
+            traversal_path: None,
         }
     }
 
