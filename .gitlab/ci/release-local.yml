@@ -188,18 +188,22 @@ verify-static-link-linux-amd64:
   variables:
     PLATFORM: linux
     ARCH: x86_64
-    # The build image's /opt/cargo/config.toml sets per-target rustflags
-    # (linker=clang, -fuse-ld=mold). Env RUSTFLAGS would *replace* (not merge
-    # with) those, so we'd lose -fuse-ld=mold. Use CARGO_ENCODED_RUSTFLAGS via
-    # individual -C flags joined with the recommended unit separator. Keep
-    # mold + clang from the image, append static-link flags.
-    RUSTFLAGS: "-C link-arg=-fuse-ld=mold -C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+    # Override the linker driver: g++ (rather than clang). g++ honors
+    # -static-libstdc++ / -static-libgcc consistently regardless of where
+    # -lstdc++ appears in the link command, because it processes the flag
+    # as a driver-level option and rewrites the implicit/explicit C++
+    # standard library link request. The libduckdb-sys build script emits
+    # cargo:rustc-link-lib=stdc++ which becomes -lstdc++ on the link line;
+    # g++ then sees -static-libstdc++ and resolves it against libstdc++.a.
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: "g++"
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   script:
     # libstdc++.a is not in debian:bookworm-slim by default; without it,
     # -static-libstdc++ silently falls back to dynamic linking. Install the
     # static archive (and file/binutils for verification).
-    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils libstdc++-12-dev
-    - echo "=== confirming static archive present ==="
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils libstdc++-12-dev g++
+    - echo "=== confirming linker driver + static archive ==="
+    - which g++ && g++ --version | head -1
     - find /usr/lib -name 'libstdc++.a' 2>/dev/null
     - find /usr/lib -name 'libgcc_eh.a' 2>/dev/null
     - ./scripts/build-local-cli.sh
