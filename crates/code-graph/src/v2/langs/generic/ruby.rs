@@ -56,6 +56,17 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(no_extract()),
+            // Constant assignments: `MAX = 2`, `Foo::Bar = obj`. Tree-sitter
+            // tags any uppercase-leading identifier on the LHS as `constant`,
+            // and qualified `Foo::Bar` LHSes as `scope_resolution`. We emit a
+            // Definition so queries like "where is MAX_TRACKED_REFS_PER_PROJECT
+            // defined" return a node; `no_scope` keeps the constant from
+            // pushing a new FQN segment for nested defs.
+            scope("assignment", "Constant")
+                .def_kind(DefKind::Other)
+                .when(field_kind("left", &["constant", "scope_resolution"]))
+                .name_from(field("left"))
+                .no_scope(),
         ]
     }
 
@@ -730,6 +741,49 @@ mod tests {
         assert!(
             ref_chains.iter().any(|(name, _)| *name == "bar"),
             "should have a chain ref for 'bar', got: {ref_chains:?}"
+        );
+    }
+
+    #[test]
+    fn constant_assignments_emit_definitions() {
+        let code = "MAX_REFS = 2\n\
+                    class Tracker\n  \
+                      MAX_TRACKED_REFS_PER_PROJECT = 2\n  \
+                      DEFAULT_NAME = \"foo\"\n  \
+                      counter = 0\n\
+                    end\n\
+                    Tracker::EXTRA = 5\n";
+        let result = parse(code).unwrap();
+
+        let consts: Vec<(&str, &str)> = result
+            .definitions
+            .iter()
+            .filter(|d| d.definition_type == "Constant")
+            .map(|d| (d.name.as_str(), d.fqn.as_str()))
+            .collect();
+
+        assert!(
+            consts.contains(&("MAX_REFS", "MAX_REFS")),
+            "top-level constant should be indexed: {consts:?}"
+        );
+        assert!(
+            consts.contains(&(
+                "MAX_TRACKED_REFS_PER_PROJECT",
+                "Tracker::MAX_TRACKED_REFS_PER_PROJECT"
+            )),
+            "nested constant should carry the enclosing class FQN: {consts:?}"
+        );
+        assert!(
+            consts.contains(&("DEFAULT_NAME", "Tracker::DEFAULT_NAME")),
+            "string-valued constant should still be indexed: {consts:?}"
+        );
+        assert!(
+            consts.contains(&("Tracker::EXTRA", "Tracker::EXTRA")),
+            "qualified constant assignment should be indexed: {consts:?}"
+        );
+        assert!(
+            !consts.iter().any(|(name, _)| *name == "counter"),
+            "lowercase local variable must not be indexed as a Constant: {consts:?}"
         );
     }
 
