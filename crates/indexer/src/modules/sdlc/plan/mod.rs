@@ -4,146 +4,47 @@ pub(crate) mod lower;
 pub(crate) use crate::llqm_v1::ast;
 use crate::llqm_v1::ast::TableRef;
 pub(crate) use crate::llqm_v1::codegen;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
+use serde_json::Value;
 
 use crate::checkpoint::Checkpoint;
+use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
-use ast::{Expr, Op, OrderExpr, Query};
+use ast::{Expr, Op, OrderExpr, Query, SelectExpr};
 
-/// Paginated ClickHouse extract query. Owns its cursor state and generates
-/// SQL on demand. Immutable: `advance` and `resume_from` return new instances.
+/// Keyset pagination state. Value type — `advance()` returns a new instance.
 #[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) struct ExtractQuery {
-    base_query: Query,
-    sort_key_columns: Vec<String>,
-    cursor_values: Vec<String>,
-    batch_size: u64,
-    /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
-    /// that gets replaced with the keyset pagination WHERE clause at emit time.
-    raw_template: Option<String>,
+pub(in crate::modules::sdlc) struct Cursor {
+    values: Vec<String>,
 }
 
-impl ExtractQuery {
-    pub fn new(base_query: Query, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
-        Self {
-            base_query,
-            sort_key_columns,
-            cursor_values: Vec::new(),
-            batch_size,
-            raw_template: None,
-        }
+impl Cursor {
+    pub fn first_page() -> Self {
+        Self { values: Vec::new() }
     }
 
-    pub fn raw(template: String, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
-        Self {
-            base_query: Query {
-                select: vec![],
-                from: TableRef::Raw(String::new()),
-                where_clause: None,
-                order_by: vec![],
-                limit: None,
+    pub fn from_checkpoint(checkpoint: &Checkpoint) -> Self {
+        match &checkpoint.cursor_values {
+            Some(values) => Self {
+                values: values.clone(),
             },
-            sort_key_columns,
-            cursor_values: Vec::new(),
-            batch_size,
-            raw_template: Some(template),
+            None => Self::first_page(),
         }
-    }
-
-    pub fn to_sql(&self) -> String {
-        if let Some(template) = &self.raw_template {
-            let cursor_sql = match self.build_cursor_expr() {
-                Some(expr) => format!(" AND {}", codegen::emit_expr_to_string(&expr)),
-                None => String::new(),
-            };
-            return template.replace("{CURSOR}", &cursor_sql);
-        }
-
-        let mut query = self.base_query.clone();
-
-        if let Some(cursor_expr) = self.build_cursor_expr() {
-            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
-        }
-
-        query.order_by = self
-            .sort_key_columns
-            .iter()
-            .map(|column| OrderExpr {
-                expr: Expr::col("", column),
-            })
-            .collect();
-
-        query.limit = Some(self.batch_size);
-
-        codegen::emit_sql(&query)
-    }
-
-    pub fn advance(&self, batch: &RecordBatch) -> Result<Self, HandlerError> {
-        let cursor_values = self.extract_cursor_values(batch)?;
-        let mut next = self.clone();
-        next.cursor_values = cursor_values;
-        Ok(next)
-    }
-
-    pub fn resume_from(mut self, position: &Checkpoint) -> Self {
-        if let Some(values) = &position.cursor_values {
-            self.cursor_values = values.clone();
-        }
-        self
     }
 
     pub fn is_first_page(&self) -> bool {
-        self.cursor_values.is_empty()
+        self.values.is_empty()
     }
 
-    pub fn cursor_values(&self) -> &[String] {
-        &self.cursor_values
-    }
-
-    pub fn batch_size(&self) -> u64 {
-        self.batch_size
-    }
-
-    /// Builds a DNF (disjunctive normal form) greater-than expression for
-    /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
-    /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
-    fn build_cursor_expr(&self) -> Option<Expr> {
-        if self.cursor_values.is_empty() {
-            return None;
-        }
-
-        let disjuncts: Vec<Option<Expr>> = (0..self.sort_key_columns.len())
-            .map(|depth| {
-                let mut conjuncts: Vec<Option<Expr>> = Vec::with_capacity(depth + 1);
-
-                for prefix in 0..depth {
-                    conjuncts.push(Some(Expr::eq(
-                        Expr::col("", &self.sort_key_columns[prefix]),
-                        Expr::raw(format!("'{}'", self.cursor_values[prefix])),
-                    )));
-                }
-                conjuncts.push(Some(Expr::binary(
-                    Op::Gt,
-                    Expr::col("", &self.sort_key_columns[depth]),
-                    Expr::raw(format!("'{}'", self.cursor_values[depth])),
-                )));
-
-                Expr::and_all(conjuncts)
-            })
-            .collect();
-
-        Expr::or_all(disjuncts)
-    }
-
-    fn extract_cursor_values(&self, batch: &RecordBatch) -> Result<Vec<String>, HandlerError> {
+    pub fn advance(&self, batch: &RecordBatch, sort_key: &[String]) -> Result<Self, HandlerError> {
         let last_row = batch.num_rows() - 1;
-
-        self.sort_key_columns
+        let values = sort_key
             .iter()
             .map(|column_name| {
                 let column_index = batch.schema().index_of(column_name).map_err(|_| {
@@ -151,7 +52,6 @@ impl ExtractQuery {
                         "sort key column '{column_name}' not found in batch"
                     ))
                 })?;
-
                 let column = batch.column(column_index);
                 ArrowUtils::array_value_to_string(column.as_ref(), last_row).ok_or_else(|| {
                     HandlerError::Processing(format!(
@@ -160,19 +60,232 @@ impl ExtractQuery {
                     ))
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { values })
     }
+
+    pub fn to_checkpoint_values(&self) -> Option<Vec<String>> {
+        if self.values.is_empty() {
+            None
+        } else {
+            Some(self.values.clone())
+        }
+    }
+
+    /// Builds a DNF (disjunctive normal form) greater-than expression for
+    /// composite key cursor pagination. For keys `[c1, c2]` with values `[v1, v2]`:
+    /// `(c1 > 'v1') OR (c1 = 'v1' AND c2 > 'v2')`
+    pub fn to_expr(&self, sort_key: &[String]) -> Option<Expr> {
+        if self.values.is_empty() {
+            return None;
+        }
+
+        let disjuncts: Vec<Option<Expr>> = (0..sort_key.len())
+            .map(|depth| {
+                let mut conjuncts: Vec<Option<Expr>> = Vec::with_capacity(depth + 1);
+                for (key, val) in sort_key.iter().zip(&self.values).take(depth) {
+                    conjuncts.push(Some(Expr::eq(
+                        Expr::col("", key),
+                        Expr::raw(format!("'{val}'")),
+                    )));
+                }
+                conjuncts.push(Some(Expr::binary(
+                    Op::Gt,
+                    Expr::col("", &sort_key[depth]),
+                    Expr::raw(format!("'{}'", self.values[depth])),
+                )));
+                Expr::and_all(conjuncts)
+            })
+            .collect();
+
+        Expr::or_all(disjuncts)
+    }
+}
+
+/// Static execution plan for a single entity type. Built once from ontology at
+/// startup. Describes *what* to extract and *how* to transform, but not *when*
+/// or *where* — watermark, traversal_path, and cursor are applied dynamically
+/// via [`PreparedQuery`].
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct Plan {
+    pub name: String,
+    pub select: Vec<SelectExpr>,
+    pub from: TableRef,
+    pub static_filters: Option<Expr>,
+    pub watermark_column: String,
+    pub sort_key: Vec<String>,
+    pub batch_size: u64,
+    /// Traversal path filter for namespaced plans. `None` for global plans.
+    pub traversal_filter: Option<Expr>,
+    pub transforms: Vec<Transformation>,
+    pub enrichment: Option<EnrichmentSql>,
+}
+
+/// Pre-built SQL fragments for CTE-based enrichment (standalone edges).
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct EnrichmentSql {
+    pub cte_defs: Vec<String>,
+    pub join_clauses: Vec<String>,
+    pub select_exprs: Vec<String>,
+}
+
+/// Pure query builder. Each `with_*` method layers a filter or parameter onto
+/// the plan's static skeleton. Call [`to_sql()`](Self::to_sql) to emit the
+/// final ClickHouse SQL, [`params()`](Self::params) for the parameter map.
+#[derive(Clone)]
+pub(in crate::modules::sdlc) struct PreparedQuery {
+    plan: Plan,
+    filters: Vec<Expr>,
+    params: serde_json::Map<String, Value>,
+}
+
+impl Plan {
+    pub fn prepare(&self) -> PreparedQuery {
+        let mut filters = Vec::new();
+        if let Some(filter) = &self.static_filters {
+            filters.push(filter.clone());
+        }
+        PreparedQuery {
+            plan: self.clone(),
+            filters,
+            params: serde_json::Map::new(),
+        }
+    }
+}
+
+impl PreparedQuery {
+    pub fn with_base_conditions(mut self, conditions: &BTreeMap<String, String>) -> Self {
+        if let Some(filter) = &self.plan.traversal_filter {
+            self.filters.push(filter.clone());
+        }
+        for (key, value) in conditions {
+            self.params
+                .insert(key.clone(), Value::String(value.clone()));
+        }
+        self
+    }
+
+    pub fn with_watermark(mut self, last: &DateTime<Utc>, current: &DateTime<Utc>) -> Self {
+        self.filters
+            .push(watermark_range(&self.plan.watermark_column));
+        self.params.insert(
+            "last_watermark".to_string(),
+            Value::String(last.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        self.params.insert(
+            "watermark".to_string(),
+            Value::String(current.format(TIMESTAMP_FORMAT).to_string()),
+        );
+        self
+    }
+
+    pub fn with_cursor(mut self, cursor: &Cursor) -> Self {
+        if let Some(expr) = cursor.to_expr(&self.plan.sort_key) {
+            self.filters.push(expr);
+        }
+        self
+    }
+
+    pub fn to_sql(&self) -> String {
+        let where_clause = Expr::and_all(self.filters.iter().cloned().map(Some));
+
+        if let Some(enrichment) = &self.plan.enrichment {
+            self.emit_cte_sql(where_clause.as_ref(), enrichment)
+        } else {
+            self.emit_structured_sql(where_clause)
+        }
+    }
+
+    pub fn params(&self) -> Value {
+        Value::Object(self.params.clone())
+    }
+
+    fn emit_structured_sql(&self, where_clause: Option<Expr>) -> String {
+        let query = Query {
+            select: self.plan.select.clone(),
+            from: self.plan.from.clone(),
+            where_clause,
+            order_by: self
+                .plan
+                .sort_key
+                .iter()
+                .map(|col| OrderExpr {
+                    expr: Expr::col("", col),
+                })
+                .collect(),
+            limit: Some(self.plan.batch_size),
+        };
+        codegen::emit_sql(&query)
+    }
+
+    fn emit_cte_sql(&self, where_clause: Option<&Expr>, enrichment: &EnrichmentSql) -> String {
+        let base_select: Vec<String> = self
+            .plan
+            .select
+            .iter()
+            .map(codegen::emit_select_expr)
+            .collect();
+
+        let from_sql = match &self.plan.from {
+            TableRef::Scan { table, .. } => table.clone(),
+            TableRef::Raw(r) => r.clone(),
+        };
+
+        let where_sql = where_clause
+            .map(codegen::emit_expr_to_string)
+            .unwrap_or_default();
+
+        let order_by_sql = self.plan.sort_key.join(", ");
+
+        let outer_cols: Vec<String> = self
+            .plan
+            .select
+            .iter()
+            .map(|s| {
+                let name = s.alias.as_deref().unwrap_or(match &s.expr {
+                    Expr::Column { column, .. } => column.as_str(),
+                    Expr::Raw(r) => r.as_str(),
+                    _ => "?",
+                });
+                format!("_batch.{name} AS {name}")
+            })
+            .chain(enrichment.select_exprs.iter().cloned())
+            .collect();
+
+        format!(
+            "WITH _batch AS (\
+             SELECT {base_select} FROM {from_sql} \
+             WHERE {where_sql} \
+             ORDER BY {order_by_sql} LIMIT {batch_size}\
+             ), {cte_defs} \
+             SELECT {outer_select} FROM _batch {joins}",
+            base_select = base_select.join(", "),
+            batch_size = self.plan.batch_size,
+            cte_defs = enrichment.cte_defs.join(", "),
+            outer_select = outer_cols.join(", "),
+            joins = enrichment.join_clauses.join(" "),
+        )
+    }
+}
+
+pub(in crate::modules::sdlc) fn watermark_range(watermark_column: &str) -> Expr {
+    Expr::and_all([
+        Some(Expr::binary(
+            Op::Gt,
+            Expr::raw(watermark_column.to_string()),
+            Expr::param("last_watermark", "String"),
+        )),
+        Some(Expr::binary(
+            Op::Le,
+            Expr::raw(watermark_column.to_string()),
+            Expr::param("watermark", "String"),
+        )),
+    ])
+    .unwrap()
 }
 
 /// Unified over nodes and edges: a node plan produces node rows + FK edge rows,
 /// an edge plan produces only edge rows. The pipeline treats both identically.
-#[derive(Debug, Clone)]
-pub(in crate::modules::sdlc) struct PipelinePlan {
-    pub name: String,
-    pub extract_query: ExtractQuery,
-    pub transforms: Vec<Transformation>,
-}
-
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Transformation {
     pub query: Query,
@@ -190,8 +303,8 @@ impl Transformation {
 }
 
 pub(in crate::modules::sdlc) struct Plans {
-    pub global: Vec<PipelinePlan>,
-    pub namespaced: Vec<PipelinePlan>,
+    pub global: Vec<Plan>,
+    pub namespaced: Vec<Plan>,
 }
 
 pub(in crate::modules::sdlc) fn build_plans(
@@ -214,19 +327,13 @@ mod tests {
     use super::*;
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
-    use ast::{SelectExpr, TableRef};
-    use chrono::Utc;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
-    fn position_with_cursor(values: Vec<&str>) -> Checkpoint {
-        Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: Some(values.into_iter().map(String::from).collect()),
-        }
-    }
-
-    fn base_extract_query(sort_keys: Vec<&str>) -> Query {
-        Query {
+    fn test_plan(sort_key: Vec<&str>, batch_size: u64) -> Plan {
+        let sort_key: Vec<String> = sort_key.iter().map(|s| s.to_string()).collect();
+        Plan {
+            name: "Test".to_string(),
             select: vec![
                 SelectExpr::bare(Expr::col("", "id")),
                 SelectExpr::bare(Expr::col("", "name")),
@@ -234,102 +341,85 @@ mod tests {
                 SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
             ],
             from: TableRef::scan("source_table", None),
-            where_clause: Some(
-                Expr::and_all([
-                    Some(Expr::binary(
-                        Op::Gt,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("last_watermark", "String"),
-                    )),
-                    Some(Expr::binary(
-                        Op::Le,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("watermark", "String"),
-                    )),
-                ])
-                .unwrap(),
-            ),
-            order_by: sort_keys
-                .iter()
-                .map(|k| OrderExpr {
-                    expr: Expr::raw(k.to_string()),
-                })
-                .collect(),
-            limit: None,
+            static_filters: None,
+            watermark_column: "_siphon_replicated_at".to_string(),
+            sort_key,
+            batch_size,
+            traversal_filter: None,
+            transforms: vec![],
+            enrichment: None,
         }
     }
 
-    fn simple_query(sort_keys: Vec<&str>, batch_size: u64) -> ExtractQuery {
-        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        ExtractQuery::new(base_extract_query(sort_keys), sort_key_columns, batch_size)
+    fn namespaced_plan(sort_key: Vec<&str>) -> Plan {
+        let mut plan = test_plan(sort_key, 1000);
+        plan.traversal_filter = Some(Expr::func(
+            "startsWith",
+            vec![
+                Expr::col("", "traversal_path"),
+                Expr::param("traversal_path", "String"),
+            ],
+        ));
+        plan
     }
 
-    fn query_with_where(where_clause: &str, sort_keys: Vec<&str>) -> ExtractQuery {
-        let sort_key_columns: Vec<String> = sort_keys.iter().map(|s| s.to_string()).collect();
-        let mut base = base_extract_query(sort_keys);
-        base.where_clause =
-            Expr::and_all([base.where_clause, Some(Expr::raw(where_clause.to_string()))]);
-        ExtractQuery::new(base, sort_key_columns, 1000)
+    fn plan_with_where(extra_where: &str, sort_key: Vec<&str>) -> Plan {
+        let mut plan = test_plan(sort_key, 1000);
+        plan.static_filters = Some(Expr::raw(extra_where.to_string()));
+        plan
+    }
+
+    fn cursor_at(values: Vec<&str>) -> Cursor {
+        Cursor {
+            values: values.into_iter().map(String::from).collect(),
+        }
+    }
+
+    // ── Cursor tests ────────────────────────────────────────────────
+
+    #[test]
+    fn first_page_cursor_produces_no_expr() {
+        let cursor = Cursor::first_page();
+        let sort_key = vec!["id".to_string()];
+        assert!(cursor.to_expr(&sort_key).is_none());
+        assert!(cursor.is_first_page());
     }
 
     #[test]
-    fn first_page_sql_has_no_cursor_clause() {
-        let query = simple_query(vec!["traversal_path", "id"], 1000);
-
-        let sql = query.to_sql();
-
-        assert!(query.is_first_page());
-        assert!(sql.contains("ORDER BY traversal_path, id"));
-        assert!(sql.contains("LIMIT 1000"));
-        assert!(!sql.contains("(traversal_path >"));
+    fn cursor_from_completed_checkpoint_is_first_page() {
+        let checkpoint = Checkpoint {
+            watermark: Utc::now(),
+            cursor_values: None,
+        };
+        let cursor = Cursor::from_checkpoint(&checkpoint);
+        assert!(cursor.is_first_page());
     }
 
     #[test]
-    fn first_page_sql_includes_watermark_conditions() {
-        let query = simple_query(vec!["id"], 500);
-
-        let sql = query.to_sql();
-
-        assert!(sql.contains("_siphon_replicated_at > {last_watermark:String}"));
-        assert!(sql.contains("_siphon_replicated_at <= {watermark:String}"));
-        assert!(sql.contains("_siphon_replicated_at AS _version"));
-        assert!(sql.contains("_siphon_deleted AS _deleted"));
+    fn cursor_from_in_progress_checkpoint_has_values() {
+        let checkpoint = Checkpoint {
+            watermark: Utc::now(),
+            cursor_values: Some(vec!["42".to_string()]),
+        };
+        let cursor = Cursor::from_checkpoint(&checkpoint);
+        assert!(!cursor.is_first_page());
     }
 
     #[test]
-    fn first_page_sql_includes_where_clause() {
-        let query = query_with_where(
-            "startsWith(traversal_path, {traversal_path:String})",
-            vec!["id"],
-        );
-
-        let sql = query.to_sql();
-
-        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
+    fn cursor_dnf_single_column() {
+        let cursor = cursor_at(vec!["42"]);
+        let sort_key = vec!["id".to_string()];
+        let expr = cursor.to_expr(&sort_key).unwrap();
+        let sql = codegen::emit_expr_to_string(&expr);
+        assert!(sql.contains("(id > '42')"), "sql: {sql}");
     }
 
     #[test]
-    fn advanced_page_sql_includes_cursor_clause_single_column() {
-        let query = simple_query(vec!["id"], 1000);
-        let advanced = query.resume_from(&position_with_cursor(vec!["42"]));
-
-        let sql = advanced.to_sql();
-
-        assert!(!advanced.is_first_page());
-        assert!(
-            sql.contains("(id > '42')"),
-            "expected cursor clause in SQL: {sql}"
-        );
-        assert!(sql.contains("ORDER BY id LIMIT 1000"));
-    }
-
-    #[test]
-    fn advanced_page_sql_includes_cursor_clause_two_columns() {
-        let query = simple_query(vec!["traversal_path", "id"], 1000);
-        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "42"]));
-
-        let sql = advanced.to_sql();
-
+    fn cursor_dnf_two_columns() {
+        let cursor = cursor_at(vec!["1/2/", "42"]);
+        let sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let expr = cursor.to_expr(&sort_key).unwrap();
+        let sql = codegen::emit_expr_to_string(&expr);
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(
             sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
@@ -338,12 +428,15 @@ mod tests {
     }
 
     #[test]
-    fn advanced_page_sql_includes_cursor_clause_three_columns() {
-        let query = simple_query(vec!["traversal_path", "project_id", "id"], 1000);
-        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "10", "99"]));
-
-        let sql = advanced.to_sql();
-
+    fn cursor_dnf_three_columns() {
+        let cursor = cursor_at(vec!["1/2/", "10", "99"]);
+        let sort_key = vec![
+            "traversal_path".to_string(),
+            "project_id".to_string(),
+            "id".to_string(),
+        ];
+        let expr = cursor.to_expr(&sort_key).unwrap();
+        let sql = codegen::emit_expr_to_string(&expr);
         assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
         assert!(sql.contains("(project_id > '10')"), "sql: {sql}");
         assert!(
@@ -353,58 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn resume_from_applies_cursor_values() {
-        let query = simple_query(vec!["id"], 1000);
-        let resumed = query.resume_from(&position_with_cursor(vec!["42"]));
-
-        assert!(!resumed.is_first_page());
-        assert_eq!(resumed.cursor_values(), &["42"]);
-    }
-
-    #[test]
-    fn resume_from_completed_position_keeps_first_page() {
-        let query = simple_query(vec!["id"], 1000);
-        let completed = Checkpoint {
-            watermark: Utc::now(),
-            cursor_values: None,
-        };
-        let resumed = query.resume_from(&completed);
-
-        assert!(resumed.is_first_page());
-    }
-
-    #[test]
-    fn resume_from_produces_correct_sql() {
-        let query = simple_query(vec!["id"], 1000);
-        let resumed = query.resume_from(&position_with_cursor(vec!["42"]));
-        let sql = resumed.to_sql();
-
-        assert!(
-            sql.contains("(id > '42')"),
-            "resume_from should produce cursor clause: {sql}"
-        );
-    }
-
-    #[test]
-    fn advanced_page_with_where_clause_includes_both_conditions() {
-        let query = query_with_where(
-            "startsWith(traversal_path, {traversal_path:String})",
-            vec!["traversal_path", "id"],
-        );
-        let advanced = query.resume_from(&position_with_cursor(vec!["1/2/", "42"]));
-
-        let sql = advanced.to_sql();
-
-        assert!(sql.contains("startsWith(traversal_path, {traversal_path:String})"));
-        assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
-        assert!(
-            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
-            "sql: {sql}"
-        );
-    }
-
-    #[test]
-    fn advance_extracts_cursor_from_last_row() {
+    fn cursor_advance_extracts_last_row() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("traversal_path", DataType::Utf8, false),
             Field::new("id", DataType::Int64, false),
@@ -421,15 +463,135 @@ mod tests {
         )
         .unwrap();
 
-        let query = simple_query(vec!["traversal_path", "id"], 1000);
-        let advanced = query.advance(&batch).unwrap();
+        let cursor = Cursor::first_page();
+        let sort_key = vec!["traversal_path".to_string(), "id".to_string()];
+        let advanced = cursor.advance(&batch, &sort_key).unwrap();
+        assert_eq!(
+            advanced.to_checkpoint_values(),
+            Some(vec!["1/4/".to_string(), "30".to_string()])
+        );
+    }
 
-        assert_eq!(advanced.cursor_values(), &["1/4/", "30"]);
+    // ── PreparedQuery tests ─────────────────────────────────────────
+
+    #[test]
+    fn first_page_sql_has_no_cursor_clause() {
+        let plan = test_plan(vec!["traversal_path", "id"], 1000);
+        let cursor = Cursor::first_page();
+
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .with_cursor(&cursor)
+            .to_sql();
+
+        assert!(sql.contains("ORDER BY traversal_path, id"));
+        assert!(sql.contains("LIMIT 1000"));
+        assert!(!sql.contains("(traversal_path >"));
+    }
+
+    #[test]
+    fn first_page_sql_includes_watermark_conditions() {
+        let plan = test_plan(vec!["id"], 500);
+
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
+
+        assert!(sql.contains("_siphon_replicated_at > {last_watermark:String}"));
+        assert!(sql.contains("_siphon_replicated_at <= {watermark:String}"));
+        assert!(sql.contains("_siphon_replicated_at AS _version"));
+        assert!(sql.contains("_siphon_deleted AS _deleted"));
+    }
+
+    #[test]
+    fn namespaced_plan_includes_traversal_filter() {
+        let plan = namespaced_plan(vec!["id"]);
+        let conditions = BTreeMap::from([("traversal_path".to_string(), "1/2/".to_string())]);
+
+        let sql = plan
+            .prepare()
+            .with_base_conditions(&conditions)
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
+
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn global_plan_omits_traversal_filter() {
+        let plan = test_plan(vec!["id"], 1000);
+
+        let sql = plan
+            .prepare()
+            .with_base_conditions(&BTreeMap::new())
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
+
+        assert!(
+            !sql.contains("traversal_path"),
+            "global plan should not have traversal filter: {sql}"
+        );
+    }
+
+    #[test]
+    fn with_cursor_adds_pagination_clause() {
+        let plan = test_plan(vec!["traversal_path", "id"], 1000);
+        let cursor = cursor_at(vec!["1/2/", "42"]);
+
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .with_cursor(&cursor)
+            .to_sql();
+
+        assert!(sql.contains("(traversal_path > '1/2/')"), "sql: {sql}");
+        assert!(
+            sql.contains("(traversal_path = '1/2/') AND (id > '42')"),
+            "sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn params_include_watermark_and_base_conditions() {
+        let plan = namespaced_plan(vec!["id"]);
+        let conditions = BTreeMap::from([("traversal_path".to_string(), "1/2/".to_string())]);
+
+        let prepared = plan
+            .prepare()
+            .with_base_conditions(&conditions)
+            .with_watermark(&Utc::now(), &Utc::now());
+
+        let params = prepared.params();
+        let map = params.as_object().unwrap();
+        assert!(map.contains_key("last_watermark"));
+        assert!(map.contains_key("watermark"));
+        assert_eq!(map.get("traversal_path").unwrap(), "1/2/");
+    }
+
+    #[test]
+    fn static_filters_included_in_sql() {
+        let plan = plan_with_where("status = 'active'", vec!["id"]);
+
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
+
+        assert!(sql.contains("status = 'active'"), "sql: {sql}");
     }
 
     #[test]
     fn order_by_columns_appear_in_sql() {
-        let query = simple_query(vec!["traversal_path", "id"], 1000);
-        assert!(query.to_sql().contains("ORDER BY traversal_path, id"));
+        let plan = test_plan(vec!["traversal_path", "id"], 1000);
+        let sql = plan
+            .prepare()
+            .with_watermark(&Utc::now(), &Utc::now())
+            .to_sql();
+        assert!(sql.contains("ORDER BY traversal_path, id"), "sql: {sql}");
     }
 }

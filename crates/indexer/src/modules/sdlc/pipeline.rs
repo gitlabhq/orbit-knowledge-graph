@@ -14,14 +14,13 @@ use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, info_span, warn};
 
-use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{ExtractQuery, PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{Cursor, Plan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
@@ -59,7 +58,7 @@ impl Pipeline {
 
     pub async fn run(
         &self,
-        plans: &[PipelinePlan],
+        plans: &[Plan],
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
@@ -110,30 +109,36 @@ impl Pipeline {
 
     async fn run_plan(
         &self,
-        plan: &PipelinePlan,
+        plan: &Plan,
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
-        let mut extract_query = plan.extract_query.clone();
-
         let position_key = format!("{}.{}", context.position_key, plan.name);
         let checkpoint = self.load_checkpoint(&position_key).await;
-        let params = self.build_query_params(&checkpoint.watermark, context);
+        let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
-        let mut total_rows: u64 = 0;
-        extract_query = extract_query.resume_from(&checkpoint);
-
-        if !extract_query.is_first_page() {
+        if !cursor.is_first_page() {
             info!("resuming from saved cursor");
         }
 
+        let base_query = plan
+            .prepare()
+            .with_base_conditions(&context.base_conditions)
+            .with_watermark(&checkpoint.watermark, &context.watermark);
+        let params = base_query.params();
+
+        let mut total_rows: u64 = 0;
         let session = SessionContext::new();
 
         let extract_start = Instant::now();
         let mut batches = self
-            .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
+            .extract_batch(
+                &plan.name,
+                &base_query.clone().with_cursor(&cursor).to_sql(),
+                params.clone(),
+            )
             .await?;
         let mut extract_elapsed = extract_start.elapsed();
 
@@ -152,15 +157,15 @@ impl Pipeline {
                 "batch extracted"
             );
 
-            extract_query = extract_query.advance(batches.last().unwrap())?;
-            let has_more = rows_in_batch >= plan.extract_query.batch_size();
+            cursor = cursor.advance(batches.last().unwrap(), &plan.sort_key)?;
+            let has_more = rows_in_batch >= plan.batch_size;
 
             let write_futures = self
                 .transform(&session, &plan.name, batches, &plan.transforms, destination)
                 .await?;
 
             if has_more {
-                let next_sql = extract_query.to_sql();
+                let next_sql = base_query.clone().with_cursor(&cursor).to_sql();
                 let (write_result, extract_result) = tokio::join!(
                     self.drain_writes(write_futures),
                     self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
@@ -168,7 +173,7 @@ impl Pipeline {
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
 
-                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                self.save_batch_progress(&position_key, context, &cursor, progress)
                     .await?;
 
                 batches = next_batches;
@@ -176,7 +181,7 @@ impl Pipeline {
             } else {
                 self.drain_writes(write_futures).await?;
 
-                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                self.save_batch_progress(&position_key, context, &cursor, progress)
                     .await?;
 
                 break;
@@ -396,7 +401,7 @@ impl Pipeline {
         &self,
         position_key: &str,
         context: &PipelineContext,
-        extract_query: &ExtractQuery,
+        cursor: &Cursor,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         self.checkpoint_store
@@ -404,7 +409,7 @@ impl Pipeline {
                 position_key,
                 &Checkpoint {
                     watermark: context.watermark,
-                    cursor_values: Some(extract_query.cursor_values().to_vec()),
+                    cursor_values: cursor.to_checkpoint_values(),
                 },
             )
             .await
@@ -444,26 +449,6 @@ impl Pipeline {
             }
         }
     }
-
-    fn build_query_params(
-        &self,
-        last_watermark: &DateTime<Utc>,
-        context: &PipelineContext,
-    ) -> Value {
-        let mut params = serde_json::Map::new();
-        params.insert(
-            "last_watermark".to_string(),
-            Value::String(last_watermark.format(TIMESTAMP_FORMAT).to_string()),
-        );
-        params.insert(
-            "watermark".to_string(),
-            Value::String(context.watermark.format(TIMESTAMP_FORMAT).to_string()),
-        );
-        for (key, value) in &context.base_conditions {
-            params.insert(key.clone(), Value::String(value.clone()));
-        }
-        Value::Object(params)
-    }
 }
 
 #[cfg(test)]
@@ -471,8 +456,7 @@ mod tests {
     use super::*;
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
-    use crate::modules::sdlc::plan::ExtractQuery;
-    use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
+    use crate::modules::sdlc::plan::ast::{Expr, Query, SelectExpr, TableRef};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
@@ -481,38 +465,11 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Mutex;
 
-    fn simple_extract_query(batch_size: u64) -> ExtractQuery {
-        let base_query = Query {
-            select: vec![
-                SelectExpr::bare(Expr::col("", "id")),
-                SelectExpr::bare(Expr::col("", "name")),
-                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
-                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
-            ],
-            from: TableRef::scan("source_table", None),
-            where_clause: Some(
-                Expr::and_all([
-                    Some(Expr::binary(
-                        Op::Gt,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("last_watermark", "String"),
-                    )),
-                    Some(Expr::binary(
-                        Op::Le,
-                        Expr::raw("_siphon_replicated_at"),
-                        Expr::param("watermark", "String"),
-                    )),
-                ])
-                .unwrap(),
-            ),
-            order_by: vec![],
-            limit: None,
-        };
-
-        ExtractQuery::new(base_query, vec!["id".to_string()], batch_size)
+    fn simple_plan(name: &str) -> Plan {
+        simple_plan_with_batch_size(name, 1000)
     }
 
-    fn simple_plan(name: &str) -> PipelinePlan {
+    fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
         let transform_query = Query {
             select: vec![
                 SelectExpr::bare(Expr::col("", "id")),
@@ -524,14 +481,26 @@ mod tests {
             limit: None,
         };
 
-        PipelinePlan {
+        Plan {
             name: name.to_string(),
-            extract_query: simple_extract_query(1000),
+            select: vec![
+                SelectExpr::bare(Expr::col("", "id")),
+                SelectExpr::bare(Expr::col("", "name")),
+                SelectExpr::new(Expr::raw("_siphon_replicated_at"), "_version"),
+                SelectExpr::new(Expr::raw("_siphon_deleted"), "_deleted"),
+            ],
+            from: TableRef::scan("source_table", None),
+            static_filters: None,
+            watermark_column: "_siphon_replicated_at".to_string(),
+            sort_key: vec!["id".to_string()],
+            batch_size,
+            traversal_filter: None,
             transforms: vec![Transformation {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
             }],
+            enrichment: None,
         }
     }
 
@@ -686,8 +655,7 @@ mod tests {
     #[tokio::test]
     async fn multi_batch_paginates_and_completes() {
         let store = Arc::new(RecordingCheckpointStore::new());
-        let mut plan = simple_plan("Test");
-        plan.extract_query = simple_extract_query(10);
+        let plan = simple_plan_with_batch_size("Test", 10);
 
         let pipeline = Pipeline::new(
             Arc::new(MultiBatchDatalake {

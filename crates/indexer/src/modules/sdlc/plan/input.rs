@@ -4,6 +4,7 @@ use ontology::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::EnrichmentSql;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 /// A node property to project onto the edge row during transform.
@@ -113,16 +114,6 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
     /// that do point lookups by FK, avoiding full namespace scans.
     pub enrichment: Option<EnrichmentSql>,
-}
-
-/// Pre-built SQL fragments for CTE-based enrichment.
-pub(in crate::modules::sdlc) struct EnrichmentSql {
-    /// CTE definitions (e.g. `_e0 AS (SELECT id, argMax(...) FROM ... WHERE id IN (...) GROUP BY id)`).
-    pub cte_defs: Vec<String>,
-    /// JOIN clauses (e.g. `LEFT JOIN _e0 ON _batch.issue_id = _e0.id`).
-    pub join_clauses: Vec<String>,
-    /// SELECT expressions for enriched columns (e.g. `_e0.state_id AS _e0_state_id`).
-    pub select_exprs: Vec<String>,
 }
 
 pub(in crate::modules::sdlc) enum ExtractColumn {
