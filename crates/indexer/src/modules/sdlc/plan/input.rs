@@ -4,8 +4,17 @@ use ontology::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::EnrichmentSql;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
+// CTE fragments for standalone-edge enrichment. lower::render_cte_template
+// stitches them into `WITH _batch AS (...) ... LEFT JOIN` so each endpoint
+// does a point lookup (`id IN (SELECT DISTINCT fk FROM _batch)`) rather
+// than a full namespace scan.
+pub(in crate::modules::sdlc) struct EnrichmentSql {
+    pub cte_defs: Vec<String>,
+    pub join_clauses: Vec<String>,
+    pub select_exprs: Vec<String>,
+}
 
 /// A node property to project onto the edge row during transform.
 pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {

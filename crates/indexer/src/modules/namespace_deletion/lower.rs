@@ -1,7 +1,5 @@
 use ontology::{DELETED_COLUMN, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 
-use crate::llqm_v1::ast::{Expr, Insert, InsertSelect, Op, Query, SelectExpr, TableRef};
-use crate::llqm_v1::codegen;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 pub struct DeletionStatement {
@@ -11,20 +9,17 @@ pub struct DeletionStatement {
     pub sql: String,
 }
 
-/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a namespace
-/// across all ontology-driven tables.
+/// Builds `INSERT INTO ... SELECT` statements that soft-delete all rows for a
+/// namespace across every ontology-driven table.
 ///
-/// For each namespaced node table and the shared edge table, generates:
+/// For each namespaced node table and the shared edge table, emits:
 /// ```sql
-/// INSERT INTO {prefixed_table}
-/// SELECT {sort_key_columns..., true, now64(6)}
+/// INSERT INTO {prefixed_table} ({sort_key..., _deleted, _version})
+/// SELECT {sort_key..., true, now64(6)}
 /// FROM {prefixed_table}
 /// WHERE startsWith(traversal_path, {traversal_path:String})
 ///   AND _deleted = false
 /// ```
-///
-/// The table names are prefixed according to the embedded `SCHEMA_VERSION` so
-/// deletions target the same table-set the indexer is currently writing to.
 pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
     let mut statements = Vec::new();
 
@@ -32,89 +27,49 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
         if !node.has_traversal_path {
             continue;
         }
-
         let sort_key = ontology
             .sort_key_for_table(&node.destination_table)
             .unwrap_or(&node.sort_key);
-
-        let select = build_select_from_sort_key(sort_key);
-        let columns = build_destination_columns(sort_key);
         let prefixed = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-        let statement = build_deletion_insert(&node.destination_table, &prefixed, columns, select);
-        statements.push(statement);
+        statements.push(build_deletion_insert(
+            &node.destination_table,
+            &prefixed,
+            sort_key,
+        ));
     }
 
     for edge_table in ontology.edge_tables() {
         let config = ontology
             .edge_table_config(edge_table)
             .expect("edge_tables() only returns keys present in edge_table_configs");
-        let edge_sort_key = &config.sort_key;
-        let edge_select = build_select_from_sort_key(edge_sort_key);
-        let edge_columns = build_destination_columns(edge_sort_key);
-        let prefixed_edge = prefixed_table_name(edge_table, *SCHEMA_VERSION);
-        let edge_statement =
-            build_deletion_insert(edge_table, &prefixed_edge, edge_columns, edge_select);
-        statements.push(edge_statement);
+        let prefixed = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+        statements.push(build_deletion_insert(
+            edge_table,
+            &prefixed,
+            &config.sort_key,
+        ));
     }
 
     statements
 }
 
-fn build_select_from_sort_key(sort_key: &[String]) -> Vec<SelectExpr> {
-    let mut select: Vec<SelectExpr> = sort_key
-        .iter()
-        .map(|column| SelectExpr::bare(Expr::col("", column)))
-        .collect();
-    select.push(SelectExpr::bare(Expr::raw("true")));
-    select.push(SelectExpr::bare(Expr::raw("now64(6)")));
-    select
-}
-
-fn build_destination_columns(sort_key: &[String]) -> Vec<String> {
-    let mut columns: Vec<String> = sort_key.to_vec();
-    columns.push(DELETED_COLUMN.to_string());
-    columns.push(VERSION_COLUMN.to_string());
-    columns
-}
-
 fn build_deletion_insert(
     unprefixed_table: &str,
     prefixed_table: &str,
-    destination_columns: Vec<String>,
-    select: Vec<SelectExpr>,
+    sort_key: &[String],
 ) -> DeletionStatement {
-    let where_clause = Expr::and_all([
-        Some(Expr::func(
-            "startsWith",
-            vec![
-                Expr::col("", TRAVERSAL_PATH_COLUMN),
-                Expr::param(TRAVERSAL_PATH_COLUMN, "String"),
-            ],
-        )),
-        Some(Expr::binary(
-            Op::Eq,
-            Expr::col("", DELETED_COLUMN),
-            Expr::raw("false"),
-        )),
-    ]);
-
-    let insert_select = InsertSelect {
-        insert: Insert {
-            table: prefixed_table.to_string(),
-            columns: destination_columns,
-        },
-        query: Query {
-            select,
-            from: TableRef::scan(prefixed_table, None),
-            where_clause,
-            order_by: vec![],
-            limit: None,
-        },
-    };
-
+    let sort_key_cols = sort_key.join(", ");
+    let insert_columns = format!("{sort_key_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
+    let sql = format!(
+        "INSERT INTO {prefixed_table} ({insert_columns}) \
+         SELECT {sort_key_cols}, true, now64(6) \
+         FROM {prefixed_table} \
+         WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
+         AND ({DELETED_COLUMN} = false))"
+    );
     DeletionStatement {
         table: unprefixed_table.to_string(),
-        sql: codegen::emit_insert_select(&insert_select),
+        sql,
     }
 }
 

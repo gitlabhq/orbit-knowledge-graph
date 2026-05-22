@@ -32,7 +32,6 @@ pub mod config;
 pub mod engine;
 pub mod health;
 pub mod indexing_status;
-pub mod llqm_v1;
 pub mod locking;
 pub mod modules;
 pub mod nats;

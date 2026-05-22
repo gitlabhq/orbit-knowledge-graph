@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::checkpoint::namespace_position_key;
@@ -73,10 +72,7 @@ impl Handler for NamespaceHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
-            base_conditions: BTreeMap::from([(
-                "traversal_path".to_string(),
-                traversal_path.clone(),
-            )]),
+            traversal_path: Some(traversal_path.clone()),
         };
 
         let result = self
