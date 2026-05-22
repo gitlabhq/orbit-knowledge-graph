@@ -157,3 +157,124 @@ local-cli-publish:
     - apk add --no-cache bash curl coreutils
   script:
     - bash ./scripts/upload-local-cli-release.sh
+
+# ---------------------------------------------------------------------------
+# TEMPORARY VERIFICATION JOB — to be removed before merging the parent MR.
+#
+# Builds the orbit Linux x86_64 binary with the new static-libstdc++/libgcc
+# RUSTFLAGS and verifies the resulting binary:
+#   - ldd shows no libstdc++.so.6 / libgcc_s.so.1
+#   - objdump -T shows no GLIBCXX_* / GCC_12.0.0 symbol requirements
+#   - file reports a valid ELF binary
+#   - binary runs (or at least invokes) under UBI 8 and UBI 9 minimal
+#
+# This job runs only on MR pipelines for the verification branch (or when
+# explicitly triggered), so it does not affect normal MR pipelines.
+# ---------------------------------------------------------------------------
+
+verify-static-link-linux-amd64:
+  extends:
+    - .job-template
+    - .sccache-template
+  stage: build
+  needs: []
+  tags:
+    - saas-linux-large-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'test/verify-static-link-build'
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  variables:
+    PLATFORM: linux
+    ARCH: x86_64
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
+  script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends file binutils
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+    - BIN="target/x86_64-unknown-linux-gnu/release/orbit"
+    - echo "=== file ==="
+    - file "$BIN"
+    - echo "=== size ==="
+    - ls -lh "$BIN"
+    - echo "=== ldd ==="
+    - ldd "$BIN" || true
+    - echo "=== ldd | grep libstdc++ / libgcc (should be empty) ==="
+    - |
+      if ldd "$BIN" | grep -E 'libstdc\+\+|libgcc_s'; then
+        echo "FAIL: binary still dynamically links libstdc++/libgcc"
+        exit 1
+      else
+        echo "PASS: no libstdc++/libgcc dynamic dependency"
+      fi
+    - echo "=== objdump GLIBCXX (should be empty) ==="
+    - |
+      if objdump -T "$BIN" | grep -oE 'GLIBCXX_[0-9.]+' | sort -V -u; then
+        echo "FAIL: binary still imports GLIBCXX_* symbols"
+        exit 1
+      else
+        echo "PASS: no GLIBCXX_* symbol requirements"
+      fi
+    - echo "=== objdump GCC_ (should be empty or only old GCC_3.x / GCC_4.x baseline) ==="
+    - objdump -T "$BIN" | grep -oE 'GCC_[0-9.]+' | sort -V -u || true
+    - echo "=== objdump GLIBC (still expected — dynamic glibc) ==="
+    - objdump -T "$BIN" | grep -oE 'GLIBC_[0-9.]+' | sort -V -u | tail -10 || true
+  artifacts:
+    when: always
+    paths:
+      - orbit-local-linux-x86_64.tar.gz
+      - target/x86_64-unknown-linux-gnu/release/orbit
+    expire_in: 7 days
+
+verify-static-link-on-ubi8:
+  stage: e2e
+  image: registry.access.redhat.com/ubi8/ubi:latest
+  tags:
+    - saas-linux-medium-amd64
+  needs:
+    - verify-static-link-linux-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'test/verify-static-link-build'
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - echo "=== /etc/os-release ==="
+    - cat /etc/os-release | head -3
+    - echo "=== ldd --version ==="
+    - ldd --version | head -1
+    - chmod +x target/x86_64-unknown-linux-gnu/release/orbit
+    - echo "=== orbit --version on UBI 8 ==="
+    - |
+      # UBI 8 has glibc 2.28 — binary still needs glibc >= 2.34 because glibc
+      # is dynamically linked. We expect this to fail with GLIBC_2.34 not
+      # found errors (which is the pre-musl follow-up behavior). The point of
+      # this job is to capture the exact errors so we can prove the
+      # libstdc++/GLIBCXX gap is gone, even if the glibc gap remains.
+      target/x86_64-unknown-linux-gnu/release/orbit --version 2>&1 || true
+    - echo "=== ldd on UBI 8 ==="
+    - ldd target/x86_64-unknown-linux-gnu/release/orbit 2>&1 || true
+
+verify-static-link-on-ubi9:
+  stage: e2e
+  image: registry.access.redhat.com/ubi9-minimal:latest
+  tags:
+    - saas-linux-medium-amd64
+  needs:
+    - verify-static-link-linux-amd64
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event' && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == 'test/verify-static-link-build'
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - echo "=== /etc/os-release ==="
+    - cat /etc/os-release | head -3
+    - echo "=== ldd --version ==="
+    - ldd --version | head -1
+    - chmod +x target/x86_64-unknown-linux-gnu/release/orbit
+    - echo "=== orbit --version on UBI 9 minimal ==="
+    - target/x86_64-unknown-linux-gnu/release/orbit --version
+    - echo "=== ldd on UBI 9 ==="
+    - ldd target/x86_64-unknown-linux-gnu/release/orbit
