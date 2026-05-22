@@ -2,10 +2,6 @@
 
 **Audience:** contributors adding a new language to the v2 code indexer in
 `gitlab-org/orbit/knowledge-graph`.
-**Estimated effort:**
-
-- definitions-only "minimum viable language": 1–2 focused days
-- fully-resolved language (calls, imports, cross-file resolution): 1–2 weeks
 
 This guide walks through every file you must touch, the
 [`DslLanguage`](../../crates/code-graph/src/v2/dsl/types.rs) trait surface, the
