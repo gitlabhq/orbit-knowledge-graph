@@ -152,6 +152,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
 - Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
+- **SOX billing surface:** If you add or move a file that can affect billing correctness outside `crates/gkg-billing/` — any file that controls whether events fire, what data they contain, or whether quota checks run — add it to `.gitlab/CODEOWNERS` under the SOX-scoped rules and update the hook-points table in `docs/design-documents/decisions/013_billing_sox_scope.md` in the same MR.
 
 ## MR and issue descriptions and comments
 
