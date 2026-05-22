@@ -1645,8 +1645,14 @@ mod tests {
         .expect_err("unsupported op on virtual column should be rejected");
 
         assert!(
-            err.to_string().contains("not supported on this virtual"),
-            "expected unsupported op error, got: {err}"
+            err.is_client_safe(),
+            "virtual column op rejection should be client-safe"
         );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("content"),
+            "error should name the column: {msg}"
+        );
+        assert!(msg.contains("gt"), "error should name the operator: {msg}");
     }
 }
