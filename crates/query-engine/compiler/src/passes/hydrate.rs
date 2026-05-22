@@ -311,6 +311,10 @@ mod tests {
                 lookup: lookup.to_string(),
                 disabled: false,
                 depends_on: deps.iter().map(|s| s.to_string()).collect(),
+                allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             }),
             nullable: true,
             ..Default::default()
@@ -455,6 +459,7 @@ mod tests {
                     lookup: "blob_content".to_string(),
                     disabled: true,
                     depends_on: vec![],
+                    allowed_ops: vec![],
                 }),
                 nullable: true,
                 ..Default::default()

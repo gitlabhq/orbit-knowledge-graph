@@ -1618,7 +1618,7 @@ mod tests {
         );
 
         // Virtual filter should be carried on the hydration plan.
-        if let compiler::HydrationPlan::Static(templates) = &compiled.hydration {
+        if let HydrationPlan::Static(templates) = &compiled.hydration {
             assert!(
                 templates.iter().any(|t| !t.virtual_filters.is_empty()),
                 "hydration plan should carry virtual filters"

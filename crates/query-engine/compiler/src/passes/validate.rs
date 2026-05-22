@@ -1424,6 +1424,10 @@ mod tests {
                     lookup: "project_name".into(),
                     disabled: false,
                     depends_on: vec![],
+                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                 });
             })
             .unwrap();
