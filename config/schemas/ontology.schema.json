@@ -249,6 +249,10 @@
           "properties": {
             "type": { "type": "string", "const": "query" },
             "scope": { "$ref": "#/definitions/etlScope" },
+            "source": {
+              "type": "string",
+              "description": "Underlying primary table."
+            },
             "select": {
               "type": "string",
               "description": "Column expressions for the SELECT clause."
@@ -298,7 +302,7 @@
               }
             }
           },
-          "required": ["type", "scope", "select", "from"],
+          "required": ["type", "scope", "source", "select", "from"],
           "additionalProperties": false
         }
       ]

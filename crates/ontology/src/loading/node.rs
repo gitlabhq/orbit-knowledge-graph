@@ -57,6 +57,7 @@ enum EtlYaml {
     #[serde(rename = "query")]
     Query {
         scope: EtlScope,
+        source: String,
         select: String,
         from: String,
         #[serde(default, rename = "where")]
@@ -472,6 +473,7 @@ impl EtlYaml {
             }),
             EtlYaml::Query {
                 scope,
+                source,
                 select,
                 from,
                 where_clause,
@@ -483,6 +485,7 @@ impl EtlYaml {
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
+                source,
                 select,
                 from,
                 where_clause,
