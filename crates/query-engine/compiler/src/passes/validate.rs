@@ -160,18 +160,13 @@ impl<'a> Validator<'a> {
         Self { ontology }
     }
 
-    /// If the field is virtual, returns the allowed filter operators.
-    /// Uses the ontology's `allowed_ops` list, falling back to the default set.
-    /// Returns `None` for non-virtual fields.
+    /// If the field is virtual, returns the allowed filter operators from the
+    /// ontology. Returns `None` for non-virtual fields.
     fn virtual_allowed_ops(&self, entity: &str, prop: &str) -> Option<Vec<&str>> {
         let node = self.ontology.get_node(entity)?;
         let field = node.fields.iter().find(|f| f.name == prop)?;
         if let ontology::FieldSource::Virtual(vs) = &field.source {
-            if vs.allowed_ops.is_empty() {
-                Some(Self::DEFAULT_VIRTUAL_OPS.to_vec())
-            } else {
-                Some(vs.allowed_ops.iter().map(|s| s.as_str()).collect())
-            }
+            Some(vs.allowed_ops.iter().map(|s| s.as_str()).collect())
         } else {
             None
         }
@@ -377,16 +372,6 @@ impl<'a> Validator<'a> {
     /// Relationship filters are validated against the fixed edge table schema.
     /// Unknown edge columns are rejected (fail closed) since they would
     /// produce broken SQL at runtime.
-    /// Default operators for virtual columns when `allowed_ops` is not set.
-    const DEFAULT_VIRTUAL_OPS: &'static [&'static str] = &[
-        "eq",
-        "contains",
-        "starts_with",
-        "ends_with",
-        "is_null",
-        "is_not_null",
-    ];
-
     fn check_filter_types(&self, input: &Input) -> Result<()> {
         for node in &input.nodes {
             let Some(entity) = node.entity.as_deref() else {

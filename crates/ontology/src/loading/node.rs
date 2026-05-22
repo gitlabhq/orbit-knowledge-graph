@@ -241,13 +241,23 @@ impl NodeYaml {
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
                     (Some(col), None) => FieldSource::DatabaseColumn(col),
-                    (None, Some(v)) => FieldSource::Virtual(VirtualSource {
-                        service: v.service,
-                        lookup: v.lookup,
-                        disabled: v.disabled,
-                        depends_on: v.depends_on,
-                        allowed_ops: v.allowed_ops,
-                    }),
+                    (None, Some(v)) => {
+                        let allowed_ops = if v.allowed_ops.is_empty() {
+                            VirtualSource::DEFAULT_ALLOWED_OPS
+                                .iter()
+                                .map(|s| (*s).to_string())
+                                .collect()
+                        } else {
+                            v.allowed_ops
+                        };
+                        FieldSource::Virtual(VirtualSource {
+                            service: v.service,
+                            lookup: v.lookup,
+                            disabled: v.disabled,
+                            depends_on: v.depends_on,
+                            allowed_ops,
+                        })
+                    }
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(
                             "property '{prop_name}' on node '{name}': \
