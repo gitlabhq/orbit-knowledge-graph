@@ -4,11 +4,13 @@
 * @gitlab-org/orbit/team
 
 [SOX Billing] @gitlab-org/orbit/team
-/crates/gkg-billing/                 @gitlab-org/orbit/team
-/crates/gkg-server-config/           @gitlab-org/orbit/team
-/crates/gkg-server/src/auth/         @gitlab-org/orbit/team
-/crates/gkg-server/src/pipeline/     @gitlab-org/orbit/team
-/crates/gkg-server/src/grpc/         @gitlab-org/orbit/team
-/crates/query-engine/pipeline/       @gitlab-org/orbit/team
-/.gitlab/CODEOWNERS                  @gitlab-org/orbit/team
-/docs/design-documents/decisions/    @gitlab-org/orbit/team
+/crates/gkg-billing/
+/crates/gkg-server-config/
+/crates/gkg-server/src/auth/
+/crates/gkg-server/src/pipeline/
+/crates/gkg-server/src/grpc/
+/crates/query-engine/pipeline/
+/.gitlab/CODEOWNERS
+
+[Architecture] @gitlab-org/orbit/team
+/docs/design-documents/decisions/
