@@ -1592,4 +1592,27 @@ mod tests {
             "both range predicates must appear in SQL, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn filter_on_virtual_column_rejected() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "f", "entity": "File",
+                         "node_ids": [1],
+                         "filters": {"content": {"op": "eq", "value": "x"}}},
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("filter on virtual column should be rejected");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not filterable") || msg.contains("rejected"),
+            "filter on virtual column 'content' should be rejected, got: {msg}"
+        );
+    }
 }

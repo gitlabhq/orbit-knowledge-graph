@@ -257,6 +257,11 @@ impl NodeYaml {
                     }
                 };
 
+                let filterable = match source {
+                    FieldSource::Virtual(_) => false,
+                    _ => prop_def.filterable,
+                };
+
                 Ok(Field {
                     name: prop_name,
                     source,
@@ -265,7 +270,7 @@ impl NodeYaml {
                     enum_values: prop_def.values,
                     enum_type: prop_def.enum_type,
                     like_allowed: prop_def.like_allowed,
-                    filterable: prop_def.filterable,
+                    filterable,
                     admin_only: prop_def.admin_only,
                     description: prop_def.description,
                 })
