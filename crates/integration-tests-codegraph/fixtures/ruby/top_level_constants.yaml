@@ -27,6 +27,7 @@ fixtures:
 
           def initialize
             @count = 0
+            @label = DEFAULT_NAME
           end
 
           def allow?
@@ -343,3 +344,42 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { type: Constant, kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # BARE (UNQUALIFIED) CONSTANT REFERENCES
+  # ══════════════════════════════════════════════════════════════
+  #
+  # The Ruby DSL now declares `reference("constant")` with field-aware
+  # exclusions, so a same-class bare ref like `MAX_TRACKED_REFS_PER_PROJECT`
+  # used inside `allow?` resolves via the linker's ImplicitMember stage
+  # (walks the enclosing FQN, hits the `nested` index, finds the
+  # Constant Definition).
+
+  - name: "bare constant ref in same class resolves via ImplicitMember"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::allow?'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "bare constant ref to a string-valued constant in initialize"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::initialize'
+        AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "LHS of `MAX = 2` does not produce a self-referencing Calls edge"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN count(*) AS n
+    assert:
+      - { row: { n: 0 } }
