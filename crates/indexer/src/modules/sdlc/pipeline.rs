@@ -124,14 +124,19 @@ impl Pipeline {
             info!("resuming from saved cursor");
         }
 
-        let mut base_query = plan.prepare().with(WatermarkFilter {
-            column: &plan.watermark_column,
-            last: checkpoint.watermark,
-            current: context.watermark,
-        });
-        if let Some(path) = context.traversal_path.as_deref() {
-            base_query = base_query.with(TraversalPathFilter { path });
-        }
+        let base_query = plan
+            .prepare()
+            .with(WatermarkFilter {
+                column: &plan.watermark_column,
+                last: checkpoint.watermark,
+                current: context.watermark,
+            })
+            .with(
+                context
+                    .traversal_path
+                    .as_deref()
+                    .map(|path| TraversalPathFilter { path }),
+            );
         let params = base_query.params();
 
         let mut total_rows: u64 = 0;

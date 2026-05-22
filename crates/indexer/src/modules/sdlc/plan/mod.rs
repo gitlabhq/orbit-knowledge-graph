@@ -79,6 +79,17 @@ pub(in crate::modules::sdlc) trait Filter {
     }
 }
 
+// `None` is a filter that contributes nothing. Lets call sites stay chainable:
+// `prepared.with(maybe_path.map(|p| TraversalPathFilter { path: p }))`.
+impl<F: Filter> Filter for Option<F> {
+    fn condition(&self) -> String {
+        self.as_ref().map(|f| f.condition()).unwrap_or_default()
+    }
+    fn params(&self) -> Vec<(String, Value)> {
+        self.as_ref().map(|f| f.params()).unwrap_or_default()
+    }
+}
+
 pub(in crate::modules::sdlc) struct WatermarkFilter<'a> {
     pub column: &'a str,
     pub last: DateTime<Utc>,
