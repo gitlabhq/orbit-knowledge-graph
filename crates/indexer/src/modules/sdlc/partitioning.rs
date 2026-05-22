@@ -154,10 +154,11 @@ async fn compute_partition_ranges(
         .map(|arr| arr.iter().flatten().collect::<Vec<i64>>())
         .unwrap_or_default();
 
-    // Need at least one inner cut: cuts = [min, max+1] alone means the source is
-    // smaller than the requested partition count (the +1 prevents a degenerate
-    // single-partition split that'd just thrash the engine for no parallelism).
-    if cuts.len() < 3 {
+    // Need `count + 1` distinct cuts to actually deliver `count` partitions.
+    // Fewer (data clustered or scope too small) means we cannot honor the
+    // requested fan-out — fall back to a single non-partitioned run instead of
+    // spawning fewer-than-asked partitions whose overhead exceeds the gain.
+    if cuts.len() < count as usize + 1 {
         debug!(
             ?cuts,
             count, "skipping partitioning: insufficient distinct cuts"

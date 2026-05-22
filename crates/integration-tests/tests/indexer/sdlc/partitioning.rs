@@ -171,10 +171,13 @@ pub async fn skips_already_completed_partitions_on_retry(ctx: &TestContext) {
         .await;
     let count =
         ArrowUtils::get_column_by_name::<UInt64Array>(&result[0], "cnt").expect("cnt column");
+    // T-digest cuts on ids 1..=12 with count=4 produce [1, 3, 6, 9, 13]
+    // → p0=[1,3), p1=[3,6), p2=[6,9), p3=[9,13).
+    // p0 and p1 are pre-marked done, so p2+p3 index ids 6..=12 = 7 rows.
     assert_eq!(
         count.value(0),
-        6,
-        "only p2/p3 should have indexed (rows 7-12); p0/p1 were skipped"
+        7,
+        "only p2/p3 should have indexed (ids 6..=12); p0/p1 were skipped"
     );
 }
 
