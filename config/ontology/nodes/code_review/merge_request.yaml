@@ -308,6 +308,7 @@ etl:
   # inserts and routinely leaves those columns NULL on the destination.
   type: query
   scope: namespaced
+  source: merge_requests
   select: >-
     m.id AS id,
     m.iid AS iid,

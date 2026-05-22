@@ -59,6 +59,7 @@ pub enum EtlConfig {
     },
     Query {
         scope: EtlScope,
+        source: String,
         select: String,
         from: String,
         where_clause: Option<String>,
@@ -81,6 +82,13 @@ impl EtlConfig {
         match self {
             EtlConfig::Table { scope, .. } => *scope,
             EtlConfig::Query { scope, .. } => *scope,
+        }
+    }
+
+    pub fn source(&self) -> &str {
+        match self {
+            EtlConfig::Table { source, .. } => source,
+            EtlConfig::Query { source, .. } => source,
         }
     }
 
@@ -163,6 +171,7 @@ mod tests {
     ) -> EtlConfig {
         EtlConfig::Query {
             scope,
+            source: "source_table".to_string(),
             select: "id, name".to_string(),
             from: "source_table".to_string(),
             where_clause: where_clause.map(String::from),
