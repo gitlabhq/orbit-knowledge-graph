@@ -277,6 +277,7 @@ yaml_test!(
     ruby_imported_symbol_fallback_matrix,
     "ruby/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(ruby_top_level_constants, "ruby/top_level_constants.yaml");
 
 // Rust
 yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");

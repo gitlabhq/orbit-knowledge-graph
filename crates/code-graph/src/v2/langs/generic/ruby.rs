@@ -788,6 +788,33 @@ mod tests {
     }
 
     #[test]
+    fn qualified_constant_reference_emits_a_ref() {
+        let code = "module Foo\n  \
+                      class Bar\n    \
+                        MAX = 1\n  \
+                      end\n\
+                    end\n\
+                    class User\n  \
+                      def value\n    \
+                        Foo::Bar::MAX\n  \
+                      end\n\
+                    end\n";
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            ref_names.contains(&"Foo::Bar::MAX"),
+            "qualified constant reference should appear in refs: {ref_names:?}"
+        );
+    }
+
+    #[test]
     fn constants_convert_to_require_paths_without_stdlib_map() {
         assert_eq!(
             ruby_constant_to_require_path("JSON").as_deref(),
