@@ -73,9 +73,7 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
-        let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
-            return;
-        };
+        let common = build_common(&self.config, &self.claims, &self.schema_version);
         let query = build_query(
             &self.claims,
             &self.tool_name,

@@ -1,49 +1,79 @@
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::SnowplowContext;
-use labkit_events::orbit::OrbitCommonContext;
 use query_engine::compiler::QueryInfo;
 use serde::Serialize;
-use serde_json::json;
 
 use crate::auth::Claims;
 
-/// Iglu schema for the extended orbit_query context (2-0-2).
+const ORBIT_COMMON_SCHEMA: &str = "iglu:com.gitlab/orbit_common/jsonschema/1-0-0";
 const ORBIT_QUERY_SCHEMA: &str = "iglu:com.gitlab/orbit_query/jsonschema/2-0-2";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// orbit_common
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(crate) struct OrbitCommonContext {
+    data: serde_json::Value,
+}
+
+impl SnowplowContext for OrbitCommonContext {
+    fn schema(&self) -> &str {
+        ORBIT_COMMON_SCHEMA
+    }
+
+    fn data(&self) -> serde_json::Value {
+        self.data.clone()
+    }
+}
+
+#[derive(Serialize)]
+struct OrbitCommonData<'a> {
+    deployment_type: &'a str,
+    environment: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    correlation_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instance_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unique_instance_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organization_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    root_namespace_ids: Option<Vec<i64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema_version: Option<&'a str>,
+}
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
     claims: &Claims,
     schema_version: &str,
-) -> Option<OrbitCommonContext> {
-    let mut b = gkg_analytics::common_builder(config).schema_version(schema_version);
-    if let Some(id) = labkit::correlation::current() {
-        b = b.correlation_id(id.as_str());
+) -> OrbitCommonContext {
+    let correlation_id = labkit::correlation::current();
+
+    let data = OrbitCommonData {
+        deployment_type: gkg_analytics::deployment_type(config.deployment.kind),
+        environment: gkg_analytics::deployment_env(config),
+        correlation_id: correlation_id.as_ref().map(|id| id.as_str()),
+        instance_id: claims.instance_id.as_deref(),
+        unique_instance_id: claims.unique_instance_id.as_deref(),
+        host_name: claims.host_name.as_deref(),
+        organization_id: claims.organization_id.map(|id| id as i64),
+        root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
+        schema_version: Some(schema_version),
+    };
+
+    OrbitCommonContext {
+        data: serde_json::to_value(data).unwrap_or_default(),
     }
-    if let Some(ref id) = claims.instance_id {
-        b = b.instance_id(id);
-    }
-    if let Some(ref id) = claims.unique_instance_id {
-        b = b.unique_instance_id(id);
-    }
-    if let Some(ref h) = claims.host_name {
-        b = b.host_name(h);
-    }
-    if let Some(org) = claims.organization_id {
-        b = b.organization_id(org as i64);
-    }
-    if let Some(ns) = claims.root_namespace_id {
-        b = b.root_namespace_ids(vec![ns]);
-    }
-    b.build()
-        .map_err(|e| tracing::warn!(error = %e, "drop analytics event: orbit_common build failed"))
-        .ok()
 }
 
-/// Consumer-owned orbit_query context (schema 2-0-2).
-///
-/// Replaces the deprecated `labkit_events::orbit::OrbitQueryContext`. Includes
-/// both the original auth/identity fields and the QueryInfo structural
-/// dimensions added in 2-0-2.
+// ─────────────────────────────────────────────────────────────────────────────
+// orbit_query
+// ─────────────────────────────────────────────────────────────────────────────
+
 pub(crate) struct OrbitQueryContext {
     data: serde_json::Value,
 }
@@ -58,7 +88,6 @@ impl SnowplowContext for OrbitQueryContext {
     }
 }
 
-/// Serialized subset -- only the fields we actually populate.
 #[derive(Serialize)]
 struct OrbitQueryData<'a> {
     source_type: &'a str,
@@ -168,7 +197,7 @@ mod tests {
     }
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
+        let common = build_common(&AnalyticsConfig::default(), claims, "33");
         let query = build_query(claims, tool, None, None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
@@ -179,7 +208,7 @@ mod tests {
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
+        let common = build_common(&AnalyticsConfig::default(), claims, schema_version);
         let query = build_query(claims, "query_graph", None, None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
@@ -227,7 +256,7 @@ mod tests {
     #[test]
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
         let query = build_query(&claims, "query_graph", Some("claude-code"), None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
@@ -268,6 +297,13 @@ mod tests {
     }
 
     #[test]
+    fn common_schema_is_1_0_0() {
+        let claims = claims_with_paths(vec![]);
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+        assert_eq!(common.schema(), ORBIT_COMMON_SCHEMA);
+    }
+
+    #[test]
     fn query_info_fields_merged_into_context() {
         let claims = claims_with_paths(vec!["1/22/"]);
         let info = QueryInfo {
@@ -295,12 +331,9 @@ mod tests {
         let query = build_query(&claims, "query_graph", None, Some(&info));
         let data = query.data();
 
-        // Original auth fields still present.
         assert_eq!(data["source_type"], "mcp");
         assert_eq!(data["tool_name"], "query_graph");
         assert_eq!(data["queried_namespace_ids"][0], 22);
-
-        // QueryInfo fields merged in.
         assert_eq!(data["query_type"], "traversal");
         assert_eq!(data["node_count"], 2);
         assert_eq!(data["entity_types"][0], "MergeRequest");
@@ -310,12 +343,9 @@ mod tests {
     }
 
     #[test]
-    fn schema_is_2_0_2() {
+    fn query_schema_is_2_0_2() {
         let claims = claims_with_paths(vec![]);
         let query = build_query(&claims, "query_graph", None, None);
-        assert_eq!(
-            query.schema(),
-            "iglu:com.gitlab/orbit_query/jsonschema/2-0-2"
-        );
+        assert_eq!(query.schema(), ORBIT_QUERY_SCHEMA);
     }
 }
