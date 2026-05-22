@@ -15,11 +15,7 @@ Query the GitLab Knowledge Graph (product name **Orbit**) via the typed
 `glab orbit remote` CLI subcommands (shipped in glab v1.94.0+).
 
 **Do not use `glab api orbit/*`.** The typed CLI handles the
-`Content-Type` header, response framing, and exit codes for you. (If
-you've seen an `invalid character '@'` rejection and assumed `glab api`
-was a workaround, it isn't — see
-[`troubleshooting.md`](references/troubleshooting.md#invalid-character--json-parse-error-not-a-cli-bug)
-for the actual cause and fix.)
+`Content-Type` header, response framing, and exit codes for you.
 
 ## Discovery
 
