@@ -2,27 +2,26 @@ mod datalake;
 pub mod dispatch;
 mod handler;
 mod metrics;
+mod partitioning;
 mod pipeline;
 mod plan;
 
 use std::sync::Arc;
+
+use ontology::EtlScope;
 
 use crate::IndexerConfig;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{
-    ENTITY_HANDLER_TOPIC, EntityIndexingRequest, GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest,
-    NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
+    GLOBAL_HANDLER_TOPIC, GlobalIndexingRequest, NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest,
 };
 use crate::types::Event;
 use datalake::{Datalake, DatalakeQuery};
-use handler::entity::EntityIndexingHandler;
-use handler::global::GlobalHandler;
-use handler::namespace::NamespaceHandler;
+use handler::entity::EntityHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
-use plan::build_plans;
 use tracing::info;
 
 pub async fn register_handlers(
@@ -30,88 +29,82 @@ pub async fn register_handlers(
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let global_handler_config = config.engine.handlers.global_handler.clone();
-    let namespace_handler_config = config.engine.handlers.namespace_handler.clone();
+    let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
         datalake_client,
-        global_handler_config.datalake_batch_size,
+        entity_handler_config.datalake_batch_size,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
-    let mut batch_size_overrides = global_handler_config.batch_size_overrides.clone();
-    batch_size_overrides.extend(namespace_handler_config.batch_size_overrides.clone());
-
-    let plans = build_plans(
+    let inputs = plan::input::from_ontology(ontology);
+    let partition_strategies =
+        partitioning::build_strategies(&inputs, &entity_handler_config.partition_overrides);
+    let plans = plan::build_plans(
         ontology,
-        global_handler_config.datalake_batch_size,
-        namespace_handler_config.datalake_batch_size,
-        &batch_size_overrides,
-    );
-
-    info!(
-        global_plans = plans.global.len(),
-        namespaced_plans = plans.namespaced.len(),
-        global_entities = ?plans.global.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        namespaced_entities = ?plans.namespaced.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        "SDLC pipelines initialized"
+        entity_handler_config.datalake_batch_size,
+        entity_handler_config.datalake_batch_size,
+        &entity_handler_config.batch_size_overrides,
     );
 
     let pipeline = Arc::new(Pipeline::new(
-        datalake,
-        checkpoint_store,
+        Arc::clone(&datalake),
+        Arc::clone(&checkpoint_store),
         metrics.clone(),
         config.engine.datalake_retry.clone(),
     ));
 
-    if !plans.global.is_empty() {
-        let mut subscription = GlobalIndexingRequest::subscription();
-        if let Some(topic_config) = config.engine.topics.get(GLOBAL_HANDLER_TOPIC) {
-            subscription = subscription.with_config(topic_config);
-        }
-        registry.register_handler(Box::new(GlobalHandler::new(
-            plans.global,
+    let mut global_subscription = GlobalIndexingRequest::subscription();
+    if let Some(topic_config) = config.engine.topics.get(GLOBAL_HANDLER_TOPIC) {
+        global_subscription = global_subscription.with_config(topic_config);
+    }
+    let mut namespace_subscription = NamespaceIndexingRequest::subscription();
+    if let Some(topic_config) = config.engine.topics.get(NAMESPACE_HANDLER_TOPIC) {
+        namespace_subscription = namespace_subscription.with_config(topic_config);
+    }
+
+    let mut global_count = 0;
+    let mut namespaced_count = 0;
+    for plan in plans.global {
+        let strategy = partition_strategies.get(&plan.name).cloned();
+        registry.register_handler(Box::new(EntityHandler::new(
+            plan,
+            EtlScope::Global,
             Arc::clone(&pipeline),
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
             metrics.clone(),
-            subscription,
+            global_subscription.clone(),
+            strategy,
         )));
+        global_count += 1;
     }
-
-    if !plans.namespaced.is_empty() {
-        let mut subscription = NamespaceIndexingRequest::subscription();
-        if let Some(topic_config) = config.engine.topics.get(NAMESPACE_HANDLER_TOPIC) {
-            subscription = subscription.with_config(topic_config);
-        }
-        registry.register_handler(Box::new(NamespaceHandler::new(
-            plans.namespaced,
+    for plan in plans.namespaced {
+        let strategy = partition_strategies.get(&plan.name).cloned();
+        registry.register_handler(Box::new(EntityHandler::new(
+            plan,
+            EtlScope::Namespaced,
             Arc::clone(&pipeline),
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
             metrics.clone(),
-            namespace_handler_config,
-            subscription,
+            namespace_subscription.clone(),
+            strategy,
         )));
+        namespaced_count += 1;
     }
 
-    Ok(())
-}
-
-pub async fn register_entity_handlers(
-    registry: &HandlerRegistry,
-    config: &IndexerConfig,
-    _ontology: &ontology::Ontology,
-) -> Result<(), HandlerInitError> {
-    info!("registering entity indexing handler (no pipelines yet)");
-
-    let mut subscription = EntityIndexingRequest::subscription();
-    if let Some(topic_config) = config.engine.topics.get(ENTITY_HANDLER_TOPIC) {
-        subscription = subscription.with_config(topic_config);
-    }
-
-    registry.register_handler(Box::new(EntityIndexingHandler::new(subscription)));
+    info!(
+        global_handlers = global_count,
+        namespaced_handlers = namespaced_count,
+        partitioned_entities = partition_strategies.len(),
+        "registered SDLC entity handlers"
+    );
 
     Ok(())
 }
@@ -127,25 +120,17 @@ mod tests {
     #[test]
     fn build_plans_returns_global_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
-
-        let entity_names: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
-        assert!(entity_names.contains(&"User"), "should include User entity");
+        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+        let names: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"User"));
     }
 
     #[test]
     fn build_plans_returns_namespaced_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
-
-        let entity_names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
-        assert!(
-            entity_names.contains(&"Group"),
-            "should include Group entity"
-        );
-        assert!(
-            entity_names.contains(&"Project"),
-            "should include Project entity"
-        );
+        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+        let names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"Group"));
+        assert!(names.contains(&"Project"));
     }
 }

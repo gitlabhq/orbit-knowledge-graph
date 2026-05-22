@@ -134,17 +134,31 @@ fn build_service_with_indexing_status(
     GraphStatusService::new(client, ontology).with_indexing_status(store)
 }
 
+fn dotted_traversal(traversal_path: &str) -> String {
+    traversal_path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 fn seed_indexing_progress(
     mock_kv: &MockKvServices,
     traversal_path: &str,
     progress: &IndexingProgress,
 ) {
-    let key = traversal_path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(".");
-    let key = format!("status.{key}");
+    let key = format!("status.{}", dotted_traversal(traversal_path));
+    let payload = serde_json::to_vec(progress).expect("serialize progress");
+    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
+}
+
+fn seed_entity_progress(
+    mock_kv: &MockKvServices,
+    traversal_path: &str,
+    entity_kind: &str,
+    progress: &IndexingProgress,
+) {
+    let key = format!("status.{}.{entity_kind}", dotted_traversal(traversal_path));
     let payload = serde_json::to_vec(progress).expect("serialize progress");
     mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
 }
@@ -196,6 +210,9 @@ async fn graph_status() {
         indexing_status_indexing_when_reindex_in_flight,
         indexing_status_error_state,
         indexing_status_unknown_when_nats_unreachable,
+        indexing_status_per_entity_worst_state_wins,
+        indexing_status_per_entity_missing_key_treated_as_not_indexed,
+        indexing_status_falls_back_to_legacy_key_during_rollout,
         reporter_excludes_security_entity_counts,
         security_manager_includes_security_entity_counts,
     );
@@ -460,6 +477,99 @@ async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
 
     let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::Unknown as i32);
+}
+
+async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(30);
+    let completed = started + Duration::seconds(5);
+    let indexed = IndexingProgress {
+        last_started_at: started,
+        last_completed_at: Some(completed),
+        last_duration_ms: Some(5000),
+        last_error: None,
+    };
+    let errored = IndexingProgress {
+        last_started_at: started,
+        last_completed_at: Some(completed),
+        last_duration_ms: Some(5000),
+        last_error: Some("scan failure".to_string()),
+    };
+
+    // Seed every namespaced entity as Indexed, then flip one to Error so the
+    // worst-state-wins rule isn't dominated by missing keys.
+    let ontology = load_ontology();
+    for node in ontology.nodes() {
+        let Some(etl) = node.etl.as_ref() else {
+            continue;
+        };
+        if etl.scope() != ontology::EtlScope::Namespaced {
+            continue;
+        }
+        let progress = if node.name == "WorkItem" {
+            &errored
+        } else {
+            &indexed
+        };
+        seed_entity_progress(&mock_kv, "1/100/", &node.name, progress);
+    }
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let indexing = status.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Error as i32);
+    assert_eq!(indexing.last_error.as_deref(), Some("scan failure"));
+}
+
+async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let progress = IndexingProgress {
+        last_started_at: Utc::now() - Duration::seconds(30),
+        last_completed_at: Some(Utc::now() - Duration::seconds(25)),
+        last_duration_ms: Some(5000),
+        last_error: None,
+    };
+    // Seed only one entity, leaving the rest of the namespaced set missing.
+    seed_entity_progress(&mock_kv, "1/100/", "MergeRequest", &progress);
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let indexing = status.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
+}
+
+async fn indexing_status_falls_back_to_legacy_key_during_rollout(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(30);
+    let completed = started + Duration::seconds(5);
+    let legacy = IndexingProgress {
+        last_started_at: started,
+        last_completed_at: Some(completed),
+        last_duration_ms: Some(5000),
+        last_error: None,
+    };
+    seed_indexing_progress(&mock_kv, "1/100/", &legacy);
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let indexing = status.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Indexed as i32);
+    assert_eq!(indexing.last_duration_ms, Some(5000));
 }
 
 async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {

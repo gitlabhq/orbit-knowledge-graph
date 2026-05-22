@@ -71,9 +71,11 @@ impl SdlcMetrics {
         self.transform_duration.record(duration, &[]);
     }
 
-    pub(super) fn record_handler_duration(&self, handler: &'static str, duration: f64) {
-        self.handler_duration
-            .record(duration, &[KeyValue::new(sdlc::labels::HANDLER, handler)]);
+    pub(super) fn record_handler_duration(&self, handler: &str, duration: f64) {
+        self.handler_duration.record(
+            duration,
+            &[KeyValue::new(sdlc::labels::HANDLER, handler.to_string())],
+        );
     }
 
     pub(super) fn record_watermark_lag(&self, watermark: &DateTime<Utc>) {

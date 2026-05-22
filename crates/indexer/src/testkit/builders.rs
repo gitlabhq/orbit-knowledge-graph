@@ -9,29 +9,21 @@ use crate::handler::{Handler, HandlerRegistry};
 use crate::indexing_status::IndexingStatusStore;
 use crate::nats::{NatsBroker, NatsServices, NatsServicesImpl};
 use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, GlobalHandlerConfig, HandlersConfiguration,
-    NamespaceHandlerConfig,
+    ClickHouseConfiguration, EngineConfiguration, EntityHandlerConfig, HandlersConfiguration,
 };
 
 use super::mocks::MockDestination;
 
-/// Creates an `IndexerConfig` suitable for integration tests.
-///
-/// Sets `datalake_batch_size` to 1 for both SDLC handlers so tests process
-/// one row at a time. Uses the provided ClickHouse config for both graph and datalake.
+/// Sets `datalake_batch_size` to 1 so tests process one row at a time.
 pub fn create_test_indexer_config(clickhouse_config: &ClickHouseConfiguration) -> IndexerConfig {
     IndexerConfig {
         graph: clickhouse_config.clone(),
         datalake: clickhouse_config.clone(),
         engine: EngineConfiguration {
             handlers: HandlersConfiguration {
-                global_handler: GlobalHandlerConfig {
+                entity_handler: EntityHandlerConfig {
                     datalake_batch_size: 1,
-                    ..GlobalHandlerConfig::default()
-                },
-                namespace_handler: NamespaceHandlerConfig {
-                    datalake_batch_size: 1,
-                    ..NamespaceHandlerConfig::default()
+                    ..EntityHandlerConfig::default()
                 },
                 ..HandlersConfiguration::default()
             },

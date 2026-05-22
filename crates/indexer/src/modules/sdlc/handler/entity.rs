@@ -1,59 +1,337 @@
-use async_trait::async_trait;
-use tracing::debug;
+use std::sync::Arc;
 
+use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use ontology::EtlScope;
+use tokio::task::JoinSet;
+use tracing::{Instrument, info, info_span};
+
+use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::topic::EntityIndexingRequest;
+use crate::modules::sdlc::datalake::DatalakeQuery;
+use crate::modules::sdlc::metrics::SdlcMetrics;
+use crate::modules::sdlc::partitioning::PartitionStrategy;
+use crate::modules::sdlc::pipeline::Pipeline;
+use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
+use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
-pub struct EntityIndexingHandler {
+pub struct EntityHandler {
+    handler_name: String,
+    plan: Plan,
+    scope: EtlScope,
+    pipeline: Arc<Pipeline>,
+    datalake: Arc<dyn DatalakeQuery>,
+    checkpoint_store: Arc<dyn CheckpointStore>,
+    metrics: SdlcMetrics,
     subscription: Subscription,
+    partition_strategy: Option<PartitionStrategy>,
 }
 
-impl EntityIndexingHandler {
-    pub fn new(subscription: Subscription) -> Self {
-        Self { subscription }
+struct IndexingRequest {
+    watermark: DateTime<Utc>,
+    scope_key: String,
+    traversal_path: Option<String>,
+    namespace_id: Option<i64>,
+}
+
+impl EntityHandler {
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::modules::sdlc) fn new(
+        plan: Plan,
+        scope: EtlScope,
+        pipeline: Arc<Pipeline>,
+        datalake: Arc<dyn DatalakeQuery>,
+        checkpoint_store: Arc<dyn CheckpointStore>,
+        metrics: SdlcMetrics,
+        subscription: Subscription,
+        partition_strategy: Option<PartitionStrategy>,
+    ) -> Self {
+        let handler_name = format!("entity.{}", plan.name.to_lowercase());
+        Self {
+            handler_name,
+            plan,
+            scope,
+            pipeline,
+            datalake,
+            checkpoint_store,
+            metrics,
+            subscription,
+            partition_strategy,
+        }
+    }
+
+    fn deserialize(&self, message: Envelope) -> Result<IndexingRequest, HandlerError> {
+        match self.scope {
+            EtlScope::Global => {
+                let payload: GlobalIndexingRequest =
+                    message.to_event().map_err(serialization_error)?;
+                Ok(IndexingRequest {
+                    watermark: payload.watermark,
+                    scope_key: "global".to_string(),
+                    traversal_path: None,
+                    namespace_id: None,
+                })
+            }
+            EtlScope::Namespaced => {
+                let payload: NamespaceIndexingRequest =
+                    message.to_event().map_err(serialization_error)?;
+                Ok(IndexingRequest {
+                    watermark: payload.watermark,
+                    scope_key: namespace_position_key(payload.namespace),
+                    traversal_path: Some(payload.traversal_path),
+                    namespace_id: Some(payload.namespace),
+                })
+            }
+        }
+    }
+
+    async fn execute(
+        &self,
+        context: HandlerContext,
+        request: IndexingRequest,
+    ) -> Result<(), HandlerError> {
+        let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
+        let parent_checkpoint = self
+            .checkpoint_store
+            .load(&checkpoint_key)
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+        let last_watermark = parent_checkpoint
+            .as_ref()
+            .map(|c| c.watermark)
+            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+
+        let base_query = self
+            .plan
+            .prepare()
+            .with(WatermarkFilter {
+                column: &self.plan.watermark_column,
+                last: last_watermark,
+                current: request.watermark,
+            })
+            .with(
+                request
+                    .traversal_path
+                    .as_deref()
+                    .map(|path| TraversalPathFilter { path }),
+            );
+
+        if self.partition_strategy.is_none() || parent_checkpoint.is_some() {
+            return self
+                .pipeline
+                .run_plan(
+                    &self.plan,
+                    base_query,
+                    &checkpoint_key,
+                    request.watermark,
+                    context.destination.as_ref(),
+                    &context.progress,
+                )
+                .await;
+        }
+
+        let ranges = self
+            .partition_strategy
+            .as_ref()
+            .unwrap()
+            .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
+            .await?;
+        if ranges.is_empty() {
+            return self
+                .pipeline
+                .run_plan(
+                    &self.plan,
+                    base_query,
+                    &checkpoint_key,
+                    request.watermark,
+                    context.destination.as_ref(),
+                    &context.progress,
+                )
+                .await;
+        }
+
+        info!(
+            entity = %self.plan.name,
+            partitions = ranges.len(),
+            "running partitioned initial load"
+        );
+
+        self.run_partitions(
+            base_query.into_partitions(ranges),
+            &checkpoint_key,
+            request.watermark,
+            &context,
+        )
+        .await?;
+
+        // Consolidate at min(partition watermarks) so the next incremental run
+        // covers data that arrived after the oldest completed partition.
+        let partition_checkpoints = self
+            .checkpoint_store
+            .load_by_prefix(&format!("{checkpoint_key}.p"))
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))?;
+        let consolidated_watermark = partition_checkpoints
+            .iter()
+            .map(|(_, cp)| cp.watermark)
+            .min()
+            .unwrap_or(request.watermark);
+
+        self.checkpoint_store
+            .consolidate(&checkpoint_key, &consolidated_watermark)
+            .await
+            .map_err(|err| HandlerError::Processing(err.to_string()))
+    }
+
+    async fn run_partitions(
+        &self,
+        partitions: Vec<(
+            crate::modules::sdlc::partitioning::PartitionAssignment,
+            PreparedQuery,
+        )>,
+        checkpoint_key: &str,
+        target_watermark: DateTime<Utc>,
+        context: &HandlerContext,
+    ) -> Result<(), HandlerError> {
+        let mut set: JoinSet<Result<(), HandlerError>> = JoinSet::new();
+        for (assignment, query) in partitions {
+            let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
+
+            let existing = self
+                .checkpoint_store
+                .load(&position_key)
+                .await
+                .map_err(|err| HandlerError::Processing(err.to_string()))?;
+            if let Some(cp) = existing.as_ref()
+                && cp.cursor_values.is_none()
+            {
+                info!(partition = %position_key, "skipping already-completed partition");
+                continue;
+            }
+
+            let plan = self.plan.clone();
+            let pipeline = Arc::clone(&self.pipeline);
+            let destination = Arc::clone(&context.destination);
+            let progress = context.progress.clone();
+
+            set.spawn(async move {
+                pipeline
+                    .run_plan(
+                        &plan,
+                        query,
+                        &position_key,
+                        target_watermark,
+                        destination.as_ref(),
+                        &progress,
+                    )
+                    .await
+            });
+        }
+
+        let mut errors = Vec::new();
+        while let Some(result) = set.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => errors.push(err.to_string()),
+                Err(join_err) => errors.push(format!("partition task panicked: {join_err}")),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(HandlerError::Processing(format!(
+                "partition failures: {}",
+                errors.join("; ")
+            )))
+        }
+    }
+}
+
+fn serialization_error(error: SerializationError) -> HandlerError {
+    match error {
+        SerializationError::Json(err) => HandlerError::Deserialization(err),
     }
 }
 
 #[async_trait]
-impl Handler for EntityIndexingHandler {
+impl Handler for EntityHandler {
     fn name(&self) -> &str {
-        "entity_handler"
+        &self.handler_name
     }
 
     fn subscription(&self) -> Subscription {
         self.subscription.clone()
     }
 
-    async fn handle(
-        &self,
-        _context: HandlerContext,
-        message: Envelope,
-    ) -> Result<(), HandlerError> {
-        let request: EntityIndexingRequest = message.to_event().map_err(|error| match error {
-            SerializationError::Json(err) => HandlerError::Deserialization(err),
-        })?;
+    async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
+        let request = self.deserialize(message)?;
 
-        debug!(
-            entity_kind = %request.entity_kind,
-            scope = ?request.scope,
-            "received entity indexing request (no pipelines registered yet)"
-        );
+        let started_at = Utc::now();
+        let span = match &request.namespace_id {
+            Some(id) => info_span!(
+                "entity_indexing",
+                entity = %self.plan.name,
+                namespace_id = id,
+            ),
+            None => info_span!("entity_indexing", entity = %self.plan.name),
+        };
+        let traversal_path = request.traversal_path.clone();
 
-        Ok(())
+        async {
+            if let Some(path) = traversal_path.as_deref() {
+                context
+                    .indexing_status
+                    .record_entity_start(path, &self.plan.name, started_at)
+                    .await;
+            }
+
+            let result = self.execute(context.clone(), request).await;
+            let completed_at = Utc::now();
+            let elapsed = completed_at
+                .signed_duration_since(started_at)
+                .to_std()
+                .unwrap_or_default();
+            self.metrics
+                .record_handler_duration(&self.handler_name, elapsed.as_secs_f64());
+            if let Err(err) = &result {
+                self.metrics
+                    .record_pipeline_error(&self.plan.name, err.error_kind());
+            }
+
+            if let Some(path) = traversal_path.as_deref() {
+                context
+                    .indexing_status
+                    .record_entity_completion(
+                        path,
+                        &self.plan.name,
+                        started_at,
+                        completed_at,
+                        result.as_ref().err().map(ToString::to_string),
+                    )
+                    .await;
+            }
+
+            result
+        }
+        .instrument(span)
+        .await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
+    use crate::modules::sdlc::plan::build_plans;
+    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use crate::types::Event;
+    use ontology::Ontology;
 
-    fn test_handler_context() -> HandlerContext {
+    fn handler_context() -> HandlerContext {
         let destination = Arc::new(MockDestination::new());
         let mock_nats = Arc::new(MockNatsServices::new());
         HandlerContext::new(
@@ -65,35 +343,83 @@ mod tests {
         )
     }
 
+    fn build_handler(entity_name: &str, scope: EtlScope) -> EntityHandler {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
+        let scope_plans = match scope {
+            EtlScope::Global => plans.global,
+            EtlScope::Namespaced => plans.namespaced,
+        };
+        let plan = scope_plans
+            .into_iter()
+            .find(|p| p.name == entity_name)
+            .unwrap_or_else(|| panic!("entity plan not found: {entity_name}"));
+
+        let datalake: Arc<dyn DatalakeQuery> = Arc::new(EmptyDatalake);
+        let checkpoint_store: Arc<dyn CheckpointStore> = Arc::new(MockCheckpointStore);
+        let pipeline = Arc::new(Pipeline::new(
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
+            test_metrics(),
+            Default::default(),
+        ));
+        let subscription = match scope {
+            EtlScope::Global => GlobalIndexingRequest::subscription(),
+            EtlScope::Namespaced => NamespaceIndexingRequest::subscription(),
+        };
+
+        EntityHandler::new(
+            plan,
+            scope,
+            pipeline,
+            datalake,
+            checkpoint_store,
+            test_metrics(),
+            subscription,
+            None,
+        )
+    }
+
     #[tokio::test]
-    async fn handle_deserializes_and_returns_ok() {
-        let handler = EntityIndexingHandler::new(EntityIndexingRequest::subscription());
+    async fn global_entity_handler_processes_request() {
+        let handler = build_handler("User", EtlScope::Global);
+        assert_eq!(handler.name(), "entity.user");
 
-        let payload = serde_json::json!({
-            "entity_kind": "User",
-            "watermark": "2024-01-21T00:00:00Z",
-            "scope": "Global"
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
+        let envelope = TestEnvelopeFactory::simple(
+            &serde_json::json!({ "watermark": "2024-01-21T00:00:00Z" }).to_string(),
+        );
 
-        let result = handler.handle(test_handler_context(), envelope).await;
+        let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn handle_namespaced_request() {
-        let handler = EntityIndexingHandler::new(EntityIndexingRequest::subscription());
+    async fn namespaced_entity_handler_processes_request() {
+        let handler = build_handler("MergeRequest", EtlScope::Namespaced);
+        assert_eq!(handler.name(), "entity.mergerequest");
 
-        let payload = serde_json::json!({
-            "entity_kind": "MergeRequest",
-            "watermark": "2024-01-21T00:00:00Z",
-            "scope": { "Namespace": { "namespace_id": 100, "traversal_path": "42/100/" } }
-        })
-        .to_string();
-        let envelope = TestEnvelopeFactory::simple(&payload);
+        let envelope = TestEnvelopeFactory::simple(
+            &serde_json::json!({
+                "namespace": 100,
+                "traversal_path": "42/100/",
+                "watermark": "2024-01-21T00:00:00Z"
+            })
+            .to_string(),
+        );
 
-        let result = handler.handle(test_handler_context(), envelope).await;
+        let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn subscriptions_match_scope() {
+        let global = build_handler("User", EtlScope::Global);
+        assert_eq!(global.subscription(), GlobalIndexingRequest::subscription());
+
+        let namespaced = build_handler("MergeRequest", EtlScope::Namespaced);
+        assert_eq!(
+            namespaced.subscription(),
+            NamespaceIndexingRequest::subscription()
+        );
     }
 }

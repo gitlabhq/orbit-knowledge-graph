@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
+use futures::stream::{FuturesUnordered, StreamExt};
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::indexing_status::IndexingStatusStore;
-use ontology::Ontology;
+use indexer::indexing_status::{IndexingProgress, IndexingStatusStore};
+use ontology::{EtlScope, Ontology};
 use query_engine::compiler::{ResultContext, SecurityContext, codegen};
 use tonic::Status;
 use tracing::{debug, info, warn};
@@ -113,7 +114,29 @@ impl GraphStatusService {
             return Ok(None);
         };
 
-        let progress = match store.get(traversal_path).await {
+        let entity_kinds = namespaced_entity_kinds(&self.ontology);
+
+        let mut futures = FuturesUnordered::new();
+        for kind in &entity_kinds {
+            futures
+                .push(async move { (kind.as_str(), store.get_entity(traversal_path, kind).await) });
+        }
+
+        let mut entity_progress: Vec<(String, Option<IndexingProgress>)> = Vec::new();
+        while let Some((kind, result)) = futures.next().await {
+            match result {
+                Ok(progress) => entity_progress.push((kind.to_string(), progress)),
+                Err(error) => {
+                    warn!(%error, traversal_path, entity = kind, "failed to read entity indexing progress");
+                    return Ok(Some(IndexingStatus {
+                        state: IndexingState::Unknown.into(),
+                        ..Default::default()
+                    }));
+                }
+            }
+        }
+
+        let legacy_progress = match store.get(traversal_path).await {
             Ok(p) => p,
             Err(error) => {
                 warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
@@ -124,22 +147,10 @@ impl GraphStatusService {
             }
         };
 
-        Ok(Some(match progress {
-            None => IndexingStatus {
-                state: IndexingState::NotIndexed.into(),
-                ..Default::default()
-            },
-            Some(p) => {
-                let state = derive_indexing_state(&p);
-                IndexingStatus {
-                    state: state.into(),
-                    last_started_at: Some(p.last_started_at.to_rfc3339()),
-                    last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
-                    last_duration_ms: p.last_duration_ms,
-                    last_error: p.last_error,
-                }
-            }
-        }))
+        Ok(Some(aggregate_indexing_status(
+            entity_progress,
+            legacy_progress,
+        )))
     }
 
     async fn execute_count_query(
@@ -227,12 +238,96 @@ impl GraphStatusService {
     }
 }
 
-fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) -> IndexingState {
+fn derive_indexing_state(progress: &IndexingProgress) -> IndexingState {
     match progress.last_completed_at {
         None => IndexingState::Backfilling,
         Some(completed) if progress.last_started_at > completed => IndexingState::Indexing,
         Some(_) if progress.last_error.is_some() => IndexingState::Error,
         Some(_) => IndexingState::Indexed,
+    }
+}
+
+fn namespaced_entity_kinds(ontology: &Ontology) -> Vec<String> {
+    ontology
+        .nodes()
+        .filter_map(|n| {
+            let etl = n.etl.as_ref()?;
+            (etl.scope() == EtlScope::Namespaced).then(|| n.name.clone())
+        })
+        .collect()
+}
+
+// Higher = worse, so the "worst" state wins. NotIndexed dominates a missing
+// key because not-yet-started is a strictly less-known state than failing.
+fn state_priority(state: IndexingState) -> u8 {
+    match state {
+        IndexingState::Indexed => 0,
+        IndexingState::Indexing => 1,
+        IndexingState::Error => 2,
+        IndexingState::Backfilling => 3,
+        IndexingState::NotIndexed => 4,
+        IndexingState::Unknown => 5,
+    }
+}
+
+fn aggregate_indexing_status(
+    entity_progress: Vec<(String, Option<IndexingProgress>)>,
+    legacy_progress: Option<IndexingProgress>,
+) -> IndexingStatus {
+    // Rollout fallback: nothing per-entity has been written yet → defer to
+    // the legacy single-key format so existing pre-MR deployments keep
+    // reporting state.
+    let any_entity_present = entity_progress.iter().any(|(_, p)| p.is_some());
+    if !any_entity_present {
+        return match legacy_progress {
+            None => IndexingStatus {
+                state: IndexingState::NotIndexed.into(),
+                ..Default::default()
+            },
+            Some(p) => indexing_status_from_progress(derive_indexing_state(&p), &p),
+        };
+    }
+
+    let mut worst_state = IndexingState::Indexed;
+    let mut worst_progress: Option<&IndexingProgress> = None;
+
+    for (_kind, progress) in &entity_progress {
+        let (state, progress_ref) = match progress {
+            None => (IndexingState::NotIndexed, None),
+            Some(p) => (derive_indexing_state(p), Some(p)),
+        };
+        if state_priority(state) > state_priority(worst_state) {
+            worst_state = state;
+            worst_progress = progress_ref;
+        }
+    }
+
+    // Also fold in the legacy per-namespace key (code-indexing or unmigrated
+    // SDLC) so the worst state still wins.
+    if let Some(p) = legacy_progress.as_ref() {
+        let state = derive_indexing_state(p);
+        if state_priority(state) > state_priority(worst_state) {
+            worst_state = state;
+            worst_progress = Some(p);
+        }
+    }
+
+    match worst_progress {
+        Some(p) => indexing_status_from_progress(worst_state, p),
+        None => IndexingStatus {
+            state: worst_state.into(),
+            ..Default::default()
+        },
+    }
+}
+
+fn indexing_status_from_progress(state: IndexingState, p: &IndexingProgress) -> IndexingStatus {
+    IndexingStatus {
+        state: state.into(),
+        last_started_at: Some(p.last_started_at.to_rfc3339()),
+        last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
+        last_duration_ms: p.last_duration_ms,
+        last_error: p.last_error.clone(),
     }
 }
 
@@ -460,5 +555,79 @@ mod tests {
             last_error: None,
         };
         assert_eq!(derive_indexing_state(&progress), IndexingState::Indexing);
+    }
+
+    fn completed_progress(error: Option<&str>) -> IndexingProgress {
+        let started = Utc::now() - Duration::seconds(30);
+        IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(started + Duration::seconds(5)),
+            last_duration_ms: Some(5000),
+            last_error: error.map(String::from),
+        }
+    }
+
+    #[test]
+    fn aggregate_falls_back_to_legacy_when_no_entity_keys_present() {
+        let entities = vec![
+            ("MergeRequest".to_string(), None),
+            ("Issue".to_string(), None),
+        ];
+        let status = aggregate_indexing_status(entities, Some(completed_progress(None)));
+        assert_eq!(status.state, IndexingState::Indexed as i32);
+    }
+
+    #[test]
+    fn aggregate_not_indexed_when_no_entity_keys_and_no_legacy() {
+        let entities = vec![
+            ("MergeRequest".to_string(), None),
+            ("Issue".to_string(), None),
+        ];
+        let status = aggregate_indexing_status(entities, None);
+        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+    }
+
+    #[test]
+    fn aggregate_missing_entity_key_wins_over_indexed() {
+        let entities = vec![
+            ("MergeRequest".to_string(), Some(completed_progress(None))),
+            ("Issue".to_string(), None),
+        ];
+        let status = aggregate_indexing_status(entities, None);
+        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+    }
+
+    #[test]
+    fn aggregate_error_wins_over_indexed_and_indexing() {
+        let in_flight = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: Some(Utc::now() - Duration::seconds(60)),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        };
+        let entities = vec![
+            ("MergeRequest".to_string(), Some(completed_progress(None))),
+            ("Issue".to_string(), Some(in_flight)),
+            (
+                "Project".to_string(),
+                Some(completed_progress(Some("scan failure"))),
+            ),
+        ];
+        let status = aggregate_indexing_status(entities, None);
+        assert_eq!(status.state, IndexingState::Error as i32);
+        assert_eq!(status.last_error.as_deref(), Some("scan failure"));
+    }
+
+    #[test]
+    fn aggregate_legacy_folds_into_worst_state() {
+        let entities = vec![("MergeRequest".to_string(), Some(completed_progress(None)))];
+        let legacy = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: None,
+            last_duration_ms: None,
+            last_error: None,
+        };
+        let status = aggregate_indexing_status(entities, Some(legacy));
+        assert_eq!(status.state, IndexingState::Backfilling as i32);
     }
 }
