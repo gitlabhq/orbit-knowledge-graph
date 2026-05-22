@@ -33,7 +33,30 @@ pub(super) use query_engine::pipeline::{
     NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap,
 };
 pub(super) use query_engine::shared::RedactionOutput;
+pub(super) use query_engine::shared::content::ColumnResolverRegistry;
 pub(super) use serde_json::Value;
+
+pub(super) struct MockColumnResolver;
+
+#[async_trait::async_trait]
+impl query_engine::shared::content::ColumnResolver for MockColumnResolver {
+    async fn resolve_batch(
+        &self,
+        lookup: &str,
+        rows: &[&query_engine::shared::content::PropertyRow],
+        _ctx: &query_engine::shared::content::ResolverContext,
+    ) -> Result<Vec<Option<gkg_utils::arrow::ColumnValue>>, query_engine::pipeline::PipelineError>
+    {
+        Ok(rows
+            .iter()
+            .map(|_| {
+                Some(gkg_utils::arrow::ColumnValue::String(format!(
+                    "mock:{lookup}"
+                )))
+            })
+            .collect())
+    }
+}
 
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
     std::sync::LazyLock::new(|| {
@@ -73,8 +96,12 @@ pub(super) async fn run_query_with_security(
     let mut result = QueryResult::from_batches(&batches, &compiled.base.result_context);
     let redacted_count = run_redaction(&mut result, svc);
 
+    let mut resolver_registry = ColumnResolverRegistry::new();
+    resolver_registry.register("gitaly", Arc::new(MockColumnResolver));
+
     let mut server_extensions = TypeMap::default();
     server_extensions.insert(client);
+    server_extensions.insert(Arc::new(resolver_registry));
     let mut pipeline_ctx = QueryPipelineContext {
         query_json: String::new(),
         compiled: Some(Arc::clone(&compiled)),
