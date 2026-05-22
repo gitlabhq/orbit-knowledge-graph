@@ -398,6 +398,9 @@ pub struct VirtualSource {
     /// for resolution. The compiler ensures these are fetched during hydration
     /// even if the user didn't request them.
     pub depends_on: Vec<String>,
+    /// Filter operators allowed on this virtual column. Empty means use the
+    /// default set (eq, contains, starts_with, ends_with, is_null, is_not_null).
+    pub allowed_ops: Vec<String>,
 }
 
 /// A field definition within an entity.

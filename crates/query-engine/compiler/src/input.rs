@@ -472,8 +472,9 @@ pub struct InputFilter {
     pub data_type: Option<ontology::DataType>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
     Gt,

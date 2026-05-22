@@ -68,7 +68,15 @@
         "depends_on": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them.",
+          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them."
+        },
+        "allowed_ops": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["eq", "contains", "starts_with", "ends_with", "is_null", "is_not_null"]
+          },
+          "description": "Filter operators allowed on this virtual column. Applied in-memory after hydration. Defaults to [eq, contains, starts_with, ends_with, is_null, is_not_null] when omitted.",
           "default": []
         }
       },

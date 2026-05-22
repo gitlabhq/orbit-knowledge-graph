@@ -215,6 +215,10 @@ struct VirtualSourceYaml {
     /// for resolution. The compiler ensures these are fetched during hydration.
     #[serde(default)]
     depends_on: Vec<String>,
+    /// Filter operators allowed on this virtual column. When omitted, all
+    /// default virtual ops are allowed.
+    #[serde(default)]
+    allowed_ops: Vec<String>,
 }
 
 impl NodeYaml {
@@ -242,6 +246,7 @@ impl NodeYaml {
                         lookup: v.lookup,
                         disabled: v.disabled,
                         depends_on: v.depends_on,
+                        allowed_ops: v.allowed_ops,
                     }),
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(
