@@ -240,14 +240,18 @@ impl Engine {
             }
         }
 
-        let drained = inflight.len();
+        let pending_at_shutdown = inflight.len();
         while let Some(result) = inflight.join_next().await {
             if let Err(error) = result {
                 warn!(%error, topic = %topic_name, "message processing task panicked");
             }
         }
 
-        info!(topic = %topic_name, drained, "topic listener stopped");
+        info!(
+            topic = %topic_name,
+            pending_at_shutdown,
+            "topic listener stopped"
+        );
         Ok(())
     }
 
