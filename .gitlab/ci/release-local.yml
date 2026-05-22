@@ -22,6 +22,12 @@
   needs: []
   variables:
     PLATFORM: linux
+    # Statically link libstdc++ and libgcc so the released binary doesn't pin
+    # consumers to a specific host libstdc++ version (GLIBCXX/CXXABI). The
+    # Windows build already does this; symmetry on Linux unblocks shipping
+    # the binary into environments built on older distros (UBI 9, etc.)
+    # without each consumer pulling in gcc-toolset-12.
+    RUSTFLAGS: "-C link-arg=-static-libgcc -C link-arg=-static-libstdc++"
   script:
     - ./scripts/build-local-cli.sh
     - sccache --show-stats || true
