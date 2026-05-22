@@ -70,7 +70,7 @@ impl AnalyticsObserver {
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
 
-    fn set_query_dimensions(&mut self, info: QueryInfo) {
+    fn set_query_info(&mut self, info: QueryInfo) {
         self.query_info = Some(info);
     }
 
@@ -177,7 +177,7 @@ mod tests {
             None,
             "33".to_string(),
         );
-        obs.set_query_dimensions(QueryInfo::from(&compiler::CompiledQueryContext {
+        obs.set_query_info(QueryInfo::from(&compiler::CompiledQueryContext {
             query_type: compiler::input::QueryType::Traversal,
             base: compiler::passes::codegen::ParameterizedQuery {
                 sql: String::new(),

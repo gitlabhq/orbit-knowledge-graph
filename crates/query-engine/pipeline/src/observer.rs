@@ -9,7 +9,7 @@ pub trait PipelineObserver: Send {
 
     /// Structural metadata about the compiled query (entities, filters, etc.).
     /// Called once after successful compilation. Default no-op.
-    fn set_query_dimensions(&mut self, _dimensions: QueryInfo) {}
+    fn set_query_info(&mut self, _dimensions: QueryInfo) {}
 
     fn compiled(&mut self, elapsed: Duration);
     fn executed(&mut self, elapsed: Duration, batch_count: usize);
@@ -52,9 +52,9 @@ impl PipelineObserver for MultiObserver {
         }
     }
 
-    fn set_query_dimensions(&mut self, dimensions: QueryInfo) {
+    fn set_query_info(&mut self, dimensions: QueryInfo) {
         for o in self.iter_mut() {
-            o.set_query_dimensions(dimensions.clone());
+            o.set_query_info(dimensions.clone());
         }
     }
 
@@ -111,7 +111,7 @@ mod tests {
     #[derive(Default)]
     struct CountingObserver {
         set_query_type_calls: Arc<AtomicUsize>,
-        set_query_dimensions_calls: Arc<AtomicUsize>,
+        set_query_info_calls: Arc<AtomicUsize>,
         compiled_calls: Arc<AtomicUsize>,
         executed_calls: Arc<AtomicUsize>,
         authorized_calls: Arc<AtomicUsize>,
@@ -125,7 +125,7 @@ mod tests {
         fn handle(&self) -> CountingObserverHandle {
             CountingObserverHandle {
                 set_query_type_calls: Arc::clone(&self.set_query_type_calls),
-                set_query_dimensions_calls: Arc::clone(&self.set_query_dimensions_calls),
+                set_query_info_calls: Arc::clone(&self.set_query_info_calls),
                 compiled_calls: Arc::clone(&self.compiled_calls),
                 executed_calls: Arc::clone(&self.executed_calls),
                 authorized_calls: Arc::clone(&self.authorized_calls),
@@ -139,7 +139,7 @@ mod tests {
 
     struct CountingObserverHandle {
         set_query_type_calls: Arc<AtomicUsize>,
-        set_query_dimensions_calls: Arc<AtomicUsize>,
+        set_query_info_calls: Arc<AtomicUsize>,
         compiled_calls: Arc<AtomicUsize>,
         executed_calls: Arc<AtomicUsize>,
         authorized_calls: Arc<AtomicUsize>,
@@ -153,9 +153,8 @@ mod tests {
         fn set_query_type(&mut self, _qt: &'static str) {
             self.set_query_type_calls.fetch_add(1, Ordering::Relaxed);
         }
-        fn set_query_dimensions(&mut self, _dimensions: QueryInfo) {
-            self.set_query_dimensions_calls
-                .fetch_add(1, Ordering::Relaxed);
+        fn set_query_info(&mut self, _dimensions: QueryInfo) {
+            self.set_query_info_calls.fetch_add(1, Ordering::Relaxed);
         }
         fn compiled(&mut self, _elapsed: Duration) {
             self.compiled_calls.fetch_add(1, Ordering::Relaxed);

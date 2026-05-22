@@ -137,7 +137,7 @@ impl PipelineObserver for BillingObserver {
         self.query_type = query_type;
     }
 
-    fn set_query_dimensions(&mut self, info: QueryInfo) {
+    fn set_query_info(&mut self, info: QueryInfo) {
         self.query_info = Some(info);
     }
 
