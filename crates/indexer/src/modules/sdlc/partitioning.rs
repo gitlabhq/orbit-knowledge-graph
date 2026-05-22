@@ -127,10 +127,16 @@ async fn compute_partition_ranges(
         .map(|i| format!("{}", i as f64 / count as f64))
         .collect::<Vec<_>>()
         .join(", ");
+    // `arrayFilter(isFinite, …)` is load-bearing: on an empty scope,
+    // quantilesTDigest returns NaN/±Inf and toInt64(NaN) errors out
+    // (`CANNOT_CONVERT_TYPE`). Filtering before the cast keeps the empty case
+    // honest and collapses the result to `[min=0, max+1=1]`, which the
+    // cuts.len() < 3 guard turns into a non-partitioned fallback.
     let sql = format!(
         "SELECT arraySort(arrayDistinct(arrayConcat( \
             [toInt64(min({column}))], \
-            arrayMap(x -> toInt64(x), quantilesTDigest({fractions})({column})), \
+            arrayMap(x -> toInt64(x), arrayFilter(x -> isFinite(x), \
+                quantilesTDigest({fractions})({column}))), \
             [toInt64(max({column})) + 1] \
          ))) AS cuts FROM {table} WHERE {scope}"
     );
@@ -324,6 +330,24 @@ mod tests {
         );
         let params = datalake.captured_params.lock().unwrap().clone();
         assert_eq!(params["traversal_path"], "42/100/");
+    }
+
+    #[tokio::test]
+    async fn probe_sql_filters_non_finite_quantiles() {
+        // Regression: on an empty scope, quantilesTDigest returns NaN/±Inf and
+        // a downstream `toInt64(NaN)` crashes the query. The SQL must wrap the
+        // quantile array in `arrayFilter(isFinite, …)` before the Int64 cast so
+        // the empty case collapses to [min, max+1] and the cuts.len() < 3 guard
+        // can return an empty Vec instead of erroring.
+        let datalake = ProbeDatalake::new(vec![0, 25, 50, 75, 101]);
+        let _ = compute_partition_ranges(&datalake, "t", "id", 4, Some("42/100/"))
+            .await
+            .unwrap();
+        let sql = datalake.captured_sql.lock().unwrap().clone();
+        assert!(
+            sql.contains("arrayFilter(x -> isFinite(x)"),
+            "expected isFinite filter around quantiles in: {sql}"
+        );
     }
 
     #[test]
