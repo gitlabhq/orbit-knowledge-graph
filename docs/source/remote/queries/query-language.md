@@ -229,6 +229,22 @@ Fetch per-file diff content from diff snapshots:
 }
 ```
 
+`HAS_DIFF` returns every diff snapshot the merge request ever had
+(`MergeRequestDiff.merge_request_id` FK). `HAS_LATEST_DIFF` returns
+only the most recent snapshot (`MergeRequest.latest_merge_request_diff_id`
+FK) — useful for "what does the merge request look like right now", but
+not for historical questions. For "every merge request that ever touched
+a file", traverse `HAS_DIFF` over all snapshots. Using `HAS_LATEST_DIFF`
+for historical-coverage questions can substantially undercount on
+long-lived files: an MR that touched the file in an earlier revision
+but not in its final diff is invisible through `HAS_LATEST_DIFF`.
+
+`MergeRequestDiffFile.old_path` is the preferred column for file
+lookups; `new_path` differs from `old_path` only on renames. Filtering
+and grouping by `old_path` keeps the same row identity across an MR's
+history. See the ontology field descriptions on
+[`merge_request_diff_file.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml).
+
 Fetch source file content:
 
 ```json
