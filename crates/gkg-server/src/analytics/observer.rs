@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::{SnowplowContext, StructuredEvent};
+use labkit_events::StructuredEvent;
 use query_engine::compiler::QueryInfo;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
@@ -15,24 +15,6 @@ use super::context::{build_common, build_query};
 
 const GKG_CATEGORY: &str = "gkg";
 const ACTION_QUERY_EXECUTED: &str = "gkg_query_executed";
-
-/// Iglu schema URI for the query info context.
-/// The schema must be registered in the GitLab Iglu repo before events
-/// carrying this context will pass Snowplow validation.
-pub const ORBIT_QUERY_INFO_SCHEMA: &str = "iglu:com.gitlab/orbit_query_info/jsonschema/1-0-0";
-
-/// Snowplow context wrapper for [`QueryInfo`].
-struct QueryInfoContext(QueryInfo);
-
-impl SnowplowContext for QueryInfoContext {
-    fn schema(&self) -> &str {
-        ORBIT_QUERY_INFO_SCHEMA
-    }
-
-    fn data(&self) -> serde_json::Value {
-        serde_json::to_value(&self.0).unwrap_or_default()
-    }
-}
 
 pub(crate) struct AnalyticsObserver {
     tracker: Option<Arc<dyn AnalyticsTracker>>,
@@ -94,20 +76,18 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
             return;
         };
-        let Some(query) = build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref())
-        else {
-            return;
-        };
+        let query = build_query(
+            &self.claims,
+            &self.tool_name,
+            self.coding_agent.as_deref(),
+            self.query_info.as_ref(),
+        );
 
-        let mut builder = StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
+        match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)
-            .context(query);
-
-        if let Some(ref info) = self.query_info {
-            builder = builder.context(QueryInfoContext(info.clone()));
-        }
-
-        match builder.build() {
+            .context(query)
+            .build()
+        {
             Ok(event) => tracker.track(event),
             Err(e) => tracing::warn!(error = %e, "failed to build analytics event"),
         }
@@ -167,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn event_has_three_contexts_when_query_info_present() {
+    fn query_info_merged_into_orbit_query_context() {
         let tracker = Arc::new(InMemoryAnalyticsTracker::new());
         let mut obs = AnalyticsObserver::new(
             Some(tracker.clone()),
@@ -202,10 +182,20 @@ mod tests {
 
         let events = tracker.drain();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].contexts().len(), 3);
-        assert_eq!(events[0].contexts()[2].schema, ORBIT_QUERY_INFO_SCHEMA);
-        assert_eq!(events[0].contexts()[2].data["query_type"], "traversal");
-        assert_eq!(events[0].contexts()[2].data["is_search"], true);
+        // Two contexts: orbit_common + orbit_query (with merged query_info).
+        assert_eq!(events[0].contexts().len(), 2);
+        let query_ctx = &events[0].contexts()[1];
+        assert_eq!(
+            query_ctx.schema,
+            "iglu:com.gitlab/orbit_query/jsonschema/2-0-2"
+        );
+        // Auth fields.
+        assert_eq!(query_ctx.data["source_type"], "mcp");
+        assert_eq!(query_ctx.data["tool_name"], "query_graph");
+        // QueryInfo fields merged in.
+        assert_eq!(query_ctx.data["query_type"], "traversal");
+        assert_eq!(query_ctx.data["is_search"], true);
+        assert_eq!(query_ctx.data["node_count"], 1);
     }
 
     #[test]
