@@ -77,9 +77,11 @@ graph TD
     WorkItem -- HAS_NOTE --> Note
 
     MergeRequest -- TARGETS --> Branch
+    MergeRequest -- FROM_BRANCH --> Branch
     MergeRequest -- CLOSES --> WorkItem
-    Pipeline -- TRIGGERED --> MergeRequest
-    Pipeline -- TRIGGERED --> Branch
+    MergeRequest -- TRIGGERED --> Pipeline
+    User -- TRIGGERED --> Pipeline
+    User -- TRIGGERED --> Job
 
     WorkItem -- IN_PROJECT --> Project
     WorkItem -- IN_GROUP --> Group
@@ -87,20 +89,26 @@ graph TD
     User -- MERGED --> MergeRequest
     User -- REVIEWER --> MergeRequest
     User -- CLOSED --> WorkItem
+    User -- CLOSED --> MergeRequest
+    User -- ASSIGNED --> MergeRequest
+    User -- ASSIGNED --> WorkItem
+    User -- MEMBER_OF --> Group
+    User -- MEMBER_OF --> Project
+    MergeRequest -- FIXES --> Vulnerability
 ```
 
 ### Implemented Relationship Types
 
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `CONTAINS`                          | `Group`        | `Group`, `Project` | A group contains a subgroup or project.                                                            |
+| `CONTAINS`                          | `Group`, `User`, `Project`, `WorkItem` | `Group`, `Project`, `Branch`, `WorkItem` | A group contains a subgroup or project; a user namespace contains a project; a project contains a branch; a work item contains a child work item. |
 | `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `MergeRequestDiffFile`, `VulnerabilityScanner`, `Note`, `MergeRequest` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
-| `IN_GROUP`                          | `WorkItem`     | `Group`        | A work item belongs to a group scope.                                                                   |
-| `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest`, `Note` | A user authored an entity.                                                        |
+| `IN_GROUP`                          | `WorkItem`, `Milestone`, `Label` | `Group` | An entity belongs to a group scope.                                                          |
+| `AUTHORED`                          | `User`         | `Note`, `MergeRequest`, `Vulnerability`, `WorkItem` | A user authored an entity.                                              |
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
-| `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
-| `CLOSED`                            | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
+| `TRIGGERED`                         | `MergeRequest`, `User` | `Pipeline`, `Job` | A merge request or user triggered a pipeline; a user triggered a job.                     |
+| `CLOSED`                            | `User`         | `WorkItem`, `MergeRequest` | A user closed a work item or merge request.                                                 |
 | `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
 | `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
 | `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
@@ -118,9 +126,9 @@ graph TD
 | `RUNS_ON`                           | `Job`          | `Runner`       | The runner that executed the job.                                                                       |
 | `RUNS_FOR_GROUP`                    | `Runner`       | `Group`        | A group runner is registered against a group.                                                           |
 | `RUNS_FOR_PROJECT`                  | `Runner`       | `Project`      | A project runner is registered against a project.                                                       |
-| `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
+| `HAS_NOTE`                          | `MergeRequest`, `WorkItem`, `Vulnerability` | `Note` | An entity has notes attached.                                                   |
 | `HAS_LABEL`                         | `WorkItem`, `MergeRequest` | `Label` | An entity has labels applied.                                                         |
-| `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |
+| `IN_MILESTONE`                      | `WorkItem`, `MergeRequest` | `Milestone` | An entity belongs to a milestone.                                                              |
 | `HAS_DIFF`                          | `MergeRequest` | `MergeRequestDiff` | A merge request has diff versions.                                                                 |
 | `HAS_LATEST_DIFF`                   | `MergeRequest` | `MergeRequestDiff` | A merge request's most recent diff snapshot (from `latest_merge_request_diff_id`).                 |
 | `HAS_FILE`                          | `MergeRequestDiff` | `MergeRequestDiffFile` | A diff version contains files.                                                             |
@@ -129,7 +137,7 @@ graph TD
 | `UPDATED_BY`                        | `User`         | `MergeRequest` | User who most recently updated the merge request.                                                       |
 | `LAST_EDITED_BY`                    | `User`         | `MergeRequest` | User who most recently edited the merge request's content (title/description).                         |
 | `HAS_FINDING`                       | `SecurityScan`, `Vulnerability` | `Finding`, `VulnerabilityOccurrence` | A security scan produced findings, or a vulnerability points at its canonical occurrence. |
-| `HAS_IDENTIFIER`                    | `Vulnerability`| `VulnerabilityIdentifier` | A vulnerability is associated with identifiers.                                               |
+| `HAS_IDENTIFIER`                    | `Vulnerability`, `Finding`, `VulnerabilityOccurrence` | `VulnerabilityIdentifier` | An entity is associated with vulnerability identifiers.              |
 | `DETECTED_IN`                       | `Finding` | `Pipeline` | A finding was first or most recently detected in a pipeline. |
 | `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
 | `OCCURRENCE_OF`                     | `VulnerabilityOccurrence` | `Vulnerability` | A vulnerability occurrence is linked to a vulnerability. |
@@ -137,6 +145,15 @@ graph TD
 | `DEPLOYED_TO`                       | `MergeRequest` | `Deployment`   | Merge request was included in a deployment.                                                             |
 | `IN_ENVIRONMENT`                    | `Deployment`   | `Environment`  | Deployment targets a specific environment.                                                              |
 | `CREATED_FOR_MR`                    | `Environment`  | `MergeRequest` | Environment was first created by a merge request pipeline.                                              |
+| `MEMBER_OF`                         | `User`         | `Group`, `Project` | A user is a member of a group or project (with access level and membership state).                 |
+| `CREATOR`                           | `User`         | `Project`      | A user created a project.                                                                               |
+| `OWNER`                             | `User`         | `Group`        | A user owns a group.                                                                                    |
+| `ASSIGNED`                          | `User`         | `MergeRequest`, `WorkItem` | A user is assigned to a merge request or work item.                                         |
+| `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
+| `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
+| `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
+| `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
+| `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
 
 ---
 
