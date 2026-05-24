@@ -22,7 +22,7 @@ The Knowledge Graph data is stored in ClickHouse graph tables that are separate 
 
 - **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/` and the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`); each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
 - **Entity as Node**: Every entity in the GitLab ecosystem (e.g., Project, Issue, File, Function Definition) is represented as a node.
-- **Interaction as Edge**: Relationships between these entities (e.g., a User `COMMENTS_ON` an Issue, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
+- **Interaction as Edge**: Relationships between these entities (e.g., a `MergeRequest` `CLOSES` a `WorkItem`, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
 
 ---
 
@@ -65,17 +65,16 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 graph TD
     Group -- CONTAINS --> Project
     Group -- CONTAINS --> Group
-    Project -- HAS_MERGE_REQUEST --> MergeRequest
+    MergeRequest -- IN_PROJECT --> Project
     Pipeline -- IN_PROJECT --> Project
-    Project -- HAS_VULNERABILITY --> Vulnerability
+    Vulnerability -- IN_PROJECT --> Project
     Branch -- IN_PROJECT --> Project
 
     User -- AUTHORED --> MergeRequest
     User -- AUTHORED --> WorkItem
-    User -- COMMENTS_ON --> MergeRequest
-    User -- COMMENTS_ON --> WorkItem
-    Note -- IS_COMMENT_ON --> MergeRequest
-    Note -- IS_COMMENT_ON --> WorkItem
+    User -- AUTHORED --> Note
+    MergeRequest -- HAS_NOTE --> Note
+    WorkItem -- HAS_NOTE --> Note
 
     MergeRequest -- TARGETS --> Branch
     MergeRequest -- CLOSES --> WorkItem
@@ -95,13 +94,9 @@ graph TD
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`        | `Group`, `Project` | A group contains a subgroup or project.                                                            |
-| `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
-| `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityOccurrence`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `MergeRequestDiffFile`, `VulnerabilityScanner`, `Note`, `MergeRequest` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `IN_GROUP`                          | `WorkItem`     | `Group`        | A work item belongs to a group scope.                                                                   |
-| `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest` | A user authored an entity.                                                                |
-| `COMMENTS_ON`                       | `User`         | `MergeRequest`, `WorkItem` | A user commented on an entity (via a `Note`).                                            |
-| `IS_COMMENT_ON`                     | `Note`         | `MergeRequest`, `WorkItem` | A note is a comment on a specific entity.                                                |
+| `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest`, `Note` | A user authored an entity.                                                        |
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
@@ -124,7 +119,7 @@ graph TD
 | `RUNS_FOR_GROUP`                    | `Runner`       | `Group`        | A group runner is registered against a group.                                                           |
 | `RUNS_FOR_PROJECT`                  | `Runner`       | `Project`      | A project runner is registered against a project.                                                       |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
-| `HAS_LABEL`                         | `WorkItem`     | `Label`        | A work item has labels.                                                                                 |
+| `HAS_LABEL`                         | `WorkItem`, `MergeRequest` | `Label` | An entity has labels applied.                                                         |
 | `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |
 | `HAS_DIFF`                          | `MergeRequest` | `MergeRequestDiff` | A merge request has diff versions.                                                                 |
 | `HAS_LATEST_DIFF`                   | `MergeRequest` | `MergeRequestDiff` | A merge request's most recent diff snapshot (from `latest_merge_request_diff_id`).                 |
