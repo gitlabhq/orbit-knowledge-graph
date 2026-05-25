@@ -807,6 +807,16 @@ impl CodeGraph {
         })
     }
 
+    /// Definitions intended for the output projection — excludes nodes that
+    /// the language layer marked as `is_proxied` because another node in
+    /// the same file is the canonical row for the same logical symbol.
+    /// Internal resolver code that needs every node (call wiring, type
+    /// lookup) should keep using [`Self::definitions`].
+    pub fn definitions_visible(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
+        self.definitions()
+            .filter(|(_, _, def)| !def.metadata.as_ref().is_some_and(|m| m.is_proxied))
+    }
+
     pub fn imports_iter(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphImport)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Import { file_path, id } = &self.graph[idx] {

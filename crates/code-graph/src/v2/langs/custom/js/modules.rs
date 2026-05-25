@@ -146,10 +146,55 @@ impl JsModuleGraphBuilder {
         }
     }
 
-    pub fn add_file(&mut self, file: JsPhase1File) -> JsPhase1FileInfo {
+    pub fn add_file(&mut self, mut file: JsPhase1File) -> JsPhase1FileInfo {
         let relative_path = self.graph.relative_path(&file.path);
         let module_def = synthesize_module_definition(&relative_path);
         let module_scope = module_def.fqn.as_str().to_string();
+
+        // Count export bindings per local FQN. Single-binding exports
+        // produce a synthesized proxy row that mirrors the local; we mark
+        // those proxies as `is_proxied` so projection emits one row per
+        // logical symbol (the local with bare FQN, plus the proxy's wider
+        // declaration range backported onto it). Aliases (2+ bindings)
+        // keep the proxy rows visible — they are distinct export names.
+        let mut bindings_per_fqn: FxHashMap<&str, usize> = FxHashMap::default();
+        for binding in &file.bindings {
+            if let JsModuleBindingTargetInput::LocalDefinition { fqn } = &binding.target {
+                *bindings_per_fqn.entry(fqn.as_str()).or_insert(0) += 1;
+            }
+        }
+        let proxied_fqns: rustc_hash::FxHashSet<String> = bindings_per_fqn
+            .iter()
+            .filter(|(_, count)| **count == 1)
+            .map(|(fqn, _)| (*fqn).to_string())
+            .collect();
+
+        // Backport the proxy's declaration range onto the local for
+        // single-binding exports — the analyzer's range is identifier-only
+        // while the export binding covers the full declaration block.
+        let proxy_range_by_fqn: FxHashMap<String, ExportedBinding> = file
+            .bindings
+            .iter()
+            .filter_map(|b| match &b.target {
+                JsModuleBindingTargetInput::LocalDefinition { fqn }
+                    if proxied_fqns.contains(fqn) =>
+                {
+                    Some((fqn.clone(), b.binding.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        for def in &mut file.definitions {
+            if let Some(binding) = proxy_range_by_fqn.get(def.fqn.as_str()) {
+                // Adopt the binding's line/column span (covers the whole
+                // declaration block) but keep the analyzer's byte_offset
+                // so the JS resolver's byte-based identity check
+                // (`resolve/mod.rs:193`) still pairs graph defs with their
+                // analyzer counterparts.
+                let bind = to_graph_range(binding.range);
+                def.range = Range::new(bind.start, bind.end, def.range.byte_offset);
+            }
+        }
 
         let local_defs_by_fqn: FxHashMap<_, _> = file
             .definitions
@@ -159,7 +204,19 @@ impl JsModuleGraphBuilder {
         let export_defs: Vec<_> = file
             .bindings
             .iter()
-            .map(|binding| synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn))
+            .map(|binding| {
+                let mut proxy =
+                    synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn);
+                if let JsModuleBindingTargetInput::LocalDefinition { fqn } = &binding.target
+                    && proxied_fqns.contains(fqn)
+                {
+                    let meta = proxy
+                        .metadata
+                        .get_or_insert_with(|| Box::new(DefinitionMetadata::default()));
+                    meta.is_proxied = true;
+                }
+                proxy
+            })
             .collect();
 
         let local_def_count = file.definitions.len();

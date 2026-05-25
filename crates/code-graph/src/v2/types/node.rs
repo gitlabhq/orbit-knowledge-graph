@@ -86,6 +86,12 @@ pub struct DefinitionMetadata {
     pub companion_of: Option<String>,
     /// Whether the definition is exported from the file/module.
     pub is_exported: bool,
+    /// Set on synthesized proxy definitions that mirror another
+    /// definition in the same file (e.g. JS export rows whose target is
+    /// a single in-file local). The in-memory node stays for hierarchy
+    /// lookups and binding resolution; projection layers suppress the
+    /// row so each logical symbol surfaces as exactly one output entry.
+    pub is_proxied: bool,
 }
 
 /// Language-agnostic import binding categories.

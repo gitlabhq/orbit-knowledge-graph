@@ -112,6 +112,7 @@ impl MetadataRule {
             decorators,
             companion_of,
             is_exported: false,
+            is_proxied: false,
         }))
     }
 }

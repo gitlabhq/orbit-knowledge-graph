@@ -387,6 +387,7 @@ pub struct GraphDefMeta {
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
     pub is_exported: bool,
+    pub is_proxied: bool,
 }
 
 /// Pool-backed import. Stored in `CodeGraph.imports`.
@@ -420,6 +421,7 @@ impl GraphDef {
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
                 is_exported: m.is_exported,
+                is_proxied: m.is_proxied,
             })
         });
         Self {
@@ -844,6 +846,7 @@ mod tests {
                 decorators: vec![],
                 companion_of: None,
                 is_exported: true,
+                is_proxied: false,
             })),
         };
         let gdef = GraphDef::from_canonical(&cdef, &mut pool);

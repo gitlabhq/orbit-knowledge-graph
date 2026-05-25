@@ -1,0 +1,78 @@
+name: "TypeScript single-binding exports carry full declaration range on the local"
+pipeline: js
+fixtures:
+  - path: src/context_error.ts
+    content: |
+      export interface ContextError {
+        ctx: string;
+        detail: string;
+      }
+
+      export const isContextError = (
+        error: unknown,
+      ): error is ContextError =>
+        typeof error === 'object' && error !== null && 'ctx' in error;
+
+      export function tag(error: unknown): string {
+        if (isContextError(error)) {
+          return error.ctx;
+        }
+        return 'unknown';
+      }
+
+      function privateHelper(): number {
+        return 1;
+      }
+
+tests:
+  - name: Inline-exported interface carries the full declaration range
+    # The interface declaration spans lines 1–4 (0-indexed: rows 0–3).
+    # Before the backport the local def's end_line was the identifier
+    # row (0). With the binding range backported the local now covers
+    # the closing brace too.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/context_error.ts'
+        AND d.fqn = 'ContextError'
+      RETURN d.end_line AS end_line
+    assert:
+      - { row_count: 1 }
+      - { count_gte: { field: end_line, value: 2 } }
+
+  - name: Inline-exported multi-line arrow function range covers all lines
+    # The arrow function declaration spans rows 5–8 (start–end inclusive).
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/context_error.ts'
+        AND d.fqn = 'isContextError'
+      RETURN d.end_line AS end_line, d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { count_gte: { field: end_line, value: 8 } }
+
+  - name: Inline-exported function body range is preserved
+    # `function tag(...) { if (...) { return ... } return ... }` spans
+    # rows 10–15.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/context_error.ts'
+        AND d.fqn = 'tag'
+      RETURN d.end_line AS end_line
+    assert:
+      - { row_count: 1 }
+      - { count_gte: { field: end_line, value: 14 } }
+
+  - name: Unexported helper still gets indexed
+    # `privateHelper` has no export binding — no range backport — but
+    # the analyzer's identifier-position row survives so it remains
+    # discoverable. (This guards against the backport accidentally
+    # widening every local.)
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/context_error.ts'
+        AND d.fqn = 'privateHelper'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "privateHelper" } }

@@ -67,6 +67,10 @@ yaml_test!(
     "typescript/type_only_and_definitions.yaml"
 );
 yaml_test!(
+    typescript_single_export_range_backport,
+    "typescript/single_export_range_backport.yaml"
+);
+yaml_test!(
     react_jsx_component_matrix,
     "react/jsx_component_matrix.yaml"
 );
