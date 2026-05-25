@@ -1083,12 +1083,19 @@ impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
 }
 
 fn write_range(b: &mut BatchBuilder, range: &Range) -> Result<(), arrow::error::ArrowError> {
-    b.col("start_line")?.push_int(range.start.line as i64)?;
-    b.col("end_line")?.push_int(range.end.line as i64)?;
+    // Parser ranges are 0-indexed (tree-sitter `row`/`column`, OXC line
+    // and column index). We convert both to 1-indexed at the projection
+    // boundary so a `file:line:col` citation lines up with editors,
+    // IDEs, error messages, and agents — that is what the field names
+    // imply. Byte offsets stay 0-indexed: they index into a buffer, not
+    // into a human-readable line/column grid.
+    b.col("start_line")?.push_int(range.start.line as i64 + 1)?;
+    b.col("end_line")?.push_int(range.end.line as i64 + 1)?;
     b.col("start_byte")?.push_int(range.byte_offset.0 as i64)?;
     b.col("end_byte")?.push_int(range.byte_offset.1 as i64)?;
-    b.col("start_char")?.push_int(range.start.column as i64)?;
-    b.col("end_char")?.push_int(range.end.column as i64)?;
+    b.col("start_char")?
+        .push_int(range.start.column as i64 + 1)?;
+    b.col("end_char")?.push_int(range.end.column as i64 + 1)?;
     Ok(())
 }
 

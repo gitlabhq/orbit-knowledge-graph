@@ -1,0 +1,142 @@
+name: "Range contract — bytes 0-indexed, lines + chars 1-indexed, every language"
+
+# Pin the projection contract for source-position fields across every
+# pipeline (tree-sitter generic + OXC for JS/TS). The contract:
+#
+#   * `start_byte` / `end_byte` are 0-indexed byte offsets into the file.
+#   * `start_line` / `end_line` are 1-indexed (first line = 1).
+#   * `start_char` / `end_char` are 1-indexed character columns within
+#     the line (first column = 1).
+#
+# A definition's range always starts at the leading keyword / modifier
+# of its declaration (`class`, `def`, `type`, `pub struct`, ...), not
+# at the identifier in the middle. Languages whose AST splits the
+# keyword from the body (Go's `type_declaration` wraps `type_spec`)
+# use the DSL primitive `range_from_parent` to extend back to the
+# outer node — see `langs/generic/go.rs`.
+
+fixtures:
+  - path: pkg/user.py
+    content: |
+      class User:
+          def name(self) -> str:
+              return "u"
+
+  - path: lib/user.rb
+    content: |
+      class User
+        def name
+          "u"
+        end
+      end
+
+  - path: user.go
+    content: |
+      package user
+
+      type User struct{}
+
+      func Name() string { return "u" }
+
+  - path: User.java
+    content: |
+      public class User {
+          public String name() { return "u"; }
+      }
+
+  - path: src/user.rs
+    content: |
+      pub struct User;
+
+      impl User {
+          pub fn name(&self) -> &'static str { "u" }
+      }
+
+tests:
+  # ── Python: tree-sitter pipeline ────────────────────────────────
+  - name: Python class is 1-indexed, at byte 0
+    # `class User:` at file line 1 column 1, byte 0.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'User'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  - name: Python method is 1-indexed, at 4-space indent
+    # `class User:\n` = 12 bytes, then 4 spaces of indent → `def` at
+    # line 2 col 5 byte 16.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, sc: 5, sb: 16 } }
+
+  # ── Ruby: tree-sitter pipeline ──────────────────────────────────
+  - name: Ruby class starts at `class` keyword on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  - name: Ruby method starts at `def` keyword on line 2
+    # `class User\n` = 11 bytes, then 2-space indent → `def` at byte 13.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, sc: 3, sb: 13 } }
+
+  # ── Go: tree-sitter pipeline (range_from_parent("type_declaration"))
+  - name: Go struct starts at `type` keyword on line 3
+    # `package user\n\n` = 14 bytes → `type User struct{}` starts at byte 14.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'user.go' AND d.name = 'User'
+        AND d.definition_type = 'Struct'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 3, sc: 1, sb: 14 } }
+
+  - name: Go function starts at `func` keyword on line 5
+    # Lines 1-4: `package user\n` + `\n` + `type User struct{}\n` + `\n`
+    #          = 13 + 1 + 19 + 1 = 34 bytes. `func` starts at byte 34.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'user.go' AND d.name = 'Name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 5, sc: 1, sb: 34 } }
+
+  # ── Java: tree-sitter pipeline ──────────────────────────────────
+  - name: Java class starts at `public class User` on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'User.java' AND d.name = 'User'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  # ── Rust: tree-sitter pipeline ──────────────────────────────────
+  - name: Rust struct starts at `pub struct User` on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/user.rs' AND d.name = 'User'
+        AND d.definition_type = 'Struct'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }

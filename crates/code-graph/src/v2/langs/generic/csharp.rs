@@ -290,12 +290,28 @@ fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) 
         return true;
     };
 
+    // `using Foo = Bar.Baz;` binds the alias `Foo` to a single symbol
+    // `Baz` (the last segment of the path). Surface `Baz` as the import
+    // identifier so queries can match on it the same way as Java's
+    // `import java.util.List` → `List`. Plain `using Bar.Baz;` keeps
+    // `name = None` because it imports a namespace, not a symbol.
+    //
+    // Strip generic parameters from the final segment so
+    // `using MyList = System.Collections.Generic.List<int>;` surfaces
+    // as `List` instead of `List<int>` — the bound type is still
+    // `List`, the generic argument is type-erased noise for symbol
+    // queries.
+    let name = path
+        .rsplit('.')
+        .next()
+        .map(|seg| seg.split('<').next().unwrap_or(seg).to_string());
+
     imports.push(CanonicalImport {
         import_type: "AliasedImport",
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
         path,
-        name: None,
+        name,
         alias: Some(alias),
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),

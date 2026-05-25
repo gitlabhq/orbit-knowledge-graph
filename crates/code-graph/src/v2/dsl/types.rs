@@ -43,6 +43,12 @@ pub struct ScopeRule {
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
+    /// If set, the def's range starts at the position of the nearest
+    /// ancestor whose kind matches. Used to align languages whose
+    /// declaration AST splits the keyword from the body (e.g. Go's
+    /// `type_declaration` wraps `type_spec`) with the cross-language
+    /// convention that a definition's range covers its leading keyword.
+    pub(crate) range_from_parent: Option<&'static str>,
 }
 
 impl Rule for ScopeRule {
@@ -97,6 +103,16 @@ impl ScopeRule {
         self
     }
 
+    /// Extend the def's range upward to the nearest ancestor of this
+    /// kind. The start position (line/column/byte) is taken from the
+    /// ancestor; the end position stays on the matched node (they
+    /// usually coincide). If no ancestor of that kind is found, the
+    /// matched node's range is used unchanged.
+    pub fn range_from_parent(mut self, kind: &'static str) -> Self {
+        self.range_from_parent = Some(kind);
+        self
+    }
+
     pub(crate) fn resolve_def_kind(&self) -> DefKind {
         self.def_kind
     }
@@ -127,6 +143,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
+        range_from_parent: None,
     }
 }
 
@@ -141,6 +158,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
+        range_from_parent: None,
     }
 }
 
@@ -160,6 +178,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         default_name: None,
         creates_scope: true,
         metadata_rule: None,
+        range_from_parent: None,
     }
 }
 

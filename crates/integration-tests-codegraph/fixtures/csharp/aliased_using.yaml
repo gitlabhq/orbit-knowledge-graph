@@ -1,0 +1,62 @@
+name: "C# aliased `using` surfaces the bound symbol"
+
+# `using Foo = Bar.Baz;` binds the single symbol `Baz` under the alias
+# `Foo`. The ImportedSymbol row used to have `name = NULL` so queries
+# like "which files alias type X" had nothing to filter on. Plain
+# `using Bar.Baz;` still keeps `name = NULL` — it imports a namespace,
+# not a specific symbol.
+
+fixtures:
+  - path: Services/Worker.cs
+    content: |
+      using System;
+      using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+      using Result = GitLab.Extension.Utility.Results.Result;
+      using MyList = System.Collections.Generic.List<int>;
+
+      namespace App.Services
+      {
+          public class Worker
+          {
+              public Result Run() => null;
+              public LogLevel Level => LogLevel.Information;
+              public MyList Items => null;
+          }
+      }
+
+tests:
+  - name: Aliased `using` surfaces the last path segment as the symbol name
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.alias IN ['LogLevel', 'Result']
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
+      ORDER BY alias
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: "LogLevel", name: "LogLevel", path: "Microsoft.Extensions.Logging.LogLevel" } }
+      - { row: { alias: "Result", name: "Result", path: "GitLab.Extension.Utility.Results.Result" } }
+
+  - name: Plain `using` still has no symbol name (namespace import)
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.path = 'System'
+      RETURN i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: null } }
+
+  - name: Generic-typed alias strips the generic parameter from `name`
+    # `using MyList = System.Collections.Generic.List<int>;` —
+    # the bound symbol is `List`; the `<int>` is a type argument, not
+    # part of the identifier. Queries filtering on `name = 'List'`
+    # should match this row.
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.alias = 'MyList'
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { alias: "MyList", name: "List", path: "System.Collections.Generic.List<int>" } }

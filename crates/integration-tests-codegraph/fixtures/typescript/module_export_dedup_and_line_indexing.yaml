@@ -1,0 +1,95 @@
+name: "TS module-export dedup and 1-indexed line numbers"
+
+# Every exported TS symbol used to surface as two `gl_definition` rows:
+# the analyzer's local plus a synthesized export proxy that inherited
+# the local's `definition_type`. The proxy is now tagged
+# `definition_type = 'ModuleExport'`; the two production projectors
+# (indexer + DuckDB) filter those rows at the projection boundary so
+# consumers see one entry per logical symbol. The in-memory graph
+# still keeps the proxy node for cross-file import wiring.
+#
+# `start_line` is also written 1-indexed so `file:start_line` lines up
+# with editor/IDE numbering.
+
+pipeline: js
+
+fixtures:
+  - path: lib/context_error.ts
+    content: |
+      export interface ContextError {
+        ctx: string;
+      }
+
+      export const isContextError = (e: unknown): e is ContextError =>
+        typeof e === 'object' && e !== null && 'ctx' in e;
+
+      export function tag(e: unknown): string {
+        return isContextError(e) ? e.ctx : 'unknown';
+      }
+
+      function privateHelper(): number {
+        return 1;
+      }
+
+tests:
+  - name: Visible projection emits exactly one row per exported symbol
+    # `definition_type <> 'ModuleExport'` mirrors what the indexer and
+    # DuckDB projectors strip before writing `gl_definition`.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/context_error.ts'
+        AND d.name IN ['ContextError', 'isContextError', 'tag']
+        AND d.definition_type <> 'ModuleExport'
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "ContextError", fqn: "ContextError" } }
+      - { row: { name: "isContextError", fqn: "isContextError" } }
+      - { row: { name: "tag", fqn: "tag" } }
+
+  - name: Module-export proxy carries the ModuleExport definition_type
+    # Proxies are still in the in-memory graph (resolver needs them);
+    # they are tagged so projection can drop them uniformly. Without
+    # the tag they inherit the local's type (e.g. 'Interface') and
+    # show up as duplicate rows.
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/context_error.ts'
+        AND d.fqn = 'lib/context_error.ts::ContextError'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "ModuleExport" } }
+
+  - name: Unexported helper still surfaces (only proxies are filtered)
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/context_error.ts'
+        AND d.name = 'privateHelper'
+        AND d.definition_type <> 'ModuleExport'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: start_line is 1-indexed (interface on file line 1)
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/context_error.ts'
+        AND d.name = 'ContextError'
+        AND d.definition_type = 'Interface'
+      RETURN d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 1 } }
+
+  - name: start_line is 1-indexed (function `tag` on file line 8)
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/context_error.ts'
+        AND d.name = 'tag'
+        AND d.definition_type = 'Function'
+      RETURN d.start_line AS start_line
+    assert:
+      - { row_count: 1 }
+      - { row: { start_line: 8 } }

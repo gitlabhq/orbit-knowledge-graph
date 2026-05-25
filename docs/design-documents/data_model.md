@@ -159,6 +159,14 @@ The Code Graph represents the structure and relationships within the source code
 | `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
 | `ImportedSymbol`      | An imported symbol or module reference within a file.                                                   | `import_path`, `import_type`, `identifier_name`, `identifier_alias`, `file_path` |
 
+`identifier_name` follows each language's binding semantics, so its meaning varies:
+
+- **JavaScript / TypeScript / Python / Ruby / Java**: the imported symbol (`import { Foo }`, `from m import Foo`, `import java.util.List`) — `identifier_name = 'Foo'` / `'List'`.
+- **Go**: the package binding name (`import "github.com/x/y"` → `identifier_name = 'y'`). Individual symbols used from the package (`fmt.Println`) are not surfaced as separate `ImportedSymbol` rows; they appear as `CALLS` edges from the calling definition into the package's `ImportedSymbol` row instead.
+- **C#**: plain `using Namespace;` imports a namespace, not a symbol — `identifier_name` is `NULL`. Aliased `using Foo = Bar.Baz;` binds the single symbol `Baz` so `identifier_name = 'Baz'` and `identifier_alias = 'Foo'`.
+
+Cross-language queries that need "which files use symbol X" should join `CALLS` edges into the `ImportedSymbol` row rather than filtering on `identifier_name` directly.
+
 ### Relationship Visualization
 
 ```mermaid

@@ -17,6 +17,7 @@ mod resolve;
 mod types;
 mod workspace;
 
+pub use modules::MODULE_EXPORT_TYPE;
 pub use pipeline::JsPipeline;
 
 // Internal `super::` shorthand for sibling modules. Nothing outside this

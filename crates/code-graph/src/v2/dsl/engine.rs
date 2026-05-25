@@ -5,7 +5,7 @@ use super::utils::{
     canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
 };
 use crate::trace;
-use crate::utils::node_to_range;
+use crate::utils::{Position, Range, node_to_range};
 use crate::v2::config::Language;
 use crate::v2::trace::Tracer;
 use crate::v2::types::{
@@ -20,6 +20,31 @@ use treesitter_visit::{Node, SupportLang};
 pub struct ParsedDefs {
     pub definitions: Vec<CanonicalDefinition>,
     pub imports: Vec<CanonicalImport>,
+}
+
+/// Walk up from `node` looking for the nearest ancestor with the given
+/// kind. If found, build a range that starts at the ancestor's start
+/// position (line / column / byte) and ends at the original node's end
+/// position. If not found, fall back to the original node's range.
+///
+/// Used to align declaration ranges across languages whose AST splits
+/// the leading keyword from the body — e.g. Go's `type_declaration`
+/// wraps `type_spec`, but only `type_spec` carries the identifier.
+fn range_extended_to_ancestor(node: &Node<StrDoc<SupportLang>>, parent_kind: &str) -> Range {
+    let inner = node_to_range(node);
+    let mut current = node.parent();
+    while let Some(ancestor) = current {
+        if ancestor.kind().as_ref() == parent_kind {
+            let outer = node_to_range(&ancestor);
+            return Range::new(
+                Position::new(outer.start.line, outer.start.column),
+                Position::new(inner.end.line, inner.end.column),
+                (outer.byte_offset.0, inner.byte_offset.1),
+            );
+        }
+        current = ancestor.parent();
+    }
+    inner
 }
 
 fn default_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
@@ -135,11 +160,16 @@ impl LanguageSpec {
             .extract()
             .apply(node)
             .or_else(|| rule.default_name.map(|s| s.to_string()))?;
+        let range = if let Some(parent_kind) = rule.range_from_parent {
+            range_extended_to_ancestor(node, parent_kind)
+        } else {
+            node_to_range(node)
+        };
         Some(ScopeMatch {
             name,
             label: rule.resolve_label(node),
             def_kind: rule.resolve_def_kind(),
-            range: node_to_range(node),
+            range,
             creates_scope: rule.creates_scope,
             metadata: rule.extract_metadata(node, &resolve),
         })

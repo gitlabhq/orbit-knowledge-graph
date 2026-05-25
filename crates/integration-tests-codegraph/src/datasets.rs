@@ -104,6 +104,12 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
 }
 
 fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBatch> {
+    // Keep every Definition node so resolver-wiring tests can MATCH
+    // through proxy targets. Tests that need to assert what consumers
+    // see in `gl_definition` should filter on `definition_type` (the
+    // module-export proxy carries `ModuleExport` — see
+    // `js::modules::synthesize_export_definition`). Line numbers are
+    // 1-indexed to mirror `linker::graph::write_range`.
     let defs: Vec<_> = graph.definitions().collect();
     let n = defs.len();
     let mut id_b = Int64Builder::with_capacity(n);
@@ -124,12 +130,15 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
         fqn_b.append_value(graph.str(d.fqn));
         name_b.append_value(graph.str(d.name));
         dt_b.append_value(d.definition_type);
-        sl_b.append_value(d.range.start.line as i64);
-        el_b.append_value(d.range.end.line as i64);
+        // 1-indexed lines and columns mirror `linker::graph::write_range`
+        // so YAML assertions match what consumers see in `gl_definition`.
+        // Bytes stay 0-indexed (buffer offsets, not line/column grid).
+        sl_b.append_value(d.range.start.line as i64 + 1);
+        el_b.append_value(d.range.end.line as i64 + 1);
         sb_b.append_value(d.range.byte_offset.0 as i64);
         eb_b.append_value(d.range.byte_offset.1 as i64);
-        sc_b.append_value(d.range.start.column as i64);
-        ec_b.append_value(d.range.end.column as i64);
+        sc_b.append_value(d.range.start.column as i64 + 1);
+        ec_b.append_value(d.range.end.column as i64 + 1);
     }
 
     make_batch(

@@ -74,14 +74,24 @@ impl DslLanguage for GoDsl {
                 .metadata(metadata().return_type(field("result"))),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
-            scope("type_spec", "Type").def_kind(DefKind::Other),
+            //
+            // `type_spec` starts at the identifier (`User` in `type User struct{}`),
+            // but every other language reports a declaration's range from its
+            // leading keyword. `range_from_parent("type_declaration")` extends
+            // the start position to the `type` keyword so cross-language byte
+            // and column comparisons line up.
+            scope("type_spec", "Type")
+                .def_kind(DefKind::Other)
+                .range_from_parent("type_declaration"),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
                 .when(field_kind("type", &["struct_type"]))
+                .range_from_parent("type_declaration")
                 .metadata(metadata().super_types(go_embedded_types)),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
-                .when(field_kind("type", &["interface_type"])),
+                .when(field_kind("type", &["interface_type"]))
+                .range_from_parent("type_declaration"),
         ]
     }
 

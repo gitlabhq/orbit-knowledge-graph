@@ -215,6 +215,10 @@ tests:
       - { row: { file_path: "src/app/api/items/[id]/route.ts", fqn: "src/app/api/items/[id]/route.ts", type: "Module" } }
 
   - name: Next route export proxies are synthesized for route conventions
+    # Synthesized export proxies carry `definition_type = 'ModuleExport'`
+    # so the indexer and DuckDB projectors can drop them uniformly. The
+    # underlying local keeps its real type (Function/Variable) — see the
+    # adjacent test that filters `<> 'ModuleExport'`.
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN [
@@ -235,18 +239,18 @@ tests:
       ORDER BY fqn
     assert:
       - { row_count: 12 }
-      - { row: { fqn: "src/app/(marketing)/blog/[...slug]/page.tsx::default", type: "Function" } }
-      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::default", type: "Function" } }
-      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::generateStaticParams", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::GET", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::PUT", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::PATCH", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::DELETE", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::HEAD", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::OPTIONS", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::runtime", type: "Variable" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::dynamic", type: "Variable" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::revalidate", type: "Variable" } }
+      - { row: { fqn: "src/app/(marketing)/blog/[...slug]/page.tsx::default", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::default", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::generateStaticParams", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::GET", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::PUT", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::PATCH", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::DELETE", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::HEAD", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::OPTIONS", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::runtime", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::dynamic", type: "ModuleExport" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::revalidate", type: "ModuleExport" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
     query: |

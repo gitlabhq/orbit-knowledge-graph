@@ -102,8 +102,17 @@ pub fn convert_v2_graph(
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Definition" => {
+                // The JS pipeline keeps a `ModuleExport` proxy node per
+                // exported symbol so its cross-file lookup index can
+                // walk `module → export_name`. Those proxies duplicate
+                // the underlying local for projection purposes — strip
+                // them so `gl_definition` carries one row per logical
+                // symbol. See `code_graph::v2::langs::custom::js::modules`.
                 let rows: Vec<_> = graph
                     .definitions()
+                    .filter(|(_, _, def)| {
+                        def.definition_type != code_graph::v2::langs::custom::js::MODULE_EXPORT_TYPE
+                    })
                     .map(|(idx, file_path, def)| DefinitionRow {
                         file_path,
                         def,

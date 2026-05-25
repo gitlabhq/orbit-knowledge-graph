@@ -12,6 +12,7 @@ macro_rules! yaml_test {
 // Structural
 yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
+yaml_test!(range_contract, "range_contract.yaml");
 
 // JavaScript / TypeScript
 yaml_test!(
@@ -65,6 +66,10 @@ yaml_test!(
 yaml_test!(
     typescript_type_only_and_definitions,
     "typescript/type_only_and_definitions.yaml"
+);
+yaml_test!(
+    typescript_module_export_dedup_and_line_indexing,
+    "typescript/module_export_dedup_and_line_indexing.yaml"
 );
 yaml_test!(
     react_jsx_component_matrix,
@@ -266,6 +271,7 @@ yaml_test!(
     csharp_imported_symbol_fallback_matrix,
     "csharp/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(csharp_aliased_using, "csharp/aliased_using.yaml");
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
@@ -278,6 +284,7 @@ yaml_test!(
     "ruby/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(ruby_top_level_constants, "ruby/top_level_constants.yaml");
+yaml_test!(ruby_line_indexing, "ruby/line_indexing.yaml");
 
 // Rust
 yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");

@@ -13,7 +13,14 @@ use rustc_hash::FxHashMap;
 
 use super::types::ExportedBinding;
 
-const MODULE_EXPORT_TYPE: &str = "ModuleExport";
+/// `definition_type` label stamped on synthesized export-binding rows
+/// (proxies). They live in the in-memory graph because the resolver's
+/// cross-file lookup index hangs every named export off the module
+/// scope, but they duplicate the underlying local for projection
+/// purposes. The two production projectors filter on this constant.
+/// Public so the projectors reference a single source of truth.
+pub const MODULE_EXPORT_TYPE: &str = "ModuleExport";
+
 const PRIMARY_EXPORT_MEMBER: &str = "default";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -276,12 +283,15 @@ fn synthesize_export_definition(
         _ => None,
     };
 
-    let (definition_type, kind) = local_target
-        .map(|def| (def.definition_type, def.kind))
-        .unwrap_or((MODULE_EXPORT_TYPE, DefKind::Other));
+    // Only called for non-local bindings (re-export, file target,
+    // unresolved). The proxy carries [`MODULE_EXPORT_TYPE`] to make its
+    // role explicit. Local-backed bindings bypass this entirely:
+    // `add_file` wires the binding's `export_node` straight to the
+    // local def, so no proxy row enters the graph.
+    let kind = local_target.map(|def| def.kind).unwrap_or(DefKind::Other);
 
     CanonicalDefinition {
-        definition_type,
+        definition_type: MODULE_EXPORT_TYPE,
         kind,
         name: member_name.to_string(),
         fqn: Fqn::from_parts(&[module_fqn, member_name], "::"),

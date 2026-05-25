@@ -89,7 +89,11 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: null, alias: "Json", import_type: "AliasedImport" } }
+      # `using Json = Newtonsoft.Json.JsonConvert;` binds the alias `Json`
+      # to the single symbol `JsonConvert`. Surface that symbol as `name`
+      # so cross-language "which files alias type X" queries can match it
+      # the same way as Java's `import java.util.List` → name=`List`.
+      - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: "JsonConvert", alias: "Json", import_type: "AliasedImport" } }
 
   - name: "console logging calls do not target ambient namespace imports"
     query: |

@@ -294,7 +294,16 @@ fn convert_definitions(
     ontology: &Ontology,
 ) -> Result<RecordBatch, ArrowError> {
     convert_entity(graph, ids, env, ontology, "Definition", |g, ids| {
+        // The JS pipeline keeps a `ModuleExport` proxy node per exported
+        // symbol so its cross-file lookup index can walk
+        // `module → export_name`. Those proxies duplicate the underlying
+        // local for projection purposes — strip them so `gl_definition`
+        // carries one row per logical symbol. See
+        // `code_graph::v2::langs::custom::js::modules`.
         g.definitions()
+            .filter(|(_, _, def)| {
+                def.definition_type != code_graph::v2::langs::custom::js::MODULE_EXPORT_TYPE
+            })
             .map(|(idx, file_path, def)| DefinitionRow {
                 file_path,
                 def,
