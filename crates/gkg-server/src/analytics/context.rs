@@ -220,9 +220,11 @@ mod tests {
                 .map(|e| format!("  - {e}"))
                 .collect();
             if !errors.is_empty() {
-                panic!("{label} failed Iglu schema validation:\n{}", errors.join("\n"));
+                panic!(
+                    "{label} failed Iglu schema validation:\n{}",
+                    errors.join("\n")
+                );
             }
-        }
         }
 
         #[test]

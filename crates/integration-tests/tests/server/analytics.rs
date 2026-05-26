@@ -175,13 +175,13 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == "iglu:com.gitlab/orbit_common/jsonschema/1-0-0"),
+            .any(|s| s == gkg_analytics::ORBIT_COMMON_SCHEMA),
         "missing orbit_common context, contexts={context_schemas:?}"
     );
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == "iglu:com.gitlab/orbit_query/jsonschema/2-0-1"),
+            .any(|s| s == gkg_analytics::ORBIT_QUERY_SCHEMA),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 

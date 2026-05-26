@@ -152,11 +152,11 @@ mod tests {
         assert_eq!(events[0].contexts().len(), 2);
         assert_eq!(
             events[0].contexts()[0].schema,
-            "iglu:com.gitlab/orbit_common/jsonschema/1-0-0"
+            gkg_analytics::ORBIT_COMMON_SCHEMA
         );
         assert_eq!(
             events[0].contexts()[1].schema,
-            "iglu:com.gitlab/orbit_query/jsonschema/2-0-1"
+            gkg_analytics::ORBIT_QUERY_SCHEMA
         );
     }
 
