@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify pinned Iglu schema versions exist on the live Iglu server.
 #
-# For each *.iglu-version file in config/schemas/:
+# For each *.version file in config/schemas/:
 #   1. Read the pinned version
 #   2. Fetch from live Iglu and verify it returns valid JSON
 #
@@ -14,9 +14,9 @@ VERSION_DIR="config/schemas/iglu"
 
 failed=0
 
-for version_file in "$VERSION_DIR"/*.iglu-version; do
+for version_file in "$VERSION_DIR"/*.version; do
   [ -f "$version_file" ] || continue
-  name=$(basename "$version_file" .iglu-version)
+  name=$(basename "$version_file" .version)
   version=$(cat "$version_file" | tr -d '[:space:]')
 
   remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$version") || {

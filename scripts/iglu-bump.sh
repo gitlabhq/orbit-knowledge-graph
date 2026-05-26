@@ -5,7 +5,7 @@
 #
 # 1. Runs vendir sync to pull latest schemas
 # 2. Verifies the version exists in the vendored directory
-# 3. Updates the .iglu-version pin file
+# 3. Updates the .version pin file
 
 set -euo pipefail
 
@@ -17,7 +17,7 @@ fi
 
 SCHEMA_NAME="$1"
 VERSION="$2"
-VERSION_FILE="config/schemas/iglu/${SCHEMA_NAME}.iglu-version"
+VERSION_FILE="config/schemas/iglu/${SCHEMA_NAME}.version"
 SCHEMA_FILE="vendor/iglu/public/schemas/com.gitlab/${SCHEMA_NAME}/jsonschema/${VERSION}"
 
 echo "Syncing vendored Iglu schemas..."
