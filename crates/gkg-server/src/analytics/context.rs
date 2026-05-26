@@ -1,49 +1,7 @@
+use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::SnowplowContext;
-use serde::Serialize;
 
 use crate::auth::Claims;
-
-const ORBIT_COMMON_SCHEMA: &str = "iglu:com.gitlab/orbit_common/jsonschema/1-0-0";
-const ORBIT_QUERY_SCHEMA: &str = "iglu:com.gitlab/orbit_query/jsonschema/2-0-1";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_common
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub(crate) struct OrbitCommonContext {
-    data: serde_json::Value,
-}
-
-impl SnowplowContext for OrbitCommonContext {
-    fn schema(&self) -> &str {
-        ORBIT_COMMON_SCHEMA
-    }
-
-    fn data(&self) -> serde_json::Value {
-        self.data.clone()
-    }
-}
-
-#[derive(Serialize)]
-struct OrbitCommonData<'a> {
-    deployment_type: &'a str,
-    environment: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    correlation_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instance_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    unique_instance_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    host_name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organization_id: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    root_namespace_ids: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    schema_version: Option<&'a str>,
-}
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
@@ -52,7 +10,7 @@ pub(crate) fn build_common(
 ) -> OrbitCommonContext {
     let correlation_id = labkit::correlation::current();
 
-    let data = OrbitCommonData {
+    OrbitCommonContext::new(OrbitCommonData {
         deployment_type: config.deployment.kind.into(),
         environment: config.deployment.environment.into(),
         correlation_id: correlation_id.as_deref(),
@@ -62,46 +20,7 @@ pub(crate) fn build_common(
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
         schema_version: Some(schema_version),
-    };
-
-    OrbitCommonContext {
-        data: serde_json::to_value(data).expect("OrbitCommonData is always serializable"),
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// orbit_query
-// ─────────────────────────────────────────────────────────────────────────────
-
-pub(crate) struct OrbitQueryContext {
-    data: serde_json::Value,
-}
-
-impl SnowplowContext for OrbitQueryContext {
-    fn schema(&self) -> &str {
-        ORBIT_QUERY_SCHEMA
-    }
-
-    fn data(&self) -> serde_json::Value {
-        self.data.clone()
-    }
-}
-
-#[derive(Serialize)]
-struct OrbitQueryData<'a> {
-    source_type: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    coding_agent: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    queried_namespace_ids: Option<Vec<i64>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    root_namespace_id: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    global_user_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<&'a str>,
+    })
 }
 
 pub(crate) fn build_query(
@@ -111,7 +30,7 @@ pub(crate) fn build_query(
 ) -> OrbitQueryContext {
     let queried = leaf_namespace_ids(claims);
 
-    let data = OrbitQueryData {
+    OrbitQueryContext::new(OrbitQueryData {
         source_type: claims.source_type.into(),
         tool_name: Some(tool_name),
         coding_agent,
@@ -123,11 +42,7 @@ pub(crate) fn build_query(
         root_namespace_id: claims.root_namespace_id,
         global_user_id: claims.global_user_id.as_deref(),
         session_id: claims.ai_session_id.as_deref(),
-    };
-
-    OrbitQueryContext {
-        data: serde_json::to_value(data).expect("OrbitQueryData is always serializable"),
-    }
+    })
 }
 
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
@@ -142,8 +57,8 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
-    use gkg_server_config::AnalyticsConfig;
-    use labkit_events::StructuredEvent;
+    use gkg_analytics::{ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA};
+    use labkit_events::{SnowplowContext, StructuredEvent};
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {

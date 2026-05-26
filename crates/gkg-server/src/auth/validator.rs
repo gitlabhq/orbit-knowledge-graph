@@ -81,7 +81,7 @@ mod tests {
             organization_id: None,
             min_access_level: None,
             group_traversal_ids: vec![],
-            source_type: super::SourceType::Rest,
+            source_type: crate::auth::SourceType::Rest,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,
@@ -105,7 +105,7 @@ mod tests {
         assert!(result.is_ok(), "expected valid token, got: {result:?}");
         let validated = result.unwrap();
         assert_eq!(validated.username, "testuser");
-        assert_eq!(validated.source_type, super::SourceType::Rest);
+        assert_eq!(validated.source_type, crate::auth::SourceType::Rest);
     }
 
     #[test]

@@ -5080,6 +5080,8 @@ dependencies = [
  "gkg-server-config",
  "labkit-events",
  "parking_lot",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 
@@ -6126,6 +6128,7 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "gkg-analytics",
  "gkg-server",
  "gkg-server-config",
  "gkg-utils",
