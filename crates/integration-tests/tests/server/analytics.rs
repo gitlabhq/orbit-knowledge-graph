@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
-use labkit_events::{SnowplowContext, Tracker};
+use labkit_events::Tracker;
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
