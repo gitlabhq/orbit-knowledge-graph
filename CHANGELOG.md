@@ -1,3 +1,13 @@
+## [0.63.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.62.0...v0.63.0) (2026-05-26)
+
+### Features
+
+* replace deprecated labkit analytics types with consumer-owned Snowplow contexts ([4ceea92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ceea923bf8b7cc36ebd9149902d3701cd5893f5)) by Michael Usachenko
+
+### Other
+
+* **schema:** bump SCHEMA_VERSION to 45 and regenerate DDL ([987cdc6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/987cdc67850132e9e22e2f86a4d7ba09f3db39d2)) by Jean-Gabriel Doyon
+
 ## [0.62.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.61.0...v0.62.0) (2026-05-26)
 
 ### Features
