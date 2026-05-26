@@ -230,6 +230,21 @@ mod tests {
         ) -> Result<(), CheckpointError> {
             Ok(())
         }
+
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(Vec::new())
+        }
+
+        async fn consolidate(
+            &self,
+            _parent_key: &str,
+            _watermark: &chrono::DateTime<Utc>,
+        ) -> Result<(), CheckpointError> {
+            Ok(())
+        }
     }
 
     fn scheduler_with_store(store: Arc<dyn NamespaceDeletionStore>) -> NamespaceDeletionScheduler {

@@ -79,4 +79,19 @@ impl CheckpointStore for MockCheckpointStore {
     ) -> Result<(), CheckpointError> {
         Ok(())
     }
+
+    async fn load_by_prefix(
+        &self,
+        _prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        Ok(Vec::new())
+    }
+
+    async fn consolidate(
+        &self,
+        _parent_key: &str,
+        _watermark: &chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
 }

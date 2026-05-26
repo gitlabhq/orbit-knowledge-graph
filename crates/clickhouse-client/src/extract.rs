@@ -1,5 +1,6 @@
-use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
+use chrono::{DateTime, TimeZone, Utc};
 
 #[derive(Debug, thiserror::Error)]
 #[error("invalid column type: expected {expected}")]
@@ -88,6 +89,38 @@ impl FromArrowColumn for i64 {
                 if !column.is_null(i) {
                     values.push(column.value(i));
                 }
+            }
+        }
+
+        Ok(values)
+    }
+}
+
+impl FromArrowColumn for DateTime<Utc> {
+    fn extract_column(
+        batches: &[RecordBatch],
+        column_index: usize,
+    ) -> Result<Vec<Self>, ExtractError> {
+        let mut values = Vec::new();
+
+        for batch in batches {
+            let column = batch
+                .column(column_index)
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .ok_or(ExtractError {
+                    expected: "TimestampMicrosecondArray",
+                })?;
+
+            for i in 0..column.len() {
+                if column.is_null(i) {
+                    continue;
+                }
+                let micros = column.value(i);
+                let timestamp = Utc.timestamp_micros(micros).single().ok_or(ExtractError {
+                    expected: "valid microsecond timestamp",
+                })?;
+                values.push(timestamp);
             }
         }
 

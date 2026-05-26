@@ -2,10 +2,9 @@ use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-use arrow::array::{Array, StringArray, TimestampMicrosecondArray};
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
-use gkg_utils::arrow::ArrowUtils;
+use chrono::{DateTime, Utc};
+use clickhouse_client::FromArrowColumn;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -52,6 +51,17 @@ pub trait CheckpointStore: Send + Sync {
         key: &str,
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError>;
+
+    async fn load_by_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError>;
+
+    async fn consolidate(
+        &self,
+        parent_key: &str,
+        watermark: &DateTime<Utc>,
+    ) -> Result<(), CheckpointError>;
 }
 
 pub struct ClickHouseCheckpointStore {
@@ -71,8 +81,7 @@ impl ClickHouseCheckpointStore {
     ) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
-        let cursor_json = serde_json::to_string(cursor_values)
-            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+        let cursor_json = serde_json::to_string(cursor_values).map_err(checkpoint_store_error)?;
 
         self.client
             .query(&format!(
@@ -84,10 +93,39 @@ impl ClickHouseCheckpointStore {
             .param("cursor_values", cursor_json)
             .execute()
             .await
-            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+            .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
+
+    async fn tombstone(&self, key: &str, watermark: &DateTime<Utc>) -> Result<(), CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
+
+        self.client
+            .query(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
+                 VALUES ({{key:String}}, {{watermark:String}}, '', true)"
+            ))
+            .param("key", key)
+            .param("watermark", formatted_watermark)
+            .execute()
+            .await
+            .map_err(checkpoint_store_error)?;
+
+        Ok(())
+    }
+}
+
+fn parse_cursor_json(raw: &str) -> Result<Option<Vec<String>>, CheckpointError> {
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(raw).map_err(checkpoint_store_error)
+}
+
+fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {
+    CheckpointError::Store(err.to_string())
 }
 
 #[async_trait]
@@ -98,55 +136,46 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .client
             .query(&format!(
                 "SELECT argMax(watermark, _version) AS watermark, \
-                        argMax(cursor_values, _version) AS cursor_values \
+                        argMax(cursor_values, _version) AS cursor_values, \
+                        argMax(_deleted, _version) AS deleted \
                  FROM {table} \
                  WHERE key = {{key:String}}"
             ))
             .param("key", key)
             .fetch_arrow()
             .await
-            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+            .map_err(checkpoint_store_error)?;
 
-        let batch = match batches.into_iter().next() {
-            Some(batch) if batch.num_rows() > 0 => batch,
-            _ => return Ok(None),
+        let watermarks =
+            DateTime::<Utc>::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
+        let Some(watermark) = watermarks.into_iter().next() else {
+            return Ok(None);
         };
-
-        let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(&batch, 0)
-            .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
-
-        if timestamps.is_null(0) {
+        // argMax over an empty set returns the column's default value because
+        // `watermark` is declared non-nullable in the checkpoint schema. A
+        // genuine row never carries the epoch, so treat it as a missing entry.
+        if watermark == DateTime::<Utc>::UNIX_EPOCH {
             return Ok(None);
         }
 
-        let micros = timestamps.value(0);
-        if micros == 0 {
+        let deleted = bool::extract_column(&batches, 2)
+            .map_err(checkpoint_store_error)?
+            .into_iter()
+            .next()
+            .unwrap_or(false);
+        if deleted {
             return Ok(None);
         }
 
-        let watermark = Utc
-            .timestamp_micros(micros)
-            .single()
-            .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
-
-        let cursor_json =
-            ArrowUtils::get_column_by_index::<StringArray>(&batch, 1).and_then(|arr| {
-                if arr.is_null(0) || arr.value(0).is_empty() {
-                    None
-                } else {
-                    Some(arr.value(0).to_string())
-                }
-            });
-
-        let cursor_values: Option<Vec<String>> = match cursor_json {
-            Some(json) => serde_json::from_str(&json)
-                .map_err(|err| CheckpointError::Store(err.to_string()))?,
-            None => None,
-        };
+        let cursor_json = String::extract_column(&batches, 1)
+            .map_err(checkpoint_store_error)?
+            .into_iter()
+            .next()
+            .unwrap_or_default();
 
         Ok(Some(Checkpoint {
             watermark,
-            cursor_values,
+            cursor_values: parse_cursor_json(&cursor_json)?,
         }))
     }
 
@@ -165,6 +194,75 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError> {
         self.upsert(key, watermark, &None).await
+    }
+
+    async fn load_by_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let batches = self
+            .client
+            .query(&format!(
+                "SELECT key, \
+                        argMax(watermark, _version) AS watermark, \
+                        argMax(cursor_values, _version) AS cursor_values, \
+                        argMax(_deleted, _version) AS deleted \
+                 FROM {table} \
+                 WHERE startsWith(key, {{prefix:String}}) \
+                 GROUP BY key"
+            ))
+            .param("prefix", prefix)
+            .fetch_arrow()
+            .await
+            .map_err(checkpoint_store_error)?;
+
+        let keys = String::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
+        let watermarks =
+            DateTime::<Utc>::extract_column(&batches, 1).map_err(checkpoint_store_error)?;
+        let cursor_jsons = String::extract_column(&batches, 2).map_err(checkpoint_store_error)?;
+        let deleted = bool::extract_column(&batches, 3).map_err(checkpoint_store_error)?;
+
+        keys.into_iter()
+            .zip(watermarks)
+            .zip(cursor_jsons)
+            .zip(deleted)
+            .filter_map(|(((key, watermark), cursor_json), is_deleted)| {
+                if is_deleted {
+                    return None;
+                }
+                Some(parse_cursor_json(&cursor_json).map(|cursor_values| {
+                    (
+                        key,
+                        Checkpoint {
+                            watermark,
+                            cursor_values,
+                        },
+                    )
+                }))
+            })
+            .collect()
+    }
+
+    async fn consolidate(
+        &self,
+        parent_key: &str,
+        watermark: &DateTime<Utc>,
+    ) -> Result<(), CheckpointError> {
+        let partition_prefix = format!("{parent_key}.p");
+        let partition_keys: Vec<String> = self
+            .load_by_prefix(&partition_prefix)
+            .await?
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+
+        self.save_completed(parent_key, watermark).await?;
+
+        for key in partition_keys {
+            self.tombstone(&key, watermark).await?;
+        }
+        Ok(())
     }
 }
 

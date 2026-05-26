@@ -76,15 +76,6 @@
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
             "partition_overrides": {}
-          },
-          "global-handler": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": 500000
-          },
-          "namespace-handler": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": 500000,
-            "max_concurrent_entities": 3
           }
         },
         "max_concurrent_workers": 16,
@@ -221,9 +212,6 @@
             "batch_size": 100,
             "cron": null,
             "events_stream_name": "siphon_stream_main_db"
-          },
-          "entity": {
-            "cron": null
           },
           "global": {
             "cron": null
@@ -498,15 +486,6 @@
               "batch_size_overrides": {},
               "datalake_batch_size": 500000,
               "partition_overrides": {}
-            },
-            "global-handler": {
-              "batch_size_overrides": {},
-              "datalake_batch_size": 500000
-            },
-            "namespace-handler": {
-              "batch_size_overrides": {},
-              "datalake_batch_size": 500000,
-              "max_concurrent_entities": 3
             }
           }
         },
@@ -539,20 +518,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "EntityDispatcherConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
-      "type": "object",
-      "properties": {
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        }
-      }
     },
     "EntityHandlerConfig": {
       "type": "object",
@@ -624,27 +589,6 @@
           "default": null
         }
       }
-    },
-    "GlobalHandlerConfig": {
-      "type": "object",
-      "properties": {
-        "batch_size_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "default": {}
-        },
-        "datalake_batch_size": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 500000,
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false
     },
     "GrpcConfig": {
       "type": "object",
@@ -728,21 +672,6 @@
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
             "partition_overrides": {}
-          }
-        },
-        "global-handler": {
-          "$ref": "#/$defs/GlobalHandlerConfig",
-          "default": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": 500000
-          }
-        },
-        "namespace-handler": {
-          "$ref": "#/$defs/NamespaceHandlerConfig",
-          "default": {
-            "batch_size_overrides": {},
-            "datalake_batch_size": 500000,
-            "max_concurrent_entities": 3
           }
         }
       },
@@ -897,34 +826,6 @@
           "default": null
         }
       }
-    },
-    "NamespaceHandlerConfig": {
-      "type": "object",
-      "properties": {
-        "batch_size_overrides": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "default": {}
-        },
-        "datalake_batch_size": {
-          "type": "integer",
-          "format": "uint64",
-          "default": 500000,
-          "minimum": 0
-        },
-        "max_concurrent_entities": {
-          "description": "Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)\nto run concurrently within a single namespace indexing pass.",
-          "type": "integer",
-          "format": "uint",
-          "default": 3,
-          "minimum": 0
-        }
-      },
-      "additionalProperties": false
     },
     "NamespaceTarget": {
       "description": "A namespace with lists of deployments and/or statefulsets to monitor.",
@@ -1319,9 +1220,6 @@
               "cron": null,
               "events_stream_name": "siphon_stream_main_db"
             },
-            "entity": {
-              "cron": null
-            },
             "global": {
               "cron": null
             },
@@ -1357,12 +1255,6 @@
             "batch_size": 100,
             "cron": null,
             "events_stream_name": "siphon_stream_main_db"
-          }
-        },
-        "entity": {
-          "$ref": "#/$defs/EntityDispatcherConfig",
-          "default": {
-            "cron": null
           }
         },
         "global": {

@@ -1,3 +1,38 @@
+## [0.62.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.61.0...v0.62.0) (2026-05-26)
+
+### Features
+
+* **billing:** add CustomersDot usage quota gate for mcp/rest queries ([d6eac94](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d6eac9435bd333c732296c6f80406d1518d80eb7)) by Sharmad Nachnolkar
+* **billing:** make quota fallback cache TTL configurable ([f5efa69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5efa69a2737535399290a1302f48ef35fb414c2)) by snachnolkar
+* **code-graph:** index Ruby constant assignments as Definitions ([dd0fbb0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd0fbb048b34aaf560dff5f55555c711c330b1d1)) by Michael Angelo Rivera
+* **compiler:** replace trait-object pipeline with SSOT proc macro ([2452142](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24521427e4966319cf978d44afefbb36e13baf4f)) by Michael Usachenko
+* **indexer:** consolidate entity handlers with per-entity partitioning ([8eeefec](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8eeefecfdac82bc94e285869025f8788761088d5)) by Jean-Gabriel Doyon
+* **ontology:** require explicit source on type:query etls ([db1e83c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/db1e83cadd66f0c64a829d2f6c06263ad3021a1b)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **code-graph:** parse JSX in JavaScript files ([4a7c7de](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a7c7de37aecb56bb0b7e55e08ecf2a64f017893)) by michaelangeloio
+* **compiler:** post-hydration filtering for virtual columns ([68bf616](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/68bf616142171e2fe36ab57528ee83321d431b86)) by Michael Usachenko
+* **compiler:** spring cleaning — dead code, test consolidation, visibility ([214e686](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/214e686a2ff68340aa54fd97d7c2054d68ccb67f)) by Michael Usachenko
+* **dashboards:** orbit dashboard drift cleanup ([5d788a2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5d788a22d213a82aa6cde80457769e54806f80d4)) by Bohdan Parkhomchuk
+* **orbit:** address skill feedback items from evaluation ([a531c2c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a531c2cdb0f01bfa856f4284d855cc7ea8d4e532)) by Dmitry Gruzd
+* **security:** tighten debug SQL gate to per-path access levels, remove admin bypass ([9f557d2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f557d277b01ffa9cf7f58c2a364478cc07a9d02)) by Michael Usachenko
+
+### Other
+
+* add CODEOWNERS with SOX-scoped section for billing emission ([f052bca](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f052bca656cd030086cecea61f44a55396f82419)) by Michael Angelo Rivera
+* add CONTEXT.md domain glossary ([e5c6318](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5c63188e451e2b8ff5f5dcb64813bd4775ab0b6)) by Dmitry Gruzd
+* **adr:** 013 — system notes edge materialization ([7fd8cf1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fd8cf109e819d764c33a88d538c983b691117da)) by Dmitry Gruzd
+* **deps:** update rust crate config to v0.15.23 ([ffff8aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ffff8aa66b4b3409f3c199a94c23401b0f3238c6)) by GitLab Renovate Bot
+* **deps:** update rust crate tar to v0.4.46 ([f3421ef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f3421efcbab2fdcf3fd6bd86b62baa13d5805072)) by GitLab Renovate Bot
+* **deps:** update rust crate toon-format to v0.4.6 ([36aeea7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36aeea7ff88e490d362b8c3a859629f1d274660b)) by GitLab Renovate Bot
+* **dev:** add contributor guide for adding a new language ([92ec2fd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/92ec2fd40afd4a88d241d476f62bc9463496fe22)) by Dmitry Gruzd
+* **indexer:** composable SDLC pipeline query builder ([1618dd7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1618dd7a723f9a2fe07508c6cab39250daab1001)) by Jean-Gabriel Doyon
+* **indexer:** remove llqm_v1, template-based SDLC pipeline ([ccf2a90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ccf2a90ac9ff2af78c5d8d4d18013008a797461a)) by Jean-Gabriel Doyon
+* **indexer:** run handlers concurrently, move engine config to subscriptions ([807eb9d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/807eb9da7837fb1da3a0fd42a10d80b822d77b98)) by Jean-Gabriel Doyon
+* **install:** add platform install steps ([9bd4566](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9bd4566b7ecd835bb1346c6ff340d5f171c2fd6f)) by Bohdan Parkhomchuk
+* **query-dsl:** data correctness tests for multi-filter range queries ([cfaa8de](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfaa8de79159ff2becad862862ff7d76742a3411)) by Michael Usachenko
+
 ## [0.61.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.60.0...v0.61.0) (2026-05-21)
 
 ### Features

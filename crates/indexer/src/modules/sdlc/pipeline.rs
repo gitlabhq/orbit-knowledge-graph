@@ -10,8 +10,7 @@ use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
-use tokio::sync::Semaphore;
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{debug, info, warn};
 
 use crate::destination::Destination;
 use crate::handler::HandlerError;
@@ -19,22 +18,13 @@ use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{
-    Cursor, CursorFilter, Plan, SOURCE_DATA_TABLE, Transformation, TraversalPathFilter,
-    WatermarkFilter,
-};
+use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
 
 const MAX_RETRIES: u32 = 3;
-
-pub(in crate::modules::sdlc) struct PipelineContext {
-    pub watermark: DateTime<Utc>,
-    pub position_key: String,
-    pub traversal_path: Option<String>,
-}
 
 pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
@@ -58,85 +48,23 @@ impl Pipeline {
         }
     }
 
-    pub async fn run(
-        &self,
-        plans: &[Plan],
-        context: &PipelineContext,
-        destination: &dyn Destination,
-        progress: &ProgressNotifier,
-        max_concurrent_entities: usize,
-    ) -> Result<(), HandlerError> {
-        let semaphore = Semaphore::new(max_concurrent_entities.max(1));
-        let mut futures = FuturesUnordered::new();
-
-        let traversal_path = context
-            .traversal_path
-            .clone()
-            .unwrap_or_else(|| "global".to_string());
-
-        for plan in plans {
-            let span = info_span!(
-                "sdlc_pipeline",
-                pipeline = %plan.name,
-                traversal_path = %traversal_path,
-            );
-            futures.push(
-                async {
-                    let _permit = semaphore.acquire().await.expect("semaphore is not closed");
-                    let result = self.run_plan(plan, context, destination, progress).await;
-                    (&plan.name, result)
-                }
-                .instrument(span),
-            );
-        }
-
-        let mut errors = Vec::new();
-        while let Some((name, result)) = futures.next().await {
-            if let Err(err) = result {
-                self.metrics.record_pipeline_error(name, err.error_kind());
-                errors.push(format!("{name}: {err}"));
-            }
-        }
-
-        if errors.is_empty() {
-            return Ok(());
-        }
-
-        Err(HandlerError::Processing(format!(
-            "pipelines failed: {}",
-            errors.join("; ")
-        )))
-    }
-
-    async fn run_plan(
+    pub async fn run_plan(
         &self,
         plan: &Plan,
-        context: &PipelineContext,
+        base_query: PreparedQuery,
+        position_key: &str,
+        target_watermark: DateTime<Utc>,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
-        let position_key = format!("{}.{}", context.position_key, plan.name);
-        let checkpoint = self.load_checkpoint(&position_key).await;
+        let checkpoint = self.load_checkpoint(position_key).await;
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() {
             info!("resuming from saved cursor");
         }
 
-        let base_query = plan
-            .prepare()
-            .with(WatermarkFilter {
-                column: &plan.watermark_column,
-                last: checkpoint.watermark,
-                current: context.watermark,
-            })
-            .with(
-                context
-                    .traversal_path
-                    .as_deref()
-                    .map(|path| TraversalPathFilter { path }),
-            );
         let params = base_query.params();
 
         let mut total_rows: u64 = 0;
@@ -195,7 +123,7 @@ impl Pipeline {
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
 
-                self.save_batch_progress(&position_key, context, &cursor, progress)
+                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
                     .await?;
 
                 batches = next_batches;
@@ -203,7 +131,7 @@ impl Pipeline {
             } else {
                 self.drain_writes(write_futures).await?;
 
-                self.save_batch_progress(&position_key, context, &cursor, progress)
+                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
                     .await?;
 
                 break;
@@ -211,7 +139,7 @@ impl Pipeline {
         }
 
         self.checkpoint_store
-            .save_completed(&position_key, &context.watermark)
+            .save_completed(position_key, &target_watermark)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -223,7 +151,7 @@ impl Pipeline {
         let elapsed = started_at.elapsed();
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics.record_watermark_lag(&context.watermark);
+        self.metrics.record_watermark_lag(&target_watermark);
 
         if total_rows > 0 {
             info!(
@@ -422,7 +350,7 @@ impl Pipeline {
     async fn save_batch_progress(
         &self,
         position_key: &str,
-        context: &PipelineContext,
+        target_watermark: DateTime<Utc>,
         cursor: &Cursor,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
@@ -430,7 +358,7 @@ impl Pipeline {
             .save_progress(
                 position_key,
                 &Checkpoint {
-                    watermark: context.watermark,
+                    watermark: target_watermark,
                     cursor_values: cursor.to_checkpoint_values(),
                 },
             )
@@ -510,12 +438,21 @@ mod tests {
         }
     }
 
-    fn test_context() -> PipelineContext {
-        PipelineContext {
-            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
-            position_key: "test".to_string(),
-            traversal_path: None,
-        }
+    fn test_watermark() -> DateTime<Utc> {
+        "2024-06-15T12:00:00Z".parse().unwrap()
+    }
+
+    fn base_query(plan: &Plan) -> PreparedQuery {
+        plan.prepare()
+            .with(crate::modules::sdlc::plan::WatermarkFilter {
+                column: &plan.watermark_column,
+                last: DateTime::<Utc>::UNIX_EPOCH,
+                current: test_watermark(),
+            })
+    }
+
+    fn position_key(plan: &Plan) -> String {
+        format!("test.{}", plan.name)
     }
 
     fn test_batch(rows: usize) -> RecordBatch {
@@ -634,6 +571,21 @@ mod tests {
             });
             Ok(())
         }
+
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(Vec::new())
+        }
+
+        async fn consolidate(
+            &self,
+            _parent_key: &str,
+            _watermark: &DateTime<Utc>,
+        ) -> Result<(), CheckpointError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -645,14 +597,16 @@ mod tests {
             Default::default(),
         );
         let destination = MockDestination::new();
+        let plan = simple_plan("Test");
 
         let result = pipeline
-            .run(
-                &[simple_plan("Test")],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
         assert!(result.is_ok());
@@ -675,12 +629,13 @@ mod tests {
         let destination = MockDestination::new();
 
         let result = pipeline
-            .run(
-                &[plan],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
 
@@ -704,7 +659,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn continues_past_individual_failures() {
+    async fn datalake_failure_surfaces_as_error() {
         let pipeline = Pipeline::new(
             Arc::new(FailingDatalake),
             Arc::new(RecordingCheckpointStore::new()),
@@ -712,22 +667,20 @@ mod tests {
             Default::default(),
         );
         let destination = MockDestination::new();
+        let plan = simple_plan("Failing");
 
-        let plans = vec![simple_plan("First"), simple_plan("Second")];
         let result = pipeline
-            .run(
-                &plans,
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
 
         assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("First"), "should mention first failure");
-        assert!(err_msg.contains("Second"), "should mention second failure");
     }
 
     /// Records every `max_block_size` it sees and replays a configurable
@@ -793,13 +746,15 @@ mod tests {
             Default::default(),
         );
 
+        let plan = simple_plan("Test");
         let _ = pipeline
-            .run(
-                &[simple_plan("Test")],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
 
@@ -833,13 +788,15 @@ mod tests {
             },
         );
 
+        let plan = simple_plan("Test");
         let result = pipeline
-            .run(
-                &[simple_plan("Test")],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -872,13 +829,15 @@ mod tests {
             },
         );
 
+        let plan = simple_plan("Test");
         let _ = pipeline
-            .run(
-                &[simple_plan("Test")],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
 
@@ -907,14 +866,16 @@ mod tests {
             Default::default(),
         );
         let destination = MockDestination::new();
+        let plan = simple_plan("Test");
 
         let result = pipeline
-            .run(
-                &[simple_plan("Test")],
-                &test_context(),
+            .run_plan(
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
-                3,
             )
             .await;
 
