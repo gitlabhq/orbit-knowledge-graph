@@ -12,7 +12,8 @@ use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphO
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
-use std::collections::HashSet;
+use parking_lot::RwLock;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -698,9 +699,18 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
 
 /// `BatchSink` for ClickHouse. Bridges the sync `write_batch` trait
 /// method to async ClickHouse writes via a tokio runtime handle.
+///
+/// `BatchSink::write_batch` is invoked once per `(table, batch)` pair, and
+/// a single project produces 6-10+ such calls across the entity and edge
+/// tables. The sink caches one `BatchWriter` per table so that repeated
+/// writes to the same table reuse the writer instead of paying the async
+/// trait dispatch and `Box` allocation on every call. The underlying
+/// HTTP transport is already pooled by the `clickhouse` crate via the
+/// shared `Client`; this just stops rebuilding the writer wrapper.
 pub struct ClickHouseSink {
     destination: Arc<dyn crate::destination::Destination>,
     runtime: tokio::runtime::Handle,
+    writers: RwLock<HashMap<String, Arc<dyn crate::destination::BatchWriter>>>,
 }
 
 impl ClickHouseSink {
@@ -711,7 +721,25 @@ impl ClickHouseSink {
         Self {
             destination,
             runtime,
+            writers: RwLock::new(HashMap::new()),
         }
+    }
+
+    async fn writer_for(
+        &self,
+        table: &str,
+    ) -> Result<Arc<dyn crate::destination::BatchWriter>, code_graph::v2::SinkError> {
+        if let Some(writer) = self.writers.read().get(table).cloned() {
+            return Ok(writer);
+        }
+        let new_writer: Arc<dyn crate::destination::BatchWriter> = Arc::from(
+            self.destination
+                .new_batch_writer(table)
+                .await
+                .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?,
+        );
+        let mut guard = self.writers.write();
+        Ok(guard.entry(table.to_string()).or_insert(new_writer).clone())
     }
 }
 
@@ -725,11 +753,7 @@ impl code_graph::v2::BatchSink for ClickHouseSink {
             return Ok(());
         }
         self.runtime.block_on(async {
-            let writer = self
-                .destination
-                .new_batch_writer(table)
-                .await
-                .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+            let writer = self.writer_for(table).await?;
             writer
                 .write_batch(std::slice::from_ref(batch))
                 .await
