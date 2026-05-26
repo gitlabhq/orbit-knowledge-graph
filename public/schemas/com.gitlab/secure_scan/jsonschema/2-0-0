@@ -1,0 +1,107 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for a Secure scan event",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "secure_scan",
+    "version": "2-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "required": [
+    "analyzer",
+    "analyzer_vendor",
+    "analyzer_version",
+    "end_time",
+    "findings_count",
+    "scan_type",
+    "scanner",
+    "scanner_vendor",
+    "scanner_version",
+    "start_time",
+    "status",
+    "report_schema_version",
+    "report_size"
+  ],
+  "properties": {
+    "analyzer": {
+      "description": "Name of the analyzer that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "analyzer_vendor": {
+      "description": "Vendor that maintains the analyzer that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "analyzer_version": {
+      "description": "Version of the analyzer that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "end_time": {
+      "description": "ISO8601 UTC value with format yyyy-mm-ddThh:mm:ss, representing when the scan finished",
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}\\:\\d{2}\\:\\d{2}$",
+      "minLength": 1,
+      "maxLength": 20
+    },
+    "findings_count": {
+      "description": "Number of vulnerability findings in the report",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "scan_type": {
+      "description": "Type of the scan",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "scanner": {
+      "description": "Name of the underlying scanner that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "scanner_vendor": {
+      "description": "Vendor of the underlying scanner that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "scanner_version": {
+      "description": "Version of the underlying scanner that ran the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "start_time": {
+      "description": "ISO8601 UTC value with format yyyy-mm-ddThh:mm:ss, representing when the scan finished",
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}\\:\\d{2}\\:\\d{2}$",
+      "minLength": 1,
+      "maxLength": 20
+    },
+    "status": {
+      "description": "Whether or not the scan was successful",
+      "type": "string",
+      "enum": ["success", "failure"]
+    },
+    "report_schema_version": {
+      "description": "Version of the Secure schema used by the report produced by the scan",
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "report_size": {
+      "description": "Size of raw report, in bytes",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1073741824
+    }
+  }
+}
