@@ -12,6 +12,8 @@ testkit = []
 gkg-server-config = { path = "../gkg-server-config" }
 labkit-events = { workspace = true }
 parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [lints]

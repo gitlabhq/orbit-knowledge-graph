@@ -1,8 +1,7 @@
 use std::time::Duration;
 
+use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
 use labkit_events::Tracker;
-use labkit_events::gkg::GkgEvent;
-use labkit_events::orbit::{DeploymentType, OrbitCommonContext, OrbitQueryContext, SourceType};
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -109,26 +108,36 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         .build()
         .expect("tracker build");
 
-    let common = OrbitCommonContext::builder(DeploymentType::Com, "staging")
-        .correlation_id("corr-it-1")
-        .instance_id("inst-it")
-        .organization_id(42)
-        .root_namespace_ids(vec![99])
-        .build()
-        .expect("common");
+    let common = OrbitCommonContext::new(OrbitCommonData {
+        deployment_type: ".com",
+        environment: "staging",
+        correlation_id: Some("corr-it-1"),
+        instance_id: Some("inst-it"),
+        unique_instance_id: None,
+        host_name: None,
+        organization_id: Some(42),
+        root_namespace_ids: Some(vec![99]),
+        schema_version: None,
+    });
 
-    let query = OrbitQueryContext::builder(SourceType::Mcp)
-        .tool_name("query_graph")
-        .global_user_id("guser-it")
-        .session_id("sess-it")
-        .root_namespace_id(99)
+    let query = OrbitQueryContext::new(OrbitQueryData {
+        source_type: "mcp",
+        tool_name: Some("query_graph"),
+        coding_agent: None,
+        queried_namespace_ids: None,
+        root_namespace_id: Some(99),
+        global_user_id: Some("guser-it"),
+        session_id: Some("sess-it"),
+    });
+
+    let event = labkit_events::StructuredEvent::builder("gkg", "gkg_query_executed")
+        .context(common)
+        .context(query)
         .build()
-        .expect("query");
+        .expect("event build");
 
     let (good_before, bad_before) = micro_counts(&http, &micro.base_url).await;
-    tracker
-        .track_gkg_event(GkgEvent::query_executed(common, query))
-        .expect("track");
+    tracker.track_structured_event(event).expect("track");
     tracker.shutdown().await;
 
     let (mut good, mut bad) = (good_before, bad_before);

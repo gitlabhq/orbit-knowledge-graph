@@ -1,5 +1,5 @@
+use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::orbit::{OrbitCommonContext, OrbitQueryContext, SourceType};
 
 use crate::auth::Claims;
 
@@ -7,60 +7,44 @@ pub(crate) fn build_common(
     config: &AnalyticsConfig,
     claims: &Claims,
     schema_version: &str,
-) -> Option<OrbitCommonContext> {
-    let mut b = gkg_analytics::common_builder(config).schema_version(schema_version);
-    if let Some(id) = labkit::correlation::current() {
-        b = b.correlation_id(id.as_str());
-    }
-    if let Some(ref id) = claims.instance_id {
-        b = b.instance_id(id);
-    }
-    if let Some(ref id) = claims.unique_instance_id {
-        b = b.unique_instance_id(id);
-    }
-    if let Some(ref h) = claims.host_name {
-        b = b.host_name(h);
-    }
-    if let Some(org) = claims.organization_id {
-        b = b.organization_id(org as i64);
-    }
-    if let Some(ns) = claims.root_namespace_id {
-        b = b.root_namespace_ids(vec![ns]);
-    }
-    b.build()
-        .map_err(|e| tracing::warn!(error = %e, "drop analytics event: orbit_common build failed"))
-        .ok()
+) -> OrbitCommonContext {
+    let correlation_id = labkit::correlation::current();
+
+    OrbitCommonContext::new(OrbitCommonData {
+        deployment_type: config.deployment.kind.into(),
+        environment: config.deployment.environment.into(),
+        correlation_id: correlation_id.as_deref(),
+        instance_id: claims.instance_id.as_deref(),
+        unique_instance_id: claims.unique_instance_id.as_deref(),
+        host_name: claims.host_name.as_deref(),
+        organization_id: claims.organization_id.map(|id| id as i64),
+        root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
+        schema_version: Some(schema_version),
+    })
 }
 
 pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
     coding_agent: Option<&str>,
-) -> Option<OrbitQueryContext> {
-    let mut b = OrbitQueryContext::builder(map_source(&claims.source_type)).tool_name(tool_name);
-    if let Some(agent) = coding_agent {
-        b = b.coding_agent(agent);
-    }
-    if let Some(ref id) = claims.global_user_id {
-        b = b.global_user_id(id);
-    }
-    if let Some(ref s) = claims.ai_session_id {
-        b = b.session_id(s);
-    }
-    if let Some(ns) = claims.root_namespace_id {
-        b = b.root_namespace_id(ns);
-    }
+) -> OrbitQueryContext {
     let queried = leaf_namespace_ids(claims);
-    if !queried.is_empty() {
-        b = b.queried_namespace_ids(queried);
-    }
-    b.build()
-        .map_err(|e| tracing::warn!(error = %e, "drop analytics event: orbit_query build failed"))
-        .ok()
+
+    OrbitQueryContext::new(OrbitQueryData {
+        source_type: claims.source_type.into(),
+        tool_name: Some(tool_name),
+        coding_agent,
+        queried_namespace_ids: if queried.is_empty() {
+            None
+        } else {
+            Some(queried)
+        },
+        root_namespace_id: claims.root_namespace_id,
+        global_user_id: claims.global_user_id.as_deref(),
+        session_id: claims.ai_session_id.as_deref(),
+    })
 }
 
-/// Leaf namespace ID per scoped traversal path. Empty paths and unparseable
-/// segments are skipped; duplicates are preserved in input order.
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
     claims
         .group_traversal_ids
@@ -69,20 +53,12 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
         .collect()
 }
 
-fn map_source(s: &str) -> SourceType {
-    match s {
-        "frontend" => SourceType::Frontend,
-        "dws" => SourceType::Dws,
-        "mcp" => SourceType::Mcp,
-        "core" => SourceType::Core,
-        _ => SourceType::Rest,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
+    use gkg_analytics::{ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA};
+    use labkit_events::{SnowplowContext, StructuredEvent};
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {
@@ -103,7 +79,7 @@ mod tests {
                     access_levels: vec![20],
                 })
                 .collect(),
-            source_type: "mcp".into(),
+            source_type: crate::auth::SourceType::Mcp,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,
@@ -117,6 +93,28 @@ mod tests {
         }
     }
 
+    fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
+        let common = build_common(&AnalyticsConfig::default(), claims, "33");
+        let query = build_query(claims, tool, None);
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
+        event.contexts()[1].data.clone()
+    }
+
+    fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
+        let common = build_common(&AnalyticsConfig::default(), claims, schema_version);
+        let query = build_query(claims, "query_graph", None);
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
+        event.contexts()[0].data.clone()
+    }
+
     #[test]
     fn leaf_namespace_ids_extracts_last_segment() {
         let claims = claims_with_paths(vec!["1/22/", "1/33/", "2000271/122276018/"]);
@@ -127,25 +125,6 @@ mod tests {
     fn leaf_namespace_ids_skips_unparseable_and_empty() {
         let claims = claims_with_paths(vec!["", "abc/", "1/22/", "/"]);
         assert_eq!(leaf_namespace_ids(&claims), vec![22]);
-    }
-
-    /// Inspect the JSON `data` of a context built via `build_*`. The
-    /// `to_self_describing_json` method is `pub(crate)` in labkit_events, so
-    /// we round-trip through `GkgEvent` and read its public `contexts()`.
-    fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        use labkit_events::gkg::GkgEvent;
-        let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool, None).unwrap();
-        let event = GkgEvent::query_executed(common, query);
-        event.contexts()[1].data.clone()
-    }
-
-    fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        use labkit_events::gkg::GkgEvent;
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None).unwrap();
-        let event = GkgEvent::query_executed(common, query);
-        event.contexts()[0].data.clone()
     }
 
     #[test]
@@ -173,11 +152,14 @@ mod tests {
 
     #[test]
     fn build_query_passes_through_coding_agent() {
-        use labkit_events::gkg::GkgEvent;
         let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
-        let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
-        let event = GkgEvent::query_executed(common, query);
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+        let query = build_query(&claims, "query_graph", Some("claude-code"));
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
         let data = event.contexts()[1].data.clone();
         assert_eq!(data["coding_agent"], "claude-code");
     }
@@ -190,24 +172,23 @@ mod tests {
     }
 
     #[test]
-    fn map_source_recognises_all_jwt_values() {
-        let cases = [
-            ("frontend", SourceType::Frontend),
-            ("dws", SourceType::Dws),
-            ("mcp", SourceType::Mcp),
-            ("core", SourceType::Core),
-            ("rest", SourceType::Rest),
-            ("anything-else", SourceType::Rest),
-        ];
-        for (input, expected) in cases {
-            assert_eq!(map_source(input), expected, "for input {input}");
-        }
-    }
-
-    #[test]
     fn build_common_sets_schema_version() {
         let claims = claims_with_paths(vec![]);
         let data = common_data(&claims, "33");
         assert_eq!(data["schema_version"], "33");
+    }
+
+    #[test]
+    fn common_schema_is_1_0_0() {
+        let claims = claims_with_paths(vec![]);
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+        assert_eq!(common.schema(), ORBIT_COMMON_SCHEMA);
+    }
+
+    #[test]
+    fn query_schema_is_2_0_1() {
+        let claims = claims_with_paths(vec![]);
+        let query = build_query(&claims, "query_graph", None);
+        assert_eq!(query.schema(), ORBIT_QUERY_SCHEMA);
     }
 }

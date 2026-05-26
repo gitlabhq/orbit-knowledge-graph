@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::gkg::GkgEvent;
+use labkit_events::StructuredEvent;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
@@ -11,6 +11,9 @@ use crate::auth::Claims;
 use gkg_analytics::AnalyticsTracker;
 
 use super::context::{build_common, build_query};
+
+const GKG_CATEGORY: &str = "gkg";
+const ACTION_QUERY_EXECUTED: &str = "gkg_query_executed";
 
 pub(crate) struct AnalyticsObserver {
     tracker: Option<Arc<dyn AnalyticsTracker>>,
@@ -62,14 +65,17 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
-        let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
-            return;
-        };
-        let Some(query) = build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref())
-        else {
-            return;
-        };
-        tracker.track(GkgEvent::query_executed(common, query));
+        let common = build_common(&self.config, &self.claims, &self.schema_version);
+        let query = build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref());
+
+        match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
+            .context(common)
+            .context(query)
+            .build()
+        {
+            Ok(event) => tracker.track(event),
+            Err(e) => tracing::warn!(error = %e, "failed to build analytics event"),
+        }
     }
 }
 
@@ -97,7 +103,7 @@ mod tests {
             organization_id: Some(42),
             min_access_level: None,
             group_traversal_ids: vec![],
-            source_type: "mcp".into(),
+            source_type: crate::auth::SourceType::Mcp,
             ai_session_id: Some("sess".into()),
             instance_id: Some("inst".into()),
             unique_instance_id: Some("uniq".into()),
@@ -124,6 +130,34 @@ mod tests {
         );
         obs.finish(10, 0);
         assert_eq!(tracker.count(), 1);
+    }
+
+    #[test]
+    fn event_uses_structured_event_with_two_contexts() {
+        let tracker = Arc::new(InMemoryAnalyticsTracker::new());
+        let obs = AnalyticsObserver::new(
+            Some(tracker.clone()),
+            Arc::new(AnalyticsConfig::default()),
+            test_claims(),
+            "query_graph",
+            None,
+            "33".to_string(),
+        );
+        obs.finish(10, 0);
+
+        let events = tracker.drain();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].category(), "gkg");
+        assert_eq!(events[0].action(), "gkg_query_executed");
+        assert_eq!(events[0].contexts().len(), 2);
+        assert_eq!(
+            events[0].contexts()[0].schema,
+            "iglu:com.gitlab/orbit_common/jsonschema/1-0-0"
+        );
+        assert_eq!(
+            events[0].contexts()[1].schema,
+            "iglu:com.gitlab/orbit_query/jsonschema/2-0-1"
+        );
     }
 
     #[test]

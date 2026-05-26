@@ -11,6 +11,7 @@ publish = false
 [dev-dependencies]
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
+gkg-analytics = { path = "../gkg-analytics" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }

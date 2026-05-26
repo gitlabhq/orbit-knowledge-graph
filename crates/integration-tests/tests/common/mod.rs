@@ -51,7 +51,7 @@ impl DummyClaims for gkg_server::auth::Claims {
                 path: "1/".into(),
                 access_levels: vec![AccessLevel::Owner as u32],
             }],
-            source_type: "rest".into(),
+            source_type: gkg_server::auth::SourceType::Rest,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,

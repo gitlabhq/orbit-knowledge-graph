@@ -1129,7 +1129,7 @@ mod tests {
             organization_id: Some(1),
             min_access_level: None,
             group_traversal_ids: vec![],
-            source_type: "rest".into(),
+            source_type: crate::auth::SourceType::Rest,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,
