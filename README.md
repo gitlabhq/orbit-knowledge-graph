@@ -234,9 +234,11 @@ All Terraform lives in [config-mgmt](https://ops.gitlab.net/gitlab-com/gl-infra/
 
 ## 6. Usage Billing
 
-Billing infrastructure for GKG is **not yet implemented**. It will leverage the existing consumption-based billing system (CustomersDot, Snowplow, ClickHouse) used by AI Gateway and other services.
+GKG uses GitLab's consumption-based billing system (CustomersDot, Snowplow). The `gkg-billing` crate emits `orbit_workflow_completion` Snowplow events on every successful query and enforces credit quotas via the CDot API.
 
-Architecture and implementation details are **TODO** -- to be filled out as this workstream progresses.
+- **Billing events**: `BillingObserver` fires on pipeline success, attaching query type, source type, and feature-qualified name. Metrics: `gkg.billing.events.{emitted,dropped,rejected}`.
+- **Quota gate**: `QuotaService` sends a HEAD request to CDot before query execution for metered source types (`mcp`, `rest`). Fail-open on CDot errors. Results cached with jittered TTL.
+- **SOX boundary**: `crates/gkg-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point. This file plus `crates/gkg-billing/` are the entire auditable surface.
 
 ### References
 

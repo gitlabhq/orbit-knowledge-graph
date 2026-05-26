@@ -76,6 +76,11 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
+| Iglu schemas (vendored subtree) | `vendor/iglu/` (update via `git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash`) |
+| Iglu version pins | `config/schemas/*.iglu-version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
+| Analytics event definition | `config/events/gkg_query_executed.yml` |
+| Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |
+| Billing config + observer | `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs` |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
 
 ## Crate map
@@ -86,7 +91,8 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`), MCP tool registry, and Orbit agent command registry (`CommandRegistry`) |
 | `gkg-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
-| `gkg-analytics` | Cross-crate Snowplow analytics primitives: `AnalyticsTracker` trait, `SnowplowAnalyticsTracker` (wraps `labkit_events::Tracker`), `InMemoryAnalyticsTracker` (testkit), shared `OrbitCommonContext` builder. Domain-specific contexts (Claims → `OrbitQueryContext`, indexer state → `OrbitSdlcIndexingContext`) are built in the consuming crate. |
+| `gkg-analytics` | Consumer-owned Snowplow context types (`OrbitCommonContext`, `OrbitQueryContext`) and tracker infrastructure (`AnalyticsTracker` trait, `SnowplowAnalyticsTracker`, `InMemoryAnalyticsTracker`). Context types replace the deprecated `labkit_events::orbit::*` types and implement `labkit_events::SnowplowContext`. Schema URIs are derived at runtime from Iglu version pins (`config/schemas/*.iglu-version`) and the vendored subtree (`vendor/iglu/`). `load_schema_json()` loads vendored schemas for test validation. |
+| `gkg-billing` | Snowplow billing-event emission (`BillingObserver`, `BillingTracker`, `BillingInputs`) and CDot quota enforcement (`QuotaService`). Licensed as `LicenseRef-EE`. The billing adapter in `gkg-server/src/billing_adapter.rs` is the single `Claims → BillingInputs` conversion point (SOX auditable surface). Billing event metrics: `gkg.billing.events.{emitted,dropped,rejected}`. |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
