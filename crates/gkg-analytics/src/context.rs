@@ -125,6 +125,8 @@ pub struct OrbitQueryData<'a> {
     pub global_user_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_gitlab_team_member: Option<bool>,
 }
 
 impl OrbitQueryContext {

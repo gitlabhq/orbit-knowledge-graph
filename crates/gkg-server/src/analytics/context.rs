@@ -42,6 +42,7 @@ pub(crate) fn build_query(
         root_namespace_id: claims.root_namespace_id,
         global_user_id: claims.global_user_id.as_deref(),
         session_id: claims.ai_session_id.as_deref(),
+        is_gitlab_team_member: claims.is_gitlab_team_member,
     })
 }
 

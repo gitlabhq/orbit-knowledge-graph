@@ -33,7 +33,8 @@ for version_file in "$VERSION_DIR"/*.iglu-version; do
 
   # 2. Diff against live Iglu.
   remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$version") || {
-    echo "WARN: could not fetch $IGLU_BASE/$name/jsonschema/$version (skipping)"
+    echo "ERROR: could not fetch $IGLU_BASE/$name/jsonschema/$version"
+    failed=1
     continue
   }
 
