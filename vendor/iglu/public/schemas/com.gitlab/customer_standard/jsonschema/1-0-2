@@ -1,0 +1,72 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Standard schema for a customerDot events",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "customer_standard",
+    "version": "1-0-2",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["environment", "source"],
+  "properties": {
+    "environment": {
+      "description": "Name of the source environment, such as `production` or `staging`",
+      "type": "string",
+      "maxLength": 32
+    },
+    "source": {
+      "description": "Name of the source application, such as  `gitlab-rails` or `gitlab-javascript`",
+      "type": "string",
+      "maxLength": 32
+    },
+    "customer_id": {
+      "description": "ID of the associated customer",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "billing_account_name": {
+      "description": "The name of the Billing Account, such as `A00123456`",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "namespace_id": {
+      "description": "ID of the associated namespace",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "subscription_name": {
+      "description": "Name of the subscription, such as `A-S0000000`",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "product_rate_plan_product_name": {
+      "description": "The `product_name` of the product rate plan of the order, such as `GitLab Credits - Monthly Committed Pool`",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "product_rate_plan_id": {
+      "description": "The Zuora ID of the product rate plan charge of the order, such as `8a8aa0009898e47e01989e3185244bdd`",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "base_product_name": {
+      "description": "The `product_name` of the subscritions `base_product`'s `product_rate_plan`, such as `SaaS - Premium`",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "base_product_id": {
+      "description": "The Zuora ID of the subscritions `base_product`'s `product_rate_plan`, such as `25ca5b8f1a799ec501e9ec6d090e0018`",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "google_analytics_id": {
+      "description": "Google Analytics ID from the marketing site",
+      "type": ["string", "null"],
+      "maxLength": 32
+    }
+  }
+}

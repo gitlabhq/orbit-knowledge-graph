@@ -1,0 +1,16 @@
+inherit_gem:
+  gitlab-styles:
+    - rubocop-bundler.yml
+    - rubocop-gemspec.yml
+    - rubocop-layout.yml
+    - rubocop-lint.yml
+    - rubocop-metrics.yml
+    - rubocop-naming.yml
+    - rubocop-performance.yml
+    - rubocop-rspec.yml
+
+AllCops:
+  CacheRootDirectory: tmp
+
+Style/EmptyMethod:
+  Enabled: false

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for a Gitlab subscription_auto_renew event",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "subscription_auto_renew",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "ID",
+      "type": "string",
+      "maxLength": 50
+    },
+    "reasons": {
+      "description": "Collection of possible reasons",
+      "type": "array",
+      "items": {
+        "description": "Brief reason description",
+        "type": "string",
+        "maxLength": 50
+      }
+    },
+    "other": {
+      "description": "Other reasons as provided by the user",
+      "type": "string",
+      "maxLength": 10000
+    }
+  }
+}

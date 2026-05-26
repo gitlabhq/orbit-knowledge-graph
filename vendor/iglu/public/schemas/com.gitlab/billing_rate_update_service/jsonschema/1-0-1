@@ -1,0 +1,49 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for a Gitlab billing_rate_update_service event",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "billing_rate_update_service",
+    "version": "1-0-1",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "order_id": {
+      "description": "Order ID",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "action": {
+      "description": "The type of Billing Rate Update Service action",
+      "type": "string",
+      "maxLength": 50
+    },
+    "original_seat_count": {
+      "description": "The original number of seats for the Order",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "current_seat_count": {
+      "description": "The current number of seats for the Order",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "original_cost": {
+      "description": "The original cost of the Order",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "current_cost": {
+      "description": "The current cost of the Order",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2147483647
+    }
+  }
+}
