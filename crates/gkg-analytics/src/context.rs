@@ -10,9 +10,32 @@ use labkit_events::SnowplowContext;
 use serde::Serialize;
 
 pub static ORBIT_COMMON_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    let version = include_str!(concat!(env!("SCHEMA_DIR"), "/iglu/orbit_common.version")).trim();
-    format!("iglu:com.gitlab/orbit_common/jsonschema/{version}")
+    iglu_schema_uri(include_str!(concat!(
+        env!("IGLU_DIR"),
+        "/orbit_common/jsonschema/1-0-0"
+    )))
 });
+
+pub static ORBIT_QUERY_SCHEMA: LazyLock<String> = LazyLock::new(|| {
+    iglu_schema_uri(include_str!(concat!(
+        env!("IGLU_DIR"),
+        "/orbit_query/jsonschema/2-0-1"
+    )))
+});
+
+/// Extract the Iglu schema URI from a vendored schema JSON's `self` block.
+fn iglu_schema_uri(json_str: &str) -> String {
+    let schema: serde_json::Value =
+        serde_json::from_str(json_str).expect("vendored Iglu schema is valid JSON");
+    let s = &schema["self"];
+    format!(
+        "iglu:{}/{}/{}/{}",
+        s["vendor"].as_str().expect("self.vendor"),
+        s["name"].as_str().expect("self.name"),
+        s["format"].as_str().expect("self.format"),
+        s["version"].as_str().expect("self.version"),
+    )
+}
 
 pub static ORBIT_QUERY_SCHEMA: LazyLock<String> = LazyLock::new(|| {
     let version = include_str!(concat!(env!("SCHEMA_DIR"), "/iglu/orbit_query.version")).trim();

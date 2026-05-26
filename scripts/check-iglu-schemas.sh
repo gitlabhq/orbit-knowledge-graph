@@ -1,71 +1,49 @@
 #!/usr/bin/env bash
-# Verify vendored Iglu schemas match the versions declared in .version
-# files and are up to date with the live Iglu server.
+# Verify the vendored iglu subtree matches the live Iglu server for orbit schemas.
 #
-# For each *.version file in config/schemas/iglu/:
-#   1. Read the pinned version (e.g. "2-0-1")
-#   2. Check the corresponding .json file exists and its embedded
-#      self.version matches the pinned version
-#   3. Fetch the live schema from Iglu and diff against the vendored copy
+# For each orbit_* schema directory in the subtree, finds the latest version
+# file, compares it against the live Iglu endpoint.
 #
-# Exits non-zero if any schema is missing, mismatched, or drifted.
+# Exits non-zero if any schema has drifted (subtree needs `git subtree pull`).
 
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
-VENDOR_DIR="config/schemas/iglu"
+SUBTREE_DIR="vendor/iglu/public/schemas/com.gitlab"
 
 failed=0
 
-for version_file in "$VENDOR_DIR"/*.version; do
-  name=$(basename "$version_file" .version)  # e.g. "orbit_query"
-  version=$(cat "$version_file" | tr -d '[:space:]')
-  json_file="$VENDOR_DIR/${name}.json"
+for schema_dir in "$SUBTREE_DIR"/orbit_*/; do
+  name=$(basename "$schema_dir")
+  # Find the latest version file (highest semver directory name).
+  latest=$(ls -1 "$schema_dir/jsonschema/" 2>/dev/null | sort -t- -k1,1n -k2,2n -k3,3n | tail -1)
 
-  # 1. Check the JSON file exists.
-  if [ ! -f "$json_file" ]; then
-    echo "MISSING: $json_file (declared version: $version)"
-    failed=1
+  if [ -z "$latest" ]; then
+    echo "WARN: no version found in $schema_dir/jsonschema/"
     continue
   fi
 
-  # 2. Check the embedded self.version matches the pinned version.
-  embedded=$(python3 -c "
-import json, sys
-schema = json.load(open('$json_file'))
-print(schema.get('self', {}).get('version', ''))
-")
-  if [ "$embedded" != "$version" ]; then
-    echo "MISMATCH: $json_file has self.version='$embedded' but $version_file says '$version'"
-    failed=1
-    continue
-  fi
+  local_file="$schema_dir/jsonschema/$latest"
 
-  # 3. Fetch from Iglu and compare.
-  iglu_path="${name}/jsonschema/${version}"
-  remote=$(curl -sf "$IGLU_BASE/$iglu_path") || {
-    echo "WARN: could not fetch $IGLU_BASE/$iglu_path (skipping freshness check)"
+  remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$latest") || {
+    echo "WARN: could not fetch $IGLU_BASE/$name/jsonschema/$latest (skipping)"
     continue
   }
 
-  local_norm=$(python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)" < "$json_file")
+  local_norm=$(python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)" < "$local_file")
   remote_norm=$(echo "$remote" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)")
 
   if [ "$local_norm" != "$remote_norm" ]; then
-    echo "DRIFT: $json_file differs from $IGLU_BASE/$iglu_path"
-    echo "  Run: curl -s '$IGLU_BASE/$iglu_path' > '$json_file'"
+    echo "DRIFT: $local_file differs from live Iglu"
+    echo "  Run: git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash"
     failed=1
   fi
 done
 
 if [ "$failed" -ne 0 ]; then
   echo ""
-  echo "Vendored Iglu schemas are out of date or misconfigured."
-  echo "To bump a schema version:"
-  echo "  1. Update the version in config/schemas/iglu/<name>.version"
-  echo "  2. Rename the .json file to match: <name>.<new-version>.json"
-  echo "  3. Re-vendor: curl -s '\$IGLU_BASE/<name>/jsonschema/<new-version>' > config/schemas/iglu/<name>.<new-version>.json"
+  echo "Vendored iglu subtree is out of date."
   exit 1
 fi
 
-echo "All vendored Iglu schemas are up to date."
+echo "All vendored orbit Iglu schemas are up to date."

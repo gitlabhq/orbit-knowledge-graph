@@ -185,8 +185,8 @@ mod tests {
 
         static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
             let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
-                env!("SCHEMA_DIR"),
-                "/iglu/orbit_common.json"
+                env!("IGLU_DIR"),
+                "/orbit_common/jsonschema/1-0-0"
             )))
             .expect("orbit_common schema is valid JSON");
             jsonschema::validator_for(&schema).expect("orbit_common schema compiles")
@@ -194,8 +194,8 @@ mod tests {
 
         static ORBIT_QUERY_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
             let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
-                env!("SCHEMA_DIR"),
-                "/iglu/orbit_query.json"
+                env!("IGLU_DIR"),
+                "/orbit_query/jsonschema/2-0-1"
             )))
             .expect("orbit_query schema is valid JSON");
             jsonschema::validator_for(&schema).expect("orbit_query schema compiles")
