@@ -8,6 +8,30 @@ use crate::auth::Claims;
 const ORBIT_COMMON_SCHEMA: &str = "iglu:com.gitlab/orbit_common/jsonschema/1-0-0";
 const ORBIT_QUERY_SCHEMA: &str = "iglu:com.gitlab/orbit_query/jsonschema/2-0-2";
 
+/// Runtime execution metrics accumulated from pipeline observer callbacks.
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct QueryExecMetrics {
+    /// Total pipeline duration in milliseconds (compile + execute + authorize + hydrate).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    pub compile_ms: Option<u64>,
+    pub execute_ms: Option<u64>,
+    pub authorization_ms: Option<u64>,
+    pub hydration_ms: Option<u64>,
+    /// Rows returned to the caller after redaction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redacted_count: Option<u64>,
+    /// ClickHouse resource usage (summed across base + hydration queries).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ch_read_rows: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ch_read_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ch_memory_usage: Option<u64>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // orbit_common
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +134,7 @@ pub(crate) fn build_query(
     tool_name: &str,
     coding_agent: Option<&str>,
     query_info: Option<&QueryInfo>,
+    exec_metrics: Option<&QueryExecMetrics>,
 ) -> OrbitQueryContext {
     let queried = leaf_namespace_ids(claims);
 
@@ -129,14 +154,21 @@ pub(crate) fn build_query(
 
     let mut data = serde_json::to_value(base).unwrap_or_default();
 
-    if let Some(info) = query_info
-        && let Ok(serde_json::Value::Object(info_map)) = serde_json::to_value(info)
-        && let serde_json::Value::Object(map) = &mut data
-    {
-        map.extend(info_map);
-    }
+    // Merge compile-time query dimensions.
+    merge_object(&mut data, query_info);
+    // Merge runtime execution metrics.
+    merge_object(&mut data, exec_metrics);
 
     OrbitQueryContext { data }
+}
+
+fn merge_object<T: Serialize>(data: &mut serde_json::Value, source: Option<&T>) {
+    if let Some(src) = source
+        && let Ok(serde_json::Value::Object(map)) = serde_json::to_value(src)
+        && let serde_json::Value::Object(base) = data
+    {
+        base.extend(map);
+    }
 }
 
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
@@ -198,7 +230,7 @@ mod tests {
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, "33");
-        let query = build_query(claims, tool, None, None);
+        let query = build_query(claims, tool, None, None, None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -209,7 +241,7 @@ mod tests {
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version);
-        let query = build_query(claims, "query_graph", None, None);
+        let query = build_query(claims, "query_graph", None, None, None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -257,7 +289,7 @@ mod tests {
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33");
-        let query = build_query(&claims, "query_graph", Some("claude-code"), None);
+        let query = build_query(&claims, "query_graph", Some("claude-code"), None, None);
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -328,7 +360,7 @@ mod tests {
             has_variable_hops: false,
             has_virtual_columns: false,
         };
-        let query = build_query(&claims, "query_graph", None, Some(&info));
+        let query = build_query(&claims, "query_graph", None, Some(&info), None);
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");
@@ -345,7 +377,7 @@ mod tests {
     #[test]
     fn query_schema_is_2_0_2() {
         let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", None, None);
+        let query = build_query(&claims, "query_graph", None, None, None);
         assert_eq!(query.schema(), ORBIT_QUERY_SCHEMA);
     }
 }

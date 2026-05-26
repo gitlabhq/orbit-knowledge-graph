@@ -35,6 +35,11 @@ pub struct BillingObserver {
     inputs: BillingInputs,
     query_type: &'static str,
     query_info: Option<QueryInfo>,
+    compile_ms: Option<u64>,
+    execute_ms: Option<u64>,
+    ch_read_rows: u64,
+    ch_read_bytes: u64,
+    ch_memory_usage: u64,
     errored: Cell<bool>,
 }
 
@@ -45,6 +50,11 @@ impl BillingObserver {
             inputs,
             query_type: "unknown",
             query_info: None,
+            compile_ms: None,
+            execute_ms: None,
+            ch_read_rows: 0,
+            ch_read_bytes: 0,
+            ch_memory_usage: 0,
             errored: Cell::new(false),
         }
     }
@@ -109,10 +119,25 @@ impl BillingObserver {
             "query_type": self.query_type,
             "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
         });
-        if let Some(ref info) = self.query_info
-            && let serde_json::Value::Object(ref mut map) = metadata
-        {
-            map.insert("query_info".to_string(), json!(info));
+        if let serde_json::Value::Object(ref mut map) = metadata {
+            if let Some(ref info) = self.query_info {
+                map.insert("query_info".to_string(), json!(info));
+            }
+            if let Some(ms) = self.compile_ms {
+                map.insert("compile_ms".to_string(), json!(ms));
+            }
+            if let Some(ms) = self.execute_ms {
+                map.insert("execute_ms".to_string(), json!(ms));
+            }
+            if self.ch_read_rows > 0 {
+                map.insert("ch_read_rows".to_string(), json!(self.ch_read_rows));
+            }
+            if self.ch_read_bytes > 0 {
+                map.insert("ch_read_bytes".to_string(), json!(self.ch_read_bytes));
+            }
+            if self.ch_memory_usage > 0 {
+                map.insert("ch_memory_usage".to_string(), json!(self.ch_memory_usage));
+            }
         }
         builder = builder.metadata(metadata);
 
@@ -141,15 +166,25 @@ impl PipelineObserver for BillingObserver {
         self.query_info = Some(info);
     }
 
-    fn compiled(&mut self, _elapsed: Duration) {}
+    fn compiled(&mut self, elapsed: Duration) {
+        self.compile_ms = Some(elapsed.as_millis().min(u64::MAX as u128) as u64);
+    }
 
-    fn executed(&mut self, _elapsed: Duration, _batch_count: usize) {}
+    fn executed(&mut self, elapsed: Duration, _batch_count: usize) {
+        self.execute_ms = Some(elapsed.as_millis().min(u64::MAX as u128) as u64);
+    }
 
     fn authorized(&mut self, _elapsed: Duration) {}
 
     fn hydrated(&mut self, _elapsed: Duration) {}
 
-    fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
+    fn query_executed(&mut self, _label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
+        self.ch_read_rows += read_rows;
+        self.ch_read_bytes += read_bytes;
+        if memory > 0 {
+            self.ch_memory_usage = self.ch_memory_usage.max(memory as u64);
+        }
+    }
 
     fn record_error(&self, _error: &PipelineError) {
         self.errored.set(true);
