@@ -323,6 +323,14 @@ run = "./scripts/gkg-native-dev.sh env"
 description = "Print the derived local GKG environment"
 
 
+[tasks."iglu:bump"]
+run = "bash ./scripts/iglu-bump.sh"
+description = "Bump a pinned Iglu schema version (e.g. mise iglu:bump -- orbit_query 2-0-2)"
+
+[tasks."iglu:check"]
+run = "bash ./scripts/check-iglu-schemas.sh"
+description = "Verify pinned Iglu schemas match the vendored subtree and live Iglu"
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
