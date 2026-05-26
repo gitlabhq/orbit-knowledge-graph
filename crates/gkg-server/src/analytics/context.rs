@@ -215,14 +215,14 @@ mod tests {
         });
 
         fn assert_valid(validator: &jsonschema::Validator, data: &serde_json::Value, label: &str) {
-            let result = validator.validate(data);
-            if let Err(errors) = result {
-                let msgs: Vec<_> = errors.map(|e| format!("  - {e}")).collect();
-                panic!(
-                    "{label} failed Iglu schema validation:\n{}",
-                    msgs.join("\n")
-                );
+            let errors: Vec<_> = validator
+                .iter_errors(data)
+                .map(|e| format!("  - {e}"))
+                .collect();
+            if !errors.is_empty() {
+                panic!("{label} failed Iglu schema validation:\n{}", errors.join("\n"));
             }
+        }
         }
 
         #[test]
