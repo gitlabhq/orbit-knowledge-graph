@@ -77,7 +77,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
-| Iglu schemas (vendored subtree) | `vendor/iglu/` (update via `git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash`) |
+| Iglu schemas (vendored via vendir) | `vendor/iglu/` (update via `vendir sync` or `mise iglu:bump -- <name> <version>`) |
 | Iglu version pins | `config/schemas/*.iglu-version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
 | Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |

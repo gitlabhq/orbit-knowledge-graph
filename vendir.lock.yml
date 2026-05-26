@@ -1,0 +1,9 @@
+apiVersion: vendir.k14s.io/v1alpha1
+directories:
+- contents:
+  - git:
+      commitTitle: Merge branch 'psk-add-artifact-registry-schema' into 'master'...
+      sha: 41c4095eddef3c0b2d657755103847d1897b11d6
+    path: .
+  path: vendor/iglu
+kind: LockConfig

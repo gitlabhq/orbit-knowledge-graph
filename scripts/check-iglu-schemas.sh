@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Verify the vendored iglu subtree matches the live Iglu server for pinned
-# orbit schema versions.
+# Verify vendored Iglu schemas match live Iglu for pinned versions.
 #
 # For each *.iglu-version file in config/schemas/:
 #   1. Read the pinned version
-#   2. Check the corresponding file exists in the subtree
+#   2. Check the corresponding file exists in the vendored directory
 #   3. Diff against the live Iglu endpoint
 #
 # Exits non-zero if any schema is missing or has drifted.
@@ -12,7 +11,7 @@
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
-SUBTREE_DIR="vendor/iglu/public/schemas/com.gitlab"
+VENDOR_DIR="vendor/iglu/public/schemas/com.gitlab"
 VERSION_DIR="config/schemas"
 
 failed=0
@@ -21,12 +20,12 @@ for version_file in "$VERSION_DIR"/*.iglu-version; do
   [ -f "$version_file" ] || continue
   name=$(basename "$version_file" .iglu-version)
   version=$(cat "$version_file" | tr -d '[:space:]')
-  local_file="$SUBTREE_DIR/$name/jsonschema/$version"
+  local_file="$VENDOR_DIR/$name/jsonschema/$version"
 
-  # 1. Check the subtree has this version.
+  # 1. Check the vendored directory has this version.
   if [ ! -f "$local_file" ]; then
     echo "MISSING: $local_file (pinned version: $version)"
-    echo "  Run: git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash"
+    echo "  Run: mise iglu:bump -- $name $version"
     failed=1
     continue
   fi
@@ -43,14 +42,14 @@ for version_file in "$VERSION_DIR"/*.iglu-version; do
 
   if [ "$local_norm" != "$remote_norm" ]; then
     echo "DRIFT: $local_file differs from live Iglu"
-    echo "  Run: git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash"
+    echo "  Run: mise iglu:bump -- $name $version"
     failed=1
   fi
 done
 
 if [ "$failed" -ne 0 ]; then
   echo ""
-  echo "Vendored iglu subtree is out of date or pinned version is missing."
+  echo "Vendored Iglu schemas are out of date or pinned version is missing."
   exit 1
 fi
 
