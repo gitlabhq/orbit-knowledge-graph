@@ -697,16 +697,8 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
     }
 }
 
-/// `BatchSink` for ClickHouse. Bridges the sync `write_batch` trait
-/// method to async ClickHouse writes via a tokio runtime handle.
-///
-/// `BatchSink::write_batch` is invoked once per `(table, batch)` pair, and
-/// a single project produces 6-10+ such calls across the entity and edge
-/// tables. The sink caches one `BatchWriter` per table so that repeated
-/// writes to the same table reuse the writer instead of paying the async
-/// trait dispatch and `Box` allocation on every call. The underlying
-/// HTTP transport is already pooled by the `clickhouse` crate via the
-/// shared `Client`; this just stops rebuilding the writer wrapper.
+/// `BatchSink` for ClickHouse. Caches one `BatchWriter` per table so
+/// repeated writes to the same table reuse the wrapper.
 pub struct ClickHouseSink {
     destination: Arc<dyn crate::destination::Destination>,
     runtime: tokio::runtime::Handle,
