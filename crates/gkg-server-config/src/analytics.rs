@@ -23,32 +23,48 @@ pub struct DeploymentConfig {
     pub environment: DeploymentEnvironment,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DeploymentKind {
+    #[strum(serialize = ".com")]
     Com,
+    #[strum(serialize = "dedicated")]
     Dedicated,
     #[default]
+    #[strum(serialize = "self-managed")]
     SelfManaged,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    strum::IntoStaticStr,
+)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum DeploymentEnvironment {
     #[default]
     Development,
     Staging,
     Production,
-}
-
-impl DeploymentEnvironment {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Development => "development",
-            Self::Staging => "staging",
-            Self::Production => "production",
-        }
-    }
 }
 
 #[cfg(test)]

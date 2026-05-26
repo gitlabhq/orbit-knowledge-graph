@@ -53,8 +53,8 @@ pub(crate) fn build_common(
     let correlation_id = labkit::correlation::current();
 
     let data = OrbitCommonData {
-        deployment_type: gkg_analytics::deployment_type(config.deployment.kind),
-        environment: gkg_analytics::deployment_env(config),
+        deployment_type: config.deployment.kind.into(),
+        environment: config.deployment.environment.into(),
         correlation_id: correlation_id.as_deref(),
         instance_id: claims.instance_id.as_deref(),
         unique_instance_id: claims.unique_instance_id.as_deref(),
