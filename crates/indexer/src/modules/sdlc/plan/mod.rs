@@ -272,8 +272,8 @@ impl PreparedQuery {
             .map(|p| {
                 let query = self.clone().with(RangeFilter {
                     column: &p.column,
-                    lower_bound: p.bounds.lower_bound(),
-                    upper_bound: p.bounds.upper_bound(),
+                    lower_bound: &p.lower_bound,
+                    upper_bound: &p.upper_bound,
                 });
                 (p, query)
             })
