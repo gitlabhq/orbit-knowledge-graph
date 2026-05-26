@@ -1,32 +1,39 @@
 #!/usr/bin/env bash
-# Verify the vendored iglu subtree matches the live Iglu server for orbit schemas.
+# Verify the vendored iglu subtree matches the live Iglu server for pinned
+# orbit schema versions.
 #
-# For each orbit_* schema directory in the subtree, finds the latest version
-# file, compares it against the live Iglu endpoint.
+# For each *.iglu-version file in config/schemas/:
+#   1. Read the pinned version
+#   2. Check the corresponding file exists in the subtree
+#   3. Diff against the live Iglu endpoint
 #
-# Exits non-zero if any schema has drifted (subtree needs `git subtree pull`).
+# Exits non-zero if any schema is missing or has drifted.
 
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
 SUBTREE_DIR="vendor/iglu/public/schemas/com.gitlab"
+VERSION_DIR="config/schemas"
 
 failed=0
 
-for schema_dir in "$SUBTREE_DIR"/orbit_*/; do
-  name=$(basename "$schema_dir")
-  # Find the latest version file (highest semver directory name).
-  latest=$(ls -1 "$schema_dir/jsonschema/" 2>/dev/null | sort -t- -k1,1n -k2,2n -k3,3n | tail -1)
+for version_file in "$VERSION_DIR"/*.iglu-version; do
+  [ -f "$version_file" ] || continue
+  name=$(basename "$version_file" .iglu-version)
+  version=$(cat "$version_file" | tr -d '[:space:]')
+  local_file="$SUBTREE_DIR/$name/jsonschema/$version"
 
-  if [ -z "$latest" ]; then
-    echo "WARN: no version found in $schema_dir/jsonschema/"
+  # 1. Check the subtree has this version.
+  if [ ! -f "$local_file" ]; then
+    echo "MISSING: $local_file (pinned version: $version)"
+    echo "  Run: git subtree pull --prefix=vendor/iglu https://gitlab.com/gitlab-org/iglu.git master --squash"
+    failed=1
     continue
   fi
 
-  local_file="$schema_dir/jsonschema/$latest"
-
-  remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$latest") || {
-    echo "WARN: could not fetch $IGLU_BASE/$name/jsonschema/$latest (skipping)"
+  # 2. Diff against live Iglu.
+  remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$version") || {
+    echo "WARN: could not fetch $IGLU_BASE/$name/jsonschema/$version (skipping)"
     continue
   }
 
@@ -42,8 +49,8 @@ done
 
 if [ "$failed" -ne 0 ]; then
   echo ""
-  echo "Vendored iglu subtree is out of date."
+  echo "Vendored iglu subtree is out of date or pinned version is missing."
   exit 1
 fi
 
-echo "All vendored orbit Iglu schemas are up to date."
+echo "All pinned orbit Iglu schemas are up to date."

@@ -184,12 +184,12 @@ mod tests {
         use std::sync::LazyLock;
 
         static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
-            let schema = gkg_analytics::load_latest_schema_json("orbit_common");
+            let schema = gkg_analytics::load_schema_json("orbit_common");
             jsonschema::validator_for(&schema).expect("orbit_common schema compiles")
         });
 
         static ORBIT_QUERY_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
-            let schema = gkg_analytics::load_latest_schema_json("orbit_query");
+            let schema = gkg_analytics::load_schema_json("orbit_query");
             jsonschema::validator_for(&schema).expect("orbit_query schema compiles")
         });
 

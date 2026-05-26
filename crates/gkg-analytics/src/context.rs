@@ -4,56 +4,43 @@
 //! Each struct wraps a `serde_json::Value` payload and implements
 //! `SnowplowContext` with the corresponding Iglu schema URI.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::LazyLock;
 
 use labkit_events::SnowplowContext;
 use serde::Serialize;
 
-/// Root of the orbit Iglu schemas in the vendored subtree.
-fn iglu_dir() -> PathBuf {
-    // IGLU_DIR is set in .cargo/config.toml (relative to workspace root).
-    // At runtime, the working directory is the workspace root.
+/// Read the pinned version from a `.iglu-version` file.
+fn pinned_version(name: &str) -> String {
+    let path = PathBuf::from(env!("SCHEMA_DIR")).join(format!("{name}.iglu-version"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+        .trim()
+        .to_string()
+}
+
+/// Resolve the schema JSON path in the vendored subtree for a pinned version.
+fn schema_path(name: &str, version: &str) -> PathBuf {
     PathBuf::from(env!("IGLU_DIR"))
+        .join(name)
+        .join("jsonschema")
+        .join(version)
 }
 
-pub static ORBIT_COMMON_SCHEMA: LazyLock<String> =
-    LazyLock::new(|| load_latest_schema_uri(&iglu_dir(), "orbit_common"));
+pub static ORBIT_COMMON_SCHEMA: LazyLock<String> = LazyLock::new(|| {
+    let version = pinned_version("orbit_common");
+    format!("iglu:com.gitlab/orbit_common/jsonschema/{version}")
+});
 
-pub static ORBIT_QUERY_SCHEMA: LazyLock<String> =
-    LazyLock::new(|| load_latest_schema_uri(&iglu_dir(), "orbit_query"));
+pub static ORBIT_QUERY_SCHEMA: LazyLock<String> = LazyLock::new(|| {
+    let version = pinned_version("orbit_query");
+    format!("iglu:com.gitlab/orbit_query/jsonschema/{version}")
+});
 
-/// Scan `{iglu_dir}/{name}/jsonschema/` for the latest version and build
-/// the Iglu schema URI from the directory structure.
-fn load_latest_schema_uri(iglu_dir: &Path, name: &str) -> String {
-    let version = latest_version(iglu_dir, name);
-    format!("iglu:com.gitlab/{name}/jsonschema/{version}")
-}
-
-/// Find the latest version directory name under `{iglu_dir}/{name}/jsonschema/`.
-fn latest_version(iglu_dir: &Path, name: &str) -> String {
-    let jsonschema_dir = iglu_dir.join(name).join("jsonschema");
-    let mut versions: Vec<(u32, u32, u32, String)> = std::fs::read_dir(&jsonschema_dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", jsonschema_dir.display()))
-        .filter_map(|entry| {
-            let name = entry.ok()?.file_name().to_str()?.to_string();
-            let parts: Vec<u32> = name.split('-').filter_map(|p| p.parse().ok()).collect();
-            (parts.len() == 3).then(|| (parts[0], parts[1], parts[2], name))
-        })
-        .collect();
-    versions.sort();
-    versions
-        .last()
-        .unwrap_or_else(|| panic!("no versions in {}", jsonschema_dir.display()))
-        .3
-        .clone()
-}
-
-/// Load the raw schema JSON for a given schema name (latest version).
-pub fn load_latest_schema_json(name: &str) -> serde_json::Value {
-    let dir = iglu_dir();
-    let version = latest_version(&dir, name);
-    let path = dir.join(name).join("jsonschema").join(&version);
+/// Load the schema JSON for a given schema name at its pinned version.
+pub fn load_schema_json(name: &str) -> serde_json::Value {
+    let version = pinned_version(name);
+    let path = schema_path(name, &version);
     let content = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     serde_json::from_str(&content).expect("vendored Iglu schema is valid JSON")
