@@ -1,0 +1,85 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for Code Suggestion events",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "code_suggestions_context",
+    "version": "2-3-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "required": [
+    "gitlab_realm"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gitlab_realm": {
+      "type": "string",
+      "description": "Self-Managed or SaaS",
+      "enum": ["self-managed", "saas"]
+    },
+    "gitlab_host_name": {
+      "type": ["string", "null"],
+      "description": "Host name of the GitLab instance where the request comes from",
+      "maxLength": 255
+    },
+    "gitlab_instance_id": {
+      "type": ["string", "null"],
+      "description": "ID of the GitLab instance where the request comes from",
+      "maxLength": 255
+    },
+    "gitlab_saas_namespace_ids": {
+      "description": "List of the namespace IDs that the user has a Code Suggestions subscription in SaaS for",
+      "type": ["array", "null"],
+      "items": {
+        "description": "ID of the namespace",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+      }
+    },
+    "language": {
+      "type": ["string", "null"],
+      "description": "Programming language of the completions request",
+      "maxLength": 32
+    },
+    "model_engine": {
+      "type": ["string", "null"],
+      "description": "Model engine used for the completions",
+      "maxLength": 64
+    },
+    "model_name": {
+      "type": ["string", "null"],
+      "description": "Model name used for the completions",
+      "maxLength": 64
+    },
+    "prefix_length": {
+      "type": ["integer", "null"],
+      "description": "Length of the prefix in characters",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "suffix_length": {
+      "type": ["integer", "null"],
+      "description": "Length of the suffix in characters",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "suggestion_source": {
+      "type": ["string", "null"],
+      "description": "Suggestion source: cache or network",
+      "enum": ["cache", "network"]
+    },
+    "user_agent": {
+      "type": ["string", "null"],
+      "description": "User-agent string of the request (holds information about the origin of the request)",
+      "maxLength": 255
+    },
+    "api_status_code": {
+      "type": ["integer", "null"],
+      "description": "HTTP status code of GitLab API",
+      "minimum": 0,
+      "maximum": 2147483647
+    }
+  }
+}

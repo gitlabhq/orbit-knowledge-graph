@@ -1,0 +1,65 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Context for GKG query-path events (gkg_query_executed, gkg_schema_introspected).",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_query",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_type"],
+  "properties": {
+    "source_type": {
+      "description": "Source type of the request.",
+      "type": "string",
+      "enum": ["dap", "mcp", "rest_api", "cli"]
+    },
+    "tool_name": {
+      "description": "Name of the Orbit tool invoked (e.g. query_graph, get_graph_schema).",
+      "type": ["string", "null"],
+      "enum": ["query_graph", "get_graph_schema", null]
+    },
+    "queried_namespace_ids": {
+      "description": "List of namespace IDs associated with the query. The unit of adoption for WAN metric.",
+      "type": ["array", "null"],
+      "items": {
+        "description": "Namespace ID associated with the query",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+      }
+    },
+    "root_namespace_id": {
+      "description": "Top-level group of the caller's namespace. Required for billing rollup and enterprise segmentation.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "global_user_id": {
+      "description": "Globally unique identity of the calling user. Null for bot or service account calls.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "user_type": {
+      "description": "Distinguishes human users from automated callers.",
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "plan": {
+      "description": "Name of the plan, such as free, premium or ultimate.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "session_id": {
+      "description": "Correlates multiple Orbit tool calls within a single DAP session. Null for non-DAP access.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "is_gitlab_team_member": {
+      "description": "Separates internal dogfooding from real external adoption. Null if not determinable.",
+      "type": ["boolean", "null"]
+    }
+  }
+}

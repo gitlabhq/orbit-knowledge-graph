@@ -1,0 +1,91 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for Code Suggestion events",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "code_suggestions_context",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "required": [
+    "prefix_length",
+    "suffix_length",
+    "language",
+    "user_agent",
+    "gitlab_realm"
+  ],
+  "properties": {
+    "request_counts": {
+      "type": ["array", "null"],
+      "description": "Acceptance, show and error counts for previous requests",
+      "items": {
+        "type": "object",
+        "description": "Acceptance, show and error counts for previous request",
+        "required": ["requests", "errors", "accepts"],
+        "properties": {
+          "requests": {
+            "type": "integer",
+            "description": "Count of completions requests",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "errors": {
+            "type": "integer",
+            "description": "Count of failed completions requests",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "accepts": {
+            "type": "integer",
+            "description": "Count of accepted completions requests",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "lang": {
+            "type": ["string", "null"],
+            "description": "Programming language of the completions request",
+            "maxLength": 32
+          },
+          "model_engine": {
+            "type": ["string", "null"],
+            "description": "Model engine used for the completions",
+            "maxLength": 64
+          },
+          "model_name": {
+            "type": ["string", "null"],
+            "description": "Model name used for the completions",
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "prefix_length": {
+      "type": "integer",
+      "description": "Length of the prefix in characters",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "suffix_length": {
+      "type": "integer",
+      "description": "Length of the suffix in characters",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "language": {
+      "type": "string",
+      "description": "Programming language of the completions request",
+      "maxLength": 32
+    },
+    "user_agent": {
+      "type": "string",
+      "description": "User-agent string of the request (holds information about the origin of the request)",
+      "maxLength": 255
+    },
+    "gitlab_realm": {
+      "type": "string",
+      "description": "Self-Managed or SaaS",
+      "maxLength": 32
+    }
+  }
+}
