@@ -23,9 +23,15 @@ pub static ORBIT_COMMON_SCHEMA: LazyLock<String> =
 pub static ORBIT_QUERY_SCHEMA: LazyLock<String> =
     LazyLock::new(|| load_latest_schema_uri(&iglu_dir(), "orbit_query"));
 
-/// Scan `{iglu_dir}/{name}/jsonschema/` for the latest version, read the
-/// schema JSON, and extract the Iglu URI from its `self` block.
+/// Scan `{iglu_dir}/{name}/jsonschema/` for the latest version and build
+/// the Iglu schema URI from the directory structure.
 fn load_latest_schema_uri(iglu_dir: &Path, name: &str) -> String {
+    let version = latest_version(iglu_dir, name);
+    format!("iglu:com.gitlab/{name}/jsonschema/{version}")
+}
+
+/// Find the latest version directory name under `{iglu_dir}/{name}/jsonschema/`.
+fn latest_version(iglu_dir: &Path, name: &str) -> String {
     let jsonschema_dir = iglu_dir.join(name).join("jsonschema");
     let mut versions: Vec<(u32, u32, u32, String)> = std::fs::read_dir(&jsonschema_dir)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", jsonschema_dir.display()))
@@ -36,50 +42,20 @@ fn load_latest_schema_uri(iglu_dir: &Path, name: &str) -> String {
         })
         .collect();
     versions.sort();
-    let (_, _, _, version_dir) = versions
+    versions
         .last()
-        .unwrap_or_else(|| panic!("no versions in {}", jsonschema_dir.display()));
-
-    let content = std::fs::read_to_string(jsonschema_dir.join(&version_dir)).unwrap_or_else(|e| {
-        panic!(
-            "cannot read {}/{version_dir}: {e}",
-            jsonschema_dir.display()
-        )
-    });
-    let schema: serde_json::Value =
-        serde_json::from_str(&content).expect("vendored Iglu schema is valid JSON");
-    let s = &schema["self"];
-    format!(
-        "iglu:{}/{}/{}/{}",
-        s["vendor"].as_str().expect("self.vendor"),
-        s["name"].as_str().expect("self.name"),
-        s["format"].as_str().expect("self.format"),
-        s["version"].as_str().expect("self.version"),
-    )
+        .unwrap_or_else(|| panic!("no versions in {}", jsonschema_dir.display()))
+        .3
+        .clone()
 }
 
 /// Load the raw schema JSON for a given schema name (latest version).
 pub fn load_latest_schema_json(name: &str) -> serde_json::Value {
-    let jsonschema_dir = iglu_dir().join(name).join("jsonschema");
-    let mut versions: Vec<(u32, u32, u32, String)> = std::fs::read_dir(&jsonschema_dir)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", jsonschema_dir.display()))
-        .filter_map(|entry| {
-            let name = entry.ok()?.file_name().to_str()?.to_string();
-            let parts: Vec<u32> = name.split('-').filter_map(|p| p.parse().ok()).collect();
-            (parts.len() == 3).then(|| (parts[0], parts[1], parts[2], name))
-        })
-        .collect();
-    versions.sort();
-    let (_, _, _, version_dir) = versions
-        .last()
-        .unwrap_or_else(|| panic!("no versions in {}", jsonschema_dir.display()));
-
-    let content = std::fs::read_to_string(jsonschema_dir.join(&version_dir)).unwrap_or_else(|e| {
-        panic!(
-            "cannot read {}/{version_dir}: {e}",
-            jsonschema_dir.display()
-        )
-    });
+    let dir = iglu_dir();
+    let version = latest_version(&dir, name);
+    let path = dir.join(name).join("jsonschema").join(&version);
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     serde_json::from_str(&content).expect("vendored Iglu schema is valid JSON")
 }
 
