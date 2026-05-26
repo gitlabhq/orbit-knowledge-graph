@@ -112,7 +112,7 @@ pub(crate) fn build_query(
     let queried = leaf_namespace_ids(claims);
 
     let data = OrbitQueryData {
-        source_type: map_source(&claims.source_type),
+        source_type: &claims.source_type,
         tool_name: Some(tool_name),
         coding_agent,
         queried_namespace_ids: if queried.is_empty() {
@@ -136,16 +136,6 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
         .iter()
         .filter_map(|tp| gkg_utils::traversal_path::leaf_id(&tp.path))
         .collect()
-}
-
-fn map_source(s: &str) -> &'static str {
-    match s {
-        "frontend" => "frontend",
-        "dws" => "dws",
-        "mcp" => "mcp",
-        "core" => "core",
-        _ => "rest",
-    }
 }
 
 #[cfg(test)]
@@ -264,21 +254,6 @@ mod tests {
         let claims = claims_with_paths(vec![]);
         let data = query_data(&claims, "query_graph");
         assert!(data.get("coding_agent").is_none());
-    }
-
-    #[test]
-    fn map_source_recognises_all_jwt_values() {
-        let cases = [
-            ("frontend", "frontend"),
-            ("dws", "dws"),
-            ("mcp", "mcp"),
-            ("core", "core"),
-            ("rest", "rest"),
-            ("anything-else", "rest"),
-        ];
-        for (input, expected) in cases {
-            assert_eq!(map_source(input), expected, "for input {input}");
-        }
     }
 
     #[test]
