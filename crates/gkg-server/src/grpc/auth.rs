@@ -19,7 +19,7 @@ impl RequestContext {
     pub fn record_in_current_span(&self) {
         let span = tracing::Span::current();
         span.record("user_id", self.claims.user_id);
-        span.record("source_type", &self.claims.source_type);
+        span.record("source_type", <&str>::from(self.claims.source_type));
         if let Some(sid) = &self.claims.ai_session_id {
             span.record("ai_session_id", sid.as_str());
         }
@@ -123,7 +123,7 @@ mod tests {
                 organization_id: None,
                 min_access_level: None,
                 group_traversal_ids: vec![],
-                source_type: String::new(),
+                source_type: crate::auth::SourceType::Rest,
                 ai_session_id: None,
                 instance_id: None,
                 unique_instance_id: None,

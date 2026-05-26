@@ -103,7 +103,7 @@ mod tests {
             organization_id: Some(42),
             min_access_level: None,
             group_traversal_ids: vec![],
-            source_type: "mcp".into(),
+            source_type: crate::auth::SourceType::Mcp,
             ai_session_id: Some("sess".into()),
             instance_id: Some("inst".into()),
             unique_instance_id: Some("uniq".into()),

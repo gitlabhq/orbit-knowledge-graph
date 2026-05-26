@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// One traversal path the user holds in their scope, paired with the exact
 /// effective access levels they hold on that path. Mirrors the `(path, roles)`
@@ -38,7 +38,8 @@ pub struct Claims {
     /// from both paths but only Vulnerability rows from `1/3/`.
     #[serde(default)]
     pub group_traversal_ids: Vec<TraversalPathClaim>,
-    pub source_type: String,
+    #[serde(deserialize_with = "deserialize_source_type")]
+    pub source_type: SourceType,
     #[serde(default, rename = "session_id")]
     pub ai_session_id: Option<String>,
     #[serde(default)]
@@ -62,4 +63,27 @@ pub struct Claims {
     /// self-managed / Dedicated instances.
     #[serde(default)]
     pub is_gitlab_team_member: Option<bool>,
+}
+
+/// Source type of the request, matching the Iglu `orbit_query` enum.
+/// Unknown JWT values deserialize to `Rest` (the catch-all).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+pub enum SourceType {
+    Frontend,
+    Dws,
+    Mcp,
+    Core,
+    Rest,
+}
+
+fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType, D::Error> {
+    let s = String::deserialize(d)?;
+    Ok(match s.as_str() {
+        "frontend" => SourceType::Frontend,
+        "dws" => SourceType::Dws,
+        "mcp" => SourceType::Mcp,
+        "core" => SourceType::Core,
+        _ => SourceType::Rest,
+    })
 }

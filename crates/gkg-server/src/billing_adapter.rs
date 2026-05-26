@@ -17,7 +17,7 @@ impl From<&Claims> for BillingInputs {
         Self {
             realm: c.realm.clone(),
             user_id: c.user_id as i64,
-            source_type: c.source_type.clone(),
+            source_type: <&str>::from(c.source_type).to_string(),
             organization_id: c.organization_id.map(|id| id as i64),
             instance_id: c.instance_id.clone(),
             unique_instance_id: c.unique_instance_id.clone(),
@@ -33,7 +33,7 @@ impl From<&Claims> for BillingInputs {
 impl From<&Claims> for QuotaCheckInputs {
     fn from(c: &Claims) -> Self {
         Self {
-            source_type: c.source_type.clone(),
+            source_type: <&str>::from(c.source_type).to_string(),
             user_id: c.user_id as i64,
             realm: c.realm.clone(),
             global_user_id: c.global_user_id.clone(),

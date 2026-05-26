@@ -112,7 +112,7 @@ pub(crate) fn build_query(
     let queried = leaf_namespace_ids(claims);
 
     let data = OrbitQueryData {
-        source_type: &claims.source_type,
+        source_type: claims.source_type.into(),
         tool_name: Some(tool_name),
         coding_agent,
         queried_namespace_ids: if queried.is_empty() {
@@ -164,7 +164,7 @@ mod tests {
                     access_levels: vec![20],
                 })
                 .collect(),
-            source_type: "mcp".into(),
+            source_type: crate::auth::SourceType::Mcp,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,

@@ -61,7 +61,7 @@ mod tests {
             organization_id,
             min_access_level: Some(20),
             group_traversal_ids,
-            source_type: "rest".into(),
+            source_type: super::SourceType::Rest,
             ai_session_id: None,
             instance_id: None,
             unique_instance_id: None,
