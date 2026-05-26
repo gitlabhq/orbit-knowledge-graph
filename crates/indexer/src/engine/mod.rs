@@ -192,9 +192,10 @@ impl Engine {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
         });
+        let max_inflight = configuration.max_concurrent_workers;
         let tasks: Vec<_> = subscriptions
             .into_iter()
-            .map(|subscription| self.listen(subscription, runtime.clone()))
+            .map(|subscription| self.listen(subscription, runtime.clone(), max_inflight))
             .collect();
         futures::future::try_join_all(tasks).await?;
 
@@ -205,9 +206,10 @@ impl Engine {
         &self,
         subscription: Subscription,
         runtime: Arc<EngineRuntime>,
+        max_inflight: usize,
     ) -> Result<(), EngineError> {
         let topic_name = format!("{}.{}", subscription.stream, subscription.subject);
-        info!(topic = %topic_name, "topic listener starting");
+        info!(topic = %topic_name, max_inflight, "topic listener starting");
 
         let mut messages = self
             .broker
@@ -218,7 +220,7 @@ impl Engine {
         loop {
             tokio::select! {
                 _ = self.cancel.cancelled() => break,
-                Some(message) = messages.next() => {
+                Some(message) = messages.next(), if inflight.len() < max_inflight => {
                     let message = message?;
                     let progress = message.progress_notifier();
                     let span = tracing::info_span!(
@@ -236,6 +238,11 @@ impl Engine {
                         subscription.clone(),
                         topic_name.clone(),
                     ).instrument(span));
+                }
+                Some(result) = inflight.join_next() => {
+                    if let Err(error) = result {
+                        warn!(%error, topic = %topic_name, "message processing task panicked");
+                    }
                 }
             }
         }
@@ -862,6 +869,85 @@ mod tests {
         assert!(
             matches!(outcome, HandlersOutcome::Exhausted { .. }),
             "Exhausted should take precedence over retry, got {outcome:?}"
+        );
+    }
+
+    /// Validates the backpressure mechanism in the listen loop.
+    ///
+    /// The select loop guards message consumption with `if inflight.len() < max_inflight`.
+    /// Without this guard, all messages are pulled immediately and queued on the
+    /// worker pool semaphore — causing NATS ack_wait timeouts and infinite redelivery.
+    #[tokio::test]
+    async fn listen_loop_caps_inflight_to_max() {
+        use tokio_stream::wrappers::ReceiverStream;
+
+        let max_inflight: usize = 2;
+        let total_messages: usize = 20;
+        let work_duration = Duration::from_millis(50);
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let completed = Arc::new(AtomicUsize::new(0));
+
+        let runtime = test_runtime(&EngineConfiguration {
+            max_concurrent_workers: max_inflight,
+            ..Default::default()
+        });
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<usize>(total_messages);
+        for i in 0..total_messages {
+            tx.send(i).await.unwrap();
+        }
+        drop(tx);
+
+        let mut messages = ReceiverStream::new(rx);
+        let mut inflight = tokio::task::JoinSet::new();
+
+        loop {
+            tokio::select! {
+                Some(_msg) = messages.next(), if inflight.len() < max_inflight => {
+                    let runtime = runtime.clone();
+                    let active = active.clone();
+                    let peak = peak.clone();
+                    let completed = completed.clone();
+                    inflight.spawn(async move {
+                        let _permit = runtime
+                            .worker_pool
+                            .acquire_handler_slot(None)
+                            .await
+                            .expect("semaphore closed");
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(current, Ordering::SeqCst);
+                        tokio::time::sleep(work_duration).await;
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        completed.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+                Some(result) = inflight.join_next() => {
+                    result.expect("task panicked");
+                }
+                else => break,
+            }
+        }
+
+        while let Some(result) = inflight.join_next().await {
+            result.expect("task panicked");
+        }
+
+        let observed_peak = peak.load(Ordering::SeqCst);
+        let total_completed = completed.load(Ordering::SeqCst);
+
+        assert_eq!(
+            total_completed, total_messages,
+            "all messages should be processed"
+        );
+        assert!(
+            observed_peak <= max_inflight,
+            "peak concurrency {observed_peak} exceeded max_inflight {max_inflight}"
+        );
+        assert!(
+            observed_peak > 0,
+            "expected at least one concurrent execution"
         );
     }
 }
