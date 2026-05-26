@@ -151,54 +151,6 @@ impl Default for DatalakeRetryConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct GlobalHandlerConfig {
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
-
-    #[serde(default)]
-    pub batch_size_overrides: HashMap<String, u64>,
-}
-
-impl Default for GlobalHandlerConfig {
-    fn default() -> Self {
-        Self {
-            datalake_batch_size: default_datalake_batch_size(),
-            batch_size_overrides: HashMap::new(),
-        }
-    }
-}
-
-fn default_max_concurrent_entities() -> usize {
-    3
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct NamespaceHandlerConfig {
-    #[serde(default = "default_datalake_batch_size")]
-    pub datalake_batch_size: u64,
-
-    #[serde(default)]
-    pub batch_size_overrides: HashMap<String, u64>,
-
-    /// Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)
-    /// to run concurrently within a single namespace indexing pass.
-    #[serde(default = "default_max_concurrent_entities")]
-    pub max_concurrent_entities: usize,
-}
-
-impl Default for NamespaceHandlerConfig {
-    fn default() -> Self {
-        Self {
-            datalake_batch_size: default_datalake_batch_size(),
-            batch_size_overrides: HashMap::new(),
-            max_concurrent_entities: default_max_concurrent_entities(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
 pub struct EntityHandlerConfig {
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
@@ -277,10 +229,6 @@ pub struct CodeIndexingTaskHandlerConfig {
 #[schemars(deny_unknown_fields)]
 pub struct HandlersConfiguration {
     #[serde(default)]
-    pub global_handler: GlobalHandlerConfig,
-    #[serde(default)]
-    pub namespace_handler: NamespaceHandlerConfig,
-    #[serde(default)]
     pub entity_handler: EntityHandlerConfig,
     #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
@@ -296,12 +244,6 @@ pub struct GlobalDispatcherConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
-pub struct EntityDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 }
@@ -415,8 +357,6 @@ pub struct ScheduledTasksConfiguration {
     pub global: GlobalDispatcherConfig,
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
-    #[serde(default)]
-    pub entity: EntityDispatcherConfig,
     #[serde(default)]
     pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
     #[serde(default)]

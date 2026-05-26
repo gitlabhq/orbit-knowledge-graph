@@ -113,6 +113,7 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     pub destination_table: String,
     pub columns: Vec<ExtractColumn>,
     pub source: ExtractSource,
+    pub base_table: String,
     pub watermark: String,
     pub deleted: String,
     pub order_by: Vec<String>,
@@ -541,6 +542,7 @@ fn resolve_standalone_edge(
     };
 
     let source = ExtractSource::Table(config.source.clone());
+    let base_table = config.source.clone();
     let order_by = config.order_by.clone();
     let watermark = config.watermark.clone();
     let deleted = config.deleted.clone();
@@ -560,6 +562,7 @@ fn resolve_standalone_edge(
             destination_table: edge_table,
             columns: extract_columns,
             source,
+            base_table,
             watermark,
             deleted,
             order_by,
@@ -643,6 +646,7 @@ fn build_extract_plan(
                 destination_table: destination_table.to_string(),
                 columns,
                 source: ExtractSource::Table(source.clone()),
+                base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
                 order_by,
@@ -653,6 +657,7 @@ fn build_extract_plan(
             }
         }
         EtlConfig::Query {
+            source,
             select,
             from,
             where_clause,
@@ -672,6 +677,7 @@ fn build_extract_plan(
                 destination_table: destination_table.to_string(),
                 columns,
                 source: ExtractSource::Raw(from.clone()),
+                base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
                 order_by: order_by.clone(),

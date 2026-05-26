@@ -7,7 +7,7 @@ toc_hide: true
 
 ## Status
 
-Proposed
+Accepted (revised 2026-05-22)
 
 ## Date
 
@@ -15,114 +15,107 @@ Proposed
 
 ## Context
 
-Today, `GlobalHandler` processes global entities (currently just User)
-per message, and `NamespaceHandler` processes all namespaced entities
-(MergeRequest, Issue, Pipeline, Job, ...) per namespace per message. Both
-run entity pipelines concurrently behind `max_concurrent_entities`, but the
-work is bound to a single NATS message and a single engine worker slot.
+Originally, `GlobalHandler` processed global entities per message and
+`NamespaceHandler` processed all namespaced entities per namespace per message.
+Both ran entity pipelines concurrently behind `max_concurrent_entities`, but
+the work was bound to a single NATS message and a single engine worker slot.
 
 Problems:
 
-1. **No cross-worker concurrency.** A slow entity blocks all others in the
-   same message. Other workers sit idle.
-2. **No intra-entity parallelism.** A large entity cannot be split across
-   workers.
-3. **Noisy neighbors.** All namespaced entities share one NATS consumer. A
-   backlog of large-namespace messages delays all entity types.
+1. No cross-worker concurrency. A slow entity blocks all others in the same
+   message and the other workers sit idle.
+2. No intra-entity parallelism. A large entity cannot be split across workers.
+3. Noisy neighbours. All namespaced entities shared one NATS consumer, so a
+   backlog of large-namespace messages delayed all entity types.
 
 ## Decision
 
-Replace `GlobalHandler` and `NamespaceHandler` with a single handler type,
-`EntityIndexingHandler`, where one NATS message = one entity kind, optionally
-scoped to a namespace. The dispatcher owns partition orchestration: it
-reads checkpoint state, computes quantile boundaries, and publishes one
-message per (entity, scope, partition) combination. Each message carries
-an optional `PartitionAssignment` so the handler applies the range filter
-without needing checkpoint or quantile awareness.
+Replace `GlobalHandler` and `NamespaceHandler` with one `EntityHandler` per
+ontology entity. Each handler owns a single `Plan` and subscribes to the
+existing global/namespace NATS topic for its scope. The dispatcher publishes
+one message; every entity handler for that scope receives it (NATS pub/sub),
+which gives cross-entity parallelism without per-entity subjects or a new
+message type.
 
-Incremental indexing (where a completed unified checkpoint already exists)
-runs as a single non-partitioned message — it processes only the delta
-since the last watermark and is already fast.
+Intra-entity parallelism comes from `partition_overrides`: when configured for
+an entity, the handler computes id-range partitions on the fly during the
+first run and fans them out across a `JoinSet`. Once all partitions complete,
+the partition checkpoints are consolidated into a single completed checkpoint
+and subsequent runs skip partitioning.
 
-### Message type
+### Handler
 
 ```rust
-pub struct EntityIndexingRequest {
-    pub entity_kind: String,
-    pub watermark: DateTime<Utc>,
-    pub scope: IndexingScope,
-    pub partition: Option<PartitionAssignment>,
-}
-
-pub enum IndexingScope {
-    Global,
-    Namespace { namespace_id: i64, traversal_path: String },
-}
-
-pub struct PartitionAssignment {
-    pub index: u32,
-    pub total: u32,
-    pub column: String,
-    pub bounds: PartitionBounds,
+pub struct EntityHandler {
+    plan: Plan,
+    scope: EtlScope,
+    pipeline: Arc<Pipeline>,
+    datalake: Arc<dyn DatalakeQuery>,
+    checkpoint_store: Arc<dyn CheckpointStore>,
+    partition_strategy: Option<PartitionStrategy>,
+    // ...
 }
 ```
 
-The dispatcher attaches a `PartitionAssignment` when it decides to split
-work. The handler applies the range filter from the assignment to its
-extract query. `PartitionSpec` and `PartitionStrategy` are internal
-dispatcher types used for checkpoint keys and quantile computation.
+Registration loops `Ontology::nodes()`, builds a `Plan` per entity, and
+registers one `EntityHandler` against either `GlobalIndexingRequest` or
+`NamespaceIndexingRequest` based on the entity's `EtlScope`. The handler
+deserializes the existing request types, no new message envelope is needed.
 
-### NATS subject hierarchy
+### Partitioning
 
-```plaintext
-sdlc.entity.indexing.requested.{entity_kind}.global             # global
-sdlc.entity.indexing.requested.{entity_kind}.{org_id}.{ns_id}  # namespaced
+Filters compose via the existing `Filter` trait. A partition range is just
+another filter (half-open id-range), so it belongs on the prepared query:
+
+```rust
+plan.prepare()
+    .with(WatermarkFilter { ... })
+    .with(TraversalPathFilter { ... })
+    .into_partitions(ranges)  // -> Vec<(PartitionAssignment, PreparedQuery)>
 ```
 
-A single `EntityIndexingHandler` subscribes to
-`sdlc.entity.indexing.requested.>` and routes internally by
-`entity_kind`. The `GKG_INDEXER` stream adds this wildcard subject to
-accept all entity messages. Multiple engine workers pull from the same
-NATS consumer concurrently, so cross-entity parallelism comes from the
-worker pool rather than per-entity consumers.
+`PartitionStrategy` holds the partition count, the id column, and the
+datalake table needed to probe `min/max`. `PartitionAssignment` carries the
+resulting half-open bounds for one shard.
 
-The stream's `max_messages_per_subject: 1` with
-`discard_new_per_subject: true` deduplicates at the (entity, scope)
-level: if a handler has not acked the previous message for that exact
-subject, the dispatcher's publish is silently rejected.
+The handler:
 
-### Handler and pipeline
+1. Loads the parent checkpoint `{scope_key}.{entity}`. If it exists, this is
+   an incremental run, no partitioning.
+2. Otherwise, calls `strategy.compute_ranges(...)`, which runs
+   `SELECT min/max(col) FROM source WHERE [traversal_path...]` against the
+   datalake (using the ETL's `source` table) and slices the result evenly.
+3. `base_query.into_partitions(ranges)` yields N prepared queries.
+4. Each is spawned on a `JoinSet` against `Pipeline::run_plan` with its own
+   checkpoint key `{scope_key}.{entity}.p{idx}of{total}`.
+5. After all partitions finish, `CheckpointStore::consolidate(parent_key,
+   watermark)` writes the parent key and tombstones the partition rows.
 
-A single `EntityIndexingHandler` holds a
-`HashMap<String, Arc<dyn EntityPipeline>>`, keyed by entity kind. On
-each message it deserializes the `EntityIndexingRequest`, looks up the
-pipeline by `entity_kind`, and delegates. Unknown entity kinds log a
-warning and return `Ok(())`.
+#### Retry behavior
 
-All current entities use `SimpleEntityPipeline`, which runs a single
-`PipelinePlan` against the existing `Pipeline::run_plan`. If the request
-carries a `PartitionAssignment`, the pipeline applies the range filter
-to its extract query and uses a partition-specific checkpoint key.
-Otherwise it uses the unified key. The pipeline has no partition
-orchestration logic — it runs exactly what the dispatcher told it to.
+If any partition fails before they all complete, the parent checkpoint stays
+unwritten and the next message re-enters the partitioning path. To avoid
+re-extracting work that already succeeded:
 
-Future entities (e.g., SystemNotes) can implement `EntityPipeline` with
-custom logic instead of using `SimpleEntityPipeline`.
+- `run_partitions` loads each partition's checkpoint before spawning. Any
+  partition whose checkpoint has `cursor_values: None` (a successful
+  `save_completed` from a prior attempt) is skipped: its task is never
+  spawned, and the rows it indexed last time stay in the destination.
+- `consolidate` writes the parent at `min(partition watermarks)` rather than
+  the current `request.watermark`. Partitions that completed in an earlier
+  attempt still hold their original (older) watermark; pinning the parent to
+  the minimum keeps the next incremental run covering the
+  `(old_watermark, request.watermark]` window for those id-ranges, so no data
+  is lost.
 
-### Partitioning (initial indexing only)
-
-Partitioning applies only during initial indexing (no unified checkpoint
-for the entity+scope). Incremental indexing processes only the delta since
-the last watermark and completes in seconds; partitioning it would add
-overhead for no gain. The dispatcher checks the checkpoint store to
-decide (see [Dispatcher](#dispatcher)).
+If every partition is already complete (e.g. the previous attempt finished
+all partitions but crashed before consolidation), `run_partitions` spawns
+nothing and `consolidate` runs immediately.
 
 #### Partition column: first non-scope sort key column
 
-When a `PartitionAssignment` is present, the handler applies a range
-filter on the **first non-scope column** of the entity's source
-`order_by`. For namespaced entities, the scope column is
-`traversal_path`. For global entities, there is no scope column.
+The range filter is applied on the first non-`traversal_path` column of the
+plan's sort key.
 
 ```sql
 AND {partition_column} >= '{lower_bound}' AND {partition_column} < '{upper_bound}'
@@ -135,45 +128,18 @@ Examples from the current ontology:
 | MergeRequest | `[traversal_path, id]` | `id` |
 | User (global) | `[id]` | `id` |
 | JobMetadata | `[traversal_path, build_id]` | `build_id` |
-| Note | `[traversal_path, noteable_type, noteable_id, id]` | `noteable_type` |
-| deployed_to | `[traversal_path, deployment_id, merge_request_id]` | `deployment_id` |
 
-Entities where the first non-scope column has low cardinality (e.g.,
-Note's `noteable_type` with ~10 enum values) are poor partitioning
-candidates and should not have `partition-overrides` set.
-
-Derivation and filter generation:
-
-```rust
-fn partition_column(order_by: &[String], scope: EtlScope) -> Option<&str> {
-    let skip = match scope {
-        EtlScope::Namespaced => 1, // skip traversal_path
-        EtlScope::Global => 0,
-    };
-    order_by.get(skip).map(String::as_str)
-}
-
-fn partition_filter_sql(column: &str, spec: &PartitionSpec) -> String {
-    match &spec.strategy {
-        PartitionStrategy::Range { lower_bound, upper_bound } => format!(
-            "{column} >= '{lower_bound}' AND {column} < '{upper_bound}'"
-        ),
-    }
-}
-```
-
-`partition_column` runs once at dispatcher startup; `partition_filter_sql`
-runs at handler execution time using the bounds from the
-`PartitionAssignment`. The range filter composes with the existing `WHERE`
-and keyset cursor as a conjunct and does not affect sort order.
+Entities where the first non-scope column has low cardinality (e.g., Note's
+`noteable_type` with ~10 enum values) are poor partitioning candidates and
+should not have `partition_overrides` set.
 
 #### Why range over hash
 
 Benchmarks on `siphon_p_ci_builds` (100M rows, PRIMARY KEY
 `(traversal_path, id, partition_id)`, ClickHouse Cloud dev instance,
-2026-05-08) show range filtering on a primary key column reads 3.9×
-less data than hash. ClickHouse evaluates the range condition via
-PREWHERE and skips decompressing non-matching columns:
+2026-05-08) show range filtering on a primary key column reads 3.9× less
+data than hash. ClickHouse evaluates the range condition via PREWHERE and
+skips decompressing non-matching columns:
 
 | Filter (4 partitions, `startsWith(traversal_path, '158/')`) | read_rows | read_bytes | duration |
 |---|---|---|---|
@@ -181,27 +147,9 @@ PREWHERE and skips decompressing non-matching columns:
 | `cityHash64(id) % 4 = 0` | 147,456 | 50.62 MiB | 649 ms |
 | `id >= 548 AND id < 24726584` | 147,456 | 13.05 MiB | 48 ms |
 
-`EXPLAIN indexes = 1` confirms range uses both `traversal_path` and
-`id` in the primary key condition (`generic exclusion search`), while
-hash uses only `traversal_path` (`binary search`). Both select the same
-granules for this scope, but range's PREWHERE reads **3.9× fewer bytes**
-and runs **13× faster**.
-
-See [Hash partitioning from day 1](#hash-partitioning-from-day-1)
-for why hash was considered and rejected.
-
-#### Boundary computation
-
-The dispatcher computes quantile boundaries using `quantilesTDigest`
-each time it plans partition jobs. Boundaries are not persisted — they
-are recomputed from the source table. This works because:
-
-- Boundary drift between runs does not cause data gaps. Each partition
-  has its own cursor-based checkpoint, so rows near a shifted boundary
-  are processed by whichever partition covers them. The cursor prevents
-  re-processing within a partition.
-- The quantile query is cheap (single aggregate over a primary key
-  column) compared to the actual ETL work.
+`EXPLAIN indexes = 1` confirms range uses both `traversal_path` and `id` in
+the primary key condition (`generic exclusion search`), while hash uses only
+`traversal_path` (`binary search`).
 
 ### Checkpoint key design
 
@@ -212,91 +160,24 @@ ns.{namespace_id}.{entity_kind}                       # namespaced, no partition
 ns.{namespace_id}.{entity_kind}.p{idx}of{total}       # namespaced, partitioned
 ```
 
-Non-partitioned keys match the current format (`global.User`,
-`ns.100.MergeRequest`), so no checkpoint migration is needed. The
-`of{total}` suffix invalidates old partitioned checkpoints when the
-partition count changes. Namespace deletion's
-`startsWith(key, 'ns.{id}.')` matches both formats.
+Non-partitioned keys match the previous format (`global.User`,
+`ns.100.MergeRequest`), so no checkpoint migration is needed. The `of{total}`
+suffix invalidates old partitioned checkpoints when the partition count
+changes. Namespace deletion's `startsWith(key, 'ns.{id}.')` matches both
+formats.
 
-Key construction:
-
-```rust
-fn entity_position_key(scope: &IndexingScope) -> String {
-    match scope {
-        IndexingScope::Global => "global".to_string(),
-        IndexingScope::Namespace { namespace_id, .. } => format!("ns.{namespace_id}"),
-    }
-}
-
-fn entity_checkpoint_key(
-    scope: &IndexingScope,
-    entity_kind: &str,
-    partition: Option<&PartitionSpec>,
-) -> String {
-    let base = entity_position_key(scope);
-    match partition {
-        None => format!("{base}.{entity_kind}"),
-        Some(p) => format!(
-            "{base}.{entity_kind}.p{}of{}",
-            p.partition_index, p.total_partitions
-        ),
-    }
-}
-```
-
-These produce the same prefixes as the current `namespace_position_key`
-and `"global"` constants (e.g., `ns.100.MergeRequest`,
-`ns.100.MergeRequest.p2of4`). Pipeline checkpoint load/save is unchanged.
-
-### Dispatcher
-
-`EntityDispatcher` owns partition orchestration. On each scheduled run it:
-
-1. Loads enabled namespaces from the datalake.
-2. For each (entity, scope) pair, calls `plan_dispatch` which reads the
-   checkpoint store to decide what to publish:
-   - Unified checkpoint already completed → publish one non-partitioned
-     message (incremental delta).
-   - All partition checkpoints completed → consolidate (write unified
-     checkpoint with min watermark), then publish non-partitioned.
-   - Some partitions incomplete or none started → compute quantile
-     boundaries via `PartitionStrategy`, publish one message per
-     pending partition with a `PartitionAssignment`.
-3. `PublishDuplicate` is handled silently (NATS dedup).
-
-Consolidation writes a unified checkpoint with `watermark = min(partition
-watermarks)`. After consolidation, subsequent runs publish non-partitioned
-messages (incremental).
-
-### Configuration
-
-All entity handlers share a single concurrency group (`"sdlc"`). The
-engine's worker pool caps total concurrent SDLC handlers via the group
-semaphore. Per-entity groups can be added later without code changes.
-
-`partition-overrides` lives on the handler config. The dispatcher reads
-it at startup to build `PartitionStrategy` instances per entity.
-
-```yaml
-handlers:
-  entity-handler:
-    concurrency-group: sdlc
-    datalake-batch-size: 500000
-    batch-size-overrides:
-      MergeRequest: 100000
-    partition-overrides:
-      MergeRequest: 4
-      Job: 4
-```
+`CheckpointStore` gains `load_by_prefix` and `consolidate`. Consolidation
+inserts a completed row at the parent key and tombstones every row matching
+`{parent}.p%` via the `_deleted` column on the `ReplacingMergeTree`.
 
 ### Indexing status tracking
 
 Today, one NATS KV key per namespace tracks indexing progress
-(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`).
-This breaks with entity-level messages: Entity A completing and writing
-"Indexed" while Entity B is still running gives a wrong answer.
+(`orbit_indexing_progress` bucket, consumed by `GraphStatusService`). With
+per-entity handlers, this breaks: Entity A completing and writing "Indexed"
+while Entity B is still running gives a wrong answer for the namespace.
 
-#### New key scheme: per-entity status
+#### Per-entity status key
 
 Each entity handler writes its own status key:
 
@@ -313,27 +194,27 @@ fn entity_status_key(traversal_path: &str, entity_kind: &str) -> String {
 }
 ```
 
-Each handler writes only its own key. NATS message deduplication
-serializes runs for the same (entity, scope) pair, so no cross-handler
-coordination is needed.
+Each handler writes only its own key. NATS message deduplication serializes
+runs for the same (entity, scope) pair, so no cross-handler coordination is
+needed.
 
 #### GraphStatusService aggregation
 
 `GraphStatusService` uses the ontology to derive the expected set of
-namespaced entity kinds, then reads one NATS KV key per entity. Missing
-keys are treated as `NotIndexed`. The namespace-level state is the worst
-of any entity's state:
+namespaced entity kinds, then reads one NATS KV key per entity. Missing keys
+are treated as `NotIndexed`. The namespace-level state is the worst of any
+entity's state:
 
 ```rust
 // Priority: higher = worse. NotIndexed dominates (missing key = not started).
 fn state_priority(state: IndexingState) -> u8 {
     match state {
-        IndexingState::Indexed    => 0,
-        IndexingState::Indexing   => 1,
-        IndexingState::Error      => 2,
+        IndexingState::Indexed     => 0,
+        IndexingState::Indexing    => 1,
+        IndexingState::Error       => 2,
         IndexingState::Backfilling => 3,
-        IndexingState::NotIndexed => 4,
-        IndexingState::Unknown    => 5,
+        IndexingState::NotIndexed  => 4,
+        IndexingState::Unknown     => 5,
     }
 }
 ```
@@ -343,68 +224,90 @@ fn state_priority(state: IndexingState) -> u8 {
 #### Migration
 
 During rollout, `GraphStatusService` checks both old-format keys
-(`status.42.9970`) and new entity-suffixed keys. Old keys become stale
-once all handlers run the new code and can be purged by TTL.
+(`status.42.9970`) and new entity-suffixed keys. Old keys become stale once
+all handlers run the new code and can be purged by TTL.
+
+### Configuration
+
+`partition_overrides` lives on the entity handler config. Entities without an
+override run un-partitioned.
+
+```yaml
+handlers:
+  entity-handler:
+    batch_size_overrides:
+      WorkItem: 50000
+    partition_overrides:
+      Job: 5
+```
+
+The existing `global-handler` and `namespace-handler` topic configs continue
+to govern engine-level policy (retry, concurrency group, DLQ) since per-entity
+handlers subscribe to those topics.
 
 ## Why not the alternatives
 
 ### Keep two handlers, add internal entity-level parallelism
 
-`Pipeline::run` already runs entities concurrently behind a semaphore.
-Increasing `max_concurrent_entities` helps within one handler invocation,
-but the work is still bound to one NATS message and one engine worker slot.
-Multiple workers cannot help with a single namespace's entities. Worse, one
-slow entity delays the NATS ack for the entire message, triggering
-redelivery of all entities.
+`Pipeline::run` (now removed) already ran entities concurrently behind a
+semaphore. Increasing `max_concurrent_entities` helped within one handler
+invocation, but the work was still bound to one NATS message and one engine
+worker slot. Multiple workers could not help with a single namespace's
+entities, and one slow entity delayed the NATS ack for the entire message,
+triggering redelivery of all entities.
+
+### Per-subject `sdlc.entity.indexing.requested.>` with an `EntityIndexingRequest` envelope
+
+Originally proposed: a dispatcher publishes one message per (entity, scope,
+partition) on a per-entity-kind subject, and the handler routes by
+`entity_kind`. This required a new message type, a new NATS subject family,
+and a dispatcher that owned partition orchestration (boundary computation,
+publishing, consolidation).
+
+Switched to per-entity handlers on shared topics because:
+
+- The existing `GlobalIndexingRequest` and `NamespaceIndexingRequest` already
+  carry everything needed (watermark + scope). The new envelope was pure
+  overhead.
+- The dispatcher had nothing useful to do, the entity handler already knows
+  its plan, its scope, its partition strategy. Pushing that work to the
+  dispatcher just moved the same logic across a network hop and added a
+  partition-state-machine to the dispatcher.
+- Local `JoinSet` partition execution is simpler than dispatcher-orchestrated
+  partition messages: failure isolation, retry, and ack semantics all stay in
+  one handler invocation.
 
 ### Hash partitioning from day 1
 
-`cityHash64(column) % N = i` needs no boundary computation and is
-stable across retries. Benchmarks show it reads **3.9× more
-data** than range for the same scope (50.62 MiB vs 13.05 MiB on
-`siphon_p_ci_builds`, 100K row scope, 4 partitions). Hash cannot
-benefit from ClickHouse's primary key index — `EXPLAIN indexes = 1`
-confirms only `traversal_path` is used, not `id`. For entities with
-deeper sort keys (Note, MergeRequestDiffFile) neither approach provides
-index benefits, but those entities are poor partitioning candidates
-anyway (low-cardinality first columns). Boundary drift between runs is
-not a concern because each partition resumes from its own cursor
-checkpoint.
-
-### Per-entity concurrency groups from day 1
-
-Each entity kind could get its own concurrency group (e.g.,
-`sdlc.merge_request: 3`, `sdlc.user: 1`). This gives finer-grained
-isolation but requires operators to configure 38 group limits. A shared
-`sdlc` group with the existing global cap is simpler and sufficient
-until empirical data shows a specific entity needs throttling.
+`cityHash64(column) % N = i` needs no boundary computation and is stable
+across retries. Benchmarks above show it reads 3.9× more data than range
+for the same scope. Hash cannot benefit from ClickHouse's primary key index.
 
 ## Consequences
 
-**What improves:**
+### What improves
 
-- Entity kinds process independently. Slow MergeRequest does not delay
-  Issue or Job.
-- Large entities can be partitioned: 4-partition MergeRequest = 4 workers.
-- `EntityPipeline` trait is an extension point for custom logic
-  (e.g., SystemNotes).
-- Backward-compatible checkpoint keys. No re-processing on deploy.
+- Each entity kind has its own NATS consumer (per-handler registration on the
+  shared subscription), so a slow MergeRequest does not delay Issue or Job
+  processing.
+- Large entities can be partitioned with no message-bus changes:
+  `partition_overrides: { Job: 5 }` and the handler does the rest.
+- Backward-compatible checkpoint keys, no re-processing on deploy.
 
-**What gets harder:**
+### What gets harder
 
-- Breaking config change: `global-handler`/`namespace-handler` →
-  `entity-handler`.
-- Indexing status: one key per (entity, namespace) instead of per
-  namespace. `GraphStatusService` aggregates with worst-state-wins.
-  Old and new key formats coexist during rollout.
-- Dispatcher complexity: `EntityDispatcher` owns a partition state
-  machine (scan checkpoints, compute boundaries, consolidate). The
-  handler pipeline is simpler in exchange.
+- Breaking refactor: `GlobalHandler` and `NamespaceHandler` are gone, along
+  with `Pipeline::run` (multi-plan). Only `Pipeline::run_plan` remains.
+  Failure isolation across entities now relies on the engine's
+  retry/concurrency layer rather than per-handler error aggregation.
+- Indexing status: one KV key per (entity, namespace) instead of one per
+  namespace. `GraphStatusService` aggregates with worst-state-wins. Old and
+  new key formats coexist during rollout.
 
 ## References
 
 - [SDLC indexing design document](../indexing/sdlc_indexing.md)
 - [Observability design document](../observability.md)
-- Current handler implementations: `crates/indexer/src/modules/sdlc/handler/{global,namespace}.rs`
-- NATS stream configuration: `crates/nats-client/src/client.rs:91-104`
+- Handler implementation: `crates/indexer/src/modules/sdlc/handler/entity.rs`
+- Partitioning logic: `crates/indexer/src/modules/sdlc/partitioning.rs`
 - Range vs hash partition benchmarks: `siphon_p_ci_builds` (100M rows, ClickHouse Cloud dev instance, 2026-05-08)

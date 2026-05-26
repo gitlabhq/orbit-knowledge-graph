@@ -14,6 +14,7 @@ mod merge_request_diffs;
 mod merge_requests;
 mod milestones;
 mod notes;
+mod partitioning;
 mod projects;
 mod security;
 mod watermarking;
@@ -30,6 +31,11 @@ async fn global_indexing() {
         global::processes_and_transforms_users,
         global::uses_watermark_for_incremental_processing,
         global::resumes_from_saved_cursor_skipping_processed_users,
+        partitioning::partitioned_initial_load_indexes_all_rows_and_consolidates,
+        partitioning::second_run_after_consolidation_skips_partitioning,
+        partitioning::skips_already_completed_partitions_on_retry,
+        partitioning::all_partitions_completed_runs_consolidate_only,
+        partitioning::span_smaller_than_partition_count_falls_back_to_single_run,
     );
 }
 
@@ -112,5 +118,7 @@ async fn namespace_indexing() {
         security::processes_security_scan_finding_edges,
         watermarking::uses_watermark_for_incremental_processing,
         watermarking::resumes_from_saved_cursor_skipping_processed_groups,
+        partitioning::namespaced_entity_partitions_by_id_within_scope,
+        partitioning::query_etl_entity_partitions_by_id_within_scope,
     );
 }

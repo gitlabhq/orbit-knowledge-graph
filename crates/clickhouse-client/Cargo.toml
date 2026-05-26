@@ -11,6 +11,7 @@ gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, features = ["lz4"] }
 bytes = { workspace = true }
+chrono = { workspace = true }
 clickhouse = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

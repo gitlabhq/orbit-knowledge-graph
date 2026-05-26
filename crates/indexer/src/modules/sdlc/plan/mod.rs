@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
+use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::handler::HandlerError;
@@ -135,6 +136,23 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
+pub(in crate::modules::sdlc) struct RangeFilter<'a> {
+    pub column: &'a str,
+    pub lower_bound: &'a str,
+    pub upper_bound: &'a str,
+}
+
+impl Filter for RangeFilter<'_> {
+    fn condition(&self) -> String {
+        format!(
+            "{col} >= '{lo}' AND {col} < '{hi}'",
+            col = self.column,
+            lo = self.lower_bound,
+            hi = self.upper_bound,
+        )
+    }
+}
+
 pub(in crate::modules::sdlc) struct CursorFilter<'a> {
     pub sort_key: &'a [String],
     pub values: &'a [String],
@@ -243,6 +261,23 @@ impl PreparedQuery {
 
     pub fn params(&self) -> Value {
         Value::Object(self.params.clone())
+    }
+
+    pub fn into_partitions(
+        self,
+        partitions: Vec<PartitionAssignment>,
+    ) -> Vec<(PartitionAssignment, PreparedQuery)> {
+        partitions
+            .into_iter()
+            .map(|p| {
+                let query = self.clone().with(RangeFilter {
+                    column: &p.column,
+                    lower_bound: &p.lower_bound,
+                    upper_bound: &p.upper_bound,
+                });
+                (p, query)
+            })
+            .collect()
     }
 }
 

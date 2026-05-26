@@ -90,7 +90,71 @@ impl IndexingStatusStore {
 
     pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
         let key = normalize_key(traversal_path)?;
-        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
+        self.read_key(&key).await
+    }
+
+    pub async fn record_entity_start(
+        &self,
+        traversal_path: &str,
+        entity_kind: &str,
+        started_at: DateTime<Utc>,
+    ) {
+        let previous = self.get_entity(traversal_path, entity_kind).await.unwrap_or_else(|error| {
+            warn!(traversal_path, entity_kind, %error, "failed to read previous entity progress; starting from scratch");
+            None
+        });
+        let progress = match previous {
+            Some(mut prev) => {
+                prev.last_started_at = started_at;
+                prev
+            }
+            None => IndexingProgress {
+                last_started_at: started_at,
+                last_completed_at: None,
+                last_duration_ms: None,
+                last_error: None,
+            },
+        };
+        self.write_entity(traversal_path, entity_kind, progress)
+            .await;
+    }
+
+    pub async fn record_entity_completion(
+        &self,
+        traversal_path: &str,
+        entity_kind: &str,
+        started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
+        error: Option<String>,
+    ) {
+        let duration_ms = completed_at
+            .signed_duration_since(started_at)
+            .num_milliseconds()
+            .max(0) as u64;
+        self.write_entity(
+            traversal_path,
+            entity_kind,
+            IndexingProgress {
+                last_started_at: started_at,
+                last_completed_at: Some(completed_at),
+                last_duration_ms: Some(duration_ms),
+                last_error: error,
+            },
+        )
+        .await;
+    }
+
+    pub async fn get_entity(
+        &self,
+        traversal_path: &str,
+        entity_kind: &str,
+    ) -> Result<Option<IndexingProgress>, Error> {
+        let key = entity_key(traversal_path, entity_kind)?;
+        self.read_key(&key).await
+    }
+
+    async fn read_key(&self, key: &str) -> Result<Option<IndexingProgress>, Error> {
+        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, key).await? else {
             return Ok(None);
         };
         let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
@@ -105,7 +169,26 @@ impl IndexingStatusStore {
                 return;
             }
         };
+        self.write_raw(&key, progress).await;
+    }
 
+    async fn write_entity(
+        &self,
+        traversal_path: &str,
+        entity_kind: &str,
+        progress: IndexingProgress,
+    ) {
+        let key = match entity_key(traversal_path, entity_kind) {
+            Ok(key) => key,
+            Err(error) => {
+                warn!(traversal_path, entity_kind, %error, "skipping entity indexing status record");
+                return;
+            }
+        };
+        self.write_raw(&key, progress).await;
+    }
+
+    async fn write_raw(&self, key: &str, progress: IndexingProgress) {
         let payload = match serde_json::to_vec(&progress) {
             Ok(bytes) => Bytes::from(bytes),
             Err(error) => {
@@ -118,7 +201,7 @@ impl IndexingStatusStore {
             .kv
             .kv_put(
                 INDEXING_PROGRESS_BUCKET,
-                &key,
+                key,
                 payload,
                 KvPutOptions::default(),
             )
@@ -136,6 +219,12 @@ fn normalize_key(traversal_path: &str) -> Result<String, Error> {
         return Err(Error::EmptyTraversalPath);
     }
     Ok(format!("{KEY_PREFIX}.{dotted}"))
+}
+
+/// `("42/9970/", "MergeRequest")` → `"status.42.9970.MergeRequest"`.
+fn entity_key(traversal_path: &str, entity_kind: &str) -> Result<String, Error> {
+    let base = normalize_key(traversal_path)?;
+    Ok(format!("{base}.{entity_kind}"))
 }
 
 #[cfg(test)]
@@ -160,6 +249,22 @@ mod tests {
                 "input: {empty:?}"
             );
         }
+    }
+
+    #[test]
+    fn entity_key_appends_kind() {
+        assert_eq!(
+            entity_key("42/9970/", "MergeRequest").unwrap(),
+            "status.42.9970.MergeRequest"
+        );
+        assert_eq!(
+            entity_key("42/9970/12345/", "Issue").unwrap(),
+            "status.42.9970.12345.Issue"
+        );
+        assert!(matches!(
+            entity_key("", "MergeRequest"),
+            Err(Error::EmptyTraversalPath)
+        ));
     }
 
     #[test]
