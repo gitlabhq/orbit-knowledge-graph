@@ -1,0 +1,59 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for Artifact Registry context. Attached as a custom context to Snowplow events emitted by the Artifact Registry standalone service.",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "artifact_registry_context",
+    "format": "jsonschema",
+    "version": "1-0-0"
+  },
+  "type": "object",
+  "required": [
+    "ar_instance_version"
+  ],
+  "properties": {
+    "ar_instance_version": {
+      "description": "Artifact Registry version, e.g. 1.2.0",
+      "type": ["string"],
+      "maxLength": 32
+    },
+    "ar_namespace_id": {
+      "description": "ID of the Artifact Registry namespace. An Organization can own multiple AR namespaces.",
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "format": {
+      "description": "Artifact format being acted upon.",
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "repository_kind": {
+      "description": "Kind of repository the event applies to. Local repositories store the Organization's own artifacts; virtual repositories aggregate upstream sources; remote repositories represent cached content from a single upstream.",
+      "type": ["string", "null"],
+      "enum": [
+        "local",
+        "virtual",
+        "remote"
+      ]
+    },
+    "repository_id": {
+      "description": "ID of the format-specific repository within the AR namespace. Useful for per-repository slicing. Null for events that are not repository-scoped.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 9223372036854775807
+    },
+    "cache_hit": {
+      "description": "Whether the requested artifact was served from the virtual repository cache. Only meaningful for pulls from virtual repositories.",
+      "type": ["boolean", "null"]
+    },
+    "upstream_type": {
+      "description": "Type of upstream resolved for a virtual repository operation. Local upstreams point at another local AR repository; remote upstreams point at an external registry.",
+      "type": ["string", "null"],
+      "enum": [
+        "local",
+        "remote"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

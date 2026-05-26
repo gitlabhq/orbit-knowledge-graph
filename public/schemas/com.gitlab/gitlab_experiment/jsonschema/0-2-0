@@ -1,0 +1,34 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for a gitlab-experiment events",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "gitlab_experiment",
+    "version": "0-2-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "variant"],
+  "properties": {
+    "key": {
+      "description": "Context key, as generated from the experiment context",
+      "type": "string",
+      "maxLength": 32
+    },
+    "variant": {
+      "description": "Variant determined to use for the context key",
+      "type": "string",
+      "maxLength": 255
+    },
+    "migrations": {
+      "type": "array",
+      "description": "Optional array of previous context keys",
+      "items": {
+        "description": "Previous context key, as generated from experiment context",
+        "type": "string",
+        "maxLength": 32
+      }
+    }
+  }
+}

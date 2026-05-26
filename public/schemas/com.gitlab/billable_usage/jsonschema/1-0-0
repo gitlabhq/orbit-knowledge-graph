@@ -1,0 +1,143 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Schema for billable usage events",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "billable_usage",
+    "version": "1-0-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "required": [
+    "event_type",
+    "unit_of_measure",
+    "duration_seconds",
+    "realm",
+    "global_user_id",
+    "context_generated_at"
+  ],
+  "properties": {
+    "instance_id": {
+      "description": "Identifier for the customer instance",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "unique_instance_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Unique ID of the GitLab instance where the request comes from",
+      "maxLength": 255
+    },
+    "unit_of_measure": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The base unit used for measurement and billing (e.g., 'bytes', 'seconds', 'tokens'). Used for accurate unit conversion and billing calculations.",
+      "maxLength": 255
+    },
+    "host_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Host name of the GitLab instance where the request comes from",
+      "maxLength": 255
+    },
+    "feature_id": {
+      "description": "Identifier for the billable feature being used",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "event_type": {
+      "description": "Name of billable event",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "context_generated_at": {
+      "description": "Timestamp indicating moment when context was generated",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "duration_seconds": {
+      "description": "Duration for which workflow ran",
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "realm": {
+      "description": "Environment type (SaaS, Dedicated, SM)",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "SaaS",
+        "Dedicated",
+        "SM",
+        null
+      ]
+    },
+    "project_id": {
+      "description": "ID of the associated project",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "namespace_id": {
+      "description": "ID of the associated namespace",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "global_user_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Globally unique user ID",
+      "maxLength": 64
+    },
+    "ultimate_parent_namespace_id": {
+      "description": "ID of the associated ultimate parent namespace",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "metadata": {
+      "description": "Flexible metadata field for key-value pairs or nested objects",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
