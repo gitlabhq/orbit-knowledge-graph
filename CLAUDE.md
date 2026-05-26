@@ -78,7 +78,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
 | Iglu schemas (vendored via vendir) | `vendor/iglu/` (update via `vendir sync` or `mise iglu:bump -- <name> <version>`) |
-| Iglu version pins | `config/schemas/*.iglu-version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
+| Iglu version pins | `config/schemas/iglu/*.iglu-version` (bump via `mise iglu:bump -- <name> <version>`, check via `mise iglu:check`) |
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
 | Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |
 | Billing config + observer | `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs` |

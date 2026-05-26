@@ -10,7 +10,7 @@
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
-VERSION_DIR="config/schemas"
+VERSION_DIR="config/schemas/iglu"
 
 failed=0
 

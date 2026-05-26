@@ -12,7 +12,7 @@ use serde::Serialize;
 
 /// Read the pinned version from a `.iglu-version` file.
 fn pinned_version(name: &str) -> String {
-    let path = PathBuf::from(env!("SCHEMA_DIR")).join(format!("{name}.iglu-version"));
+    let path = PathBuf::from(env!("SCHEMA_DIR")).join("iglu").join(format!("{name}.iglu-version"));
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
         .trim()
