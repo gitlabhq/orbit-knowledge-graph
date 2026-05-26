@@ -191,4 +191,74 @@ mod tests {
         let query = build_query(&claims, "query_graph", None);
         assert_eq!(query.schema(), ORBIT_QUERY_SCHEMA);
     }
+
+    // ── Iglu schema validation ──────────────────────────────────────────
+
+    mod iglu {
+        use super::*;
+        use std::sync::LazyLock;
+
+        static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
+            let schema: serde_json::Value = serde_json::from_str(include_str!(
+                "../../../../config/schemas/iglu/orbit_common.1-0-0.json"
+            ))
+            .expect("orbit_common schema is valid JSON");
+            jsonschema::validator_for(&schema).expect("orbit_common schema compiles")
+        });
+
+        static ORBIT_QUERY_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
+            let schema: serde_json::Value = serde_json::from_str(include_str!(
+                "../../../../config/schemas/iglu/orbit_query.2-0-1.json"
+            ))
+            .expect("orbit_query schema is valid JSON");
+            jsonschema::validator_for(&schema).expect("orbit_query schema compiles")
+        });
+
+        fn assert_valid(validator: &jsonschema::Validator, data: &serde_json::Value, label: &str) {
+            let result = validator.validate(data);
+            if let Err(errors) = result {
+                let msgs: Vec<_> = errors.map(|e| format!("  - {e}")).collect();
+                panic!(
+                    "{label} failed Iglu schema validation:\n{}",
+                    msgs.join("\n")
+                );
+            }
+        }
+
+        #[test]
+        fn common_context_validates_against_iglu_schema() {
+            let claims = claims_with_paths(vec!["1/22/"]);
+            let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+            assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
+        }
+
+        #[test]
+        fn common_context_minimal_validates() {
+            let claims = claims_with_paths(vec![]);
+            let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+            assert_valid(
+                &ORBIT_COMMON_VALIDATOR,
+                &common.data(),
+                "orbit_common (minimal)",
+            );
+        }
+
+        #[test]
+        fn query_context_validates_against_iglu_schema() {
+            let claims = claims_with_paths(vec!["1/22/"]);
+            let query = build_query(&claims, "query_graph", Some("claude-code"));
+            assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
+        }
+
+        #[test]
+        fn query_context_minimal_validates() {
+            let claims = claims_with_paths(vec![]);
+            let query = build_query(&claims, "query_graph", None);
+            assert_valid(
+                &ORBIT_QUERY_VALIDATOR,
+                &query.data(),
+                "orbit_query (minimal)",
+            );
+        }
+    }
 }

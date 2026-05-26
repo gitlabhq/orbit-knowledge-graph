@@ -54,5 +54,10 @@ pre-commit:
         - "crates/gkg-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
         - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+    - name: iglu-schema-check
+      run: bash ./scripts/check-iglu-schemas.sh
+      glob:
+        - "config/schemas/iglu/**"
+        - "crates/gkg-server/src/analytics/context.rs"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit
