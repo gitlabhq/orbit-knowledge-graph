@@ -398,6 +398,21 @@ pub struct VirtualSource {
     /// for resolution. The compiler ensures these are fetched during hydration
     /// even if the user didn't request them.
     pub depends_on: Vec<String>,
+    /// Filter operators allowed on this virtual column. Populated by the
+    /// ontology loader — always non-empty at runtime (defaults applied during
+    /// loading when the YAML omits `allowed_ops`).
+    pub allowed_ops: Vec<String>,
+}
+
+impl VirtualSource {
+    pub const DEFAULT_ALLOWED_OPS: &[&str] = &[
+        "eq",
+        "contains",
+        "starts_with",
+        "ends_with",
+        "is_null",
+        "is_not_null",
+    ];
 }
 
 /// A field definition within an entity.

@@ -47,6 +47,9 @@ pub struct HydrationTemplate {
     /// the hydration pipeline can narrow scans via `startsWith(traversal_path, tp)`
     /// using TP values extracted from the base query.
     pub has_traversal_path: bool,
+    /// Filters on virtual columns to apply in-memory after hydration resolves
+    /// their values. Each entry is `(column_name, filter)`.
+    pub virtual_filters: Vec<(String, crate::input::InputFilter)>,
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
@@ -148,6 +151,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 virtual_columns,
                 injected_columns,
                 has_traversal_path: ont_node.has_traversal_path,
+                virtual_filters: node.virtual_filters.clone(),
             })
         })
         .collect()
@@ -307,6 +311,10 @@ mod tests {
                 lookup: lookup.to_string(),
                 disabled: false,
                 depends_on: deps.iter().map(|s| s.to_string()).collect(),
+                allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             }),
             nullable: true,
             ..Default::default()
@@ -451,6 +459,7 @@ mod tests {
                     lookup: "blob_content".to_string(),
                     disabled: true,
                     depends_on: vec![],
+                    allowed_ops: vec![],
                 }),
                 nullable: true,
                 ..Default::default()

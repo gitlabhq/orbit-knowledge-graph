@@ -484,6 +484,8 @@ local reference =
   + o.sectionCollapsed('Query engine — threats (reference)', o.metricsInDomain('query.engine'), DS, SEL)
   + o.sectionCollapsed('Content resolution (reference)', o.metricsInDomain('server.content'), DS, SEL)
   + o.sectionCollapsed('Schema watcher (reference)', o.metricsInDomain('server.schema_watcher'), DS, SEL)
+  + o.sectionCollapsed('Billing events (reference)', o.metricsInDomain('billing.events'), DS, SEL)
+  + o.sectionCollapsed('Circuit breaker (reference)', o.metricsInDomain('resilience.circuit_breaker'), DS, o.GKG_ANY_SEL)
   + o.externalSection('Rails KG — request (reference)', ext.RAILS_KG_REQUEST, RDS, RAIL)
   + o.externalSection('Rails KG — traversal (reference)', ext.RAILS_KG_TRAVERSAL, RDS, RAIL);
 

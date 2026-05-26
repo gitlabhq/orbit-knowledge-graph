@@ -52,7 +52,8 @@ pub use constants::{
 };
 pub use error::{QueryError, Result};
 pub use input::{
-    ColumnSelection, DynamicColumnMode, EntityAuthConfig, Input, InputNode, QueryType, parse_input,
+    ColumnSelection, DynamicColumnMode, EntityAuthConfig, FilterOp, Input, InputFilter, InputNode,
+    QueryType, parse_input,
 };
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
@@ -70,7 +71,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, TraversalPath};
+pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -1593,5 +1594,67 @@ mod tests {
             sql.contains(">=") && sql.contains("<"),
             "both range predicates must appear in SQL, got:\n{sql}"
         );
+    }
+
+    #[test]
+    fn filter_on_virtual_column_compiles_without_sql_predicate() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let compiled = compile(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "f", "entity": "File",
+                         "node_ids": [1],
+                         "filters": {"content": {"op": "eq", "value": "x"}},
+                         "columns": ["path", "content"]},
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect("virtual column filter should compile");
+
+        let sql = compiled.base.render();
+        assert!(
+            !sql.contains("content"),
+            "virtual column 'content' must not appear in SQL, got:\n{sql}"
+        );
+
+        // Virtual filter should be carried on the hydration plan.
+        if let HydrationPlan::Static(templates) = &compiled.hydration {
+            assert!(
+                templates.iter().any(|t| !t.virtual_filters.is_empty()),
+                "hydration plan should carry virtual filters"
+            );
+        } else {
+            panic!("expected static hydration plan");
+        }
+    }
+
+    #[test]
+    fn filter_on_virtual_column_rejects_unsupported_op() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let err = compile(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "f", "entity": "File",
+                         "node_ids": [1],
+                         "filters": {"content": {"op": "gt", "value": "x"}}},
+                "limit": 5
+            }"#,
+            &ontology,
+            &security_ctx(),
+        )
+        .expect_err("unsupported op on virtual column should be rejected");
+
+        assert!(
+            err.is_client_safe(),
+            "virtual column op rejection should be client-safe"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("content"),
+            "error should name the column: {msg}"
+        );
+        assert!(msg.contains("gt"), "error should name the operator: {msg}");
     }
 }

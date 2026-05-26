@@ -24,6 +24,7 @@
           "api_user": null,
           "customers_dot_url": "",
           "enabled": false,
+          "fallback_cache_ttl_secs": 3600,
           "request_timeout_ms": 1000
         }
       }
@@ -303,6 +304,7 @@
             "api_user": null,
             "customers_dot_url": "",
             "enabled": false,
+            "fallback_cache_ttl_secs": 3600,
             "request_timeout_ms": 1000
           }
         }
@@ -1289,6 +1291,12 @@
         "enabled": {
           "type": "boolean",
           "default": false
+        },
+        "fallback_cache_ttl_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 0
         },
         "request_timeout_ms": {
           "type": "integer",

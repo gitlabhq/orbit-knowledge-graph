@@ -136,6 +136,7 @@ These repositories on [`ops.gitlab.net`](https://ops.gitlab.net) manage the Kube
 | Operational runbooks | [`docs/dev/runbooks/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
 | Local GDK-connected development | [`docs/dev/local-development.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
 | E2E testing harness | [`docs/dev/e2e-testing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/e2e-testing.md) -- full-stack e2e tests on GKE (GitLab + Siphon + GKG), runs in CI on MRs |
+| Contributors: adding a new language | [`docs/dev/adding-a-language.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/adding-a-language.md) -- step-by-step guide for adding a new language to the v2 code indexer (DSL trait surface, `define_languages!` macro, fixture registration, common traps) |
 | [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---

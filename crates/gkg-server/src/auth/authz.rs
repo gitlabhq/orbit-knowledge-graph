@@ -25,8 +25,17 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String
             .collect()
     };
 
+    let realm = claims
+        .realm
+        .as_deref()
+        .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok());
+
     SecurityContext::new_with_roles(org_id, traversal_paths)
-        .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
+        .map(|sc| {
+            sc.with_role(claims.admin, claims.min_access_level)
+                .with_realm(realm)
+                .with_team_member(claims.is_gitlab_team_member.unwrap_or(false))
+        })
         .map_err(|e| e.to_string())
 }
 
@@ -62,6 +71,7 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            is_gitlab_team_member: None,
         }
     }
 

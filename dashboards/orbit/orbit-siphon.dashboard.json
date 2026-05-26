@@ -300,7 +300,7 @@
          "type": "timeseries"
       }
    ],
-   "refresh": "1m",
+   "refresh": "",
    "schemaVersion": 39,
    "tags": [
       "orbit",
@@ -320,19 +320,6 @@
             "query": "prometheus",
             "refresh": 1,
             "regex": "/Analytics Eventsdot/",
-            "type": "datasource"
-         },
-         {
-            "current": {
-               "text": "Mimir - Gitlab Gprd",
-               "value": "mimir-gitlab-gprd"
-            },
-            "hide": 0,
-            "label": "Rails datasource (gitlab tenant)",
-            "name": "RAILS_DS",
-            "query": "prometheus",
-            "refresh": 1,
-            "regex": "/Gitlab Gstg|Gitlab Gprd/",
             "type": "datasource"
          },
          {
@@ -370,6 +357,7 @@
                "text": "gprd",
                "value": "gprd"
             },
+            "description": "Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.",
             "hide": 0,
             "includeAll": false,
             "label": "Rails env",
@@ -385,14 +373,9 @@
                   "selected": false,
                   "text": "gstg",
                   "value": "gstg"
-               },
-               {
-                  "selected": false,
-                  "text": "both",
-                  "value": "gstg|gprd"
                }
             ],
-            "query": "gprd,gstg,gstg|gprd",
+            "query": "gprd,gstg",
             "type": "custom"
          }
       ]

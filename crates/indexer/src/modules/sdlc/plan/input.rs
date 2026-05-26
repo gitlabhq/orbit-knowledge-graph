@@ -6,6 +6,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
+// CTE fragments for standalone-edge enrichment. lower::render_cte_template
+// stitches them into `WITH _batch AS (...) ... LEFT JOIN` so each endpoint
+// does a point lookup (`id IN (SELECT DISTINCT fk FROM _batch)`) rather
+// than a full namespace scan.
+pub(in crate::modules::sdlc) struct EnrichmentSql {
+    pub cte_defs: Vec<String>,
+    pub join_clauses: Vec<String>,
+    pub select_exprs: Vec<String>,
+}
+
 /// A node property to project onto the edge row during transform.
 pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
     /// Column in the source MemTable (e.g. "status").
@@ -113,16 +123,6 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
     /// that do point lookups by FK, avoiding full namespace scans.
     pub enrichment: Option<EnrichmentSql>,
-}
-
-/// Pre-built SQL fragments for CTE-based enrichment.
-pub(in crate::modules::sdlc) struct EnrichmentSql {
-    /// CTE definitions (e.g. `_e0 AS (SELECT id, argMax(...) FROM ... WHERE id IN (...) GROUP BY id)`).
-    pub cte_defs: Vec<String>,
-    /// JOIN clauses (e.g. `LEFT JOIN _e0 ON _batch.issue_id = _e0.id`).
-    pub join_clauses: Vec<String>,
-    /// SELECT expressions for enriched columns (e.g. `_e0.state_id AS _e0_state_id`).
-    pub select_exprs: Vec<String>,
 }
 
 pub(in crate::modules::sdlc) enum ExtractColumn {

@@ -33,8 +33,8 @@ pub struct QueryOptions {
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
     /// When true, includes compiled ClickHouse SQL in the response metadata.
-    /// Only honored for authorized users (instance admins and direct GitLab
-    /// org members with Reporter+ access).
+    /// On SaaS: honored for GitLab team members. On self-managed/Dedicated:
+    /// honored for instance admins only.
     #[serde(default)]
     pub include_debug_sql: bool,
 }
@@ -351,6 +351,10 @@ pub struct InputNode {
     /// Virtual columns stripped by normalize, consumed by the hydration plan.
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
+    /// Filters on virtual columns, separated by normalize so they don't flow
+    /// into SQL. Applied in-memory after hydration resolves the column values.
+    #[serde(skip)]
+    pub virtual_filters: Vec<(String, InputFilter)>,
     /// Whether the node table has a traversal_path column. Set during normalization.
     #[serde(skip)]
     pub has_traversal_path: bool,
@@ -374,6 +378,7 @@ impl Default for InputNode {
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
+            virtual_filters: Vec::new(),
             has_traversal_path: false,
             traversal_paths: Vec::new(),
         }
@@ -458,7 +463,7 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
@@ -467,8 +472,9 @@ pub struct InputFilter {
     pub data_type: Option<ontology::DataType>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum FilterOp {
     Eq,
     Gt,

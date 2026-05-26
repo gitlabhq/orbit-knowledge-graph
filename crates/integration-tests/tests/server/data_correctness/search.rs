@@ -744,3 +744,115 @@ pub(super) async fn search_multi_filter_mixed_with_single_filter(ctx: &TestConte
         n.prop_str("merged_at").is_some_and(|s| s >= "2024-06-01")
     });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Virtual column filters (post-hydration, uses MockColumnResolver)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Filter on virtual column `diff` with `contains` matching the mock value.
+/// MockColumnResolver returns "mock:mr_raw_patch" for every MR, so
+/// `contains: "mock"` should return all merged MRs that pass the state filter.
+pub(super) async fn search_virtual_filter_contains_matching(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "diff"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "diff": {"op": "contains", "value": "mock"}
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "diff", |n| {
+        n.prop_str("diff").is_some_and(|s| s.contains("mock"))
+    });
+}
+
+/// Filter on virtual column `diff` with `eq` that does not match the mock
+/// value. Should return 0 rows.
+pub(super) async fn search_virtual_filter_eq_no_match(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "diff"],
+                     "filters": {
+                         "diff": {"op": "eq", "value": "nonexistent content"}
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::Filter {
+        field: "diff".into(),
+    });
+    resp.assert_node_count(0);
+}
+
+/// Virtual filter `is_not_null` on `diff`. MockColumnResolver always
+/// returns a value, so all MRs should pass.
+pub(super) async fn search_virtual_filter_is_not_null(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "diff"],
+                     "filters": {
+                         "diff": {"op": "is_not_null"}
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(6);
+    resp.assert_filter("MergeRequest", "diff", |n| n.prop_str("diff").is_some());
+}
+
+/// Combined physical + virtual filter: state=merged AND diff contains "mock".
+pub(super) async fn search_virtual_filter_combined_with_physical(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "diff"],
+                     "filters": {
+                         "state": "merged",
+                         "diff": {"op": "starts_with", "value": "mock:"}
+                     }},
+            "order_by": {"node": "mr", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_order("MergeRequest", &[2002, 2004, 2005]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "diff", |n| {
+        n.prop_str("diff").is_some_and(|s| s.starts_with("mock:"))
+    });
+}

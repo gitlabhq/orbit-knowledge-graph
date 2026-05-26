@@ -57,6 +57,7 @@ enum EtlYaml {
     #[serde(rename = "query")]
     Query {
         scope: EtlScope,
+        source: String,
         select: String,
         from: String,
         #[serde(default, rename = "where")]
@@ -215,6 +216,10 @@ struct VirtualSourceYaml {
     /// for resolution. The compiler ensures these are fetched during hydration.
     #[serde(default)]
     depends_on: Vec<String>,
+    /// Filter operators allowed on this virtual column. When omitted, all
+    /// default virtual ops are allowed.
+    #[serde(default)]
+    allowed_ops: Vec<String>,
 }
 
 impl NodeYaml {
@@ -237,12 +242,23 @@ impl NodeYaml {
 
                 let source = match (prop_def.source, prop_def.virtual_config) {
                     (Some(col), None) => FieldSource::DatabaseColumn(col),
-                    (None, Some(v)) => FieldSource::Virtual(VirtualSource {
-                        service: v.service,
-                        lookup: v.lookup,
-                        disabled: v.disabled,
-                        depends_on: v.depends_on,
-                    }),
+                    (None, Some(v)) => {
+                        let allowed_ops = if v.allowed_ops.is_empty() {
+                            VirtualSource::DEFAULT_ALLOWED_OPS
+                                .iter()
+                                .map(|s| (*s).to_string())
+                                .collect()
+                        } else {
+                            v.allowed_ops
+                        };
+                        FieldSource::Virtual(VirtualSource {
+                            service: v.service,
+                            lookup: v.lookup,
+                            disabled: v.disabled,
+                            depends_on: v.depends_on,
+                            allowed_ops,
+                        })
+                    }
                     (Some(_), Some(_)) => {
                         return Err(OntologyError::Validation(format!(
                             "property '{prop_name}' on node '{name}': \
@@ -457,6 +473,7 @@ impl EtlYaml {
             }),
             EtlYaml::Query {
                 scope,
+                source,
                 select,
                 from,
                 where_clause,
@@ -468,6 +485,7 @@ impl EtlYaml {
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
+                source,
                 select,
                 from,
                 where_clause,

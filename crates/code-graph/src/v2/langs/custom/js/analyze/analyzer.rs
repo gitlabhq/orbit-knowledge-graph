@@ -729,8 +729,8 @@ fn build_module_info(
 }
 
 impl JsAnalyzer {
-    const MAX_LINE_LENGTH: usize = 5_000;
-    const MAX_AVG_LINE_LENGTH: usize = 200;
+    const MAX_LINE_LENGTH: usize = 64 * 1024;
+    const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
     const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
 
     pub fn analyze_file(
@@ -791,6 +791,7 @@ impl JsAnalyzer {
                 format!("unknown JS source type: {file_path}"),
             )
         })?;
+        let source_type = source_type.with_jsx(source_type.is_javascript());
         let allocator = Allocator::default();
         let parsed = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             Parser::new(&allocator, source, source_type).parse()
@@ -904,5 +905,26 @@ impl JsAnalyzer {
             classes,
             module_info,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn js_files_allow_jsx_syntax() {
+        let analysis = JsAnalyzer::analyze_file(
+            "import React from 'react';\nconst App = () => <main className=\"app\" />;\nexport default App;\n",
+            "src/App.js",
+            "src/App.js",
+        )
+        .expect("JSX in .js files should parse");
+
+        assert!(
+            analysis.defs.iter().any(|def| def.name == "App"),
+            "expected App definition, got {:?}",
+            analysis.defs
+        );
     }
 }

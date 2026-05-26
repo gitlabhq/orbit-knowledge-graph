@@ -56,6 +56,17 @@ impl DslLanguage for RubyDsl {
                 .def_kind(DefKind::Lambda)
                 .no_scope()
                 .name_from(no_extract()),
+            // Constant assignments: `MAX = 2`, `Foo::Bar = obj`. Tree-sitter
+            // tags any uppercase-leading identifier on the LHS as `constant`,
+            // and qualified `Foo::Bar` LHSes as `scope_resolution`. We emit a
+            // Definition so queries like "where is MAX_TRACKED_REFS_PER_PROJECT
+            // defined" return a node; `no_scope` keeps the constant from
+            // pushing a new FQN segment for nested defs.
+            scope("assignment", "Constant")
+                .def_kind(DefKind::Other)
+                .when(field_kind("left", &["constant", "scope_resolution"]))
+                .name_from(field("left"))
+                .no_scope(),
         ]
     }
 
@@ -71,6 +82,26 @@ impl DslLanguage for RubyDsl {
             reference("scope_resolution")
                 .name_from(text())
                 .when(!parent_is("scope_resolution").and(!parent_is("call"))),
+            // Bare constant reference: `MAX_REFS` standalone in an expression.
+            // Tree-sitter tags any uppercase-leading identifier as `constant`,
+            // so this captures the same-class case (`@count < MAX_REFS`) that
+            // the `identifier` rule misses. Definitional positions are always
+            // the first named child of a parent, so we exclude with
+            // `parent_is(...).and(!has_named_prev_sibling)`: the class/module
+            // name, the LHS of an assignment, etc. The chain handler already
+            // picks up constants used as receivers (`Foo.bar`), so
+            // `!parent_is("call")` avoids a duplicate edge there.
+            reference("constant").name_from(text()).when(
+                (!parent_is("scope_resolution"))
+                    .and(!parent_is("call"))
+                    .and(!parent_is("superclass"))
+                    .and(!parent_is("left_assignment_list"))
+                    .and(!parent_is("singleton_class"))
+                    .and(!parent_is("class").and(!has_named_prev_sibling()))
+                    .and(!parent_is("module").and(!has_named_prev_sibling()))
+                    .and(!parent_is("assignment").and(!has_named_prev_sibling()))
+                    .and(!parent_is("operator_assignment").and(!has_named_prev_sibling())),
+            ),
             // bare method call without parens/args — just an identifier in Ruby
             // e.g. `validate_name` inside a method body. Exclude positions
             // where identifiers are definitely not method calls.
@@ -730,6 +761,120 @@ mod tests {
         assert!(
             ref_chains.iter().any(|(name, _)| *name == "bar"),
             "should have a chain ref for 'bar', got: {ref_chains:?}"
+        );
+    }
+
+    #[test]
+    fn constant_assignments_emit_definitions() {
+        let code = "MAX_REFS = 2\n\
+                    class Tracker\n  \
+                      MAX_TRACKED_REFS_PER_PROJECT = 2\n  \
+                      DEFAULT_NAME = \"foo\"\n  \
+                      counter = 0\n\
+                    end\n\
+                    Tracker::EXTRA = 5\n";
+        let result = parse(code).unwrap();
+
+        let consts: Vec<(&str, &str)> = result
+            .definitions
+            .iter()
+            .filter(|d| d.definition_type == "Constant")
+            .map(|d| (d.name.as_str(), d.fqn.as_str()))
+            .collect();
+
+        assert!(
+            consts.contains(&("MAX_REFS", "MAX_REFS")),
+            "top-level constant should be indexed: {consts:?}"
+        );
+        assert!(
+            consts.contains(&(
+                "MAX_TRACKED_REFS_PER_PROJECT",
+                "Tracker::MAX_TRACKED_REFS_PER_PROJECT"
+            )),
+            "nested constant should carry the enclosing class FQN: {consts:?}"
+        );
+        assert!(
+            consts.contains(&("DEFAULT_NAME", "Tracker::DEFAULT_NAME")),
+            "string-valued constant should still be indexed: {consts:?}"
+        );
+        assert!(
+            consts.contains(&("Tracker::EXTRA", "Tracker::EXTRA")),
+            "qualified constant assignment should be indexed: {consts:?}"
+        );
+        assert!(
+            !consts.iter().any(|(name, _)| *name == "counter"),
+            "lowercase local variable must not be indexed as a Constant: {consts:?}"
+        );
+    }
+
+    #[test]
+    fn bare_constant_reference_emits_a_ref() {
+        let code = "class Foo\n  \
+                      MAX = 2\n  \
+                      OTHER = MAX + 1\n  \
+                      def consume\n    \
+                        @value < MAX\n  \
+                      end\n\
+                    end\n\
+                    X = Foo\n";
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        let count_max = ref_names.iter().filter(|n| **n == "MAX").count();
+        // Two MAX refs expected: one on the RHS of `OTHER = MAX + 1`, and
+        // one inside `@value < MAX`. The LHS `MAX = 2` must not produce
+        // a ref. Same for the LHS of `OTHER = ...` and `X = ...`, and
+        // the class name `Foo` and `class Foo`.
+        assert_eq!(
+            count_max, 2,
+            "expected 2 MAX refs (RHS of `OTHER = MAX + 1`, and `@value < MAX`), got {count_max}: {ref_names:?}"
+        );
+        // RHS Foo of `X = Foo` should produce a ref.
+        assert!(
+            ref_names.contains(&"Foo"),
+            "RHS of `X = Foo` should ref Foo: {ref_names:?}"
+        );
+        // Definitional positions must not show up as refs.
+        let lhs_count = ref_names
+            .iter()
+            .filter(|n| **n == "OTHER" || **n == "X")
+            .count();
+        assert_eq!(
+            lhs_count, 0,
+            "LHS constants (OTHER, X) must not be refs: {ref_names:?}"
+        );
+    }
+
+    #[test]
+    fn qualified_constant_reference_emits_a_ref() {
+        let code = "module Foo\n  \
+                      class Bar\n    \
+                        MAX = 1\n  \
+                      end\n\
+                    end\n\
+                    class User\n  \
+                      def value\n    \
+                        Foo::Bar::MAX\n  \
+                      end\n\
+                    end\n";
+        let result = RubyDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        assert!(
+            ref_names.contains(&"Foo::Bar::MAX"),
+            "qualified constant reference should appear in refs: {ref_names:?}"
         );
     }
 

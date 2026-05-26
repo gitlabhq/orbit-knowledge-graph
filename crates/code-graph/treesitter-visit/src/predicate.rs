@@ -115,6 +115,17 @@ pub fn parent_ends_with(suffix: &'static str) -> Pred {
     exists(Extract::one(Axis::Parent, Match::Any).where_(Match::KindEndsWith(suffix)))
 }
 
+/// True when this node has any named previous sibling. Useful for
+/// detecting the first-named-child position of a parent — tree-sitter
+/// fields like `class.name`, `module.name`, and `assignment.left` are
+/// always the first named child of their parent, so combining
+/// `parent_is(kind).and(!has_named_prev_sibling())` excludes the
+/// definitional position without excluding the right-hand-side
+/// reference.
+pub fn has_named_prev_sibling() -> Pred {
+    check_at(Axis::PrevSibling, Match::Named)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

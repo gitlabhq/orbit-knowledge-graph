@@ -53,6 +53,11 @@ async fn data_correctness() {
         search::search_multi_filter_date_window_multiple_results,
         search::search_multi_filter_empty_window_returns_empty,
         search::search_multi_filter_mixed_with_single_filter,
+        // search: virtual column filters (post-hydration)
+        search::search_virtual_filter_contains_matching,
+        search::search_virtual_filter_eq_no_match,
+        search::search_virtual_filter_is_not_null,
+        search::search_virtual_filter_combined_with_physical,
         // traversal
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,

@@ -5,11 +5,6 @@ use serde_json::json;
 use crate::types::{HydrationOutput, PaginationMeta, PipelineOutput, QueryExecutionLog};
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 
-/// Traversal path prefix for the GitLab org namespace. Users whose
-/// security context includes a path starting with this prefix get
-/// compiled SQL in the response for debugging.
-const GITLAB_ORG_PATH_PREFIX: &str = "1/9970/";
-
 #[derive(Clone)]
 pub struct OutputStage;
 
@@ -73,21 +68,21 @@ impl PipelineStage for OutputStage {
     }
 }
 
-/// Debug SQL output is available to direct members of the top-level GitLab
-/// org group (traversal path exactly `1/9970/`, Reporter+) and instance admins.
-/// Sub-group or project-only members don't qualify -- this prevents
-/// external contributors invited to a single project from seeing compiled SQL.
+/// Debug SQL is gated by the JWT `is_gitlab_team_member` claim and realm:
+///
+/// - **SaaS** (`realm == "SaaS"`): requires `is_gitlab_team_member == true`.
+///   Rails sets this via `Gitlab::Com.gitlab_com_group_member?(user)`.
+/// - **Self-managed / Dedicated**: instance admins only.
+///   `is_gitlab_team_member` is always false off `.com`.
+/// - **Unknown realm or missing context**: denied.
 fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
-    ctx.security_context.as_ref().is_some_and(|sc| {
-        let direct_gitlab_org_member = sc
-            .traversal_paths
-            .iter()
-            .any(|tp| tp.path == GITLAB_ORG_PATH_PREFIX);
-        let reporter_or_above = sc
-            .access_level
-            .is_some_and(|level| level >= compiler::AccessLevel::Reporter);
-        sc.admin || (direct_gitlab_org_member && reporter_or_above)
-    })
+    ctx.security_context
+        .as_ref()
+        .is_some_and(|sc| match sc.realm {
+            Some(compiler::Realm::SaaS) => sc.is_gitlab_team_member,
+            Some(compiler::Realm::SelfManaged) | Some(compiler::Realm::Dedicated) => sc.admin,
+            None => false,
+        })
 }
 
 #[cfg(test)]
@@ -109,63 +104,81 @@ mod tests {
         }
     }
 
-    #[test]
-    fn no_security_context_denies_debug_sql() {
-        let ctx = make_ctx(None);
-        assert!(!can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn external_user_denied() {
-        let sc = SecurityContext::new(1, vec!["1/12345/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
-        let ctx = make_ctx(Some(sc));
-        assert!(!can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn gitlab_org_subgroup_member_denied() {
-        let sc = SecurityContext::new(1, vec!["1/9970/555/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
-        let ctx = make_ctx(Some(sc));
-        assert!(!can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn gitlab_org_direct_member_without_access_level_denied() {
+    fn saas_ctx(team_member: bool, admin: bool) -> QueryPipelineContext {
         let sc = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
-            .with_role(false, None);
-        let ctx = make_ctx(Some(sc));
-        assert!(!can_see_debug_sql(&ctx));
+            .with_role(admin, Some(20))
+            .with_realm(Some(compiler::Realm::SaaS))
+            .with_team_member(team_member);
+        make_ctx(Some(sc))
     }
 
-    #[test]
-    fn gitlab_org_direct_member_guest_denied() {
-        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_role(false, Some(10));
-        let ctx = make_ctx(Some(sc));
-        assert!(!can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn gitlab_org_direct_member_reporter_allowed() {
-        let sc = SecurityContext::new(1, vec!["1/9970/".into()])
-            .unwrap()
-            .with_role(false, Some(20));
-        let ctx = make_ctx(Some(sc));
-        assert!(can_see_debug_sql(&ctx));
-    }
-
-    #[test]
-    fn admin_always_allowed() {
+    fn self_managed_ctx(admin: bool) -> QueryPipelineContext {
         let sc = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_role(true, None);
-        let ctx = make_ctx(Some(sc));
-        assert!(can_see_debug_sql(&ctx));
+            .with_role(admin, None)
+            .with_realm(Some(compiler::Realm::SelfManaged));
+        make_ctx(Some(sc))
+    }
+
+    #[test]
+    fn no_security_context_denies() {
+        assert!(!can_see_debug_sql(&make_ctx(None)));
+    }
+
+    #[test]
+    fn saas_team_member_allowed() {
+        assert!(can_see_debug_sql(&saas_ctx(true, false)));
+    }
+
+    #[test]
+    fn saas_non_team_member_denied() {
+        assert!(!can_see_debug_sql(&saas_ctx(false, false)));
+    }
+
+    #[test]
+    fn saas_admin_non_team_member_denied() {
+        assert!(!can_see_debug_sql(&saas_ctx(false, true)));
+    }
+
+    #[test]
+    fn saas_admin_team_member_allowed() {
+        assert!(can_see_debug_sql(&saas_ctx(true, true)));
+    }
+
+    #[test]
+    fn self_managed_admin_allowed() {
+        assert!(can_see_debug_sql(&self_managed_ctx(true)));
+    }
+
+    #[test]
+    fn self_managed_non_admin_denied() {
+        assert!(!can_see_debug_sql(&self_managed_ctx(false)));
+    }
+
+    #[test]
+    fn dedicated_admin_allowed() {
+        let sc = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_role(true, None)
+            .with_realm(Some(compiler::Realm::Dedicated));
+        assert!(can_see_debug_sql(&make_ctx(Some(sc))));
+    }
+
+    #[test]
+    fn dedicated_non_admin_denied() {
+        let sc = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_realm(Some(compiler::Realm::Dedicated));
+        assert!(!can_see_debug_sql(&make_ctx(Some(sc))));
+    }
+
+    #[test]
+    fn missing_realm_denied() {
+        let sc = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_role(true, Some(50))
+            .with_team_member(true);
+        assert!(!can_see_debug_sql(&make_ctx(Some(sc))));
     }
 }

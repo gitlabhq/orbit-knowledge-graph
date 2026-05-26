@@ -3783,7 +3783,7 @@
          },
          "id": 72,
          "panels": [ ],
-         "title": "Scheduler (indexer)",
+         "title": "Scheduler (dispatcher)",
          "type": "row"
       },
       {
@@ -3829,7 +3829,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.5, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p50 {{task}}",
                "refId": "A"
             },
@@ -3838,7 +3838,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.95, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p95 {{task}}",
                "refId": "B"
             },
@@ -3847,7 +3847,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.99, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p99 {{task}}",
                "refId": "C"
             }
@@ -3898,7 +3898,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (task) (rate(gkg_scheduler_task_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (task) (rate(gkg_scheduler_task_duration_seconds_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{task}}",
                "refId": "A"
             }
@@ -3949,7 +3949,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (task, stage) (rate(gkg_scheduler_task_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (task, stage) (rate(gkg_scheduler_task_errors_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{task}} / {{stage}}",
                "refId": "A"
             }
@@ -4000,7 +4000,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.5, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p50 {{query}}",
                "refId": "A"
             },
@@ -4009,7 +4009,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.95, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p95 {{query}}",
                "refId": "B"
             },
@@ -4018,7 +4018,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "histogram_quantile(0.99, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                "legendFormat": "p99 {{query}}",
                "refId": "C"
             }
@@ -4069,7 +4069,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (query) (rate(gkg_scheduler_task_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (query) (rate(gkg_scheduler_task_query_duration_seconds_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{query}}",
                "refId": "A"
             }
@@ -4120,7 +4120,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_published_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_published_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{task}}",
                "refId": "A"
             }
@@ -4171,7 +4171,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_skipped_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{task}}",
                "refId": "A"
             }
@@ -4222,7 +4222,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (task, outcome) (rate(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (task, outcome) (rate(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{task}} / {{outcome}}",
                "refId": "A"
             }
@@ -6510,7 +6510,7 @@
          },
          "id": 125,
          "panels": [ ],
-         "title": "Siphon producers",
+         "title": "Billing events (webserver)",
          "type": "row"
       },
       {
@@ -6518,7 +6518,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Siphon producer ops (CDC events emitted).",
+         "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -6556,6 +6556,338 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "expr": "sum by (reason) (rate(gkg_billing_events_dropped_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{reason}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_events_dropped_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Billing events handed to the Snowplow tracker after a successful query.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 349
+         },
+         "id": 127,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_billing_events_emitted_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_events_emitted_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Billing events refused by the labkit tracker at enqueue (queue full or tracker shutdown). HTTP delivery failures to the Snowplow collector occur in labkit's background loop and are not surfaced through this counter.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 349
+         },
+         "id": 128,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_billing_events_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_events_rejected_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 357
+         },
+         "id": 129,
+         "panels": [ ],
+         "title": "Circuit breaker (CH / NATS / GitLab clients)",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Classified call outcomes through the circuit breaker.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 358
+         },
+         "id": 130,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (service, outcome) (rate(gkg_circuit_breaker_calls_total{container=~\"gkg-.*\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{service}} / {{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_circuit_breaker_calls_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Calls rejected by an open circuit breaker.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 358
+         },
+         "id": 131,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (service) (rate(gkg_circuit_breaker_calls_rejected_total{container=~\"gkg-.*\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{service}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_circuit_breaker_calls_rejected_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Circuit-breaker state transitions, labelled by service and direction.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 358
+         },
+         "id": 132,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (service, from, to) (rate(gkg_circuit_breaker_state_transitions_total{container=~\"gkg-.*\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{service}} / {{from}} / {{to}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_circuit_breaker_state_transitions_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 366
+         },
+         "id": 133,
+         "panels": [ ],
+         "title": "Siphon producers",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Siphon producer ops (CDC events emitted).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 367
+         },
+         "id": 134,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "expr": "sum by (app_id, container) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{app_id}} / {{container}}",
                "refId": "A"
@@ -6570,9 +6902,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 357
+            "y": 375
          },
-         "id": 127,
+         "id": 135,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -6598,9 +6930,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 358
+            "y": 376
          },
-         "id": 128,
+         "id": 136,
          "options": {
             "legend": {
                "calcs": [
@@ -6634,9 +6966,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 366
+            "y": 384
          },
-         "id": 129,
+         "id": 137,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -6662,9 +6994,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 367
+            "y": 385
          },
-         "id": 130,
+         "id": 138,
          "options": {
             "legend": {
                "calcs": [
@@ -6713,9 +7045,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 367
+            "y": 385
          },
-         "id": 131,
+         "id": 139,
          "options": {
             "legend": {
                "calcs": [
@@ -6764,9 +7096,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 367
+            "y": 385
          },
-         "id": 132,
+         "id": 140,
          "options": {
             "legend": {
                "calcs": [
@@ -6815,9 +7147,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 375
+            "y": 393
          },
-         "id": 133,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [
@@ -6866,9 +7198,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 375
+            "y": 393
          },
-         "id": 134,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -6917,9 +7249,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 375
+            "y": 393
          },
-         "id": 135,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -6968,9 +7300,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 383
+            "y": 401
          },
-         "id": 136,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [
@@ -7019,9 +7351,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 383
+            "y": 401
          },
-         "id": 137,
+         "id": 145,
          "options": {
             "legend": {
                "calcs": [
@@ -7070,9 +7402,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 383
+            "y": 401
          },
-         "id": 138,
+         "id": 146,
          "options": {
             "legend": {
                "calcs": [
@@ -7121,9 +7453,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 391
+            "y": 409
          },
-         "id": 139,
+         "id": 147,
          "options": {
             "legend": {
                "calcs": [
@@ -7157,9 +7489,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 399
+            "y": 417
          },
-         "id": 140,
+         "id": 148,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -7167,7 +7499,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
          "description": "Rails → GKG gRPC call latency.",
          "fieldConfig": {
@@ -7185,487 +7517,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 400
-         },
-         "id": 141,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 {{method}} / {{status}}",
-               "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 {{method}} / {{status}}",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 {{method}} / {{status}}",
-               "refId": "C"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_grpc_duration_seconds — p50/p95/p99",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails → GKG gRPC call latency.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 400
-         },
-         "id": 142,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "{{method}} / {{status}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_grpc_duration_seconds — observation rate",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails → GKG gRPC error count.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 400
-         },
-         "id": 143,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "{{method}} / {{code}}",
-               "refId": "A"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_grpc_errors_total — rate/s",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails-side redaction time.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "s"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 408
-         },
-         "id": 144,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
-               "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_redaction_duration_seconds — p50/p95/p99",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails-side redaction time.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 408
-         },
-         "id": 145,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
-               "refId": "A"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_redaction_duration_seconds — observation rate",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails-side redaction batch size.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 408
-         },
-         "id": 146,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
-               "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_redaction_batch_size — p50/p95/p99",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rails-side redaction batch size.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 0,
-            "y": 416
-         },
-         "id": 147,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
-               "refId": "A"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_redaction_batch_size — observation rate",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rows filtered by redaction per request.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 8,
-            "y": 416
-         },
-         "id": 148,
-         "options": {
-            "legend": {
-               "calcs": [
-                  "lastNotNull",
-                  "max"
-               ],
-               "displayMode": "table",
-               "placement": "bottom"
-            },
-            "tooltip": {
-               "mode": "multi"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
-               "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
-            }
-         ],
-         "title": "gitlab_knowledge_graph_redaction_filtered_count — p50/p95/p99",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$RAILS_DS"
-         },
-         "description": "Rows filtered by redaction per request.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 10,
-                  "lineInterpolation": "smooth",
-                  "showPoints": "auto"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 8,
-            "w": 8,
-            "x": 16,
-            "y": 416
+            "y": 418
          },
          "id": 149,
          "options": {
@@ -7685,22 +7537,40 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
+               "expr": "histogram_quantile(0.5, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 {{method}} / {{status}}",
                "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 {{method}} / {{status}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 {{method}} / {{status}}",
+               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_redaction_filtered_count — observation rate",
+         "title": "gitlab_knowledge_graph_grpc_duration_seconds — p50/p95/p99",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "JWT assembly latency on Rails side.",
+         "description": "Rails → GKG gRPC call latency.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7709,14 +7579,14 @@
                   "lineInterpolation": "smooth",
                   "showPoints": "auto"
                },
-               "unit": "s"
+               "unit": "short"
             }
          },
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 424
+            "x": 8,
+            "y": 418
          },
          "id": 150,
          "options": {
@@ -7736,40 +7606,22 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
+               "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "{{method}} / {{status}}",
                "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — p50/p95/p99",
+         "title": "gitlab_knowledge_graph_grpc_duration_seconds — observation rate",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "JWT assembly latency on Rails side.",
+         "description": "Rails → GKG gRPC error count.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7784,8 +7636,8 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
-            "y": 424
+            "x": 16,
+            "y": 418
          },
          "id": 151,
          "options": {
@@ -7805,22 +7657,22 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
+               "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "{{method}} / {{code}}",
                "refId": "A"
             }
          ],
-         "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — observation rate",
+         "title": "gitlab_knowledge_graph_grpc_errors_total — rate/s",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Auth-context build latency on Rails side.",
+         "description": "Rails-side redaction time.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7835,8 +7687,8 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 424
+            "x": 0,
+            "y": 426
          },
          "id": 152,
          "options": {
@@ -7856,40 +7708,40 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
                "legendFormat": "p50 overall",
                "refId": "A"
             },
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
                "legendFormat": "p95 overall",
                "refId": "B"
             },
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
                "legendFormat": "p99 overall",
                "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_auth_context_duration_seconds — p50/p95/p99",
+         "title": "gitlab_knowledge_graph_redaction_duration_seconds — p50/p95/p99",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Auth-context build latency on Rails side.",
+         "description": "Rails-side redaction time.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7904,8 +7756,8 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
-            "y": 432
+            "x": 8,
+            "y": 426
          },
          "id": 153,
          "options": {
@@ -7925,35 +7777,91 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+               "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
                "legendFormat": "count",
                "refId": "A"
             }
          ],
-         "title": "gitlab_knowledge_graph_auth_context_duration_seconds — observation rate",
+         "title": "gitlab_knowledge_graph_redaction_duration_seconds — observation rate",
          "type": "timeseries"
-      },
-      {
-         "collapsed": false,
-         "gridPos": {
-            "h": 1,
-            "w": 24,
-            "x": 0,
-            "y": 440
-         },
-         "id": 154,
-         "panels": [ ],
-         "title": "Rails KG traversal compaction",
-         "type": "row"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Traversal IDs per request (pre-compaction).",
+         "description": "Rails-side redaction batch size.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 426
+         },
+         "id": 154,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_redaction_batch_size — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Rails-side redaction batch size.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -7969,7 +7877,7 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 441
+            "y": 434
          },
          "id": 155,
          "options": {
@@ -7989,40 +7897,22 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
+               "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_traversal_ids_count — p50/p95/p99",
+         "title": "gitlab_knowledge_graph_redaction_batch_size — observation rate",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Traversal IDs per request (pre-compaction).",
+         "description": "Rows filtered by redaction per request.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8038,7 +7928,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 441
+            "y": 434
          },
          "id": 156,
          "options": {
@@ -8058,22 +7948,40 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_traversal_ids_count — observation rate",
+         "title": "gitlab_knowledge_graph_redaction_filtered_count — p50/p95/p99",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Compaction ratio of traversal IDs.",
+         "description": "Rows filtered by redaction per request.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8089,7 +7997,7 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 441
+            "y": 434
          },
          "id": 157,
          "options": {
@@ -8109,40 +8017,22 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p50 overall",
+               "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p95 overall",
-               "refId": "B"
-            },
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$RAILS_DS"
-               },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
-               "legendFormat": "p99 overall",
-               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_compaction_ratio — p50/p95/p99",
+         "title": "gitlab_knowledge_graph_redaction_filtered_count — observation rate",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Compaction ratio of traversal IDs.",
+         "description": "JWT assembly latency on Rails side.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8151,14 +8041,14 @@
                   "lineInterpolation": "smooth",
                   "showPoints": "auto"
                },
-               "unit": "short"
+               "unit": "s"
             }
          },
          "gridPos": {
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 449
+            "y": 442
          },
          "id": 158,
          "options": {
@@ -8178,22 +8068,40 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "count",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
             }
          ],
-         "title": "gitlab_knowledge_graph_compaction_ratio — observation rate",
+         "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — p50/p95/p99",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Traversal compaction fell back to uncompressed form.",
+         "description": "JWT assembly latency on Rails side.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8209,7 +8117,7 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 449
+            "y": 442
          },
          "id": 159,
          "options": {
@@ -8229,22 +8137,22 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
-               "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
             }
          ],
-         "title": "gitlab_knowledge_graph_compaction_fallback_total — rate/s",
+         "title": "gitlab_knowledge_graph_jwt_build_duration_seconds — observation rate",
          "type": "timeseries"
       },
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
-         "description": "Requests with too many traversal IDs.",
+         "description": "Auth-context build latency on Rails side.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -8253,14 +8161,14 @@
                   "lineInterpolation": "smooth",
                   "showPoints": "auto"
                },
-               "unit": "short"
+               "unit": "s"
             }
          },
          "gridPos": {
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 449
+            "y": 442
          },
          "id": 160,
          "options": {
@@ -8280,7 +8188,431 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_auth_context_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Auth-context build latency on Rails side.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 450
+         },
+         "id": 161,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_auth_context_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 458
+         },
+         "id": 162,
+         "panels": [ ],
+         "title": "Rails KG traversal compaction",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Traversal IDs per request (pre-compaction).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 459
+         },
+         "id": 163,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_traversal_ids_count — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Traversal IDs per request (pre-compaction).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 459
+         },
+         "id": 164,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_traversal_ids_count — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Compaction ratio of traversal IDs.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 459
+         },
+         "id": 165,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_compaction_ratio — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Compaction ratio of traversal IDs.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 467
+         },
+         "id": 166,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_compaction_ratio — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Traversal compaction fell back to uncompressed form.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 467
+         },
+         "id": 167,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
+               },
+               "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gitlab_knowledge_graph_compaction_fallback_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "mimir-gitlab-${rails_env}"
+         },
+         "description": "Requests with too many traversal IDs.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 467
+         },
+         "id": 168,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
                "legendFormat": "{{instance}}",
@@ -8291,7 +8623,7 @@
          "type": "timeseries"
       }
    ],
-   "refresh": "1m",
+   "refresh": "",
    "schemaVersion": 39,
    "tags": [
       "orbit",
@@ -8311,19 +8643,6 @@
             "query": "prometheus",
             "refresh": 1,
             "regex": "/Analytics Eventsdot/",
-            "type": "datasource"
-         },
-         {
-            "current": {
-               "text": "Mimir - Gitlab Gprd",
-               "value": "mimir-gitlab-gprd"
-            },
-            "hide": 0,
-            "label": "Rails datasource (gitlab tenant)",
-            "name": "RAILS_DS",
-            "query": "prometheus",
-            "refresh": 1,
-            "regex": "/Gitlab Gstg|Gitlab Gprd/",
             "type": "datasource"
          },
          {
@@ -8361,6 +8680,7 @@
                "text": "gprd",
                "value": "gprd"
             },
+            "description": "Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.",
             "hide": 0,
             "includeAll": false,
             "label": "Rails env",
@@ -8376,14 +8696,9 @@
                   "selected": false,
                   "text": "gstg",
                   "value": "gstg"
-               },
-               {
-                  "selected": false,
-                  "text": "both",
-                  "value": "gstg|gprd"
                }
             ],
-            "query": "gprd,gstg,gstg|gprd",
+            "query": "gprd,gstg",
             "type": "custom"
          }
       ]

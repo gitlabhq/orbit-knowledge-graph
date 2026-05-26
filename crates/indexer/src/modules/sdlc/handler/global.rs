@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,11 +8,11 @@ use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
-use crate::modules::sdlc::plan::PipelinePlan;
+use crate::modules::sdlc::plan::Plan;
 use crate::topic::GlobalIndexingRequest;
 
 pub struct GlobalHandler {
-    plans: Vec<PipelinePlan>,
+    plans: Vec<Plan>,
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
     subscription: Subscription,
@@ -21,7 +20,7 @@ pub struct GlobalHandler {
 
 impl GlobalHandler {
     pub fn new(
-        plans: Vec<PipelinePlan>,
+        plans: Vec<Plan>,
         pipeline: Arc<Pipeline>,
         metrics: SdlcMetrics,
         subscription: Subscription,
@@ -59,7 +58,7 @@ impl Handler for GlobalHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: "global".to_string(),
-            base_conditions: BTreeMap::new(),
+            traversal_path: None,
         };
 
         let result = self

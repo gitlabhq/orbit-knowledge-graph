@@ -162,7 +162,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
         let root = tmp.path();
         std::fs::write(root.join("ok.js"), "export const x = 1;\n").unwrap();
-        let long_line: String = "x".repeat(5_500);
+        let long_line: String = "x".repeat(70_000);
         std::fs::write(root.join("long.js"), format!("const a = '{long_line}';\n")).unwrap();
 
         let ctx = make_ctx(root);
@@ -175,5 +175,28 @@ mod tests {
             "expected a line_too_long skip, got skipped={skipped:?} faults={faults:?}",
         );
         assert!(faults.is_empty(), "line_too_long must not record a fault");
+    }
+
+    #[test]
+    fn moderately_long_js_line_is_analyzed() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let root = tmp.path();
+        let long_line: String = "x".repeat(17_000);
+        std::fs::write(
+            root.join("prettify.js"),
+            format!("// header\nconst a = '{long_line}';\n"),
+        )
+        .unwrap();
+
+        let ctx = make_ctx(root);
+        run_js(&ctx, &["prettify.js".to_string()]);
+
+        let skipped = ctx.skipped.lock().unwrap().clone();
+        let faults = ctx.faults.lock().unwrap().clone();
+        assert!(
+            skipped.is_empty(),
+            "moderately long generated lines should parse, got skipped={skipped:?}",
+        );
+        assert!(faults.is_empty(), "expected no JS faults, got {faults:?}");
     }
 }

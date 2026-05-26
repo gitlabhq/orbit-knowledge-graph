@@ -138,7 +138,14 @@ local unitFor(spec, rate=false) = (
 
 // ---------- Panel + datasource primitives ----------
 
-local datasource(uid_var) = { type: 'prometheus', uid: '$' + uid_var };
+// RAILS_DS is derived from `$rails_env` because the Rails Mimir tenants are
+// split per environment (`mimir-gitlab-gprd`, `mimir-gitlab-gstg`). Keeping
+// it as a free-standing datasource picker let users select the gprd tenant
+// while querying gstg labels, producing silent "no data" panels.
+local datasource(uid_var) = {
+  type: 'prometheus',
+  uid: if uid_var == 'RAILS_DS' then 'mimir-gitlab-${rails_env}' else '$' + uid_var,
+};
 
 local target(expr, legend, ds_var, refId='A') = {
   datasource: datasource(ds_var),
@@ -743,16 +750,6 @@ local TEMPLATING = {
       refresh: 1,
     },
     {
-      name: 'RAILS_DS',
-      label: 'Rails datasource (gitlab tenant)',
-      type: 'datasource',
-      query: 'prometheus',
-      current: { text: 'Mimir - Gitlab Gprd', value: 'mimir-gitlab-gprd' },
-      regex: '/Gitlab Gstg|Gitlab Gprd/',
-      hide: 0,
-      refresh: 1,
-    },
-    {
       name: 'cluster',
       label: 'Orbit cluster',
       type: 'custom',
@@ -770,13 +767,13 @@ local TEMPLATING = {
     {
       name: 'rails_env',
       label: 'Rails env',
+      description: 'Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.',
       type: 'custom',
-      query: 'gprd,gstg,gstg|gprd',
+      query: 'gprd,gstg',
       current: { text: 'gprd', value: 'gprd' },
       options: [
         { text: 'gprd', value: 'gprd', selected: true },
         { text: 'gstg', value: 'gstg', selected: false },
-        { text: 'both', value: 'gstg|gprd', selected: false },
       ],
       includeAll: false,
       multi: false,
@@ -799,7 +796,7 @@ local dashboard(uid, title, tags, description, items) = {
   version: 1,
   time: { from: 'now-3h', to: 'now' },
   timezone: 'utc',
-  refresh: '1m',
+  refresh: '',
   templating: TEMPLATING,
   links: [{
     type: 'dashboards',
@@ -816,6 +813,8 @@ local dashboard(uid, title, tags, description, items) = {
 
 local GKG_WEB_SEL = 'container="gkg-webserver", cluster=~"$cluster"';
 local GKG_IDX_SEL = 'container="gkg-indexer", cluster=~"$cluster"';
+local GKG_DSP_SEL = 'container="gkg-dispatcher", cluster=~"$cluster"';
+local GKG_ANY_SEL = 'container=~"gkg-.*", cluster=~"$cluster"';
 local SIPHON_SEL = 'namespace="siphon", cluster=~"$cluster"';
 local NATS_SEL = 'cluster=~"$cluster"';
 local RAILS_SEL = 'env=~"$rails_env"';
@@ -869,6 +868,8 @@ local RAILS_SEL = 'env=~"$rails_env"';
   // Selectors
   GKG_WEB_SEL: GKG_WEB_SEL,
   GKG_IDX_SEL: GKG_IDX_SEL,
+  GKG_DSP_SEL: GKG_DSP_SEL,
+  GKG_ANY_SEL: GKG_ANY_SEL,
   SIPHON_SEL: SIPHON_SEL,
   NATS_SEL: NATS_SEL,
   RAILS_SEL: RAILS_SEL,

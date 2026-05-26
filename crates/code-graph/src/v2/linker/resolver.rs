@@ -642,6 +642,25 @@ impl<'a> ResolveCtx<'a> {
 
     fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         self.check_killed()?;
+
+        // Qualified-name fast path. For refs whose name contains the
+        // language's FQN separator (e.g. Ruby `Foo::Bar::MAX` from a
+        // standalone `scope_resolution` node), the standard `by_name`
+        // strategies miss them: Definition.name is the leaf only, and
+        // `scope_fqn_walk` always prepends an enclosing scope. Try a
+        // direct by_fqn lookup first so absolute qualified references
+        // resolve to non-type-container definitions like Constants.
+        if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
+            let matches = self
+                .graph
+                .indexes
+                .by_fqn
+                .lookup(r.name, |idx| self.graph.def_fqn(idx) == r.name);
+            if !matches.is_empty() {
+                return Ok(matches.to_vec());
+            }
+        }
+
         if r.reaching.is_empty() && !self.graph.indexes.by_name.contains(r.name) {
             return Ok(vec![]);
         }

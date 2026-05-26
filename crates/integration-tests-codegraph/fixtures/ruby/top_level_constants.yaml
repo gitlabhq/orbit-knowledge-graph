@@ -1,0 +1,385 @@
+name: "Ruby constant definitions — covers gitlab-org/gitlab#600282 and gitlab-org/orbit/knowledge-graph#758"
+
+# Constants in Ruby are uppercase-leading identifiers assigned at any
+# lexical scope. Tree-sitter tags the LHS of `MAX = 2` as `constant`
+# and the LHS of `Foo::Bar = obj` as `scope_resolution`. Both must
+# produce Definition nodes with definition_type = "Constant" so that
+# queries like "where is MAX_TRACKED_REFS_PER_PROJECT defined?" return
+# a result. Lowercase locals must not be indexed.
+
+fixtures:
+  - path: lib/top_level.rb
+    content: |
+      TOP_LEVEL_LIMIT = 100
+      DEFAULT_GREETING = "hello"
+      ALLOWED_TYPES = [:user, :admin, :guest].freeze
+
+      counter = 0
+      result = counter + TOP_LEVEL_LIMIT
+
+  - path: lib/security/project_tracked_context.rb
+    content: |
+      module Security
+        class ProjectTrackedContext
+          MAX_TRACKED_REFS_PER_PROJECT = 2
+          DEFAULT_NAME = "context"
+          CONFIG = { retention: 30, max_size: 1024 }.freeze
+
+          def initialize
+            @count = 0
+            @label = DEFAULT_NAME
+          end
+
+          def allow?
+            @count < MAX_TRACKED_REFS_PER_PROJECT
+          end
+        end
+      end
+
+  - path: lib/deeply_nested.rb
+    content: |
+      module Outer
+        module Middle
+          class Inner
+            DEEP_CONST = 42
+
+            class Innermost
+              VERY_DEEP = "leaf"
+            end
+          end
+        end
+      end
+
+  - path: lib/qualified_assignment.rb
+    content: |
+      module Registry
+      end
+
+      Registry::DEFAULT_TIMEOUT = 30
+      Registry::FEATURES = [:fast, :safe]
+
+  - path: lib/mixed_kinds.rb
+    content: |
+      class Mixed
+        TYPED_CONST = 5
+        STRING_CONST = "v1"
+        ARRAY_CONST = [1, 2, 3]
+        HASH_CONST = { a: 1 }
+        CLASS_CONST = Class.new
+        PROC_CONST = ->(x) { x * 2 }
+
+        attr_accessor :name
+
+        def some_method
+          @value = TYPED_CONST
+        end
+
+        private
+
+        local_var = 99
+      end
+
+  - path: lib/singleton_constants.rb
+    content: |
+      class WithSingleton
+        OUTER_CONST = 1
+
+        class << self
+          INNER_CONST = 2
+        end
+      end
+
+  - path: lib/constant_users.rb
+    content: |
+      require_relative "security/project_tracked_context"
+      require_relative "deeply_nested"
+
+      class ContextUser
+        def allowed_refs
+          Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT
+        end
+
+        def default_label
+          Security::ProjectTrackedContext::DEFAULT_NAME
+        end
+
+        def deep_value
+          Outer::Middle::Inner::DEEP_CONST
+        end
+      end
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # BASIC: definition_type = "Constant" is emitted at all
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "constants are indexed with definition_type = Constant"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "TOP_LEVEL_LIMIT" } }
+      - { row: { name: "MAX_TRACKED_REFS_PER_PROJECT" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # TOP-LEVEL CONSTANTS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "top-level constants have FQN equal to their name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/top_level.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "TOP_LEVEL_LIMIT" } }
+      - { row: { fqn: "DEFAULT_GREETING" } }
+      - { row: { fqn: "ALLOWED_TYPES" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NESTED IN CLASS UNDER MODULE — issue reproducer
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "constant inside class inside module gets full FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'MAX_TRACKED_REFS_PER_PROJECT'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn, d.file_path AS file_path
+    assert:
+      - { row_count: 1 }
+      - {
+          row:
+            {
+              fqn: "Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT",
+              file_path: "lib/security/project_tracked_context.rb",
+            },
+        }
+
+  - name: "all constants in ProjectTrackedContext are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/security/project_tracked_context.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT" } }
+      - { row: { fqn: "Security::ProjectTrackedContext::DEFAULT_NAME" } }
+      - { row: { fqn: "Security::ProjectTrackedContext::CONFIG" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # DEEPLY NESTED
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "deeply nested constants carry every enclosing scope"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/deeply_nested.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Outer::Middle::Inner::DEEP_CONST" } }
+      - { row: { fqn: "Outer::Middle::Inner::Innermost::VERY_DEEP" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # QUALIFIED LHS — `Foo::Bar = obj` (scope_resolution on left)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "qualified constant assignments are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/qualified_assignment.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Registry::DEFAULT_TIMEOUT" } }
+      - { row: { name: "Registry::FEATURES" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # MIXED RHS TYPES — every literal kind must produce a Constant
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "constants of every RHS kind are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/mixed_kinds.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { row: { fqn: "Mixed::TYPED_CONST" } }
+      - { row: { fqn: "Mixed::STRING_CONST" } }
+      - { row: { fqn: "Mixed::ARRAY_CONST" } }
+      - { row: { fqn: "Mixed::HASH_CONST" } }
+      - { row: { fqn: "Mixed::CLASS_CONST" } }
+      - { row: { fqn: "Mixed::PROC_CONST" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # SINGLETON CLASS — constants do not pick up a synthetic segment
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "constant inside class << self stays under the enclosing class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/singleton_constants.rb'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "WithSingleton::OUTER_CONST" } }
+      - { row: { fqn: "WithSingleton::INNER_CONST" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE: lowercase locals must not be indexed as Constants
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "lowercase locals are not Constants"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND (d.name = 'counter' OR d.name = 'result' OR d.name = 'local_var')
+      RETURN d.name AS name
+    assert:
+      - { row_count: 0 }
+
+  - name: "the bare `counter` local is not promoted to a Definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/top_level.rb'
+        AND d.name = 'counter'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 0 }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE: constants do not push an FQN segment for siblings
+  # (the `.no_scope()` invariant — instance methods stay under
+  # the enclosing class, not under the constant)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "instance methods next to a constant stay on the class FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Security::ProjectTrackedContext::allow?'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "no Constant definition exists with a method-shaped FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND d.name = 'initialize'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 0 }
+
+  # ══════════════════════════════════════════════════════════════
+  # COUNTS — overall sanity
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "total Constant count across all fixtures is exact"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+      RETURN count(*) AS n
+    assert:
+      - { row_count: 1 }
+      - { row: { n: 18 } }
+
+  # ══════════════════════════════════════════════════════════════
+  # REFERENCE RESOLUTION — qualified refs resolve to Constants
+  # ══════════════════════════════════════════════════════════════
+  #
+  # `reference("scope_resolution")` extracts `Foo::Bar::MAX`-shaped
+  # refs verbatim. The linker now tries a direct by_fqn lookup for
+  # any ref name containing the separator, so absolute qualified
+  # references resolve to non-type-container Definitions (Constants,
+  # leaf Methods) — not just top-level type containers like Classes.
+
+  - name: "ContextUser methods are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/constant_users.rb'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "ContextUser::allowed_refs" } }
+      - { row: { fqn: "ContextUser::default_label" } }
+      - { row: { fqn: "ContextUser::deep_value" } }
+
+  - name: "qualified constant reference resolves to the Constant Definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ContextUser::allowed_refs'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "second qualified constant reference (string-valued) also resolves"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ContextUser::default_label'
+        AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "deeply nested constant reference resolves across module chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'ContextUser::deep_value'
+        AND callee.fqn = 'Outer::Middle::Inner::DEEP_CONST'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # BARE (UNQUALIFIED) CONSTANT REFERENCES
+  # ══════════════════════════════════════════════════════════════
+  #
+  # The Ruby DSL now declares `reference("constant")` with field-aware
+  # exclusions, so a same-class bare ref like `MAX_TRACKED_REFS_PER_PROJECT`
+  # used inside `allow?` resolves via the linker's ImplicitMember stage
+  # (walks the enclosing FQN, hits the `nested` index, finds the
+  # Constant Definition).
+
+  - name: "bare constant ref in same class resolves via ImplicitMember"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::allow?'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "bare constant ref to a string-valued constant in initialize"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::initialize'
+        AND callee.fqn = 'Security::ProjectTrackedContext::DEFAULT_NAME'
+      RETURN callee.definition_type AS type, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Constant, kind: Calls } }
+
+  - name: "LHS of `MAX = 2` does not produce a self-referencing Calls edge"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+        AND callee.fqn = 'Security::ProjectTrackedContext::MAX_TRACKED_REFS_PER_PROJECT'
+      RETURN count(*) AS n
+    assert:
+      - { row: { n: 0 } }

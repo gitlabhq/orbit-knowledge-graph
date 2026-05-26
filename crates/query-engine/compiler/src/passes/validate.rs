@@ -160,6 +160,18 @@ impl<'a> Validator<'a> {
         Self { ontology }
     }
 
+    /// If the field is virtual, returns the allowed filter operators from the
+    /// ontology. Returns `None` for non-virtual fields.
+    fn virtual_allowed_ops(&self, entity: &str, prop: &str) -> Option<Vec<&str>> {
+        let node = self.ontology.get_node(entity)?;
+        let field = node.fields.iter().find(|f| f.name == prop)?;
+        if let ontology::FieldSource::Virtual(vs) = &field.source {
+            Some(vs.allowed_ops.iter().map(|s| s.as_str()).collect())
+        } else {
+            None
+        }
+    }
+
     /// Parse JSON and validate against the base schema (structure, identifiers, security).
     pub fn check_json(&self, json: &str) -> Result<serde_json::Value> {
         let value: serde_json::Value = serde_json::from_str(json)?;
@@ -379,6 +391,18 @@ impl<'a> Validator<'a> {
                     return Err(QueryError::Validation(format!(
                         "filter on \"{prop}\" for {entity}: field is not filterable"
                     )));
+                }
+                if let Some(allowed) = self.virtual_allowed_ops(entity, prop) {
+                    for filter in filters {
+                        let op = filter.op.unwrap_or(FilterOp::Eq);
+                        if !allowed.contains(&op.as_ref()) {
+                            return Err(QueryError::Validation(format!(
+                                "filter on \"{prop}\" for {entity}: operator \"{}\" is not \
+                                 supported on this virtual column (allowed: {allowed:?})",
+                                op.as_ref()
+                            )));
+                        }
+                    }
                 }
                 let Some(data_type) = self.ontology.get_field_type(entity, prop) else {
                     continue;
@@ -1400,6 +1424,10 @@ mod tests {
                     lookup: "project_name".into(),
                     disabled: false,
                     depends_on: vec![],
+                    allowed_ops: VirtualSource::DEFAULT_ALLOWED_OPS
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
                 });
             })
             .unwrap();

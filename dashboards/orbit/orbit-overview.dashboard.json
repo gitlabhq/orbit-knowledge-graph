@@ -627,7 +627,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
          "description": "Rails → GKG gRPC requests per minute.",
          "fieldConfig": {
@@ -660,7 +660,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]) * 60)",
                "legendFormat": "calls/min",
@@ -673,7 +673,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
          "description": "Rails-side gRPC errors per minute.",
          "fieldConfig": {
@@ -706,7 +706,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]) * 60)",
                "legendFormat": "errors/min",
@@ -719,7 +719,7 @@
       {
          "datasource": {
             "type": "prometheus",
-            "uid": "$RAILS_DS"
+            "uid": "mimir-gitlab-${rails_env}"
          },
          "description": "95th percentile of Rails-side gRPC latency.",
          "fieldConfig": {
@@ -752,7 +752,7 @@
             {
                "datasource": {
                   "type": "prometheus",
-                  "uid": "$RAILS_DS"
+                  "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
                "legendFormat": "p95 ms",
@@ -763,7 +763,7 @@
          "type": "stat"
       }
    ],
-   "refresh": "1m",
+   "refresh": "",
    "schemaVersion": 39,
    "tags": [
       "orbit",
@@ -783,19 +783,6 @@
             "query": "prometheus",
             "refresh": 1,
             "regex": "/Analytics Eventsdot/",
-            "type": "datasource"
-         },
-         {
-            "current": {
-               "text": "Mimir - Gitlab Gprd",
-               "value": "mimir-gitlab-gprd"
-            },
-            "hide": 0,
-            "label": "Rails datasource (gitlab tenant)",
-            "name": "RAILS_DS",
-            "query": "prometheus",
-            "refresh": 1,
-            "regex": "/Gitlab Gstg|Gitlab Gprd/",
             "type": "datasource"
          },
          {
@@ -833,6 +820,7 @@
                "text": "gprd",
                "value": "gprd"
             },
+            "description": "Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.",
             "hide": 0,
             "includeAll": false,
             "label": "Rails env",
@@ -848,14 +836,9 @@
                   "selected": false,
                   "text": "gstg",
                   "value": "gstg"
-               },
-               {
-                  "selected": false,
-                  "text": "both",
-                  "value": "gstg|gprd"
                }
             ],
-            "query": "gprd,gstg,gstg|gprd",
+            "query": "gprd,gstg",
             "type": "custom"
          }
       ]

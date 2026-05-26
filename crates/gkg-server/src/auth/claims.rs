@@ -57,4 +57,9 @@ pub struct Claims {
     pub deployment_type: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
+    /// Whether the user is a GitLab team member. Set by Rails via
+    /// `Gitlab::Com.gitlab_com_group_member?(user)`. Always false on
+    /// self-managed / Dedicated instances.
+    #[serde(default)]
+    pub is_gitlab_team_member: Option<bool>,
 }

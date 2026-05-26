@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::checkpoint::namespace_position_key;
@@ -11,11 +10,11 @@ use tracing::info;
 
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
-use crate::modules::sdlc::plan::PipelinePlan;
+use crate::modules::sdlc::plan::Plan;
 use crate::topic::NamespaceIndexingRequest;
 
 pub struct NamespaceHandler {
-    plans: Vec<PipelinePlan>,
+    plans: Vec<Plan>,
     pipeline: Arc<Pipeline>,
     metrics: SdlcMetrics,
     config: NamespaceHandlerConfig,
@@ -24,7 +23,7 @@ pub struct NamespaceHandler {
 
 impl NamespaceHandler {
     pub fn new(
-        plans: Vec<PipelinePlan>,
+        plans: Vec<Plan>,
         pipeline: Arc<Pipeline>,
         metrics: SdlcMetrics,
         config: NamespaceHandlerConfig,
@@ -73,10 +72,7 @@ impl Handler for NamespaceHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
-            base_conditions: BTreeMap::from([(
-                "traversal_path".to_string(),
-                traversal_path.clone(),
-            )]),
+            traversal_path: Some(traversal_path.clone()),
         };
 
         let result = self

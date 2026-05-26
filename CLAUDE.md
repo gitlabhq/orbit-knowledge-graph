@@ -14,7 +14,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
-- **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal IDs, resource permissions). See `docs/design-documents/security.md`.
+- **Rails owns authorization.** GKG delegates all access decisions to Rails via gRPC (traversal paths, resource permissions). See `docs/design-documents/security.md`.
 - **ClickHouse = datalake + graph.** Datalake DB holds raw Siphon rows; graph DB holds indexed property graph tables. The indexer transforms between them.
 - **Ontology-driven graph.** YAML in `config/ontology/nodes/` and `config/ontology/edges/` drives ETL, query validation, redaction, and edge table routing. New entity types start there, not in Rust. Edge YAML `table:` field + `settings.edge_tables` in `schema.yaml` control which physical table each relationship type writes to and queries from (default: `gl_edge`). Schema: `config/schemas/ontology.schema.json`.
 - **Single binary, four modes.** `gkg-server --mode` runs as Webserver, Indexer, DispatchIndexing, or HealthCheck.
@@ -42,6 +42,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 | What | Where |
 |---|---|
+| **Domain glossary** | **`CONTEXT.md`** |
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |
 | Query DSL spec | `docs/design-documents/querying/` |
@@ -137,3 +138,5 @@ Design docs live in `docs/design-documents/` and must describe the current repos
   - `docs/design-documents/querying/` for query surface, DSL, and response shape
   - `AGENTS.md` / `CLAUDE.md` for agent-facing architecture summaries and doc-sync rules
 - **If your MR changes the architecture but no design doc changed, assume the documentation is incomplete and fix it before merging.**
+- **When you introduce a new domain concept** (new node type, relationship type, query feature, pipeline concept), check `CONTEXT.md` and add or update the term if it's missing. Only add terms that are domain-specific and would confuse a new team member — not implementation details.
+- **Before writing documentation, design docs, or MR descriptions, consult `CONTEXT.md` for canonical terminology.** Use the canonical terms, not the aliases listed under _Avoid_.

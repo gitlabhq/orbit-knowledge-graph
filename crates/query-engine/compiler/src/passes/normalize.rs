@@ -218,6 +218,27 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             node.virtual_columns = virtual_cols;
         }
 
+        // Separate filters on virtual columns so they don't flow into SQL.
+        // They'll be applied in-memory after hydration resolves the values.
+        let virtual_col_names: std::collections::HashSet<&str> = node_entity
+            .fields
+            .iter()
+            .filter(|f| f.is_virtual())
+            .map(|f| f.name.as_str())
+            .collect();
+        let mut virtual_filters = Vec::new();
+        node.filters.retain(|prop, filters| {
+            if virtual_col_names.contains(prop.as_str()) {
+                for f in filters.drain(..) {
+                    virtual_filters.push((prop.clone(), f));
+                }
+                false
+            } else {
+                true
+            }
+        });
+        node.virtual_filters = virtual_filters;
+
         // Coerce filter values to match ontology field types (e.g., enum int → string)
         for (column, filters) in &mut node.filters {
             let Some(field) = node_entity.fields.iter().find(|f| f.name == *column) else {

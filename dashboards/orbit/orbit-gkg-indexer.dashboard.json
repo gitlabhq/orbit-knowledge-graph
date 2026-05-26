@@ -5619,7 +5619,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"dispatch.namespace_deletion\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"dispatch.namespace_deletion\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
                      "legendFormat": "{{outcome}}",
                      "refId": "A"
                   }
@@ -5670,7 +5670,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
                      "legendFormat": "p50 overall",
                      "refId": "A"
                   },
@@ -5679,7 +5679,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
                      "legendFormat": "p95 overall",
                      "refId": "B"
                   },
@@ -5688,7 +5688,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
                      "legendFormat": "p99 overall",
                      "refId": "C"
                   }
@@ -5746,7 +5746,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
                      "legendFormat": "{{outcome}}",
                      "refId": "A"
                   }
@@ -5804,7 +5804,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "(sum by (stage) (increase(gkg_scheduler_task_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
+                     "expr": "(sum by (stage) (increase(gkg_scheduler_task_errors_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
                      "legendFormat": "{{stage}}",
                      "refId": "A"
                   }
@@ -6040,7 +6040,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.5, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.5, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p50 {{task}}",
                      "refId": "A"
                   },
@@ -6049,7 +6049,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.95, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.95, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p95 {{task}}",
                      "refId": "B"
                   },
@@ -6058,7 +6058,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.99, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.99, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p99 {{task}}",
                      "refId": "C"
                   }
@@ -6109,7 +6109,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (task) (rate(gkg_scheduler_task_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (task) (rate(gkg_scheduler_task_duration_seconds_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{task}}",
                      "refId": "A"
                   }
@@ -6160,7 +6160,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (task, stage) (rate(gkg_scheduler_task_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (task, stage) (rate(gkg_scheduler_task_errors_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{task}} / {{stage}}",
                      "refId": "A"
                   }
@@ -6211,7 +6211,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.5, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.5, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p50 {{query}}",
                      "refId": "A"
                   },
@@ -6220,7 +6220,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.95, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.95, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p95 {{query}}",
                      "refId": "B"
                   },
@@ -6229,7 +6229,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "histogram_quantile(0.99, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "expr": "histogram_quantile(0.99, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m])))",
                      "legendFormat": "p99 {{query}}",
                      "refId": "C"
                   }
@@ -6280,7 +6280,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (query) (rate(gkg_scheduler_task_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (query) (rate(gkg_scheduler_task_query_duration_seconds_count{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{query}}",
                      "refId": "A"
                   }
@@ -6331,7 +6331,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (task) (rate(gkg_scheduler_task_requests_published_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (task) (rate(gkg_scheduler_task_requests_published_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{task}}",
                      "refId": "A"
                   }
@@ -6382,7 +6382,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (task) (rate(gkg_scheduler_task_requests_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (task) (rate(gkg_scheduler_task_requests_skipped_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{task}}",
                      "refId": "A"
                   }
@@ -6433,7 +6433,7 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (task, outcome) (rate(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "expr": "sum by (task, outcome) (rate(gkg_scheduler_task_runs_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                      "legendFormat": "{{task}} / {{outcome}}",
                      "refId": "A"
                   }
@@ -6446,7 +6446,7 @@
          "type": "row"
       }
    ],
-   "refresh": "1m",
+   "refresh": "",
    "schemaVersion": 39,
    "tags": [
       "orbit",
@@ -6467,19 +6467,6 @@
             "query": "prometheus",
             "refresh": 1,
             "regex": "/Analytics Eventsdot/",
-            "type": "datasource"
-         },
-         {
-            "current": {
-               "text": "Mimir - Gitlab Gprd",
-               "value": "mimir-gitlab-gprd"
-            },
-            "hide": 0,
-            "label": "Rails datasource (gitlab tenant)",
-            "name": "RAILS_DS",
-            "query": "prometheus",
-            "refresh": 1,
-            "regex": "/Gitlab Gstg|Gitlab Gprd/",
             "type": "datasource"
          },
          {
@@ -6517,6 +6504,7 @@
                "text": "gprd",
                "value": "gprd"
             },
+            "description": "Selects the env label AND the Mimir tenant (mimir-gitlab-${rails_env}). The two are coupled because gprd and gstg are separate datasources.",
             "hide": 0,
             "includeAll": false,
             "label": "Rails env",
@@ -6532,14 +6520,9 @@
                   "selected": false,
                   "text": "gstg",
                   "value": "gstg"
-               },
-               {
-                  "selected": false,
-                  "text": "both",
-                  "value": "gstg|gprd"
                }
             ],
-            "query": "gprd,gstg,gstg|gprd",
+            "query": "gprd,gstg",
             "type": "custom"
          }
       ]

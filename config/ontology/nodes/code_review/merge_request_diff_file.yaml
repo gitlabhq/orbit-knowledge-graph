@@ -125,6 +125,7 @@ properties:
 etl:
   type: query
   scope: namespaced
+  source: siphon_merge_request_diff_files
   select: >-
     sipHash64(file.merge_request_diff_id, file.relative_order) AS id,
     diff.merge_request_id AS merge_request_id,

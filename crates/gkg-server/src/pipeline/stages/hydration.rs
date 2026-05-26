@@ -210,6 +210,7 @@ impl PipelineStage for HydrationStage {
                         templates,
                     );
                 }
+                hydration_helpers::apply_virtual_filters_static(&mut query_result, templates);
             }
             HydrationPlan::Dynamic(entity_specs) => {
                 let static_nodes: Vec<_> = result_context.nodes().cloned().collect();
