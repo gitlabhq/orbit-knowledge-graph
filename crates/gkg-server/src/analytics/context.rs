@@ -182,14 +182,14 @@ mod tests {
     fn common_schema_is_1_0_0() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33");
-        assert_eq!(common.schema(), ORBIT_COMMON_SCHEMA);
+        assert_eq!(common.schema(), *ORBIT_COMMON_SCHEMA);
     }
 
     #[test]
     fn query_schema_is_2_0_1() {
         let claims = claims_with_paths(vec![]);
         let query = build_query(&claims, "query_graph", None);
-        assert_eq!(query.schema(), ORBIT_QUERY_SCHEMA);
+        assert_eq!(query.schema(), *ORBIT_QUERY_SCHEMA);
     }
 
     // ── Iglu schema validation ──────────────────────────────────────────

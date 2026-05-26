@@ -175,13 +175,13 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == gkg_analytics::ORBIT_COMMON_SCHEMA),
+            .any(|s| s == *gkg_analytics::ORBIT_COMMON_SCHEMA),
         "missing orbit_common context, contexts={context_schemas:?}"
     );
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == gkg_analytics::ORBIT_QUERY_SCHEMA),
+            .any(|s| s == *gkg_analytics::ORBIT_QUERY_SCHEMA),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 
