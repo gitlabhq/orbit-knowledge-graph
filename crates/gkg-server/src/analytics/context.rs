@@ -65,7 +65,7 @@ pub(crate) fn build_common(
     };
 
     OrbitCommonContext {
-        data: serde_json::to_value(data).unwrap_or_default(),
+        data: serde_json::to_value(data).expect("OrbitCommonData is always serializable"),
     }
 }
 
@@ -126,7 +126,7 @@ pub(crate) fn build_query(
     };
 
     OrbitQueryContext {
-        data: serde_json::to_value(data).unwrap_or_default(),
+        data: serde_json::to_value(data).expect("OrbitQueryData is always serializable"),
     }
 }
 
