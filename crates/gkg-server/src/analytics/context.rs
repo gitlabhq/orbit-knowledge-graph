@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::auth::Claims;
 
 const ORBIT_COMMON_SCHEMA: &str = "iglu:com.gitlab/orbit_common/jsonschema/1-0-0";
-const ORBIT_QUERY_SCHEMA: &str = "iglu:com.gitlab/orbit_query/jsonschema/2-0-2";
+const ORBIT_QUERY_SCHEMA: &str = "iglu:com.gitlab/orbit_query/jsonschema/2-0-1";
 
 /// Runtime execution metrics accumulated from pipeline observer callbacks.
 #[derive(Debug, Clone, Default, Serialize)]
