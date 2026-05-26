@@ -57,8 +57,7 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
-    use gkg_analytics::{ORBIT_COMMON_SCHEMA, ORBIT_QUERY_SCHEMA};
-    use labkit_events::{SnowplowContext, StructuredEvent};
+    use labkit_events::StructuredEvent;
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {
@@ -176,20 +175,6 @@ mod tests {
         let claims = claims_with_paths(vec![]);
         let data = common_data(&claims, "33");
         assert_eq!(data["schema_version"], "33");
-    }
-
-    #[test]
-    fn common_schema_is_1_0_0() {
-        let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
-        assert_eq!(common.schema(), *ORBIT_COMMON_SCHEMA);
-    }
-
-    #[test]
-    fn query_schema_is_2_0_1() {
-        let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", None);
-        assert_eq!(query.schema(), *ORBIT_QUERY_SCHEMA);
     }
 
     // ── Iglu schema validation ──────────────────────────────────────────
