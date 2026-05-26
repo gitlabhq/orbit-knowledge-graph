@@ -20,8 +20,10 @@ pub(in crate::modules::sdlc) struct PartitionAssignment {
 }
 
 impl PartitionAssignment {
+    pub(crate) const CHECKPOINT_PREFIX: &str = ".p";
+
     pub fn position_suffix(&self) -> String {
-        format!(".p{}of{}", self.index, self.total)
+        format!("{}{}of{}", Self::CHECKPOINT_PREFIX, self.index, self.total)
     }
 }
 

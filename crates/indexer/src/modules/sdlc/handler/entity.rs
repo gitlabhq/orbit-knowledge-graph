@@ -10,7 +10,7 @@ use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
-use crate::modules::sdlc::partitioning::PartitionStrategy;
+use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
 use crate::modules::sdlc::pipeline::Pipeline;
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
@@ -160,7 +160,10 @@ impl EntityHandler {
         // covers data that arrived after the oldest completed partition.
         let partition_checkpoints = self
             .checkpoint_store
-            .load_by_prefix(&format!("{checkpoint_key}.p"))
+            .load_by_prefix(&format!(
+                "{checkpoint_key}{}",
+                PartitionAssignment::CHECKPOINT_PREFIX
+            ))
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
         let consolidated_watermark = partition_checkpoints
