@@ -117,26 +117,17 @@ impl EntityHandler {
                     .map(|path| TraversalPathFilter { path }),
             );
 
-        if self.partition_strategy.is_none() || parent_checkpoint.is_some() {
-            return self
-                .pipeline
-                .run_plan(
-                    &self.plan,
-                    base_query,
-                    &checkpoint_key,
-                    request.watermark,
-                    context.destination.as_ref(),
-                    &context.progress,
-                )
-                .await;
-        }
+        let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();
+        let ranges = if should_partition {
+            self.partition_strategy
+                .as_ref()
+                .unwrap()
+                .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
+                .await?
+        } else {
+            Vec::new()
+        };
 
-        let ranges = self
-            .partition_strategy
-            .as_ref()
-            .unwrap()
-            .compute_ranges(self.datalake.as_ref(), request.traversal_path.as_deref())
-            .await?;
         if ranges.is_empty() {
             return self
                 .pipeline

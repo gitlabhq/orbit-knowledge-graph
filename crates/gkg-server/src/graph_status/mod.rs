@@ -288,29 +288,18 @@ fn aggregate_indexing_status(
         };
     }
 
-    let mut worst_state = IndexingState::Indexed;
-    let mut worst_progress: Option<&IndexingProgress> = None;
+    let entity_entries = entity_progress.iter().map(|(_, progress)| match progress {
+        None => (IndexingState::NotIndexed, None),
+        Some(p) => (derive_indexing_state(p), Some(p)),
+    });
+    let legacy_entry = legacy_progress
+        .as_ref()
+        .map(|p| (derive_indexing_state(p), Some(p)));
 
-    for (_kind, progress) in &entity_progress {
-        let (state, progress_ref) = match progress {
-            None => (IndexingState::NotIndexed, None),
-            Some(p) => (derive_indexing_state(p), Some(p)),
-        };
-        if state_priority(state) > state_priority(worst_state) {
-            worst_state = state;
-            worst_progress = progress_ref;
-        }
-    }
-
-    // Also fold in the legacy per-namespace key (code-indexing or unmigrated
-    // SDLC) so the worst state still wins.
-    if let Some(p) = legacy_progress.as_ref() {
-        let state = derive_indexing_state(p);
-        if state_priority(state) > state_priority(worst_state) {
-            worst_state = state;
-            worst_progress = Some(p);
-        }
-    }
+    let (worst_state, worst_progress) = entity_entries
+        .chain(legacy_entry)
+        .max_by_key(|(state, _)| state_priority(*state))
+        .unwrap_or((IndexingState::NotIndexed, None));
 
     match worst_progress {
         Some(p) => indexing_status_from_progress(worst_state, p),

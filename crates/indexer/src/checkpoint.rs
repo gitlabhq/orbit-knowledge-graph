@@ -81,8 +81,7 @@ impl ClickHouseCheckpointStore {
     ) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
-        let cursor_json =
-            serde_json::to_string(cursor_values).map_err(checkpoint_error_from_serde)?;
+        let cursor_json = serde_json::to_string(cursor_values).map_err(checkpoint_store_error)?;
 
         self.client
             .query(&format!(
@@ -94,7 +93,7 @@ impl ClickHouseCheckpointStore {
             .param("cursor_values", cursor_json)
             .execute()
             .await
-            .map_err(checkpoint_error_from_client)?;
+            .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
@@ -112,7 +111,7 @@ impl ClickHouseCheckpointStore {
             .param("watermark", formatted_watermark)
             .execute()
             .await
-            .map_err(checkpoint_error_from_client)?;
+            .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
@@ -122,14 +121,10 @@ fn parse_cursor_json(raw: &str) -> Result<Option<Vec<String>>, CheckpointError> 
     if raw.is_empty() {
         return Ok(None);
     }
-    serde_json::from_str(raw).map_err(checkpoint_error_from_serde)
+    serde_json::from_str(raw).map_err(checkpoint_store_error)
 }
 
-fn checkpoint_error_from_serde(err: serde_json::Error) -> CheckpointError {
-    CheckpointError::Store(err.to_string())
-}
-
-fn checkpoint_error_from_client<E: std::fmt::Display>(err: E) -> CheckpointError {
+fn checkpoint_store_error<E: std::fmt::Display>(err: E) -> CheckpointError {
     CheckpointError::Store(err.to_string())
 }
 
@@ -149,10 +144,10 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .param("key", key)
             .fetch_arrow()
             .await
-            .map_err(checkpoint_error_from_client)?;
+            .map_err(checkpoint_store_error)?;
 
         let watermarks =
-            DateTime::<Utc>::extract_column(&batches, 0).map_err(checkpoint_error_from_client)?;
+            DateTime::<Utc>::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
         let Some(watermark) = watermarks.into_iter().next() else {
             return Ok(None);
         };
@@ -164,7 +159,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         }
 
         let deleted = bool::extract_column(&batches, 2)
-            .map_err(checkpoint_error_from_client)?
+            .map_err(checkpoint_store_error)?
             .into_iter()
             .next()
             .unwrap_or(false);
@@ -173,7 +168,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         }
 
         let cursor_json = String::extract_column(&batches, 1)
-            .map_err(checkpoint_error_from_client)?
+            .map_err(checkpoint_store_error)?
             .into_iter()
             .next()
             .unwrap_or_default();
@@ -220,28 +215,31 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .param("prefix", prefix)
             .fetch_arrow()
             .await
-            .map_err(checkpoint_error_from_client)?;
+            .map_err(checkpoint_store_error)?;
 
-        let keys = String::extract_column(&batches, 0).map_err(checkpoint_error_from_client)?;
+        let keys = String::extract_column(&batches, 0).map_err(checkpoint_store_error)?;
         let watermarks =
-            DateTime::<Utc>::extract_column(&batches, 1).map_err(checkpoint_error_from_client)?;
-        let cursor_jsons =
-            String::extract_column(&batches, 2).map_err(checkpoint_error_from_client)?;
-        let deleted = bool::extract_column(&batches, 3).map_err(checkpoint_error_from_client)?;
+            DateTime::<Utc>::extract_column(&batches, 1).map_err(checkpoint_store_error)?;
+        let cursor_jsons = String::extract_column(&batches, 2).map_err(checkpoint_store_error)?;
+        let deleted = bool::extract_column(&batches, 3).map_err(checkpoint_store_error)?;
 
         keys.into_iter()
             .zip(watermarks)
             .zip(cursor_jsons)
             .zip(deleted)
-            .filter(|(((_, _), _), is_deleted)| !is_deleted)
-            .map(|(((key, watermark), cursor_json), _)| {
-                Ok((
-                    key,
-                    Checkpoint {
-                        watermark,
-                        cursor_values: parse_cursor_json(&cursor_json)?,
-                    },
-                ))
+            .filter_map(|(((key, watermark), cursor_json), is_deleted)| {
+                if is_deleted {
+                    return None;
+                }
+                Some(parse_cursor_json(&cursor_json).map(|cursor_values| {
+                    (
+                        key,
+                        Checkpoint {
+                            watermark,
+                            cursor_values,
+                        },
+                    )
+                }))
             })
             .collect()
     }
