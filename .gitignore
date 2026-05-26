@@ -2,6 +2,7 @@ target/
 .DS_Store
 report.xml
 public
+!vendor/iglu/public
 node_modules
 bindings/go/.idea/
 .idea/
