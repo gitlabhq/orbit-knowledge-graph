@@ -10,12 +10,12 @@ use labkit_events::SnowplowContext;
 use serde::Serialize;
 
 pub static ORBIT_COMMON_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    let version = include_str!("../../../config/schemas/iglu/orbit_common.version").trim();
+    let version = include_str!(concat!(env!("SCHEMA_DIR"), "/iglu/orbit_common.version")).trim();
     format!("iglu:com.gitlab/orbit_common/jsonschema/{version}")
 });
 
 pub static ORBIT_QUERY_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    let version = include_str!("../../../config/schemas/iglu/orbit_query.version").trim();
+    let version = include_str!(concat!(env!("SCHEMA_DIR"), "/iglu/orbit_query.version")).trim();
     format!("iglu:com.gitlab/orbit_query/jsonschema/{version}")
 });
 

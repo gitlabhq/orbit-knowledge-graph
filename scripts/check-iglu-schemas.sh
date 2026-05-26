@@ -20,7 +20,7 @@ failed=0
 for version_file in "$VENDOR_DIR"/*.version; do
   name=$(basename "$version_file" .version)  # e.g. "orbit_query"
   version=$(cat "$version_file" | tr -d '[:space:]')
-  json_file="$VENDOR_DIR/${name}.${version}.json"
+  json_file="$VENDOR_DIR/${name}.json"
 
   # 1. Check the JSON file exists.
   if [ ! -f "$json_file" ]; then

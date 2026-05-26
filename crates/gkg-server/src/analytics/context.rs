@@ -184,17 +184,19 @@ mod tests {
         use std::sync::LazyLock;
 
         static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
-            let schema: serde_json::Value = serde_json::from_str(include_str!(
-                "../../../../config/schemas/iglu/orbit_common.1-0-0.json"
-            ))
+            let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
+                env!("SCHEMA_DIR"),
+                "/iglu/orbit_common.json"
+            )))
             .expect("orbit_common schema is valid JSON");
             jsonschema::validator_for(&schema).expect("orbit_common schema compiles")
         });
 
         static ORBIT_QUERY_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
-            let schema: serde_json::Value = serde_json::from_str(include_str!(
-                "../../../../config/schemas/iglu/orbit_query.2-0-1.json"
-            ))
+            let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
+                env!("SCHEMA_DIR"),
+                "/iglu/orbit_query.json"
+            )))
             .expect("orbit_query schema is valid JSON");
             jsonschema::validator_for(&schema).expect("orbit_query schema compiles")
         });
