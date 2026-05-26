@@ -1,47 +1,70 @@
 #!/usr/bin/env bash
-# Verify vendored Iglu schemas match the live versions served by GitLab Pages.
-# Exits non-zero if any schema has drifted.
+# Verify vendored Iglu schemas match the versions declared in .version
+# files and are up to date with the live Iglu server.
+#
+# For each *.version file in config/schemas/iglu/:
+#   1. Read the pinned version (e.g. "2-0-1")
+#   2. Check the corresponding .json file exists and its embedded
+#      self.version matches the pinned version
+#   3. Fetch the live schema from Iglu and diff against the vendored copy
+#
+# Exits non-zero if any schema is missing, mismatched, or drifted.
 
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
 VENDOR_DIR="config/schemas/iglu"
 
-schemas=(
-  "orbit_common/jsonschema/1-0-0:orbit_common.1-0-0.json"
-  "orbit_query/jsonschema/2-0-1:orbit_query.2-0-1.json"
-)
-
 failed=0
-for entry in "${schemas[@]}"; do
-  path="${entry%%:*}"
-  file="${entry##*:}"
-  local_file="$VENDOR_DIR/$file"
 
-  if [ ! -f "$local_file" ]; then
-    echo "MISSING: $local_file"
+for version_file in "$VENDOR_DIR"/*.version; do
+  name=$(basename "$version_file" .version)  # e.g. "orbit_query"
+  version=$(cat "$version_file" | tr -d '[:space:]')
+  json_file="$VENDOR_DIR/${name}.${version}.json"
+
+  # 1. Check the JSON file exists.
+  if [ ! -f "$json_file" ]; then
+    echo "MISSING: $json_file (declared version: $version)"
     failed=1
     continue
   fi
 
-  remote=$(curl -sf "$IGLU_BASE/$path") || {
-    echo "WARN: could not fetch $IGLU_BASE/$path (skipping)"
+  # 2. Check the embedded self.version matches the pinned version.
+  embedded=$(python3 -c "
+import json, sys
+schema = json.load(open('$json_file'))
+print(schema.get('self', {}).get('version', ''))
+")
+  if [ "$embedded" != "$version" ]; then
+    echo "MISMATCH: $json_file has self.version='$embedded' but $version_file says '$version'"
+    failed=1
+    continue
+  fi
+
+  # 3. Fetch from Iglu and compare.
+  iglu_path="${name}/jsonschema/${version}"
+  remote=$(curl -sf "$IGLU_BASE/$iglu_path") || {
+    echo "WARN: could not fetch $IGLU_BASE/$iglu_path (skipping freshness check)"
     continue
   }
 
-  # Normalize JSON for comparison (sort keys, consistent whitespace).
-  local_norm=$(python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)" < "$local_file")
+  local_norm=$(python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)" < "$json_file")
   remote_norm=$(echo "$remote" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)")
 
   if [ "$local_norm" != "$remote_norm" ]; then
-    echo "DRIFT: $local_file differs from $IGLU_BASE/$path"
-    echo "  Run: curl -s '$IGLU_BASE/$path' > '$local_file'"
+    echo "DRIFT: $json_file differs from $IGLU_BASE/$iglu_path"
+    echo "  Run: curl -s '$IGLU_BASE/$iglu_path' > '$json_file'"
     failed=1
   fi
 done
 
 if [ "$failed" -ne 0 ]; then
-  echo "Vendored Iglu schemas are out of date. Re-vendor and commit."
+  echo ""
+  echo "Vendored Iglu schemas are out of date or misconfigured."
+  echo "To bump a schema version:"
+  echo "  1. Update the version in config/schemas/iglu/<name>.version"
+  echo "  2. Rename the .json file to match: <name>.<new-version>.json"
+  echo "  3. Re-vendor: curl -s '\$IGLU_BASE/<name>/jsonschema/<new-version>' > config/schemas/iglu/<name>.<new-version>.json"
   exit 1
 fi
 
