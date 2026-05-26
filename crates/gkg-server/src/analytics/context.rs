@@ -181,6 +181,7 @@ mod tests {
 
     mod iglu {
         use super::*;
+        use labkit_events::SnowplowContext;
         use std::sync::LazyLock;
 
         static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
