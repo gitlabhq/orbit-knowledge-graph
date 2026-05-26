@@ -262,11 +262,11 @@ If the worker fails unexpectedly, the unacked message will be redelivered by NAT
 
 **Ontology-driven plan building**
 
-ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `PipelinePlan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
+ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `Plan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
 
 **Pipeline: extract, transform, write**
 
-Each handler invocation runs its plans through a shared `Pipeline` struct. The loop for a single plan works like this:
+Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct. The loop works like this:
 
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.

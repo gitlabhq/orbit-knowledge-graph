@@ -2060,6 +2060,7 @@ dependencies = [
  "arrow 58.3.0",
  "arrow-ipc 58.3.0",
  "bytes",
+ "chrono",
  "circuit-breaker",
  "clickhouse",
  "futures",
