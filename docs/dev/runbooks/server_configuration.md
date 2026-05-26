@@ -338,10 +338,12 @@ query:
 
 ## Analytics
 
-Identifies the GitLab deployment hosting this GKG instance. Used to tag Snowplow product analytics and OTel telemetry so downstream dashboards can segment by instance type and environment without inferring it from the hostname. Future analytics settings (opt-in/opt-out, transport, auth) will live under the same `analytics` block.
+Controls Snowplow product-analytics event emission. Events carry `orbit_common` and `orbit_query` contexts (consumer-owned, defined in `gkg-analytics`). Disabled by default -- Helm enables it for .com and Dedicated.
 
 | Config path | Env var | Default | Description |
 |-------------|---------|---------|-------------|
+| `analytics.enabled` | `GKG_ANALYTICS__ENABLED` | `false` | Enable Snowplow analytics event emission |
+| `analytics.collector_url` | `GKG_ANALYTICS__COLLECTOR_URL` | `""` | Snowplow collector endpoint (e.g. `https://snowplowprd.trx.gitlab.net`) |
 | `analytics.deployment.type` | `GKG_ANALYTICS__DEPLOYMENT__TYPE` | `self_managed` | `com`, `dedicated`, or `self_managed` |
 | `analytics.deployment.environment` | `GKG_ANALYTICS__DEPLOYMENT__ENVIRONMENT` | `development` | `development`, `staging`, or `production` |
 
@@ -349,6 +351,8 @@ Example for the .com staging cluster:
 
 ```yaml
 analytics:
+  enabled: true
+  collector_url: "https://snowplowprd.trx.gitlab.net"
   deployment:
     type: com
     environment: staging

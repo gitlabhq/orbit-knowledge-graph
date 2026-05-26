@@ -37,6 +37,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
+- Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 
 ## Where to find things
 
