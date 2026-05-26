@@ -2,8 +2,8 @@ target/
 .DS_Store
 report.xml
 public
-!vendor/iglu/public
 node_modules
+vendor/
 bindings/go/.idea/
 .idea/
 profile.json.gz

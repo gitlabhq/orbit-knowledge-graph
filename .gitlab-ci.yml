@@ -82,6 +82,7 @@ stages:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
     - mise install
+    - vendir sync
 
 .sccache-template:
   variables:
@@ -92,6 +93,7 @@ stages:
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
+    - vendir sync
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
