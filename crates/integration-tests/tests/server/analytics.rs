@@ -128,6 +128,7 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         root_namespace_id: Some(99),
         global_user_id: Some("guser-it"),
         session_id: Some("sess-it"),
+        is_gitlab_team_member: None,
     });
 
     let event = labkit_events::StructuredEvent::builder("gkg", "gkg_query_executed")
