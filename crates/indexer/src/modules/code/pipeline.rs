@@ -46,7 +46,6 @@ pub struct CodeIndexingPipeline {
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
-    download_slots: Option<Arc<Semaphore>>,
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
@@ -62,8 +61,7 @@ impl CodeIndexingPipeline {
         pipeline_config: CodeIndexingPipelineConfig,
         concurrency_limit: usize,
     ) -> Self {
-        let download_slots = sem(concurrency_limit);
-        let indexing_slots = sem(concurrency_limit);
+        let indexing_slots = sem(concurrency_limit / 2);
         Self {
             resolver,
             checkpoint_store,
@@ -72,7 +70,6 @@ impl CodeIndexingPipeline {
             table_names,
             ontology,
             pipeline_config,
-            download_slots,
             indexing_slots,
         }
     }
@@ -82,7 +79,6 @@ impl CodeIndexingPipeline {
         context: &HandlerContext,
         request: &IndexingRequest,
     ) -> Result<IndexOutcome, HandlerError> {
-        let _download_slot = acquire(&self.download_slots, "download").await?;
         let fetch_start = Instant::now();
         let repository = match self
             .resolver
@@ -133,7 +129,6 @@ impl CodeIndexingPipeline {
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
-        drop(_download_slot);
         let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
         context.progress.notify_in_progress().await;
