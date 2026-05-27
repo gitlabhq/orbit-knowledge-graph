@@ -83,6 +83,7 @@ engine:
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 5000
+        max_concurrent_indexing: 0
 
 schedule:
   tasks:

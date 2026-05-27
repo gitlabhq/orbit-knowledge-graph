@@ -65,6 +65,7 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
+              "max_concurrent_indexing": 0,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -346,6 +347,13 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
+        "max_concurrent_indexing": {
+          "description": "Cap on concurrent graph build + ClickHouse write phases per indexer pod.\nLets the handler's `code` concurrency group be raised so that archive\nfetches can overlap heavy indexing work for other projects.\n0 = no extra cap (matches the worker permit limit).",
+          "type": "integer",
+          "format": "uint",
+          "default": 0,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -386,6 +394,7 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
+            "max_concurrent_indexing": 0,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -475,6 +484,7 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
+                "max_concurrent_indexing": 0,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -658,6 +668,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
+              "max_concurrent_indexing": 0,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,

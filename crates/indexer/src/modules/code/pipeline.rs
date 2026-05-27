@@ -5,6 +5,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
+use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
@@ -45,6 +46,7 @@ pub struct CodeIndexingPipeline {
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
+    indexing_slots: Option<Arc<Semaphore>>,
 }
 
 impl CodeIndexingPipeline {
@@ -57,6 +59,10 @@ impl CodeIndexingPipeline {
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
+        let indexing_slots = match pipeline_config.max_concurrent_indexing {
+            0 => None,
+            n => Some(Arc::new(Semaphore::new(n))),
+        };
         Self {
             resolver,
             checkpoint_store,
@@ -65,6 +71,7 @@ impl CodeIndexingPipeline {
             table_names,
             ontology,
             pipeline_config,
+            indexing_slots,
         }
     }
 
@@ -122,6 +129,16 @@ impl CodeIndexingPipeline {
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
+
+        let _indexing_slot = match &self.indexing_slots {
+            Some(sem) => Some(
+                sem.clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| HandlerError::Processing(format!("indexing slot closed: {e}")))?,
+            ),
+            None => None,
+        };
 
         context.progress.notify_in_progress().await;
 
