@@ -30,5 +30,6 @@ ENV GKG_VERSION=$GKG_VERSION
 WORKDIR /app
 
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
+COPY --from=builder /build/config/schemas /build/config/schemas
 
 ENTRYPOINT ["gkg-server"]
