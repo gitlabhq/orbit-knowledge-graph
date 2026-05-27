@@ -308,7 +308,7 @@ impl BatchTx<'_> {
             }
         };
         for (table, batch) in batches {
-            if self.tx.send((table.clone(), batch)).is_err() {
+            if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
                 self.errors.lock().unwrap().push(
                     crate::v2::error::CodeGraphError::SinkWrite {
                         table,
@@ -324,7 +324,7 @@ impl BatchTx<'_> {
 
     /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
-        if self.tx.send((table.clone(), batch)).is_err() {
+        if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
             self.errors.lock().unwrap().push(
                 crate::v2::error::CodeGraphError::SinkWrite {
                     table,
