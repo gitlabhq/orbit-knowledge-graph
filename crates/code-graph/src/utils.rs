@@ -7,7 +7,7 @@ pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
 /// Wall-clock budget for sequential cross-file resolution phases
 /// (import edges, call edges, edge candidates). Shared by all custom
 /// pipelines (JS/TS, Rust).
-pub const CROSS_FILE_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+pub const CROSS_FILE_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
