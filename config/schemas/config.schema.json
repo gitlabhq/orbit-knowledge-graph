@@ -65,6 +65,7 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
+              "max_concurrent_downloads": 0,
               "max_concurrent_indexing": 0,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
@@ -347,8 +348,15 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
+        "max_concurrent_downloads": {
+          "description": "Cap on concurrent archive downloads per indexer pod. 0 = no cap.",
+          "type": "integer",
+          "format": "uint",
+          "default": 0,
+          "minimum": 0
+        },
         "max_concurrent_indexing": {
-          "description": "Cap on concurrent graph build + ClickHouse write phases per indexer pod.\nLets the handler's `code` concurrency group be raised so that archive\nfetches can overlap heavy indexing work for other projects.\n0 = no extra cap (matches the worker permit limit).",
+          "description": "Cap on concurrent graph build + ClickHouse write per indexer pod.\nSet below `engine.concurrency_groups.code` so workers freed from\nindexing can start the next download while others keep indexing.\n0 = no cap.",
           "type": "integer",
           "format": "uint",
           "default": 0,
@@ -394,6 +402,7 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
+            "max_concurrent_downloads": 0,
             "max_concurrent_indexing": 0,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
@@ -484,6 +493,7 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
+                "max_concurrent_downloads": 0,
                 "max_concurrent_indexing": 0,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
@@ -668,6 +678,7 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
+              "max_concurrent_downloads": 0,
               "max_concurrent_indexing": 0,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,

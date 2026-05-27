@@ -5,7 +5,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
@@ -46,6 +46,7 @@ pub struct CodeIndexingPipeline {
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
+    download_slots: Option<Arc<Semaphore>>,
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
@@ -59,10 +60,8 @@ impl CodeIndexingPipeline {
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
-        let indexing_slots = match pipeline_config.max_concurrent_indexing {
-            0 => None,
-            n => Some(Arc::new(Semaphore::new(n))),
-        };
+        let download_slots = sem(pipeline_config.max_concurrent_downloads);
+        let indexing_slots = sem(pipeline_config.max_concurrent_indexing);
         Self {
             resolver,
             checkpoint_store,
@@ -71,6 +70,7 @@ impl CodeIndexingPipeline {
             table_names,
             ontology,
             pipeline_config,
+            download_slots,
             indexing_slots,
         }
     }
@@ -80,6 +80,7 @@ impl CodeIndexingPipeline {
         context: &HandlerContext,
         request: &IndexingRequest,
     ) -> Result<IndexOutcome, HandlerError> {
+        let _download_slot = acquire(&self.download_slots, "download").await?;
         let fetch_start = Instant::now();
         let repository = match self
             .resolver
@@ -130,15 +131,8 @@ impl CodeIndexingPipeline {
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
-        let _indexing_slot = match &self.indexing_slots {
-            Some(sem) => Some(
-                sem.clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|e| HandlerError::Processing(format!("indexing slot closed: {e}")))?,
-            ),
-            None => None,
-        };
+        drop(_download_slot);
+        let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
         context.progress.notify_in_progress().await;
 
@@ -372,5 +366,24 @@ impl CodeIndexingPipeline {
         }
 
         Ok(())
+    }
+}
+
+fn sem(n: usize) -> Option<Arc<Semaphore>> {
+    (n > 0).then(|| Arc::new(Semaphore::new(n)))
+}
+
+async fn acquire(
+    slots: &Option<Arc<Semaphore>>,
+    name: &str,
+) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
+    match slots {
+        Some(s) => s
+            .clone()
+            .acquire_owned()
+            .await
+            .map(Some)
+            .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
+        None => Ok(None),
     }
 }
