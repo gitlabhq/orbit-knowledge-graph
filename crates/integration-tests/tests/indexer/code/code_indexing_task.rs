@@ -287,7 +287,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         project_id,
         "commit1",
         1,
-        "/stale-test",
+        "1/2/",
     )
     .await;
 
@@ -320,7 +320,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         project_id,
         "commit2",
         2,
-        "/stale-test",
+        "1/2/",
     )
     .await;
 
@@ -370,7 +370,7 @@ async fn disk_is_clean_after_successful_indexing() {
         project_id,
         commit_sha,
         1,
-        "/cleanup-test",
+        "1/4/",
     )
     .await;
 
@@ -414,7 +414,7 @@ async fn disk_is_clean_after_multiple_reindexes() {
         project_id,
         "commit1",
         1,
-        "/multi-test",
+        "1/5/",
     )
     .await;
 
@@ -428,7 +428,7 @@ async fn disk_is_clean_after_multiple_reindexes() {
         project_id,
         "commit2",
         2,
-        "/multi-test",
+        "1/5/",
     )
     .await;
 
@@ -442,7 +442,7 @@ async fn disk_is_clean_after_multiple_reindexes() {
         project_id,
         "commit3",
         3,
-        "/multi-test",
+        "1/5/",
     )
     .await;
 
