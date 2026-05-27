@@ -209,6 +209,7 @@ async fn run_webserver(
     }
 
     gkg_billing::register_metrics();
+    gkg_billing::register_quota_metrics();
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
@@ -223,7 +224,6 @@ async fn run_webserver(
     }
 
     if config.billing.quota.enabled {
-        gkg_billing::register_quota_metrics();
         if config.billing.quota.customers_dot_url.trim().is_empty() {
             return Err(anyhow::anyhow!(
                 "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
