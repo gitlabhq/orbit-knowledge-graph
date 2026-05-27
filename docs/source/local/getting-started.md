@@ -40,7 +40,7 @@ To force the static Linux archive, pass `--libc musl`.
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
 ```
 
-To force the fully static musl binary:
+To explicitly install the static musl binary (e.g. on a glibc system):
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --libc musl
