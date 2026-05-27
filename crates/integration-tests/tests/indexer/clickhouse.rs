@@ -56,6 +56,7 @@ impl TestContext {
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
     }
 
@@ -113,6 +114,7 @@ async fn setup_database(host: &str, port: u16) {
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
 
         match client.execute("SELECT 1").await {
@@ -167,6 +169,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
         query_settings: std::collections::HashMap::new(),
+        insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
     }
 }
@@ -256,6 +259,7 @@ async fn connection_failure_returns_error() {
         username: "default".to_string(),
         password: None,
         query_settings: std::collections::HashMap::new(),
+        insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
     };
 

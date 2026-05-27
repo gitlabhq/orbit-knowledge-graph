@@ -51,6 +51,7 @@ fn dummy_client() -> ArrowClickHouseClient {
         "x",
         None,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
 }
 

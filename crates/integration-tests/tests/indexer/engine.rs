@@ -205,6 +205,7 @@ impl TestContext {
                 USERNAME,
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
             );
 
             match client.execute("SELECT 1").await {
@@ -243,6 +244,7 @@ impl TestContext {
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
                     query_settings: std::collections::HashMap::new(),
+                    insert_settings: std::collections::HashMap::new(),
                     profiling: Default::default(),
                 },
                 Arc::new(EngineMetrics::default()),
@@ -269,6 +271,7 @@ impl TestContext {
             DATABASE,
             USERNAME,
             Some(PASSWORD),
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
 

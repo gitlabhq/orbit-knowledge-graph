@@ -14,6 +14,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &self.username,
             self.password.as_deref(),
             &self.query_settings,
+            &self.insert_settings,
         )
     }
 }
@@ -56,6 +57,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
@@ -70,6 +72,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
@@ -85,6 +88,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
@@ -100,6 +104,7 @@ mod tests {
             username: "".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
@@ -125,6 +130,7 @@ mod tests {
             username: "default".to_string(),
             password: None,
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 

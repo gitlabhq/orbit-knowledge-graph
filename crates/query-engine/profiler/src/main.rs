@@ -266,6 +266,7 @@ async fn main() -> Result<()> {
         &cli.ch_user,
         cli.ch_password.as_deref(),
         &custom_settings,
+        &std::collections::HashMap::new(),
     ));
 
     let profiling_config = ProfilingConfig {

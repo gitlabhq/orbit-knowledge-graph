@@ -64,6 +64,7 @@ impl TestContext {
             username: TEST_USERNAME.to_string(),
             password: Some(TEST_PASSWORD.to_string()),
             query_settings: std::collections::HashMap::new(),
+            insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
 
@@ -170,6 +171,7 @@ impl TestContext {
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         admin
             .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
@@ -210,6 +212,7 @@ impl TestContext {
                 username: TEST_USERNAME.to_string(),
                 password: Some(TEST_PASSWORD.to_string()),
                 query_settings: std::collections::HashMap::new(),
+                insert_settings: std::collections::HashMap::new(),
                 profiling: Default::default(),
             },
             url: self.url.clone(),
@@ -316,6 +319,7 @@ impl TestContext {
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
 
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
@@ -337,6 +341,7 @@ impl TestContext {
             database,
             TEST_USERNAME,
             Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
 

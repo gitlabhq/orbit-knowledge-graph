@@ -310,7 +310,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .query(&schedule_deletion_insert_sql())
+            .insert_query(&schedule_deletion_insert_sql())
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path)
             .param("scheduled_deletion_date", scheduled_deletion_date)

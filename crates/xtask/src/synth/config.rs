@@ -96,6 +96,7 @@ impl ClickHouseConfig {
             &self.username,
             self.password.as_deref(),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
     }
 }
