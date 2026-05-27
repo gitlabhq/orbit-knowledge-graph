@@ -707,18 +707,13 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
 /// streaming approach.
 pub struct BufferedClickHouseSink {
     destination: Arc<dyn crate::destination::Destination>,
-    runtime: tokio::runtime::Handle,
     buffers: RwLock<HashMap<String, Vec<RecordBatch>>>,
 }
 
 impl BufferedClickHouseSink {
-    pub fn new(
-        destination: Arc<dyn crate::destination::Destination>,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
+    pub fn new(destination: Arc<dyn crate::destination::Destination>) -> Self {
         Self {
             destination,
-            runtime,
             buffers: RwLock::new(HashMap::new()),
         }
     }

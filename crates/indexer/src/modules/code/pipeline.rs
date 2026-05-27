@@ -272,7 +272,6 @@ impl CodeIndexingPipeline {
             });
         let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
             context.destination.clone(),
-            tokio::runtime::Handle::current(),
         ));
         let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
 
