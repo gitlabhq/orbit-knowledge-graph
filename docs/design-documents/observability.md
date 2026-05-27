@@ -181,7 +181,7 @@ The billing observer instruments the path from a successful query to a Snowplow 
 
 *Quota gate metrics:*
 
-The quota gate instruments every decision made by the CDot-backed quota check. All series are pre-registered at zero on startup. `cache=miss` on `decision=fail_open` does not imply a 1:1 CDot call ratio — moka coalesces concurrent misses, so use `cdot.duration{outcome="fail_open"}` for actual upstream call counts during an outage.
+The quota gate instruments every decision made by the CDot-backed quota check. All series are pre-registered at zero on startup. `cache=miss` does not imply a 1:1 CDot call ratio — moka coalesces concurrent misses for the same key, so use `cdot.duration_seconds_count` for actual upstream call counts.
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
