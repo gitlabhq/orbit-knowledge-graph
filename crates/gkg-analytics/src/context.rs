@@ -4,48 +4,22 @@
 //! Each struct wraps a `serde_json::Value` payload and implements
 //! `SnowplowContext` with the corresponding Iglu schema URI.
 
-use std::path::PathBuf;
-use std::sync::LazyLock;
-
 use labkit_events::SnowplowContext;
 use serde::Serialize;
 
-/// Read the pinned version from a `.version` file.
-fn pinned_version(name: &str) -> String {
-    let path = PathBuf::from(env!("SCHEMA_DIR"))
-        .join("iglu")
-        .join(format!("{name}.version"));
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
-        .trim()
-        .to_string()
-}
+// Pinned versions, schema URIs, and full schema JSON are inlined at compile time
+// by `build.rs` from `config/schemas/iglu/*.version` and the vendored Iglu subtree.
+// The runtime binary never reads these files.
+include!(concat!(env!("OUT_DIR"), "/iglu_schemas.rs"));
 
-/// Resolve the schema JSON path in the vendored subtree for a pinned version.
-fn schema_path(name: &str, version: &str) -> PathBuf {
-    PathBuf::from(env!("IGLU_DIR"))
-        .join(name)
-        .join("jsonschema")
-        .join(version)
-}
-
-pub static ORBIT_COMMON_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    let version = pinned_version("orbit_common");
-    format!("iglu:com.gitlab/orbit_common/jsonschema/{version}")
-});
-
-pub static ORBIT_QUERY_SCHEMA: LazyLock<String> = LazyLock::new(|| {
-    let version = pinned_version("orbit_query");
-    format!("iglu:com.gitlab/orbit_query/jsonschema/{version}")
-});
-
-/// Load the schema JSON for a given schema name at its pinned version.
+/// Return the inlined schema JSON for a given schema name at its pinned version.
 pub fn load_schema_json(name: &str) -> serde_json::Value {
-    let version = pinned_version(name);
-    let path = schema_path(name, &version);
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-    serde_json::from_str(&content).expect("vendored Iglu schema is valid JSON")
+    let raw = match name {
+        "orbit_common" => ORBIT_COMMON_SCHEMA_JSON,
+        "orbit_query" => ORBIT_QUERY_SCHEMA_JSON,
+        other => panic!("unknown iglu schema {other:?}"),
+    };
+    serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +32,7 @@ pub struct OrbitCommonContext {
 
 impl SnowplowContext for OrbitCommonContext {
     fn schema(&self) -> &str {
-        &ORBIT_COMMON_SCHEMA
+        ORBIT_COMMON_SCHEMA
     }
 
     fn data(&self) -> serde_json::Value {
@@ -104,7 +78,7 @@ pub struct OrbitQueryContext {
 
 impl SnowplowContext for OrbitQueryContext {
     fn schema(&self) -> &str {
-        &ORBIT_QUERY_SCHEMA
+        ORBIT_QUERY_SCHEMA
     }
 
     fn data(&self) -> serde_json::Value {

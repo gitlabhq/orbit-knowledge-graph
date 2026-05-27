@@ -174,11 +174,11 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         })
         .unwrap_or_default();
     assert!(
-        context_schemas.contains(&*gkg_analytics::ORBIT_COMMON_SCHEMA),
+        context_schemas.contains(&gkg_analytics::ORBIT_COMMON_SCHEMA.to_string()),
         "missing orbit_common context, contexts={context_schemas:?}"
     );
     assert!(
-        context_schemas.contains(&*gkg_analytics::ORBIT_QUERY_SCHEMA),
+        context_schemas.contains(&gkg_analytics::ORBIT_QUERY_SCHEMA.to_string()),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 

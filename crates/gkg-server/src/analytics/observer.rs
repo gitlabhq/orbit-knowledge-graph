@@ -152,11 +152,11 @@ mod tests {
         assert_eq!(events[0].contexts().len(), 2);
         assert_eq!(
             events[0].contexts()[0].schema,
-            *gkg_analytics::ORBIT_COMMON_SCHEMA
+            gkg_analytics::ORBIT_COMMON_SCHEMA
         );
         assert_eq!(
             events[0].contexts()[1].schema,
-            *gkg_analytics::ORBIT_QUERY_SCHEMA
+            gkg_analytics::ORBIT_QUERY_SCHEMA
         );
     }
 
