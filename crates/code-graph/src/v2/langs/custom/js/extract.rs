@@ -700,7 +700,7 @@ mod tests {
             "cts/consumer.ts".to_string(),
         ];
 
-        let (analyzed, errors) = analyze_files(&files, root.to_str().expect("utf8 root path"));
+        let (analyzed, errors) = analyze_files(&files, root.to_str().expect("utf8 root path"), None);
 
         assert!(
             errors.is_empty(),

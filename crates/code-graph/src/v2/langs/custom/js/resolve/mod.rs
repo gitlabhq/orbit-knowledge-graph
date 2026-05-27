@@ -112,7 +112,13 @@ pub fn attach_resolution_edges(
             locally_resolved_imports.insert(source_node);
         }
     }
-    if !timed_out.load(Ordering::Relaxed) {
+    if timed_out.load(Ordering::Relaxed) {
+        ctx.record_skip(
+            "js:cross-file-resolve".to_string(),
+            FileSkip::TimeoutSentinel,
+            "cross-file resolution timed out",
+        );
+    } else {
         let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
         for relationship in
             resolver.resolve_calls(&imported_calls, modules_index, &deadline)
