@@ -230,14 +230,14 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         let key_prefix = format!("{}.", namespace_position_key(namespace_id));
 
         self.graph
-            .query(&delete_sdlc_checkpoints_sql())
+            .insert_query(&delete_sdlc_checkpoints_sql())
             .param("key_prefix", key_prefix)
             .execute()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
         self.graph
-            .query(&delete_code_checkpoints_sql())
+            .insert_query(&delete_code_checkpoints_sql())
             .param("traversal_path", traversal_path)
             .execute()
             .await
@@ -252,7 +252,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
 
             let error = self
                 .graph
-                .query(&statement.sql)
+                .insert_query(&statement.sql)
                 .param("traversal_path", traversal_path)
                 .execute()
                 .await
@@ -275,7 +275,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
         self.graph
-            .query(&mark_deletion_complete_sql())
+            .insert_query(&mark_deletion_complete_sql())
             .param("namespace_id", namespace_id)
             .param("traversal_path", traversal_path)
             .execute()

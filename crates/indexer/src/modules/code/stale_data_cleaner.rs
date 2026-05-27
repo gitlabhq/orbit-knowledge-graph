@@ -128,7 +128,7 @@ impl ClickHouseStaleDataCleaner {
             debug!(table, project_id, branch, "deleting stale nodes");
 
             self.client
-                .query(query)
+                .insert_query(query)
                 .param("traversal_path", traversal_path)
                 .param("project_id", project_id)
                 .param("branch", branch)
@@ -157,7 +157,7 @@ impl ClickHouseStaleDataCleaner {
             debug!(table, traversal_path, "deleting stale edges");
 
             self.client
-                .query(query)
+                .insert_query(query)
                 .param("traversal_path", traversal_path)
                 .param("watermark_time", formatted_watermark)
                 .execute()
