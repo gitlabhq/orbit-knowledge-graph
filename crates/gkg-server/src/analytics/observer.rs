@@ -65,8 +65,20 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
-        let common = build_common(&self.config, &self.claims, &self.schema_version);
-        let query = build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref());
+        let common = match build_common(&self.config, &self.claims, &self.schema_version) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to build orbit_common context, skipping analytics event");
+                return;
+            }
+        };
+        let query = match build_query(&self.claims, &self.tool_name, self.coding_agent.as_deref()) {
+            Ok(q) => q,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to build orbit_query context, skipping analytics event");
+                return;
+            }
+        };
 
         match StructuredEvent::builder(GKG_CATEGORY, ACTION_QUERY_EXECUTED)
             .context(common)

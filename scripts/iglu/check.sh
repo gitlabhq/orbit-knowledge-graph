@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Verify pinned Iglu schema versions.
+# Verify pinned Iglu schema versions exist locally and match live Iglu.
 #
-# Without flags: checks both local vendored files and live Iglu.
-# With --remote-only: skips local file checks (for CI jobs without vendir).
+# Without flags: full check (committed file exists + matches live Iglu).
+# With --remote-only: only verifies live Iglu has the pinned version.
 #
 # Exits non-zero if any check fails.
 
 set -euo pipefail
 
 IGLU_BASE="https://gitlab-org.gitlab.io/iglu/schemas/com.gitlab"
-VENDOR_DIR="vendor/iglu/public/schemas/com.gitlab"
 VERSION_DIR="config/schemas/iglu"
 
 check_local=true
@@ -23,29 +22,26 @@ for version_file in "$VERSION_DIR"/*.version; do
   [ -f "$version_file" ] || continue
   name=$(basename "$version_file" .version)
   version=$(cat "$version_file" | tr -d '[:space:]')
-  local_file="$VENDOR_DIR/$name/jsonschema/$version"
+  local_file="${VERSION_DIR}/${name}/${version}.json"
 
-  # 1. Check the vendored file exists locally (skip with --remote-only).
   if [ "$check_local" = true ] && [ ! -f "$local_file" ]; then
-    echo "ERROR: $local_file missing (pinned: $version). Run: vendir sync"
+    echo "ERROR: $local_file missing (pinned: $version). Run: mise iglu:bump -- $name $version"
     failed=1
     continue
   fi
 
-  # 2. Check live Iglu has this version.
   remote=$(curl -sf "$IGLU_BASE/$name/jsonschema/$version") || {
     echo "ERROR: $name/$version not found on live Iglu"
     failed=1
     continue
   }
 
-  # 3. Verify content matches (only when local file exists).
   if [ "$check_local" = true ] && [ -f "$local_file" ]; then
     local_norm=$(python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)" < "$local_file")
     remote_norm=$(echo "$remote" | python3 -c "import json,sys; json.dump(json.load(sys.stdin), sys.stdout, sort_keys=True)")
 
     if [ "$local_norm" != "$remote_norm" ]; then
-      echo "DRIFT: $local_file differs from live Iglu. Run: vendir sync"
+      echo "DRIFT: $local_file differs from live Iglu. Run: mise iglu:bump -- $name $version"
       failed=1
       continue
     fi

@@ -16,5 +16,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 
+[build-dependencies]
+prettyplease = { workspace = true }
+serde_json = { workspace = true }
+syn = { workspace = true }
+typify = { workspace = true }
+
 [lints]
 workspace = true

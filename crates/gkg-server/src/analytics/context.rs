@@ -1,49 +1,128 @@
-use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
-use gkg_server_config::AnalyticsConfig;
+use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
+use gkg_server_config::{AnalyticsConfig, DeploymentKind};
+use labkit_events::Error as LabkitError;
 
-use crate::auth::Claims;
+use crate::auth::{Claims, SourceType};
+
+/// Map any `Display`-able conversion error to [`LabkitError::Validation`]
+/// tagged with the schema field that produced it. Used by the typify-generated
+/// bounded newtype `TryFrom` impls below.
+fn validation<E: std::fmt::Display>(field: &'static str) -> impl FnOnce(E) -> LabkitError {
+    move |e| LabkitError::Validation {
+        field,
+        message: e.to_string(),
+    }
+}
 
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
     claims: &Claims,
     schema_version: &str,
-) -> OrbitCommonContext {
-    let correlation_id = labkit::correlation::current();
+) -> Result<OrbitCommonContext, LabkitError> {
+    let environment: &'static str = config.deployment.environment.into();
 
-    OrbitCommonContext::new(OrbitCommonData {
-        deployment_type: config.deployment.kind.into(),
-        environment: config.deployment.environment.into(),
-        correlation_id: correlation_id.as_deref(),
-        instance_id: claims.instance_id.as_deref(),
-        unique_instance_id: claims.unique_instance_id.as_deref(),
-        host_name: claims.host_name.as_deref(),
+    Ok(OrbitCommonContext::new(orbit_common::OrbitCommon {
+        deployment_type: deployment_type(config.deployment.kind),
+        environment: environment
+            .parse::<orbit_common::OrbitCommonEnvironment>()
+            .map_err(validation("environment"))?,
+        correlation_id: labkit::correlation::current()
+            .as_deref()
+            .map(str::parse::<orbit_common::OrbitCommonCorrelationId>)
+            .transpose()
+            .map_err(validation("correlation_id"))?,
+        instance_id: parse_opt(&claims.instance_id, "instance_id")?,
+        unique_instance_id: parse_opt(&claims.unique_instance_id, "unique_instance_id")?,
+        host_name: parse_opt(&claims.host_name, "host_name")?,
         organization_id: claims.organization_id.map(|id| id as i64),
         root_namespace_ids: claims.root_namespace_id.map(|ns| vec![ns]),
-        schema_version: Some(schema_version),
-    })
+        schema_version: Some(
+            schema_version
+                .parse::<orbit_common::OrbitCommonSchemaVersion>()
+                .map_err(validation("schema_version"))?,
+        ),
+    }))
 }
 
 pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
     coding_agent: Option<&str>,
-) -> OrbitQueryContext {
+) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
 
-    OrbitQueryContext::new(OrbitQueryData {
-        source_type: claims.source_type.into(),
-        tool_name: Some(tool_name),
-        coding_agent,
+    Ok(OrbitQueryContext::new(orbit_query::OrbitQuery {
+        source_type: source_type(claims.source_type),
+        tool_name: Some(
+            tool_name
+                .parse::<orbit_query::OrbitQueryToolName>()
+                .map_err(validation("tool_name"))?,
+        ),
+        coding_agent: coding_agent
+            .map(str::parse::<orbit_query::OrbitQueryCodingAgent>)
+            .transpose()
+            .map_err(validation("coding_agent"))?,
         queried_namespace_ids: if queried.is_empty() {
             None
         } else {
             Some(queried)
         },
         root_namespace_id: claims.root_namespace_id,
-        global_user_id: claims.global_user_id.as_deref(),
-        session_id: claims.ai_session_id.as_deref(),
+        global_user_id: parse_opt_query(&claims.global_user_id, "global_user_id")?,
+        session_id: claims
+            .ai_session_id
+            .as_deref()
+            .map(str::parse::<orbit_query::OrbitQuerySessionId>)
+            .transpose()
+            .map_err(validation("session_id"))?,
+        user_type: None,
+        plan: None,
         is_gitlab_team_member: claims.is_gitlab_team_member,
-    })
+    }))
+}
+
+/// Parse an optional `Claims` string into one of the orbit_common bounded
+/// newtypes. The bounds are 255 chars for instance/host fields; if the
+/// claim ever exceeds that, surface as a typed validation error rather
+/// than truncate silently.
+fn parse_opt<T>(value: &Option<String>, field: &'static str) -> Result<Option<T>, LabkitError>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    value
+        .as_deref()
+        .map(str::parse::<T>)
+        .transpose()
+        .map_err(validation(field))
+}
+
+/// Same as [`parse_opt`] but for orbit_query newtypes (maxLength 64).
+fn parse_opt_query(
+    value: &Option<String>,
+    field: &'static str,
+) -> Result<Option<orbit_query::OrbitQueryGlobalUserId>, LabkitError> {
+    parse_opt(value, field)
+}
+
+fn deployment_type(kind: DeploymentKind) -> orbit_common::OrbitCommonDeploymentType {
+    use orbit_common::OrbitCommonDeploymentType as DT;
+    match kind {
+        DeploymentKind::Com => DT::Com,
+        DeploymentKind::Dedicated => DT::Dedicated,
+        DeploymentKind::SelfManaged => DT::SelfManaged,
+    }
+}
+
+fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
+    use orbit_query::OrbitQuerySourceType as ST;
+    match source {
+        SourceType::Frontend => ST::Frontend,
+        SourceType::Dws => ST::Dws,
+        SourceType::Mcp => ST::Mcp,
+        SourceType::Core => ST::Core,
+        SourceType::Rest => ST::Rest,
+    }
 }
 
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
@@ -58,7 +137,7 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
-    use labkit_events::StructuredEvent;
+    use labkit_events::{SnowplowContext, StructuredEvent};
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {
@@ -94,8 +173,8 @@ mod tests {
     }
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, "33");
-        let query = build_query(claims, tool, None);
+        let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
+        let query = build_query(claims, tool, None).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -105,8 +184,8 @@ mod tests {
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version);
-        let query = build_query(claims, "query_graph", None);
+        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
+        let query = build_query(claims, "query_graph", None).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -153,8 +232,8 @@ mod tests {
     #[test]
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let common = build_common(&AnalyticsConfig::default(), &claims, "33");
-        let query = build_query(&claims, "query_graph", Some("claude-code"));
+        let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -178,11 +257,29 @@ mod tests {
         assert_eq!(data["schema_version"], "33");
     }
 
+    #[test]
+    fn build_common_rejects_oversized_instance_id() {
+        // The Iglu maxLength=255 bound is enforced by the typify-generated
+        // newtype, surfaced as labkit_events::Error::Validation.
+        let mut claims = claims_with_paths(vec![]);
+        claims.instance_id = Some("x".repeat(256));
+        let err = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                LabkitError::Validation {
+                    field: "instance_id",
+                    ..
+                }
+            ),
+            "expected Validation(instance_id), got: {err:?}"
+        );
+    }
+
     // ── Iglu schema validation ──────────────────────────────────────────
 
     mod iglu {
         use super::*;
-        use labkit_events::SnowplowContext;
         use std::sync::LazyLock;
 
         static ORBIT_COMMON_VALIDATOR: LazyLock<jsonschema::Validator> = LazyLock::new(|| {
@@ -211,14 +308,14 @@ mod tests {
         #[test]
         fn common_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
             assert_valid(&ORBIT_COMMON_VALIDATOR, &common.data(), "orbit_common");
         }
 
         #[test]
         fn common_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let common = build_common(&AnalyticsConfig::default(), &claims, "33");
+            let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
             assert_valid(
                 &ORBIT_COMMON_VALIDATOR,
                 &common.data(),
@@ -229,14 +326,14 @@ mod tests {
         #[test]
         fn query_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-            let query = build_query(&claims, "query_graph", Some("claude-code"));
+            let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
         fn query_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let query = build_query(&claims, "query_graph", None);
+            let query = build_query(&claims, "query_graph", None).unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),

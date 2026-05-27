@@ -82,7 +82,6 @@ stages:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
     - mise install
-    - vendir sync
 
 .sccache-template:
   variables:
@@ -93,7 +92,6 @@ stages:
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
-    - vendir sync
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
@@ -1065,8 +1063,7 @@ e2e:
         if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
           echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
         else
-          mkdir -p /build/config && cp -r config/schemas /build/config/schemas
-          SCHEMA_DIR=/build/config/schemas cargo build -p gkg-server --locked
+          cargo build -p gkg-server --locked
           cp target/debug/gkg-server .
           docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
           docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
