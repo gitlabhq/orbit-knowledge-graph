@@ -178,7 +178,7 @@ fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
 /// Per-file ceiling for the JS pipeline. The walker also applies a cap,
 /// but callers that bypass the walker (`WorkspaceProbe`, SFC block
 /// recombination) rely on this constant to stay bounded.
-pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     let raw = if let Some(s) = payload.downcast_ref::<&'static str>() {
