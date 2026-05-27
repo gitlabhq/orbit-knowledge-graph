@@ -27,6 +27,12 @@ type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>
 
 const MAX_RETRIES: u32 = 3;
 
+pub(in crate::modules::sdlc) struct PipelineContext {
+    pub destination: Arc<dyn Destination>,
+    pub progress: ProgressNotifier,
+    pub observer: Box<dyn IndexingObserver>,
+}
+
 pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -49,16 +55,13 @@ impl Pipeline {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn run_plan(
         &self,
+        context: &mut PipelineContext,
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
         target_watermark: DateTime<Utc>,
-        destination: &dyn Destination,
-        progress: &ProgressNotifier,
-        observer: &mut dyn IndexingObserver,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -100,7 +103,7 @@ impl Pipeline {
                 .map(|b| b.get_array_memory_size() as u64)
                 .sum();
             total_rows += rows_in_batch;
-            observer.extracted(rows_in_batch, bytes_in_batch);
+            context.observer.extracted(rows_in_batch, bytes_in_batch);
 
             info!(
                 rows = rows_in_batch,
@@ -112,7 +115,13 @@ impl Pipeline {
             let has_more = rows_in_batch >= plan.batch_size;
 
             let write_futures = self
-                .transform(&session, &plan.name, batches, &plan.transforms, destination)
+                .transform(
+                    &session,
+                    &plan.name,
+                    batches,
+                    &plan.transforms,
+                    context.destination.as_ref(),
+                )
                 .await?;
 
             if has_more {
@@ -130,16 +139,26 @@ impl Pipeline {
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
 
-                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
-                    .await?;
+                self.save_batch_progress(
+                    position_key,
+                    target_watermark,
+                    &cursor,
+                    &context.progress,
+                )
+                .await?;
 
                 batches = next_batches;
                 extract_elapsed = next_elapsed;
             } else {
                 self.drain_writes(write_futures).await?;
 
-                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
-                    .await?;
+                self.save_batch_progress(
+                    position_key,
+                    target_watermark,
+                    &cursor,
+                    &context.progress,
+                )
+                .await?;
 
                 break;
             }
@@ -492,6 +511,14 @@ mod tests {
     use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
 
+    fn noop_context() -> PipelineContext {
+        PipelineContext {
+            destination: Arc::new(MockDestination::new()),
+            progress: ProgressNotifier::noop(),
+            observer: Box::new(NoOpObserver),
+        }
+    }
+
     struct MultiBatchDatalake {
         call_count: Mutex<u32>,
         batch_size: usize,
@@ -604,18 +631,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Test");
 
         let result = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
         assert!(result.is_ok());
@@ -635,17 +659,13 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
-
         let result = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
 
@@ -676,18 +696,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Failing");
 
         let result = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
 
@@ -760,13 +777,11 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
 
@@ -803,13 +818,11 @@ mod tests {
         let plan = simple_plan("Test");
         let result = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -845,13 +858,11 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
 
@@ -879,18 +890,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Test");
 
         let result = pipeline
             .run_plan(
+                &mut noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
-                &mut NoOpObserver,
             )
             .await;
 

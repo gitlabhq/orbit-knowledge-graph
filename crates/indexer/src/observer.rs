@@ -61,9 +61,6 @@ pub trait IndexingObserver: Send {
     /// Datalake rows extracted (SDLC: per-batch).
     fn extracted(&mut self, _rows: u64, _bytes: u64) {}
 
-    /// Rows written to a graph table.
-    fn written(&mut self, _table: &str, _rows: u64, _bytes: u64) {}
-
     /// File processing stats after code indexing (Code pipeline).
     fn files_processed(&mut self, _discovered: u64, _parsed: u64, _skipped: u64) {}
 
@@ -119,12 +116,6 @@ impl IndexingObserver for MultiObserver {
     fn extracted(&mut self, rows: u64, bytes: u64) {
         for o in self.iter_mut() {
             o.extracted(rows, bytes);
-        }
-    }
-
-    fn written(&mut self, table: &str, rows: u64, bytes: u64) {
-        for o in self.iter_mut() {
-            o.written(table, rows, bytes);
         }
     }
 
@@ -192,9 +183,6 @@ mod tests {
         fn extracted(&mut self, _: u64, _: u64) {
             self.push("extracted");
         }
-        fn written(&mut self, _: &str, _: u64, _: u64) {
-            self.push("written");
-        }
         fn files_processed(&mut self, _: u64, _: u64, _: u64) {
             self.push("files_processed");
         }
@@ -223,7 +211,6 @@ mod tests {
         obs.set_entity_type("MergeRequest");
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);
-        obs.written("gl_node", 200, 10_000);
         obs.finish();
 
         let expected = vec![
@@ -232,7 +219,6 @@ mod tests {
             "set_entity_type",
             "set_indexing_mode",
             "extracted",
-            "written",
             "finish",
         ];
         assert_eq!(*log_a.lock().unwrap(), expected);

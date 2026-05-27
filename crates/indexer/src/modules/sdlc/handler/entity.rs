@@ -12,7 +12,7 @@ use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::Pipeline;
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
@@ -119,6 +119,12 @@ impl EntityHandler {
             IndexingMode::Incremental
         });
 
+        let mut pipeline_context = PipelineContext {
+            destination: Arc::clone(&context.destination),
+            progress: context.progress.clone(),
+            observer: Box::new(observer),
+        };
+
         let base_query = self
             .plan
             .prepare()
@@ -148,13 +154,11 @@ impl EntityHandler {
         let result = if ranges.is_empty() {
             self.pipeline
                 .run_plan(
+                    &mut pipeline_context,
                     &self.plan,
                     base_query,
                     &checkpoint_key,
                     request.watermark,
-                    context.destination.as_ref(),
-                    &context.progress,
-                    &mut observer,
                 )
                 .await
         } else {
@@ -174,8 +178,6 @@ impl EntityHandler {
                 .await;
 
             if partition_result.is_ok() {
-                // Consolidate at min(partition watermarks) so the next incremental run
-                // covers data that arrived after the oldest completed partition.
                 let partition_checkpoints = self
                     .checkpoint_store
                     .load_by_prefix(&format!(
@@ -200,10 +202,10 @@ impl EntityHandler {
         };
 
         match &result {
-            Ok(()) => observer.finish(),
+            Ok(()) => pipeline_context.observer.finish(),
             Err(e) => {
-                observer.record_error(&e.to_string());
-                observer.finish();
+                pipeline_context.observer.record_error(&e.to_string());
+                pipeline_context.observer.finish();
             }
         }
 
@@ -245,15 +247,18 @@ impl EntityHandler {
             set.spawn(async move {
                 let mut partition_observer = SdlcOtelObserver::new(partition_metrics);
                 partition_observer.set_entity_type(&plan.name);
+                let mut partition_context = PipelineContext {
+                    destination,
+                    progress,
+                    observer: Box::new(partition_observer),
+                };
                 pipeline
                     .run_plan(
+                        &mut partition_context,
                         &plan,
                         query,
                         &position_key,
                         target_watermark,
-                        destination.as_ref(),
-                        &progress,
-                        &mut partition_observer,
                     )
                     .await
             });
