@@ -3,6 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
+
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
     Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
@@ -521,7 +523,7 @@ impl ColRef<'_> {
 pub struct BatchBuilder {
     names: Vec<String>,
     cols: Vec<Col>,
-    index: HashMap<String, usize>,
+    index: FxHashMap<String, usize>,
 }
 
 impl BatchBuilder {
@@ -529,7 +531,8 @@ impl BatchBuilder {
     pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
         let mut names = Vec::with_capacity(specs.len());
         let mut cols = Vec::with_capacity(specs.len());
-        let mut index = HashMap::with_capacity(specs.len());
+        let mut index: FxHashMap<String, usize> = FxHashMap::default();
+        index.reserve(specs.len());
 
         for spec in specs {
             if index.contains_key(&spec.name) {
