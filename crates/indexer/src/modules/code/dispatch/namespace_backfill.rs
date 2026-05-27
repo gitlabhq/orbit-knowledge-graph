@@ -571,6 +571,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shuffled_publish_interleaves_two_namespaces() {
+        let nats = Arc::new(MockNatsServices::new());
+        let dispatcher = create_dispatcher(Arc::clone(&nats));
+
+        let mut projects: Vec<PendingProject> = (0..100)
+            .map(|i| PendingProject {
+                project_id: 10_000 + i,
+                traversal_path: "1/A/".to_string(),
+            })
+            .collect();
+        projects.extend((0..100).map(|i| PendingProject {
+            project_id: 20_000 + i,
+            traversal_path: "1/B/".to_string(),
+        }));
+
+        projects.shuffle(&mut rand::rng());
+        let outcome = dispatcher.publish_pending(&projects).await.unwrap();
+        assert_eq!(outcome.dispatched, 200);
+
+        let published = nats.get_published();
+        let from_a = |idx: usize| {
+            published[idx]
+                .0
+                .subject
+                .strip_prefix("code.task.indexing.requested.1")
+                .is_some()
+        };
+        let first_half_a = (0..100).filter(|&i| from_a(i)).count();
+        let second_half_a = (100..200).filter(|&i| from_a(i)).count();
+        assert!(
+            (25..=75).contains(&first_half_a) && (25..=75).contains(&second_half_a),
+            "expected both halves to contain projects from both namespaces; \
+             got A in first half: {first_half_a}, A in second half: {second_half_a}"
+        );
+    }
+
+    #[tokio::test]
     async fn extracts_namespace_ids_from_snapshot_events() {
         let nats = Arc::new(MockNatsServices::new());
         let payload = build_namespace_events(vec![
