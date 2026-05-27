@@ -2,4 +2,6 @@ FROM registry.access.redhat.com/ubi10/ubi-minimal:10.1
 
 WORKDIR /app
 COPY gkg-server /usr/local/bin/gkg-server
+COPY config/schemas /app/config/schemas
+
 ENTRYPOINT ["gkg-server"]
