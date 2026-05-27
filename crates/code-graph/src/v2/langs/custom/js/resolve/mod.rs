@@ -5,11 +5,15 @@ mod webpack;
 pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::v2::error::FileSkip;
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{
     CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
 };
+use crate::v2::pipeline::PipelineContext;
+use crate::v2::sentinel::SentinelHandle;
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
@@ -31,11 +35,14 @@ pub fn attach_resolution_edges(
     modules_index: &JsModuleIndex,
     probe: &WorkspaceProbe,
     tracer: &crate::v2::trace::Tracer,
+    sentinel: Option<&SentinelHandle>,
+    ctx: &std::sync::Arc<PipelineContext>,
 ) {
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
 
     for analyzed in analyzed_files {
+        let guard = sentinel.map(|s| s.file_start(&analyzed.relative_path));
         add_local_call_edges(
             graph,
             analyzed,
@@ -43,6 +50,13 @@ pub fn attach_resolution_edges(
             &mut seen,
             tracer,
         );
+        if guard.as_ref().is_some_and(|g| g.is_killed()) {
+            ctx.record_skip(
+                analyzed.relative_path.clone(),
+                FileSkip::TimeoutSentinel,
+                "per-file watchdog killed local call resolution",
+            );
+        }
     }
 
     if analyzed_files.is_empty() {
@@ -66,12 +80,24 @@ pub fn attach_resolution_edges(
     let mut resolver = JsCrossFileResolver::new(probe);
     resolver.apply_project_resolution_hints(probe);
 
+    // Use a shared kill flag for the cross-file resolution phases so
+    // the sentinel can abort the entire import + call resolution pass
+    // when any individual file's budget is exceeded.
+    let resolve_guard = sentinel.map(|s| s.file_start("js:cross-file-resolve"));
+    let resolve_killed = resolve_guard
+        .as_ref()
+        .map(|g| g.kill_flag())
+        .unwrap_or_else(|| std::sync::Arc::new(AtomicBool::new(false)));
+
     let import_nodes: Vec<_> = graph
         .imports_iter()
         .map(|(node, file_path, _)| (node, file_path.as_ref().to_string()))
         .collect();
     let mut locally_resolved_imports = FxHashSet::default();
     for (source_node, source_path) in import_nodes {
+        if resolve_killed.load(Ordering::Relaxed) {
+            break;
+        }
         if add_import_edge(
             graph,
             modules_index,
@@ -83,11 +109,21 @@ pub fn attach_resolution_edges(
             locally_resolved_imports.insert(source_node);
         }
     }
-    let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
-    for relationship in resolver.resolve_calls(&imported_calls, modules_index) {
-        add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
+    if !resolve_killed.load(Ordering::Relaxed) {
+        let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
+        for relationship in
+            resolver.resolve_calls(&imported_calls, modules_index, &resolve_killed)
+        {
+            add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
+        }
+        add_unresolved_imported_call_edges(
+            graph,
+            &lookup,
+            &import_lookup,
+            &imported_calls,
+            &mut seen,
+        );
     }
-    add_unresolved_imported_call_edges(graph, &lookup, &import_lookup, &imported_calls, &mut seen);
 }
 
 fn add_local_call_edges(

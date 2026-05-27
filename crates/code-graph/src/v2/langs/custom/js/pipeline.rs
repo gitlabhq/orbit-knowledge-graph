@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::v2::error::AnalyzerError;
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
+use crate::v2::sentinel;
 use rustc_hash::FxHashMap;
 
 use super::extract::{ResolvedJsFile, analyze_files};
@@ -24,7 +25,10 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let (analyzed_files, errors) = analyze_files(files, root_path);
+        let sentinel = ctx.config.per_file_timeout.and_then(sentinel::spawn_sentinel);
+        let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
+
+        let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
 
         // Route per-file outcomes to the typed collections regardless of
         // whether at least one file analyzed; the orchestrator no longer
@@ -74,10 +78,17 @@ impl LanguagePipeline for JsPipeline {
             &modules,
             &probe,
             tracer,
+            sentinel_handle,
+            ctx,
         );
         graph.finalize(tracer);
 
         btx.send_graph(graph);
+
+        if let Some((handle, join)) = sentinel {
+            handle.shutdown();
+            let _ = join.join();
+        }
 
         Ok(())
     }

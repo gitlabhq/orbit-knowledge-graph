@@ -35,12 +35,14 @@ pub type FailedJsFile = (String, AnalyzerError);
 pub fn analyze_files(
     files: &[String],
     root_path: &str,
+    sentinel: Option<&crate::v2::sentinel::SentinelHandle>,
 ) -> (Vec<AnalyzedJsFile>, Vec<FailedJsFile>) {
     // `catch_unwind` isolates per-file panics: a malformed input that trips
     // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
         .map(|relative_path| {
+            let guard = sentinel.map(|s| s.file_start(relative_path));
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 analyze_file(relative_path, root_path)
             }))
@@ -51,6 +53,17 @@ pub fn analyze_files(
                     format!("panic during analysis: {message}"),
                 ))
             });
+            // If the sentinel killed this file while OXC was running,
+            // convert whatever result we got into a timeout skip.
+            if guard.as_ref().is_some_and(|g| g.is_killed()) {
+                return (
+                    relative_path.clone(),
+                    Err(AnalyzerError::skip(
+                        FileSkip::TimeoutSentinel,
+                        "per-file watchdog killed analysis",
+                    )),
+                );
+            }
             (relative_path.clone(), outcome)
         })
         .collect();
