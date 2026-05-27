@@ -16,8 +16,7 @@ pub struct ClickHouseConfiguration {
     #[serde(default)]
     pub query_settings: HashMap<String, String>,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
-    /// parameterized `INSERT VALUES`). `INSERT INTO ... SELECT` queries ignore
-    /// these per ClickHouse semantics.
+    /// parameterized `INSERT VALUES`).
     ///
     /// Typical use: enable server-side batching via `async_insert` to reduce
     /// part creation when many small or concurrent writes hit the same tables.

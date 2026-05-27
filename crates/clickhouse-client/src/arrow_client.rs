@@ -71,10 +71,8 @@ impl ArrowClickHouseClient {
 
     /// Returns an `ArrowQuery` with `insert_settings` pre-applied.
     ///
-    /// Use this for parameterized `INSERT ... VALUES` queries so they
-    /// inherit async-insert and other write-specific settings. Has no
-    /// effect on `INSERT INTO ... SELECT` statements (ClickHouse ignores
-    /// `async_insert` for those).
+    /// Use this for `INSERT` queries so they inherit async-insert and
+    /// other write-specific settings. Use `query()` for read operations.
     pub fn insert_query(&self, sql: &str) -> ArrowQuery {
         let mut q = self.query(sql);
         for (k, v) in &self.insert_settings {
