@@ -36,6 +36,7 @@ local-cli-build-linux-amd64:
     - saas-linux-large-amd64
   variables:
     ARCH: x86_64
+    LIBC: gnu
 
 local-cli-build-linux-arm64:
   extends: .local-cli-build-linux
@@ -43,6 +44,23 @@ local-cli-build-linux-arm64:
     - saas-linux-large-arm64
   variables:
     ARCH: aarch64
+    LIBC: gnu
+
+local-cli-build-linux-musl-amd64:
+  extends: .local-cli-build-linux
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: x86_64
+    LIBC: musl
+
+local-cli-build-linux-musl-arm64:
+  extends: .local-cli-build-linux
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: aarch64
+    LIBC: musl
 
 local-cli-build-windows-amd64:
   extends:
@@ -146,6 +164,8 @@ local-cli-publish:
   needs:
     - local-cli-build-linux-amd64
     - local-cli-build-linux-arm64
+    - local-cli-build-linux-musl-amd64
+    - local-cli-build-linux-musl-arm64
     - local-cli-code-sign
   before_script:
     - apk add --no-cache bash curl coreutils

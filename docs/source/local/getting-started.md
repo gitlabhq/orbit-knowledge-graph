@@ -28,12 +28,17 @@ method that matches how you work, then run your first query.
 Install the `orbit` binary directly with the one-line installer, or through
 the GitLab CLI (`glab`) if you already use it.
 
+On Linux, the installer uses the glibc archive by default and automatically
+selects the fully static musl archive on musl-based distributions like Alpine.
+To force the static Linux archive, pass `--libc musl`.
+
 {{< tabs >}}
 
 {{< tab title="macOS and Linux" >}}
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash -s -- --libc musl
 ```
 
 Open a new terminal, then verify:
