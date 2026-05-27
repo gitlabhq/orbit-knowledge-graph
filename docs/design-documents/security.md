@@ -10,6 +10,8 @@ The Knowledge Graph allows querying across an entire GitLab namespace. To preven
 
 All access to the Knowledge Graph is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass the existing GitLab permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with future GitLab auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
 
+For the Duo-specific routing layer that sits *upstream* of these authorization checks — i.e. whether a Duo agent ever reaches the Orbit MCP server in the first place — see [Duo / Orbit prompt routing architecture](duo_orbit_prompt_routing.md). The two systems compose: routing decides whether the request happens, and the layers below decide what data the request can see.
+
 ## Access Model: Reporter+ Scope with Per-Entity Role Floors
 
 The Knowledge Graph starts from a group-level Reporter+ scope and tightens that scope per entity when the ontology requires a higher role:

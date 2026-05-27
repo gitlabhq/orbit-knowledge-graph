@@ -52,6 +52,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Namespace deletion pipeline | `docs/design-documents/indexing/namespace_deletion.md` |
 | Schema migration strategy | `docs/design-documents/schema_management.md` |
 | Observability / SLOs | `docs/design-documents/observability.md` |
+| Duo / Orbit prompt routing (Rails-side) | `docs/design-documents/duo_orbit_prompt_routing.md` |
 | Ontology node definitions | `config/ontology/nodes/` |
 | Ontology edge definitions | `config/ontology/edges/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
