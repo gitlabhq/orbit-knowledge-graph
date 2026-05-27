@@ -624,10 +624,6 @@ impl BatchBuilder {
 /// project ID, branch) that aren't part of the domain struct.
 /// Defaults to `()` for types that don't need external context.
 ///
-/// Nodes without assigned IDs should return `false` from
-/// [`should_include`](Self::should_include) and will be filtered out
-/// before building the batch.
-///
 /// ```ignore
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
@@ -659,15 +655,13 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
     fn write_row(&self, builder: &mut BatchBuilder, ctx: &Ctx) -> BatchResult<()>;
 
     /// Build a [`RecordBatch`] from a slice of items using the given
-    /// column specs, filtering out any where
-    /// [`should_include`](Self::should_include) returns `false`.
+    /// column specs.
     fn to_record_batch(
         items: &[Self],
         specs: &[ColumnSpec],
         ctx: &Ctx,
     ) -> BatchResult<RecordBatch> {
-        let included: Vec<&Self> = items.iter().filter(|i| i.should_include()).collect();
-        BatchBuilder::new(specs, included.len())?.build(&included, |item, b| {
+        BatchBuilder::new(specs, items.len())?.build(items, |item, b| {
             item.write_row(b, ctx)?;
             Ok(())
         })
