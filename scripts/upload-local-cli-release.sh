@@ -18,6 +18,8 @@ PACKAGE_NAME="orbit-local"
 ARTIFACTS=(
   "orbit-local-linux-x86_64.tar.gz"
   "orbit-local-linux-aarch64.tar.gz"
+  "orbit-local-linux-musl-x86_64.tar.gz"
+  "orbit-local-linux-musl-aarch64.tar.gz"
   "orbit-local-darwin-x86_64.tar.gz"
   "orbit-local-darwin-aarch64.tar.gz"
   "orbit-local-windows-x86_64.zip"

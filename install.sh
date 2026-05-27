@@ -5,6 +5,7 @@
 # Usage:
 #   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash
 #   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --version v0.51.0
+#   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --libc musl
 #   curl -fsSL https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh | bash -s -- --force
 #
 # Or, after downloading:
@@ -16,6 +17,7 @@ INSTALL_DIR="${HOME}/.local/bin"
 TEMP_DIR=$(mktemp -d)
 VERSION=""
 FORCE_INSTALL=false
+LINUX_LIBC=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -48,12 +50,14 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
     --version VERSION    Install a specific version (e.g., v0.51.0). Defaults to the latest release.
+    --libc LIBC          Linux libc artifact to install: gnu or musl. Defaults to auto-detection.
     --force              Reinstall even if 'orbit' already exists in the install directory.
     --help               Show this help message.
 
 EXAMPLES:
     bash install.sh
     bash install.sh --version v0.51.0
+    bash install.sh --libc musl
     bash install.sh --force
 EOF
 }
@@ -65,6 +69,16 @@ while [[ $# -gt 0 ]]; do
                 error "Missing value for --version"
             fi
             VERSION="$2"
+            shift 2
+            ;;
+        --libc)
+            if [[ -z "${2:-}" || "$2" == --* ]]; then
+                error "Missing value for --libc"
+            fi
+            case "$2" in
+                gnu|musl) LINUX_LIBC="$2" ;;
+                *) error "Invalid --libc value: $2 (expected: gnu or musl)" ;;
+            esac
             shift 2
             ;;
         --force)
@@ -109,6 +123,21 @@ detect_arch() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+detect_linux_libc() {
+    if [ -n "$LINUX_LIBC" ]; then
+        echo "$LINUX_LIBC"
+        return
+    fi
+
+    if command_exists ldd && ldd --version 2>&1 | grep -qi musl; then
+        echo "musl"
+    elif ls /lib/ld-musl-*.so.* >/dev/null 2>&1 || ls /usr/lib/ld-musl-*.so.* >/dev/null 2>&1; then
+        echo "musl"
+    else
+        echo "gnu"
+    fi
 }
 
 download_file() {
@@ -159,6 +188,7 @@ Actual:   $actual_checksum"
 install_orbit() {
     local platform="$1"
     local arch="$2"
+    local libc="${3:-}"
 
     if [ "$FORCE_INSTALL" = false ] && [ -f "$INSTALL_DIR/orbit" ]; then
         warning "Orbit local CLI is already installed at $INSTALL_DIR/orbit"
@@ -172,6 +202,9 @@ install_orbit() {
 
     local project_id="77960826"
     local artifact_name="orbit-local-${platform}-${arch}.tar.gz"
+    if [ "$platform" = "linux" ] && [ "$libc" = "musl" ]; then
+        artifact_name="orbit-local-${platform}-${libc}-${arch}.tar.gz"
+    fi
     local resolved_tag
 
     if [ -z "$VERSION" ]; then
@@ -197,7 +230,7 @@ install_orbit() {
     local checksum_url="${pkg_base}/${artifact_name}.sha256"
 
     local tarball="${TEMP_DIR}/${artifact_name}"
-    echo "Downloading the Orbit local CLI for ${platform}-${arch}..."
+    echo "Downloading the Orbit local CLI for ${platform}-${arch}${libc:+-${libc}}..."
     if ! download_file "$download_url" "$tarball"; then
         error "Failed to download the Orbit local CLI from $download_url. Check your internet connection and the version number."
     fi
@@ -297,16 +330,23 @@ main() {
     echo "=== Orbit local CLI installation ==="
     echo
 
+    ensure_dependencies
+
     local platform
     local arch
+    local libc=""
     platform=$(detect_os)
     arch=$(detect_arch)
+    if [ "$platform" = "linux" ]; then
+        libc=$(detect_linux_libc)
+    elif [ -n "$LINUX_LIBC" ]; then
+        error "--libc is only supported on Linux"
+    fi
 
-    echo "Detected system: ${platform}-${arch}"
+    echo "Detected system: ${platform}-${arch}${libc:+-${libc}}"
     echo
 
-    ensure_dependencies
-    install_orbit "$platform" "$arch"
+    install_orbit "$platform" "$arch" "$libc"
     update_path
 
     echo
