@@ -479,6 +479,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         max_file_size: 5_000_000,
         worker_threads: threads,
         per_file_timeout: Some(std::time::Duration::from_secs(5)),
+        cross_file_resolve_timeout: Some(std::time::Duration::from_secs(180)),
         ..Default::default()
     };
 

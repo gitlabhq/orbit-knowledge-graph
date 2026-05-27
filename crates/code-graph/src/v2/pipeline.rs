@@ -407,6 +407,9 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
+    /// Wall-clock budget for the sequential cross-file resolution phase.
+    /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
+    pub cross_file_resolve_timeout: Option<std::time::Duration>,
     /// Internal switch set by `Pipeline::run_with_tracer` so parser graphs only
     /// emit parsed nodes and relationships while a separate structural graph
     /// owns repository file/directory rows.
@@ -422,6 +425,7 @@ impl Default for PipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
+            cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
         }
     }

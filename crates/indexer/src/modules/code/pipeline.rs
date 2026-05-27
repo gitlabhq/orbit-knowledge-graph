@@ -226,12 +226,21 @@ impl CodeIndexingPipeline {
         } else {
             None
         };
+        let cross_file_resolve_timeout =
+            if self.pipeline_config.cross_file_resolve_timeout_ms > 0 {
+                Some(std::time::Duration::from_millis(
+                    self.pipeline_config.cross_file_resolve_timeout_ms,
+                ))
+            } else {
+                None
+            };
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,
+            cross_file_resolve_timeout,
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
