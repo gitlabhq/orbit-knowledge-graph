@@ -68,7 +68,7 @@ async fn indexes_repository() {
 async fn indexes_file_nodes_for_all_archive_files() {
     let project_id: i64 = 8;
     let commit_sha = "allfiles";
-    let traversal_path = "/all-files";
+    let traversal_path = "1/8/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -161,7 +161,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
 async fn indexes_calls_and_extends_edges() {
     let project_id: i64 = 99;
     let commit_sha = "callsdef";
-    let traversal_path = "1/99";
+    let traversal_path = "1/99/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -462,7 +462,7 @@ async fn disk_is_clean_after_multiple_reindexes() {
 #[tokio::test]
 async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let project_id: i64 = 6;
-    let traversal_path = "/write-failure-test";
+    let traversal_path = "1/6/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -543,7 +543,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 #[tokio::test]
 async fn empty_200_archive_checkpoints_as_empty_repository() {
     let project_id: i64 = 7;
-    let traversal_path = "/empty-archive-test";
+    let traversal_path = "1/7/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
