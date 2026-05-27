@@ -51,7 +51,7 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_S
 | `gkg.etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/group), `group` | Time waiting for a worker pool permit |
 | `gkg.etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held (global or per concurrency group) |
 | `gkg.etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
-| `gkg.etl.destination.write.duration` | Histogram | s | | Time to write a batch to ClickHouse |
+| `gkg.etl.destination.write.duration` | Histogram | s | `table` | Time to write a batch to ClickHouse |
 | `gkg.etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
 | `gkg.etl.destination.written` | Counter | By | `table` | Total bytes written to ClickHouse |
 | `gkg.etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |

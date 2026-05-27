@@ -937,7 +937,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Time to write a batch to ClickHouse.",
+         "description": "Time to write a batch to ClickHouse per table.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -975,8 +975,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 overall",
+               "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{table}}",
                "refId": "A"
             },
             {
@@ -984,8 +984,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 overall",
+               "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{table}}",
                "refId": "B"
             },
             {
@@ -993,8 +993,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 overall",
+               "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{table}}",
                "refId": "C"
             }
          ],
@@ -1006,7 +1006,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Time to write a batch to ClickHouse.",
+         "description": "Time to write a batch to ClickHouse per table.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -1044,8 +1044,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(rate(gkg_etl_destination_write_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "count",
+               "expr": "sum by (table) (rate(gkg_etl_destination_write_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
                "refId": "A"
             }
          ],
