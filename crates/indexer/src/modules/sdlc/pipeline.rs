@@ -30,7 +30,7 @@ const MAX_RETRIES: u32 = 3;
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub destination: Arc<dyn Destination>,
     pub progress: ProgressNotifier,
-    pub observer: Box<dyn IndexingObserver>,
+    pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
 }
 
 pub(in crate::modules::sdlc) struct Pipeline {
@@ -57,7 +57,7 @@ impl Pipeline {
 
     pub async fn run_plan(
         &self,
-        context: &mut PipelineContext,
+        context: &PipelineContext,
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
@@ -103,7 +103,11 @@ impl Pipeline {
                 .map(|b| b.get_array_memory_size() as u64)
                 .sum();
             total_rows += rows_in_batch;
-            context.observer.extracted(rows_in_batch, bytes_in_batch);
+            context
+                .observer
+                .lock()
+                .unwrap()
+                .extracted(rows_in_batch, bytes_in_batch);
 
             info!(
                 rows = rows_in_batch,
@@ -515,7 +519,7 @@ mod tests {
         PipelineContext {
             destination: Arc::new(MockDestination::new()),
             progress: ProgressNotifier::noop(),
-            observer: Box::new(NoOpObserver),
+            observer: Arc::new(Mutex::new(NoOpObserver)),
         }
     }
 
@@ -635,7 +639,7 @@ mod tests {
 
         let result = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -661,7 +665,7 @@ mod tests {
         );
         let result = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -700,7 +704,7 @@ mod tests {
 
         let result = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -777,7 +781,7 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -818,7 +822,7 @@ mod tests {
         let plan = simple_plan("Test");
         let result = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -858,7 +862,7 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
@@ -894,7 +898,7 @@ mod tests {
 
         let result = pipeline
             .run_plan(
-                &mut noop_context(),
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),

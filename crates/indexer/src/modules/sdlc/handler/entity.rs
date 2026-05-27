@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -119,10 +119,11 @@ impl EntityHandler {
             IndexingMode::Incremental
         });
 
-        let mut pipeline_context = PipelineContext {
+        let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
+        let pipeline_context = PipelineContext {
             destination: Arc::clone(&context.destination),
             progress: context.progress.clone(),
-            observer: Box::new(observer),
+            observer: Arc::clone(&observer),
         };
 
         let base_query = self
@@ -154,7 +155,7 @@ impl EntityHandler {
         let result = if ranges.is_empty() {
             self.pipeline
                 .run_plan(
-                    &mut pipeline_context,
+                    &pipeline_context,
                     &self.plan,
                     base_query,
                     &checkpoint_key,
@@ -174,6 +175,7 @@ impl EntityHandler {
                     &checkpoint_key,
                     request.watermark,
                     &context,
+                    &pipeline_context,
                 )
                 .await;
 
@@ -202,10 +204,11 @@ impl EntityHandler {
         };
 
         match &result {
-            Ok(()) => pipeline_context.observer.finish(),
+            Ok(()) => observer.lock().unwrap().finish(),
             Err(e) => {
-                pipeline_context.observer.record_error(&e.to_string());
-                pipeline_context.observer.finish();
+                let mut obs = observer.lock().unwrap();
+                obs.record_error(&e.to_string());
+                obs.finish();
             }
         }
 
@@ -221,6 +224,7 @@ impl EntityHandler {
         checkpoint_key: &str,
         target_watermark: DateTime<Utc>,
         context: &HandlerContext,
+        parent_pipeline_context: &PipelineContext,
     ) -> Result<(), HandlerError> {
         let mut set: JoinSet<Result<(), HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
@@ -240,21 +244,16 @@ impl EntityHandler {
 
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
-            let destination = Arc::clone(&context.destination);
-            let progress = context.progress.clone();
-            let partition_metrics = self.metrics.clone();
+            let partition_context = PipelineContext {
+                destination: Arc::clone(&context.destination),
+                progress: context.progress.clone(),
+                observer: Arc::clone(&parent_pipeline_context.observer),
+            };
 
             set.spawn(async move {
-                let mut partition_observer = SdlcOtelObserver::new(partition_metrics);
-                partition_observer.set_entity_type(&plan.name);
-                let mut partition_context = PipelineContext {
-                    destination,
-                    progress,
-                    observer: Box::new(partition_observer),
-                };
                 pipeline
                     .run_plan(
-                        &mut partition_context,
+                        &partition_context,
                         &plan,
                         query,
                         &position_key,

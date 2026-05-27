@@ -55,9 +55,9 @@ pub trait IndexingObserver: Send {
 
     fn nodes_indexed(&mut self, _kind: &str, _count: u64) {}
 
-    fn record_error(&self, _error: &str) {}
+    fn record_error(&mut self, _error: &str) {}
 
-    fn finish(&self) {}
+    fn finish(&mut self) {}
 }
 
 pub struct NoOpObserver;
@@ -121,14 +121,14 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
-    fn record_error(&self, error: &str) {
-        for o in self.iter() {
+    fn record_error(&mut self, error: &str) {
+        for o in self.iter_mut() {
             o.record_error(error);
         }
     }
 
-    fn finish(&self) {
-        for o in self.iter() {
+    fn finish(&mut self) {
+        for o in self.iter_mut() {
             o.finish();
         }
     }
@@ -179,10 +179,10 @@ mod tests {
         fn nodes_indexed(&mut self, _: &str, _: u64) {
             self.push("nodes_indexed");
         }
-        fn record_error(&self, _: &str) {
+        fn record_error(&mut self, _: &str) {
             self.push("record_error");
         }
-        fn finish(&self) {
+        fn finish(&mut self) {
             self.push("finish");
         }
     }
