@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;
 
-const PERMITTED_DEPENDENTS: &[&str] = &[];
+const PERMITTED_DEPENDENTS: &[&str] = &["gkg-server"];
 
 #[test]
 fn only_permitted_crates_depend_on_gkg_billing() {
