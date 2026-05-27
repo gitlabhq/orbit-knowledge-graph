@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use rand::seq::SliceRandom;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
@@ -149,13 +150,20 @@ impl NamespaceCodeBackfillDispatcher {
 
             let enabled = self.extract_enabled_namespaces(&messages)?;
 
+            let mut all_pending: Vec<PendingProject> = Vec::new();
             for (namespace_id, traversal_path) in &enabled {
-                let outcome = self
-                    .dispatch_projects_code_indexing(*namespace_id, traversal_path)
-                    .await?;
-                total.dispatched += outcome.dispatched;
-                total.skipped += outcome.skipped;
+                all_pending.extend(
+                    self.fetch_pending_for_namespace(*namespace_id, traversal_path)
+                        .await?,
+                );
             }
+            // Shuffle the flat project list so the NATS queue is interleaved
+            // across namespaces; otherwise FIFO consumption processes one
+            // namespace's entire batch before any other namespace gets a turn.
+            all_pending.shuffle(&mut rand::rng());
+            let outcome = self.publish_pending(&all_pending).await?;
+            total.dispatched += outcome.dispatched;
+            total.skipped += outcome.skipped;
 
             for message in messages {
                 message.ack().await.map_err(|error| {
@@ -211,18 +219,18 @@ impl NamespaceCodeBackfillDispatcher {
             return Ok(());
         }
 
-        let mut total = DispatchOutcome {
-            dispatched: 0,
-            skipped: 0,
-        };
-
+        let mut all_pending: Vec<PendingProject> = Vec::new();
         for (namespace_id, traversal_path) in &enabled {
-            let outcome = self
-                .dispatch_projects_code_indexing(*namespace_id, traversal_path)
-                .await?;
-            total.dispatched += outcome.dispatched;
-            total.skipped += outcome.skipped;
+            all_pending.extend(
+                self.fetch_pending_for_namespace(*namespace_id, traversal_path)
+                    .await?,
+            );
         }
+        // Shuffle the flat project list so the NATS queue is interleaved
+        // across namespaces; otherwise FIFO consumption processes one
+        // namespace's entire batch before any other namespace gets a turn.
+        all_pending.shuffle(&mut rand::rng());
+        let total = self.publish_pending(&all_pending).await?;
 
         if total.dispatched > 0 || total.skipped > 0 {
             self.metrics
@@ -345,21 +353,16 @@ impl NamespaceCodeBackfillDispatcher {
         Ok(rows)
     }
 
-    async fn dispatch_projects_code_indexing(
+    async fn fetch_pending_for_namespace(
         &self,
         namespace_id: i64,
         traversal_path: &str,
-    ) -> Result<DispatchOutcome, TaskError> {
-        let no_work = DispatchOutcome {
-            dispatched: 0,
-            skipped: 0,
-        };
-
+    ) -> Result<Vec<PendingProject>, TaskError> {
         let projects = self.fetch_namespace_projects(traversal_path).await?;
 
         if projects.is_empty() {
             debug!(namespace_id, "no pending projects in namespace");
-            return Ok(no_work);
+            return Ok(Vec::new());
         }
 
         // Skip projects that already have a checkpoint for the current
@@ -376,22 +379,29 @@ impl NamespaceCodeBackfillDispatcher {
 
         if projects.is_empty() {
             debug!(namespace_id, "all projects already checkpointed");
-            return Ok(no_work);
+            return Ok(Vec::new());
         }
 
         info!(
             namespace_id,
             count = projects.len(),
             already_checkpointed = pending_count_before_filter - projects.len(),
-            "dispatching code backfill for pending projects"
+            "fetched pending projects for code backfill"
         );
 
+        Ok(projects)
+    }
+
+    async fn publish_pending(
+        &self,
+        projects: &[PendingProject],
+    ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome {
             dispatched: 0,
             skipped: 0,
         };
 
-        for project in &projects {
+        for project in projects {
             let request = CodeIndexingTaskRequest {
                 task_id: 0,
                 project_id: project.project_id,
@@ -419,11 +429,6 @@ impl NamespaceCodeBackfillDispatcher {
                 }
             }
         }
-
-        debug!(
-            namespace_id,
-            outcome.dispatched, outcome.skipped, "dispatched code backfill for namespace"
-        );
 
         Ok(outcome)
     }
