@@ -294,10 +294,14 @@ impl CodeIndexingPipeline {
 
         // Flush all buffered tables to ClickHouse in parallel (one HTTP
         // request per distinct table, all concurrent).
-        buffered_sink
-            .flush()
-            .await
-            .map_err(|e| HandlerError::Processing(format!("ClickHouse flush: {e}")))?;
+        if let Err(e) = buffered_sink.flush().await {
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during flush for project {project_id}: {e}"
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
+        }
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
