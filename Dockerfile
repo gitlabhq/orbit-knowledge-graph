@@ -17,6 +17,8 @@ RUN --mount=type=secret,id=sccache_gcs_key \
              SCCACHE_GCS_RW_MODE=READ_WRITE; \
     fi && \
     export RUSTC_WRAPPER="$SCCACHE_BIN" && \
+    export SCHEMA_DIR=/app/config/schemas && \
+    export IGLU_DIR=/app/vendor/iglu/public/schemas/com.gitlab && \
     "$SCCACHE_BIN" --start-server || true && \
     cargo build --release -p gkg-server --locked && \
     "$SCCACHE_BIN" --show-stats || true && \
@@ -30,7 +32,7 @@ ENV GKG_VERSION=$GKG_VERSION
 WORKDIR /app
 
 COPY --from=builder /gkg-server /usr/local/bin/gkg-server
-COPY --from=builder /build/config/schemas /build/config/schemas
-COPY --from=builder /build/vendor/iglu /build/vendor/iglu
+COPY --from=builder /build/config/schemas /app/config/schemas
+COPY --from=builder /build/vendor/iglu/public/schemas/com.gitlab /app/vendor/iglu/public/schemas/com.gitlab
 
 ENTRYPOINT ["gkg-server"]
