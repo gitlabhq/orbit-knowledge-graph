@@ -397,7 +397,7 @@ mod tests {
                 project_id,
                 branch: Some(branch.to_string()),
                 commit_sha: Some("abc123".to_string()),
-                traversal_path: format!("/org/project-{}", project_id),
+                traversal_path: format!("1/{project_id}/"),
             })
             .unwrap()
         }
@@ -436,8 +436,7 @@ mod tests {
     #[tokio::test]
     async fn skips_already_indexed_tasks() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "/org/project-123", "main", 100)
-            .await;
+        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
 
         let envelope = TestContext::make_request(50, 123, "main");
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
@@ -460,15 +459,14 @@ mod tests {
     #[tokio::test]
     async fn resolves_default_branch_when_branch_is_none() {
         let ctx = TestContext::new();
-        ctx.set_checkpoint(123, "/org/project-123", "main", 100)
-            .await;
+        ctx.set_checkpoint(123, "1/123/", "main", 100).await;
 
         let envelope = Envelope::new(&CodeIndexingTaskRequest {
             task_id: 0,
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "/org/project-123".to_string(),
+            traversal_path: "1/123/".to_string(),
         })
         .unwrap();
 
@@ -493,7 +491,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "/org/project-123".to_string(),
+            traversal_path: "1/123/".to_string(),
         })
         .unwrap();
 
@@ -509,7 +507,7 @@ mod tests {
         );
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("/org/project-123", 123, "HEAD")
+            .get_checkpoint("1/123/", 123, "HEAD")
             .await
             .unwrap()
             .expect("checkpoint should be written for deleted project so the dispatcher dedupes");
@@ -536,7 +534,7 @@ mod tests {
             project_id: 123,
             branch: None,
             commit_sha: None,
-            traversal_path: "/org/project-123".to_string(),
+            traversal_path: "1/123/".to_string(),
         })
         .unwrap();
 
@@ -565,7 +563,7 @@ mod tests {
         assert!(result.is_ok(), "empty repo should ack, got {result:?}");
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("/org/project-123", 123, "main")
+            .get_checkpoint("1/123/", 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for empty repo");
@@ -593,7 +591,7 @@ mod tests {
         assert!(result.is_ok());
         let checkpoint = ctx
             .mock_checkpoints
-            .get_checkpoint("/org/project-123", 123, "main")
+            .get_checkpoint("1/123/", 123, "main")
             .await
             .unwrap()
             .expect("checkpoint should be set for missing repository");
