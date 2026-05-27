@@ -1,6 +1,6 @@
 //! Constants for the code indexing module.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ontology::{Ontology, OntologyError};
 
@@ -11,31 +11,37 @@ pub mod subjects {
     pub const KNOWLEDGE_GRAPH_ENABLED_NAMESPACES: &str = "knowledge_graph_enabled_namespaces";
 }
 
-/// ClickHouse table names for code graph entities, derived from the ontology
-/// and prefixed according to the embedded `SCHEMA_VERSION`.
+const CODE_DOMAIN: &str = "source_code";
+
 pub struct CodeTableNames {
     pub branch: String,
     pub directory: String,
     pub file: String,
     pub definition: String,
     pub imported_symbol: String,
-    /// Maps relationship kind to prefixed edge table name.
-    /// The code indexer produces multiple edge types (IN_PROJECT, CONTAINS,
-    /// DEFINES, IMPORTS, ON_BRANCH) that may route to different tables.
-    pub edge_tables: HashMap<String, String>,
-    /// Default edge table for relationship kinds not in the map.
-    pub default_edge_table: String,
+    edge_tables: HashMap<String, String>,
+    default_edge_table: String,
 }
 
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        let code_node_types: HashSet<&str> = ontology
+            .nodes()
+            .filter(|node| node.domain == CODE_DOMAIN)
+            .map(|node| node.name.as_str())
+            .collect();
+
         let mut edge_tables = HashMap::new();
-        for edge_name in ontology.edge_names() {
-            let table = ontology.edge_table_for_relationship(edge_name);
-            edge_tables.insert(
-                edge_name.to_string(),
-                prefixed_table_name(table, *SCHEMA_VERSION),
-            );
+        for edge in ontology.edges() {
+            let involves_code_node = code_node_types.contains(edge.source_kind.as_str())
+                || code_node_types.contains(edge.target_kind.as_str());
+            if involves_code_node {
+                edge_tables
+                    .entry(edge.relationship_kind.clone())
+                    .or_insert_with(|| {
+                        prefixed_table_name(&edge.destination_table, *SCHEMA_VERSION)
+                    });
+            }
         }
         let default_edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
 
@@ -76,5 +82,34 @@ impl CodeTableNames {
             &self.definition,
             &self.imported_symbol,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edge_tables_only_contain_code_relevant_tables() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+
+        let edge_tables: HashSet<&str> = names.edge_table_names().into_iter().collect();
+        let gl_edge = prefixed_table_name("gl_edge", *SCHEMA_VERSION);
+        let gl_code_edge = prefixed_table_name("gl_code_edge", *SCHEMA_VERSION);
+
+        assert!(
+            edge_tables.contains(gl_edge.as_str()),
+            "should include gl_edge"
+        );
+        assert!(
+            edge_tables.contains(gl_code_edge.as_str()),
+            "should include gl_code_edge"
+        );
+        assert_eq!(
+            edge_tables.len(),
+            2,
+            "should only contain gl_edge and gl_code_edge, got {edge_tables:?}"
+        );
     }
 }
