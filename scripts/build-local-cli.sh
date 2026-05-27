@@ -72,7 +72,8 @@ if [ "${PRINT_TARGET:-0}" = "1" ]; then
 fi
 
 # Idempotent; no-op if the target is already installed.
-rustup target add "$TARGET"
+TOOLCHAIN=$(rustc -vV | awk '/^release:/ { print $2 }')
+rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
 # Bundle libduckdb (compile from C++) so the released binary is self-contained.
