@@ -139,39 +139,9 @@ The handler reads its mode from config; production deployment uses Mode A.
 
 ### Compatibility with entity-level SDLC indexing (ADR 014)
 
-[ADR 014][adr014] (scaffolded in [!1341][adr014-mr]) replaces today's `GlobalHandler` + `NamespaceHandler` split with a single `EntityIndexingHandler` that dispatches one entity kind per NATS message. The scaffold is a no-op commit that ships the wire format (`EntityIndexingRequest`, `IndexingScope`, `PartitionAssignment`, `PartitionBounds`), the empty `EntityIndexingHandler` and `EntityDispatcher`, and the `entity-handler` / `entity` config blocks — the `EntityPipeline` trait and per-entity wiring come in a stacked follow-up. ADR 013 is structured to plug into that surface without further rework.
+ADR 014 replaced the former `GlobalHandler` + `NamespaceHandler` split with one `EntityHandler` per ontology entity type. Each handler subscribes to the shared global or namespace NATS topic and processes a single entity kind per message. Partitioning for initial loads is configured per entity via `partition_overrides`.
 
-[adr014]: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1341
-
-**Reversed partition ownership.** ADR 014 reverses the pipeline-owned partitioning model that the previous draft (!1272) carried: now the dispatcher reads checkpoint state, computes quantile boundaries with `quantilesTDigest`, and publishes one message per `(entity, scope, partition)` combination,
-each message carrying an optional `PartitionAssignment { index, total, column, bounds: Range { lower_bound, upper_bound } }`.
-The handler applies the range filter as a plain SQL `WHERE` conjunct and uses a partition-specific checkpoint key.
-The `SystemNotesPipeline` therefore stays simple — *parse + resolve + emit*, with no checkpoint orchestration, no quantile queries, no consolidation logic.
-v1 ships with `partition = None` (see "Out of scope") and adopts partitioning later through the same plumbing if and when the system-notes pass outgrows a single worker.
-
-**Compatibility matrix.**
-
-| ADR 013 element | Compatible with !1341 (ADR 014)? | Action |
-|---|---|---|
-| Custom Rust pipeline at `modules/sdlc/handler/system_notes/` | ✅ via `EntityPipeline` trait | Re-frame as a **custom `EntityPipeline`** impl (the trait extension point ADR 014 names). |
-| Mode A / Mode B (datalake source selection) | ✅ unchanged | Source-table SQL is orthogonal to dispatch model. |
-| Two-batched-IN-list ClickHouse resolver | ✅ unchanged | Runs inside the pipeline; dispatch model does not see it. |
-| Per-namespace batching | ✅ improved | Batch unit shifts from "all entities for a namespace" to "this entity for this scope" — a strictly finer-grained fit. |
-| Edge YAML declarations (`mentions.yaml`, `adds_commit.yaml`, …) | ✅ unchanged | Ontology declarations are dispatch-model-orthogonal. |
-| Metrics catalog | ✅ improved | Reuse `gkg.indexer.sdlc.*` with `entity = "SystemNote"` label; add only `edges_emitted_total` and `unknown_action_total`. |
-| Implementation plan step 7 (handler registration) | ✅ forward-compatible | Register as an `EntityPipeline` in the `EntityIndexingHandler`'s `HashMap<String, Arc<dyn EntityPipeline>>` (post-!1341), or as a `Handler` next to `NamespaceHandler` / `GlobalHandler` (pre-!1341). |
-| Checkpoint key shape | ✅ unchanged | `ns.{id}.SystemNote` works in both worlds; ADR 014 explicitly preserves the format. |
-| `system_note_metadata` Siphon prerequisite | ✅ unchanged | Independent of dispatch model. |
-| Schema-version bump (44 → 45) | ✅ unchanged | Ontology change, not dispatch. |
-| Feature flag rollout | ✅ improved | Per-entity flag is finer-grained under ADR 014. |
-| Partitioning of system-notes pass | ✅ deferred | v1 sets `partition = None`; later via `partition_overrides.SystemNote: N` plus a custom `PartitionStrategy` (see "Out of scope"). |
-
-**Ship now, forward-compatible.** ADR 013 does not need to wait for !1341 (or its stacked `EntityPipeline` follow-up) to merge:
-
-- !1341 is a no-op scaffold and the wire format / config types are already committed; approving ADR 013 against this surface is not betting on a speculative refactor.
-- ADR 014 names `SystemNotes` specifically as the motivating example for the `EntityPipeline` extension point ("Handler and pipeline"). The custom-pipeline path is the documented extension point, not a special case.
-- The Siphon-side `system_note_metadata` replication is the longer lead-time item; ADR 013 unblocks *that* coordination immediately.
-- The implementation MR can target whichever dispatch model is live when it lands. Only the registration glue differs (post-!1341 entity-handler `HashMap` insertion, ~5 lines; pre-!1341 standalone `Handler`, <30 lines of wrapper that is deleted once !1341 lands). The pipeline's *internal* code (parser, resolver, edge writer) is identical in both worlds.
+ADR 013's system-notes pipeline is fully compatible with this model: it registers as a namespaced `EntityHandler` via `Plan`, reuses the standard checkpoint key format (`ns.{id}.SystemNote`), and can opt into partitioning later via `partition_overrides.SystemNote: N`.
 
 ### Action-coverage drift mitigation
 

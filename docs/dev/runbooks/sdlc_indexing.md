@@ -37,20 +37,22 @@ Consumer names are derived from the configured `consumer_name` (default in produ
 
 | Consumer | Stream | Role |
 |----------|--------|------|
-| `gkg-indexer-sdlc-global-indexing-requested` | `GKG_INDEXER` | Global handler |
-| `gkg-indexer-sdlc-namespace-indexing-requested-wildcard-wildcard` | `GKG_INDEXER` | Namespace handler |
+| `gkg-indexer-sdlc-global-indexing-requested` | `GKG_INDEXER` | Global entity handlers |
+| `gkg-indexer-sdlc-namespace-indexing-requested-wildcard-wildcard` | `GKG_INDEXER` | Namespaced entity handlers |
 | `gkg-indexer-sdlc-namespace-deletion-requested-wildcard` | `GKG_INDEXER` | Namespace deletion handler |
 
 With ephemeral consumers (`consumer_name: None`, the local dev default), NATS assigns random names that don't survive restarts.
 
 ### Handlers
 
-| Handler | Subject | Default max_attempts | DLQ |
-|---------|---------|---------------------|-----|
-| GlobalHandler | `sdlc.global.indexing.requested` | 1 | No (re-dispatched next cycle) |
-| NamespaceHandler | `sdlc.namespace.indexing.requested.*.*` | 1 | No (re-dispatched next cycle) |
+Each ontology entity type gets its own `EntityHandler` instance. Handlers for global entities subscribe to the global subject; handlers for namespaced entities subscribe to the namespace subject.
 
-Both handlers rely on the dispatcher to re-create requests on the next cycle rather than retrying via NATS. This is the eventual consistency model.
+| Scope | Subject | Default max_attempts | DLQ |
+|-------|---------|---------------------|-----|
+| Global (e.g. User) | `sdlc.global.indexing.requested` | 1 | No (re-dispatched next cycle) |
+| Namespaced (e.g. Project, MergeRequest) | `sdlc.namespace.indexing.requested.*.*` | 1 | No (re-dispatched next cycle) |
+
+All SDLC handlers rely on the dispatcher to re-create requests on the next cycle rather than retrying via NATS. This is the eventual consistency model.
 
 ## Dispatcher
 
