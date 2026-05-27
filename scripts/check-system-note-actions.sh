@@ -24,6 +24,12 @@
 # Skip mechanism (matches GOON / RAW patterns):
 #   - `[skip system-note-actions-check]` in MR description, OR
 #   - `SKIP_SYSTEM_NOTE_ACTIONS_CHECK=1` env var.
+#
+# Offline behaviour: the upstream-fetch step uses `curl --fail || exit 0`,
+# so a contributor with no network (or a CI runner with egress restrictions)
+# gets a silent no-op rather than a failed commit. The CI job runs on
+# GitLab.com runners that always have egress to gitlab.com, so production
+# drift detection is not affected.
 
 set -euo pipefail
 

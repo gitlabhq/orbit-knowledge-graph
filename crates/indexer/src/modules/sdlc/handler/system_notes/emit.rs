@@ -120,6 +120,15 @@ where
                 let Some(author_id) = row.author_id else {
                     continue;
                 };
+                // `merged.yaml` only declares `User → MergeRequest` as a variant;
+                // Rails only emits `action='merged'` on MRs in practice, but a
+                // stray non-MR noteable (manual DB edit, Rails bug) would
+                // otherwise land an undeclared `User → WorkItem MERGED` edge
+                // in `gl_edge`. Drop it to keep the emitter honest about the
+                // edge-YAML contract.
+                if row.action == Action::Merged && row.noteable_kind != NoteableKind::MergeRequest {
+                    continue;
+                }
                 let kind = match row.action {
                     Action::Closed => edge_kinds::CLOSED,
                     Action::Reopened => edge_kinds::REOPENED,
@@ -274,6 +283,17 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "REOPENED");
         assert_eq!(edges[0].target_kind, "MergeRequest");
+    }
+
+    #[test]
+    fn merged_on_non_mr_noteable_is_dropped() {
+        // `merged.yaml` only declares User → MergeRequest. If Rails (or a
+        // manual DB edit) ever lands `action='merged'` on a WorkItem
+        // noteable, the emitter should drop it instead of producing an
+        // undeclared edge variant.
+        let row = row_for(Action::Merged, "merged", NoteableKind::WorkItem, 42);
+        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
+        assert!(edges.is_empty());
     }
 
     #[test]

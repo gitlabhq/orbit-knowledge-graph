@@ -28,8 +28,8 @@ use super::parse::{RefKind, Reference};
 /// Routes also stores `Namespace`, `User`, etc., but those never appear as
 /// the *owning project* of a referenced entity, so the resolver filters them
 /// out at query time. Embedded as a string literal in [`ROUTES_SQL`] today;
-/// the constant is the source-of-truth callers can cross-check against.
-#[allow(dead_code)]
+/// `routes_sql_contains_every_routable_source_type` asserts the two stay in
+/// sync.
 pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
 
 /// SQL template for the routes-table batch lookup.
@@ -237,6 +237,21 @@ mod tests {
     fn merge_requests_sql_uses_tuple_in_list() {
         assert!(MERGE_REQUESTS_SQL.contains("{pairs:Array(Tuple(Int64, Int64))}"));
         assert!(MERGE_REQUESTS_SQL.contains("(target_project_id, iid) IN"));
+    }
+
+    #[test]
+    fn routes_sql_contains_every_routable_source_type() {
+        // Close the loop between the documented `ROUTABLE_SOURCE_TYPES`
+        // const and the literal IN-list embedded in ROUTES_SQL: if a
+        // future contributor extends one without the other, this fails
+        // with a clear message instead of silently dropping a source-type.
+        for t in ROUTABLE_SOURCE_TYPES {
+            let needle = format!("'{t}'");
+            assert!(
+                ROUTES_SQL.contains(&needle),
+                "ROUTES_SQL missing routable source_type {t:?}"
+            );
+        }
     }
 
     #[test]

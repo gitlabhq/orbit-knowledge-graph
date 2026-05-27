@@ -483,6 +483,18 @@ mod tests {
     }
 
     #[test]
+    fn relate_mixed_mr_and_issue_refs_are_both_collected() {
+        // `all_refs_any` runs MR_REF first then ISSUE_REF; both kinds need
+        // to land in the output for a body that mixes them. Documents the
+        // emission order (MR refs before Issue refs) which downstream
+        // edge-emission stability relies on.
+        let refs = extract(Action::Relate, "marked this issue as related to !42 and #9");
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0], mr_ref(None, 42));
+        assert_eq!(refs[1], issue_ref(None, 9));
+    }
+
+    #[test]
     fn unrelate_single_reference() {
         let refs = extract(Action::Unrelate, "removed the relation with !456");
         assert_eq!(refs, vec![mr_ref(None, 456)]);
