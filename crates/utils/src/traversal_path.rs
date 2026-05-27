@@ -21,6 +21,17 @@ pub fn org_id(path: &str) -> Option<i64> {
         .and_then(|s| s.parse().ok())
 }
 
+/// Extract the top-level namespace ID (second segment) from a traversal path.
+///
+/// `"42/100/" → Some(100)`, `"42/100/1000/" → Some(100)`.
+/// Returns `None` when the path has fewer than two segments or the second
+/// segment isn't numeric.
+pub fn top_level_namespace_id(path: &str) -> Option<i64> {
+    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    segments.next(); // skip org
+    segments.next().and_then(|s| s.parse().ok())
+}
+
 /// Extract the leaf namespace ID (last segment) from a traversal path.
 ///
 /// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
@@ -89,6 +100,26 @@ mod tests {
     #[test]
     fn org_id_empty() {
         assert_eq!(org_id(""), None);
+    }
+
+    #[test]
+    fn top_level_namespace_id_two_segments() {
+        assert_eq!(top_level_namespace_id("42/100/"), Some(100));
+    }
+
+    #[test]
+    fn top_level_namespace_id_three_segments() {
+        assert_eq!(top_level_namespace_id("42/100/1000/"), Some(100));
+    }
+
+    #[test]
+    fn top_level_namespace_id_single_segment() {
+        assert_eq!(top_level_namespace_id("42/"), None);
+    }
+
+    #[test]
+    fn top_level_namespace_id_empty() {
+        assert_eq!(top_level_namespace_id(""), None);
     }
 
     #[test]

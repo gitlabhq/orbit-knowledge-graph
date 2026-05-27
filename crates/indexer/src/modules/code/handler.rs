@@ -178,6 +178,7 @@ impl CodeIndexingTaskHandler {
         )]);
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
+        observer.set_traversal_path(&request.traversal_path);
         observer.set_indexing_mode(if existing_checkpoint.is_some() {
             IndexingMode::Incremental
         } else {
