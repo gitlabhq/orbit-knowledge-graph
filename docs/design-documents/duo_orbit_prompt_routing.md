@@ -1,8 +1,8 @@
 # Duo / Orbit prompt routing architecture
 
 <!-- Validated against gitlab-org/gitlab master -->
-<!-- SHA: ddb26ef47755adef4c2168c9aac92e2bc3d91794 -->
-<!-- Date: 2026-05-18 -->
+<!-- SHA: 7ca75b3c001b1bd19387fea78fe67032322da436 -->
+<!-- Date: 2026-05-27 -->
 
 ## Overview
 
@@ -67,11 +67,21 @@ The Orbit MCP tools that this doc gates are themselves designed in:
 **Sources**
 
 - Re-validated against `gitlab-org/gitlab` master at commit
-  [`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4) on
-  2026-05-18, which includes the new `code_review/*` exclusion in
-  `McpConfigService` (commit `ddb26ef4`, "fix: Exclude Duo Code Review from
-  Orbit foundational catch-all"). Previous validation point was
-  `ee4b7d413100` on 2026-05-14; the `developer/v1` Orbit branch landed in
+  [`7ca75b3c`](https://gitlab.com/gitlab-org/gitlab/-/commit/7ca75b3c) on
+  2026-05-27. The `code_review/*` exclusion now sits at the top of
+  `orbit_enabled_for_flow?` and short-circuits before every other bucket
+  (commit [`7246bf60dc11`](https://gitlab.com/gitlab-org/gitlab/-/commit/7246bf60dc11),
+  "Fix code review short-circuiting Orbit exclusion via custom_agent? check",
+  merged 2026-05-25 via
+  [MR !237756](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/237756)).
+  The original carve-out landed in
+  [`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)
+  ("fix: Exclude Duo Code Review from Orbit foundational catch-all",
+  2026-05-14) as a row in the catch-all; `7246bf60dc11` promoted it to a
+  top-level branch after AI Catalog-launched code-review flows slipped
+  through the `custom_agent?` arm. Earlier validation points: `ee4b7d413100`
+  (2026-05-14) and `ddb26ef47755` (2026-05-18). The `developer/v1` Orbit
+  branch landed in
   [MR !235544](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/235544)
   (`6045aabbdb81`).
 - Based on internal research notes and validated against the upstream
@@ -122,12 +132,17 @@ The two paths in concrete Rails terms:
 1. **Classic chat** — `Llm::ChatService` calls AI Gateway directly. This path
    never touches DWS, never calls `McpConfigService`, and therefore **never
    sees Orbit**.
-2. **Agentic / DAP path** — `Ai::DuoWorkflows::CreateAndStartWorkflowService`
-   or `Ai::Catalog::ExecuteWorkflowService` calls `Ai::DuoWorkflows::McpConfigService`
-   to assemble the `McpServers` payload and (for foundational flows)
-   `Ai::DuoWorkflows::FoundationalFlowStartParamsResolver` to choose the flow
-   definition and version. DWS receives the payload over gRPC and executes the
-   flow.
+2. **Agentic / DAP path** — `Ai::DuoWorkflows::CreateAndStartWorkflowService`,
+   `Ai::Catalog::Flows::ExecuteService` (the AI Catalog "Run" path,
+   refactored in [!236476](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/236476))
+   and `Ai::Messaging::DefaultProjectFlowResolver` (project-less surfaces
+   such as Slack) resolve the flow definition and version via
+   `Ai::DuoWorkflows::FoundationalFlowStartParamsResolver`, then start the
+   workflow over gRPC. The `McpServers` payload is assembled by
+   `Ai::DuoWorkflows::McpConfigService` later, when DWS opens its
+   WebSocket session against the
+   `GET /api/v4/ai/duo_workflows/:workflow_id/ws` endpoint in
+   `ee/lib/api/ai/duo_workflows/workflows.rb`.
 
 ```mermaid
 flowchart LR
@@ -138,23 +153,28 @@ flowchart LR
         ExecMethod[Llm::ExecuteMethodService]
         ChatSvc[Llm::ChatService<br/>classic]
         CreateWf[Ai::DuoWorkflows::<br/>CreateAndStartWorkflowService]
-        ExecCat[Ai::Catalog::<br/>ExecuteWorkflowService]
+        ExecFlow[Ai::Catalog::Flows::<br/>ExecuteService]
+        DefaultProj[Ai::Messaging::<br/>DefaultProjectFlowResolver]
+        WfApi[API endpoint<br/>GET /api/v4/ai/duo_workflows/<br/>:id/ws]
         Resolver[FoundationalFlow<br/>StartParamsResolver]
         McpCfg[McpConfigService]
         Settings((Ai::Orbit::Settings<br/>facade))
         ExecMethod --> ChatSvc
         ExecMethod --> CreateWf
         CreateWf --> Resolver
-        CreateWf --> McpCfg
-        ExecCat --> Resolver
-        ExecCat --> McpCfg
+        ExecFlow --> Resolver
+        DefaultProj --> Resolver
+        WfApi --> McpCfg
         Resolver -. reads .-> Settings
         McpCfg -. reads .-> Settings
     end
 
     ChatSvc -->|REST /v2/chat/agent| AIGW[AI Gateway]
-    McpCfg -->|gRPC StartWorkflow| DWS
-    Resolver -->|flow def + version| DWS[Duo Workflow Service]
+    CreateWf -->|gRPC StartWorkflow| DWS[Duo Workflow Service]
+    ExecFlow -->|gRPC StartWorkflow| DWS
+    DWS -. WebSocket fetches MCP config .-> WfApi
+    McpCfg -->|McpServers payload| DWS
+    Resolver -->|flow def + version| DWS
     DWS -->|MCP calls| OrbitMCP[Orbit MCP server<br/>POST /api/v4/orbit/mcp]
     DWS -->|MCP calls| GitLabMCP[GitLab MCP server]
     DWS -->|LLM| AIGW
@@ -204,15 +224,15 @@ have the foundational path.
 The source of truth is `ee/lib/ai/foundational_chat_agents_definitions.rb`.
 Each entry has a `reference`, a `version`, and an optional `global_catalog_id`:
 
-| `id` | `reference` | `version` | `global_catalog_id` | Name |
-|---|---|---|---|---|
-| 1 | `chat` | `""` | `nil` | GitLab Duo |
-| 2 | `orbit_agent` | `v1` | `nil` | Orbit |
-| 3 | `duo_planner` | `v1` | `348` | Planner |
-| 4 | `security_analyst_agent` | `v1` | `356` | Security Analyst |
-| 5 | `analytics_agent` | `v1` | `1003596` | Data Analyst |
-| 6 | `ci_expert_agent` | `v1` | `1004583` | CI Expert |
-| 7 | `duo_permissions_assistant` | `v1` | `nil` | Permissions Assistant |
+| `id` | `reference` | `version` | `global_catalog_id` | Name | Notes |
+|---|---|---|---|---|---|
+| 1 | `chat` | `""` | `nil` | GitLab Duo | |
+| 2 | `orbit_agent` | `v1` | `nil` | Orbit | |
+| 3 | `duo_planner` | `v1` | `348` | Planner | |
+| 4 | `security_analyst_agent` | `v1` | `356` | Security Analyst | |
+| 5 | `analytics_agent` | `v1` | `1003596` | Data Analyst | |
+| 6 | `ci_expert_agent` | `v1` | `1004583` | CI Expert (beta) | Renamed in [!237125](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/237125) (2026-05-25). |
+| 7 | `duo_permissions_assistant` | `v1` | `nil` | Permissions Assistant (beta) | `selectable_in_chat: false` since [!237265](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/237265) (2026-05-26); the picker hides the "Ask Duo" button when this would be the only available agent. Not a Seam C predicate change. |
 
 When `global_catalog_id` is set, an AI Catalog item with that `id` exists and
 is the authoring surface for the agent. The Planner (catalog ID `348`),
@@ -237,7 +257,7 @@ paths**:
 | Path | Triggered by | Service | `workflow_definition` sent to DWS | What DWS loads |
 |---|---|---|---|---|
 | **Foundational path** | Duo Chat foundational agent picker | `Ai::DuoWorkflows::CreateAndStartWorkflowService` | the agent's `reference/version` (e.g. `duo_planner/v1`) | The flow YAML baked into the image (e.g. `duo_planner.yml`) |
-| **Catalog path** | `/explore/ai-catalog/agents/<id>/` "Run" UI | `Ai::Catalog::ExecuteWorkflowService` | `ai_catalog_agent` (constant — see `determine_workflow_definition`) | The generic `ai_catalog_agent` flow, configured at runtime from the JSON Rails sends |
+| **Catalog path** | `/explore/ai-catalog/agents/<id>/` "Run" UI | `Ai::Catalog::Flows::ExecuteService` (which resolves foundational-flow parameters via `FoundationalFlowStartParamsResolver` and then delegates to `Ai::Catalog::ExecuteWorkflowService`; the split landed in [!236476](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/236476)) | `ai_catalog_agent` (constant — see `determine_workflow_definition`) | The generic `ai_catalog_agent` flow, configured at runtime from the JSON Rails sends |
 
 Both paths execute the same logical agent — same prompts, same intended
 toolset — but they reach DWS through different code, with different workflow
@@ -366,16 +386,20 @@ for this user on this surface. If yes, the `orbit:` MCP server is added to
 the payload; if no, the entry is simply absent and DWS does not know Orbit
 exists for this run.
 
-The four buckets are checked in this order: **custom agent → dedicated Orbit
-agent → agentic chat → everything else (foundational catch-all)**. Custom
-agents are checked first because they can run with any workflow definition
-(including `'chat'`), and the user-built nature of the agent takes
-precedence over the workflow category. There is also a small but recent
-exclusion: workflows whose definition starts with `code_review/` are
-explicitly excluded from the catch-all and never get Orbit injected
-(introduced 2026-05-14 in [commit `ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)).
-Duo Code Review is flat-rate; the exclusion holds until the code review flow
-integrates Orbit deliberately and is benchmarked.
+The buckets are checked in this order: **code review → custom agent →
+dedicated Orbit agent → agentic chat → everything else (foundational
+catch-all)**. The `code_review/*` branch sits at the top and short-circuits
+to `false` for every Duo Code Review flow — including code-review flows
+launched through the AI Catalog, which would otherwise satisfy
+`custom_agent?` (any catalog item with selected MCP tools matches) and slip
+through that arm. Duo Code Review is flat-rate; the exclusion holds until
+the code review flow integrates Orbit deliberately and is benchmarked. The
+current top-level placement landed in
+[commit `7246bf60dc11`](https://gitlab.com/gitlab-org/gitlab/-/commit/7246bf60dc11)
+([MR !237756](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/237756),
+2026-05-25); the original carve-out lived as a row in the catch-all from
+[`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)
+(2026-05-14) until that promotion.
 
 When the gate passes, the tools listed in the payload depend on whether the
 agent is a true custom agent (intersection of the catalog's selected tools
@@ -392,42 +416,43 @@ to DWS, regardless of the per-surface predicate.
 
 **File**: `ee/app/services/ai/duo_workflows/mcp_config_service.rb`.
 
-`McpConfigService` produces the `McpServers:` map that DWS receives in its gRPC
-start payload. It is called from three places:
-
-- `Ai::DuoWorkflows::CreateAndStartWorkflowService` — agentic chat and the
-  developer flow.
-- `Ai::Catalog::ExecuteWorkflowService` — flows launched from the AI Catalog.
-- `Api::Helpers::DuoWorkflowHelpers` — the public `/api/v4/ai/duo_workflows`
-  endpoint and similar API surfaces.
-
-This service is the *only* path by which the Orbit MCP server becomes reachable
-from DWS.
+`McpConfigService` produces the `McpServers:` map that DWS receives. It has
+exactly one production caller:
+`ee/lib/api/ai/duo_workflows/workflows.rb` — the `GET
+/api/v4/ai/duo_workflows/:workflow_id/ws` Grape endpoint that Workhorse
+calls when DWS opens its WebSocket session for a workflow. Rails does *not*
+push the MCP server list over the initial gRPC `StartWorkflow` payload;
+DWS fetches it later through this REST endpoint. This service is the *only*
+path by which the Orbit MCP server becomes reachable from DWS.
 
 #### Workflow → subsetting mapping
 
 ```ruby
 def orbit_enabled_for_flow?
-  if custom_agent?
+  if code_review?                     # workflow_definition.starts_with?('code_review/')
+    false                             # Duo Code Review is flat-rate;
+                                      # exclude until it integrates Orbit deliberately
+  elsif custom_agent?
     Ai::Orbit::Settings.custom_agents_enabled?(current_user)
   elsif orbit_agent?                  # workflow_definition.starts_with?('orbit_agent')
     Ai::Orbit::Settings.agent_enabled?(current_user)
   elsif agentic_chat?                 # workflow_definition == 'chat'
     Ai::Orbit::Settings.chat_enabled?(current_user)
-  elsif code_review?                  # workflow_definition.starts_with?('code_review/')
-    false                             # Duo Code Review is flat-rate;
-                                      # exclude until it integrates Orbit deliberately
   else
     Ai::Orbit::Settings.foundational_enabled?(current_user)
   end
 end
 ```
 
-Custom agents are checked first because they can run with any
-`workflow_definition` (including `'chat'`); the user-built nature of the agent
-takes precedence over the workflow category. The `code_review?` branch was
-introduced after the initial validation point of this doc; see the
-**Sources** note in the [Overview](#overview) above.
+The `code_review?` branch is checked first so that code-review flows
+launched through the AI Catalog — which satisfy `custom_agent?` whenever
+the catalog item has selected MCP tools — cannot slip through and pick up
+Orbit injection. Custom agents come second because they can run with any
+`workflow_definition` (including `'chat'`), and the user-built nature of
+the agent takes precedence over the workflow category. The top-level
+placement of `code_review?` landed in
+[commit `7246bf60dc11`](https://gitlab.com/gitlab-org/gitlab/-/commit/7246bf60dc11);
+see the **Sources** note in the [Overview](#overview) above.
 
 #### Tool sets sent to DWS
 
@@ -558,6 +583,28 @@ Two consequences of how this is shaped today:
 version yet. They reach Orbit through Seam A (MCP injection) only; the
 system prompt and toolset they receive is the same with Orbit on or off.
 
+#### Resolver call sites
+
+The resolver is called from four places on master:
+
+- `ee/app/services/ai/duo_workflows/create_and_start_workflow_service.rb` —
+  agentic chat and the developer flow launched from the GraphQL mutation.
+- `ee/app/services/ai/catalog/flows/execute_service.rb` — the AI Catalog
+  "Run" path. After
+  [MR !236476](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/236476)
+  (merged 2026-05-22) the resolver is invoked here and the resulting
+  `flow_config_id` / `flow_config_schema_version` / `flow_version` triple
+  is threaded into `Ai::Catalog::ExecuteWorkflowService`, which no longer
+  calls the resolver itself.
+- `ee/app/services/ai/messaging/default_project_flow_resolver.rb` —
+  project-less surfaces (Slack today, Teams in flight) that derive a
+  default project from the user's default Duo namespace.
+- `ee/lib/api/helpers/duo_workflow_helpers.rb` — the public
+  `/api/v4/ai/duo_workflows/*` API surfaces.
+
+The resolver's body is identical in all four cases; only the call site
+changed.
+
 </details>
 
 ### Seam C — Foundational agent picker (pre-flight)
@@ -656,7 +703,7 @@ the per-surface predicate.
 | Other foundational agents (Planner, Security Analyst, Data Analyst, CI Expert, Permissions Assistant) launched via the chat picker | `<agent_reference>/v1` (e.g. `analytics_agent/v1`) | catch-all → `foundational_enabled?` | `gitlab:` MCP server only; agent's curated toolset (e.g. Data Analyst has `run_glql_query` natively) | `gitlab:` + `orbit:` MCP servers. **Caveat:** the LLM only actually calls the Orbit tools when the agent's `toolset:` in its `ai-assist` flow YAML lists them; today only the Orbit agent itself does. The Data Analyst is in flight under [`gitlab-org/gitlab#598823`](https://gitlab.com/gitlab-org/gitlab/-/issues/598823). |
 | Custom AI Catalog agent (catalog "Run" UI) | `ai_catalog_agent` | `custom_agent?` → `custom_agents_enabled?` | `gitlab:` MCP server only; whatever the catalog item selected, minus any Orbit tools | `gitlab:` + `orbit:` MCP servers with the `orbit:` toolset *intersected* with the catalog item's `def_mcp_tools` and `ORBIT_PREAPPROVED_TOOLS`. **Known gap:** the catalog payload builder ignores `def_mcp_tools`, so the LLM's `toolset` does not list the Orbit tools even though the server is reachable. See `<details>` below. |
 | Foundational agent launched via the catalog UI (`/explore/ai-catalog/agents/<id>/` Run) | `ai_catalog_agent` | catch-all → `foundational_enabled?` (`custom_agent?` is false because a `FoundationalChatAgent` row points at the catalog item) | `gitlab:` MCP server only | `gitlab:` + `orbit:` MCP servers with the full `ORBIT_PREAPPROVED_TOOLS`. The toolset hits the same `ai-assist` advertisement caveat as the picker path. |
-| Code review (`code_review/*`) | `code_review/<sub-flow>` | hard-coded `false` (since [`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)) | `gitlab:` MCP server only | Same as OFF. The catch-all is bypassed; this carve-out holds until Duo Code Review integrates Orbit deliberately and is benchmarked. |
+| Code review (`code_review/*`) | `code_review/<sub-flow>` | top-level `code_review?` branch → hard-coded `false` (top-level since [`7246bf60dc11`](https://gitlab.com/gitlab-org/gitlab/-/commit/7246bf60dc11); originally added as a catch-all row in [`ddb26ef4`](https://gitlab.com/gitlab-org/gitlab/-/commit/ddb26ef4)) | `gitlab:` MCP server only | Same as OFF. The `code_review?` branch short-circuits before `custom_agent?`, so AI Catalog-launched code-review flows are also excluded. This carve-out holds until Duo Code Review integrates Orbit deliberately and is benchmarked. |
 | Classic Duo Chat (`Llm::ChatService`) | n/a | `McpConfigService` not called | Built-in chat ReAct tools only | Same as OFF — pattern does not apply. |
 
 <details>
@@ -855,17 +902,24 @@ omitting it when the predicate is false. See the mermaid diagram inside
 
 ## Feature flag summary
 
-Nine feature flags collectively decide whether Orbit attaches to any given
-prompt. The first two are platform-level kill switches: with either off, no
-Orbit predicate can ever return `true`. The third decides whether the
-per-user preference is consulted at all. The fourth switches which Orbit
-tools are *advertised* in the MCP `tools/list` (legacy two-tool surface vs.
-the new command-pair from [ADR 011](decisions/011_agent_command_surface.md)).
-The remaining five gate specific surfaces: `:mcp_client` is required for any
-MCP server to be sent at all, `:mcp_catalog_agent_tools` is required for
-custom agents, `:duo_developer_orbit` gates the Seam B flow-version
-override, and `:duo_developer_next_unstable` / `:fix_pipeline_next` route
-specific flows to experimental variants.
+Nine routing-relevant feature flags collectively decide whether Orbit
+attaches to any given prompt. The first two are platform-level kill
+switches: with either off, no Orbit predicate can ever return `true`. The
+third decides whether the per-user preference is consulted at all. The
+fourth switches which Orbit tools are *advertised* in the MCP `tools/list`
+(legacy two-tool surface vs. the new command-pair from
+[ADR 011](decisions/011_agent_command_surface.md)). The remaining five gate
+specific surfaces: `:mcp_client` is required for any MCP server to be sent
+at all, `:mcp_catalog_agent_tools` is required for custom agents,
+`:duo_developer_orbit` gates the Seam B flow-version override, and
+`:duo_developer_next_unstable` / `:fix_pipeline_next` route specific flows
+to experimental variants.
+
+Two further Orbit-adjacent flags exist but do **not** gate routing:
+`:orbit_enroll_namespace` gates *namespace enrollment* (the moment an
+owner opts a namespace into Knowledge Graph) and `:knowledge_graph_billing`
+exposes the governing-namespace picker in user preferences. They are
+listed in the table below for completeness.
 
 <details>
 <summary>Full flag table with types, defaults, and effects</summary>
@@ -881,6 +935,8 @@ specific flows to experimental variants.
 | `duo_developer_orbit` | `gitlab_com_derisk` | off | Gates the `developer/v1` → `2.0.0-orbit` override in Seam B. Combined with `Ai::Orbit::Settings.killswitch_on?`. |
 | `duo_developer_next_unstable` | `wip` | off | Routes `developer/v1` to `developer_unstable/experimental`. Checked *after* the Orbit branch in Seam B, so the Orbit variant wins when both apply. Scoped to `container` / `container.root_ancestor` at the call site. |
 | `fix_pipeline_next` | `experiment` | off | Routes `fix_pipeline/v1` to `fix_pipeline_next/v1`. Unrelated to Orbit. Scoped to `container` / `container.root_ancestor` at the call site. |
+| `orbit_enroll_namespace` | `ops` | on | **Enrollment, not routing.** Gates whether an owner can opt a namespace into Knowledge Graph. Disabling/unenrollment is intentionally ungated. No effect on `Ai::Orbit::Settings` or the three seams. |
+| `knowledge_graph_billing` | `wip` | off | **Preferences UI, not routing.** Exposes the "Default Orbit namespace" picker and the `:assign_governing_knowledge_graph_namespace` ability. Touches `UserPreference` but not the four `_enabled?` predicates. |
 
 </details>
 
@@ -908,7 +964,7 @@ rows specifically.
 | Other foundational agents (picker path) | `foundational_enabled?` | n/a (today) | n/a |
 | Custom AI Catalog agent (catalog path) | `custom_agents_enabled?` | n/a | n/a |
 | Foundational agent launched via catalog UI | `foundational_enabled?` | n/a | n/a |
-| Code review (`code_review/*`) | hard-coded `false` (since `ddb26ef4`) | n/a | n/a |
+| Code review (`code_review/*`) | hard-coded `false` (top-level since `7246bf60dc11`; originally `ddb26ef4`) | n/a | n/a |
 | Classic Duo Chat | path bypasses `McpConfigService` | n/a | n/a |
 
 `<predicate>_enabled?` predicates all evaluate the same three layers
@@ -937,7 +993,7 @@ follow-up MRs have a single jump-to map.
 | Which foundational agents exist? | `ee/lib/ai/` (search for `FoundationalChatAgentsDefinitions`) |
 | How is the Orbit agent hidden in the picker? | `ee/app/graphql/resolvers/ai/` (search for `FoundationalChatAgentsResolver`) |
 | User preference shape | `ee/spec/models/user_preference_spec.rb` (`orbit_settings` examples) |
-| Resolver callers (where Orbit branching gets evaluated) | `ee/app/services/ai/duo_workflows/`, `ee/app/services/ai/catalog/`, `ee/lib/api/helpers/` |
+| Resolver callers (where Orbit branching gets evaluated) | `ee/app/services/ai/duo_workflows/create_and_start_workflow_service.rb`, `ee/app/services/ai/catalog/flows/execute_service.rb`, `ee/app/services/ai/messaging/default_project_flow_resolver.rb`, `ee/lib/api/helpers/duo_workflow_helpers.rb` |
 
 </details>
 
