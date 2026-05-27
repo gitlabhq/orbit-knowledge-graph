@@ -15,6 +15,8 @@ set -euo pipefail
 #
 # Linux builds default to the existing glibc target. Set LIBC=musl to build the
 # fully static musl variant with cargo-zigbuild.
+# Set PRINT_TARGET=1 to print the resolved Rust target and archive name without
+# building; this is useful for validating PLATFORM/ARCH/LIBC combinations.
 
 PLATFORM="${PLATFORM:-$(uname -s)}"
 PLATFORM=$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')
@@ -93,9 +95,14 @@ if [ "$PLATFORM" = "windows" ]; then
     (cd "$BIN_DIR" && zip "$OLDPWD/$ARCHIVE" orbit.exe)
 else
     if [ "$PLATFORM" = "linux" ] && [ "$LIBC" = "musl" ]; then
-        if command -v file >/dev/null; then
-            file "$BIN_DIR/orbit"
-            file "$BIN_DIR/orbit" | grep -q "statically linked"
+        if ! command -v file >/dev/null; then
+            echo "error: file(1) is required to verify musl binaries are statically linked" >&2
+            exit 1
+        fi
+        file "$BIN_DIR/orbit"
+        if ! file "$BIN_DIR/orbit" | grep -q "statically linked"; then
+            echo "error: musl build is not statically linked" >&2
+            exit 1
         fi
     fi
     tar -czvf "$ARCHIVE" -C "$BIN_DIR" orbit
