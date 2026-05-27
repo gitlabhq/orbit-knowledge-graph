@@ -35,6 +35,7 @@ pub mod indexing_status;
 pub mod locking;
 pub mod modules;
 pub mod nats;
+pub mod observer;
 pub mod scheduler;
 pub mod schema;
 pub mod topic;

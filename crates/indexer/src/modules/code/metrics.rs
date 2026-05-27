@@ -8,22 +8,22 @@ use crate::handler::HandlerError;
 
 #[derive(Clone)]
 pub struct CodeMetrics {
-    pub(super) events_processed: Counter<u64>,
-    pub(super) handler_duration: Histogram<f64>,
-    pub(super) repository_fetch_duration: Histogram<f64>,
-    pub(super) repository_resolution_strategy: Counter<u64>,
-    pub(super) repository_cleanup: Counter<u64>,
-    pub(super) repository_empty: Counter<u64>,
-    pub(super) repository_indexing_completed: Counter<u64>,
-    pub(super) repository_source_size: Histogram<u64>,
-    pub(super) indexing_duration: Histogram<f64>,
-    pub(super) files_processed: Counter<u64>,
-    pub(super) nodes_indexed: Counter<u64>,
-    pub(super) errors: Counter<u64>,
-    pub(super) files_skipped: Counter<u64>,
-    pub(super) file_faults: Counter<u64>,
-    pub(super) archive_entries_skipped: Counter<u64>,
-    pub(super) archive_bytes_skipped: Counter<u64>,
+    pub(in crate::modules::code) events_processed: Counter<u64>,
+    pub(in crate::modules::code) handler_duration: Histogram<f64>,
+    pub(in crate::modules::code) repository_fetch_duration: Histogram<f64>,
+    pub(in crate::modules::code) repository_resolution_strategy: Counter<u64>,
+    pub(in crate::modules::code) repository_cleanup: Counter<u64>,
+    pub(in crate::modules::code) repository_empty: Counter<u64>,
+    pub(in crate::modules::code) repository_indexing_completed: Counter<u64>,
+    pub(in crate::modules::code) repository_source_size: Histogram<u64>,
+    pub(in crate::modules::code) indexing_duration: Histogram<f64>,
+    pub(in crate::modules::code) files_processed: Counter<u64>,
+    pub(in crate::modules::code) nodes_indexed: Counter<u64>,
+    pub(in crate::modules::code) errors: Counter<u64>,
+    pub(in crate::modules::code) files_skipped: Counter<u64>,
+    pub(in crate::modules::code) file_faults: Counter<u64>,
+    pub(in crate::modules::code) archive_entries_skipped: Counter<u64>,
+    pub(in crate::modules::code) archive_bytes_skipped: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -57,61 +57,69 @@ impl CodeMetrics {
 }
 
 impl CodeMetrics {
-    pub(super) fn record_resolution_strategy(&self, strategy: &'static str) {
+    pub(in crate::modules::code) fn record_resolution_strategy(&self, strategy: &'static str) {
         self.repository_resolution_strategy
             .add(1, &[KeyValue::new(code::labels::STRATEGY, strategy)]);
     }
 
-    pub(super) fn record_cleanup(&self, outcome: &'static str) {
+    pub(in crate::modules::code) fn record_cleanup(&self, outcome: &'static str) {
         self.repository_cleanup
             .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
-    pub(super) fn record_outcome(&self, outcome: &'static str) {
+    pub(in crate::modules::code) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed
             .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
-    pub(super) fn record_handler_duration(&self, started_at: DateTime<Utc>) {
+    pub(in crate::modules::code) fn record_handler_duration(&self, started_at: DateTime<Utc>) {
         let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
         self.handler_duration.record(elapsed.as_secs_f64(), &[]);
     }
 
-    pub(super) fn record_empty_repository(&self, reason: &'static str) {
+    pub(in crate::modules::code) fn record_empty_repository(&self, reason: &'static str) {
         self.repository_empty
             .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
     }
 
-    pub(super) fn record_repository_indexed(&self, outcome: &'static str) {
+    pub(in crate::modules::code) fn record_repository_indexed(&self, outcome: &'static str) {
         self.repository_indexing_completed
             .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
-    pub(super) fn record_repository_source_size(&self, bytes: u64) {
+    pub(in crate::modules::code) fn record_repository_source_size(&self, bytes: u64) {
         self.repository_source_size.record(bytes, &[]);
     }
 
-    pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
+    pub(in crate::modules::code) fn record_files_processed(
+        &self,
+        count: u64,
+        outcome: &'static str,
+    ) {
         self.files_processed
             .add(count, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
-    pub(super) fn record_nodes_indexed(&self, count: u64, kind: &'static str) {
+    pub(in crate::modules::code) fn record_nodes_indexed(&self, count: u64, kind: &str) {
         self.nodes_indexed
-            .add(count, &[KeyValue::new(code::labels::KIND, kind)]);
+            .add(count, &[KeyValue::new(code::labels::KIND, kind.to_owned())]);
     }
 
-    pub(super) fn record_file_skipped(&self, reason: &'static str) {
+    pub(in crate::modules::code) fn record_file_skipped(&self, reason: &'static str) {
         self.files_skipped
             .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
     }
 
-    pub(super) fn record_file_fault(&self, kind: &'static str) {
+    pub(in crate::modules::code) fn record_file_fault(&self, kind: &'static str) {
         self.file_faults
             .add(1, &[KeyValue::new(code::labels::KIND, kind)]);
     }
 
-    pub(super) fn record_archive_entry_skipped(&self, reason: &'static str, bytes: u64) {
+    pub(in crate::modules::code) fn record_archive_entry_skipped(
+        &self,
+        reason: &'static str,
+        bytes: u64,
+    ) {
         let labels = [KeyValue::new(code::labels::REASON, reason)];
         self.archive_entries_skipped.add(1, &labels);
         self.archive_bytes_skipped.add(bytes, &labels);
@@ -124,7 +132,7 @@ impl Default for CodeMetrics {
     }
 }
 
-pub(super) trait RecordStageError<T> {
+pub(in crate::modules::code) trait RecordStageError<T> {
     fn record_error_stage(
         self,
         metrics: &CodeMetrics,

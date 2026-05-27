@@ -8,10 +8,12 @@ use tracing::{debug, info, warn};
 
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
+use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
+use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 
@@ -154,7 +156,12 @@ impl CodeIndexingTaskHandler {
             return Ok(());
         };
 
-        if self.is_already_indexed(request, &branch).await {
+        let existing_checkpoint = self.load_checkpoint(request, &branch).await;
+        if existing_checkpoint
+            .as_ref()
+            .is_some_and(|cp| cp.last_task_id >= request.task_id)
+        {
+            debug!(task_id = request.task_id, "already indexed, skipping");
             self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
@@ -166,8 +173,19 @@ impl CodeIndexingTaskHandler {
             "starting code indexing"
         );
 
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
+            CodeOtelObserver::new(self.metrics.clone()),
+        )]);
+        observer.set_pipeline_type(PipelineType::Code);
+        observer.set_project(request.project_id, &branch);
+        observer.set_indexing_mode(if existing_checkpoint.is_some() {
+            IndexingMode::Incremental
+        } else {
+            IndexingMode::Full
+        });
+
         let result = self
-            .index_with_lock(context, request, &branch, started_at)
+            .index_with_lock(context, request, &branch, started_at, &mut observer)
             .await;
 
         let outcome = match &result {
@@ -185,6 +203,14 @@ impl CodeIndexingTaskHandler {
         }
         self.metrics.record_handler_duration(started_at);
 
+        match &result {
+            Ok(_) => observer.finish(),
+            Err(e) => {
+                observer.record_error(&e.to_string());
+                observer.finish();
+            }
+        }
+
         result.map(|_| ())
     }
 
@@ -194,6 +220,7 @@ impl CodeIndexingTaskHandler {
         request: &CodeIndexingTaskRequest,
         branch: &str,
         started_at: DateTime<Utc>,
+        observer: &mut dyn IndexingObserver,
     ) -> Result<Option<IndexOutcome>, HandlerError> {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
@@ -231,6 +258,7 @@ impl CodeIndexingTaskHandler {
                     task_id: request.task_id,
                     commit_sha: request.commit_sha.clone(),
                 },
+                observer,
             )
             .await;
 
@@ -253,17 +281,16 @@ impl CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
-    async fn is_already_indexed(&self, request: &CodeIndexingTaskRequest, branch: &str) -> bool {
-        if let Ok(Some(checkpoint)) = self
-            .checkpoint_store
+    async fn load_checkpoint(
+        &self,
+        request: &CodeIndexingTaskRequest,
+        branch: &str,
+    ) -> Option<CodeIndexingCheckpoint> {
+        self.checkpoint_store
             .get_checkpoint(&request.traversal_path, request.project_id, branch)
             .await
-            && checkpoint.last_task_id >= request.task_id
-        {
-            debug!(task_id = request.task_id, "already indexed, skipping");
-            return true;
-        }
-        false
+            .ok()
+            .flatten()
     }
 }
 

@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
+use crate::observer::IndexingObserver;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
@@ -48,6 +49,7 @@ impl Pipeline {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_plan(
         &self,
         plan: &Plan,
@@ -56,6 +58,7 @@ impl Pipeline {
         target_watermark: DateTime<Utc>,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
+        observer: &mut dyn IndexingObserver,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -92,8 +95,12 @@ impl Pipeline {
             }
 
             let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let bytes_in_batch: u64 = batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum();
             total_rows += rows_in_batch;
-            self.metrics.record_batch_rows(&plan.name, rows_in_batch);
+            observer.extracted(rows_in_batch, bytes_in_batch);
 
             info!(
                 rows = rows_in_batch,
@@ -407,6 +414,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::test_helpers::test_metrics;
+    use crate::observer::NoOpObserver;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
@@ -607,6 +615,7 @@ mod tests {
                 test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
         assert!(result.is_ok());
@@ -636,6 +645,7 @@ mod tests {
                 test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
 
@@ -677,6 +687,7 @@ mod tests {
                 test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
 
@@ -755,6 +766,7 @@ mod tests {
                 test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
 
@@ -797,6 +809,7 @@ mod tests {
                 test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -838,6 +851,7 @@ mod tests {
                 test_watermark(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
 
@@ -876,6 +890,7 @@ mod tests {
                 test_watermark(),
                 &destination,
                 &ProgressNotifier::noop(),
+                &mut NoOpObserver,
             )
             .await;
 

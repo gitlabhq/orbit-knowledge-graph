@@ -10,6 +10,7 @@ pub mod config;
 mod dispatch;
 mod handler;
 pub mod metrics;
+pub(crate) mod observer;
 mod pipeline;
 pub mod repository;
 mod siphon_decoder;

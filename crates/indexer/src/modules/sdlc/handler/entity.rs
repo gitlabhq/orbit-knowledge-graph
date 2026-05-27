@@ -10,9 +10,11 @@ use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
+use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
 use crate::modules::sdlc::pipeline::Pipeline;
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
+use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -91,6 +93,15 @@ impl EntityHandler {
         context: HandlerContext,
         request: IndexingRequest,
     ) -> Result<(), HandlerError> {
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
+            SdlcOtelObserver::new(self.metrics.clone()),
+        )]);
+        observer.set_pipeline_type(PipelineType::Sdlc);
+        observer.set_entity_type(&self.plan.name);
+        if let Some(namespace_id) = request.namespace_id {
+            observer.set_namespace(namespace_id);
+        }
+
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
         let parent_checkpoint = self
             .checkpoint_store
@@ -101,6 +112,12 @@ impl EntityHandler {
             .as_ref()
             .map(|c| c.watermark)
             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+
+        observer.set_indexing_mode(if parent_checkpoint.is_none() {
+            IndexingMode::Full
+        } else {
+            IndexingMode::Incremental
+        });
 
         let base_query = self
             .plan
@@ -128,9 +145,8 @@ impl EntityHandler {
             Vec::new()
         };
 
-        if ranges.is_empty() {
-            return self
-                .pipeline
+        let result = if ranges.is_empty() {
+            self.pipeline
                 .run_plan(
                     &self.plan,
                     base_query,
@@ -138,44 +154,60 @@ impl EntityHandler {
                     request.watermark,
                     context.destination.as_ref(),
                     &context.progress,
+                    &mut observer,
+                )
+                .await
+        } else {
+            info!(
+                entity = %self.plan.name,
+                partitions = ranges.len(),
+                "running partitioned initial load"
+            );
+
+            let partition_result = self
+                .run_partitions(
+                    base_query.into_partitions(ranges),
+                    &checkpoint_key,
+                    request.watermark,
+                    &context,
                 )
                 .await;
+
+            if partition_result.is_ok() {
+                // Consolidate at min(partition watermarks) so the next incremental run
+                // covers data that arrived after the oldest completed partition.
+                let partition_checkpoints = self
+                    .checkpoint_store
+                    .load_by_prefix(&format!(
+                        "{checkpoint_key}{}",
+                        PartitionAssignment::CHECKPOINT_PREFIX
+                    ))
+                    .await
+                    .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                let consolidated_watermark = partition_checkpoints
+                    .iter()
+                    .map(|(_, cp)| cp.watermark)
+                    .min()
+                    .unwrap_or(request.watermark);
+
+                self.checkpoint_store
+                    .consolidate(&checkpoint_key, &consolidated_watermark)
+                    .await
+                    .map_err(|err| HandlerError::Processing(err.to_string()))
+            } else {
+                partition_result
+            }
+        };
+
+        match &result {
+            Ok(()) => observer.finish(),
+            Err(e) => {
+                observer.record_error(&e.to_string());
+                observer.finish();
+            }
         }
 
-        info!(
-            entity = %self.plan.name,
-            partitions = ranges.len(),
-            "running partitioned initial load"
-        );
-
-        self.run_partitions(
-            base_query.into_partitions(ranges),
-            &checkpoint_key,
-            request.watermark,
-            &context,
-        )
-        .await?;
-
-        // Consolidate at min(partition watermarks) so the next incremental run
-        // covers data that arrived after the oldest completed partition.
-        let partition_checkpoints = self
-            .checkpoint_store
-            .load_by_prefix(&format!(
-                "{checkpoint_key}{}",
-                PartitionAssignment::CHECKPOINT_PREFIX
-            ))
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        let consolidated_watermark = partition_checkpoints
-            .iter()
-            .map(|(_, cp)| cp.watermark)
-            .min()
-            .unwrap_or(request.watermark);
-
-        self.checkpoint_store
-            .consolidate(&checkpoint_key, &consolidated_watermark)
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))
+        result
     }
 
     async fn run_partitions(
@@ -208,8 +240,11 @@ impl EntityHandler {
             let pipeline = Arc::clone(&self.pipeline);
             let destination = Arc::clone(&context.destination);
             let progress = context.progress.clone();
+            let partition_metrics = self.metrics.clone();
 
             set.spawn(async move {
+                let mut partition_observer = SdlcOtelObserver::new(partition_metrics);
+                partition_observer.set_entity_type(&plan.name);
                 pipeline
                     .run_plan(
                         &plan,
@@ -218,6 +253,7 @@ impl EntityHandler {
                         target_watermark,
                         destination.as_ref(),
                         &progress,
+                        &mut partition_observer,
                     )
                     .await
             });
