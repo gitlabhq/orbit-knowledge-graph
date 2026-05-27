@@ -79,12 +79,12 @@ pub struct ConvertedGraphData {
 pub fn convert_code_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     envelope: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
     match graph.output {
-        GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, ontology),
-        GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, ontology),
+        GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, specs),
+        GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, specs),
     }
 }
 
@@ -92,15 +92,15 @@ fn convert_repository_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     Ok(ConvertedGraphData {
         branch: convert_branch_row(envelope)?,
-        directories: convert_directories(graph, ids, envelope, ontology)?,
-        files: convert_files(graph, ids, envelope, ontology)?,
-        definitions: convert_definitions(graph, ids, envelope, ontology)?,
-        imported_symbols: convert_imports(graph, ids, envelope, ontology)?,
-        edges: convert_repository_edges(graph, ids, envelope, ontology)?,
+        directories: convert_directories(graph, ids, envelope, &specs.directory)?,
+        files: convert_files(graph, ids, envelope, &specs.file)?,
+        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
+        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
+        edges: convert_repository_edges(graph, ids, envelope, specs)?,
     })
 }
 
@@ -108,15 +108,15 @@ fn convert_semantic_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &ConverterSpecs,
 ) -> Result<ConvertedGraphData, ArrowError> {
     Ok(ConvertedGraphData {
         branch: convert_empty_branch()?,
-        directories: convert_empty_directories(envelope, ontology)?,
-        files: convert_empty_files(envelope, ontology)?,
-        definitions: convert_definitions(graph, ids, envelope, ontology)?,
-        imported_symbols: convert_imports(graph, ids, envelope, ontology)?,
-        edges: convert_semantic_edges(graph, ids, envelope, ontology)?,
+        directories: convert_empty_directories(envelope, &specs.directory)?,
+        files: convert_empty_files(envelope, &specs.file)?,
+        definitions: convert_definitions(graph, ids, envelope, &specs.definition)?,
+        imported_symbols: convert_imports(graph, ids, envelope, &specs.imported_symbol)?,
+        edges: convert_semantic_edges(graph, ids, envelope, specs)?,
     })
 }
 
@@ -218,37 +218,34 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
     specs
 }
 
-/// Generic entity converter. Gets specs from the ontology, builds rows
+/// Generic entity converter. Uses precomputed specs, builds rows
 /// via the provided closure, and produces a RecordBatch.
 fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
-    entity_name: &str,
+    specs: &[ColumnSpec],
     build_rows: impl FnOnce(&'a code_graph::v2::linker::CodeGraph, &[i64]) -> Vec<R>,
 ) -> Result<RecordBatch, ArrowError> {
-    let specs = entity_specs(ontology, entity_name);
     let rows = build_rows(graph, ids);
-    R::to_record_batch(&rows, &specs, env)
+    R::to_record_batch(&rows, specs, env)
 }
 
 fn convert_empty_entity<R: AsRecordBatch<IndexerEnvelope>>(
     env: &IndexerEnvelope,
-    ontology: &Ontology,
-    entity_name: &str,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
     let rows: Vec<R> = Vec::new();
-    R::to_record_batch(&rows, &entity_specs(ontology, entity_name), env)
+    R::to_record_batch(&rows, specs, env)
 }
 
 fn convert_directories(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, ontology, "Directory", |g, ids| {
+    convert_entity(graph, ids, env, specs, |g, ids| {
         g.directories()
             .map(|(idx, dir)| DirectoryRow {
                 dir,
@@ -260,18 +257,18 @@ fn convert_directories(
 
 fn convert_empty_directories(
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_empty_entity::<DirectoryRow<'_>>(env, ontology, "Directory")
+    convert_empty_entity::<DirectoryRow<'_>>(env, specs)
 }
 
 fn convert_files(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, ontology, "File", |g, ids| {
+    convert_entity(graph, ids, env, specs, |g, ids| {
         g.files()
             .map(|(idx, file)| FileRow {
                 file,
@@ -283,18 +280,18 @@ fn convert_files(
 
 fn convert_empty_files(
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_empty_entity::<FileRow<'_>>(env, ontology, "File")
+    convert_empty_entity::<FileRow<'_>>(env, specs)
 }
 
 fn convert_definitions(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, ontology, "Definition", |g, ids| {
+    convert_entity(graph, ids, env, specs, |g, ids| {
         g.definitions()
             .map(|(idx, file_path, def)| DefinitionRow {
                 file_path,
@@ -310,9 +307,9 @@ fn convert_imports(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    convert_entity(graph, ids, env, ontology, "ImportedSymbol", |g, ids| {
+    convert_entity(graph, ids, env, specs, |g, ids| {
         g.imports_iter()
             .map(|(idx, file_path, import)| ImportRow {
                 file_path,
@@ -398,10 +395,9 @@ fn convert_repository_edges(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let specs = edge_specs(ontology);
-    let denorm_cols = denormalized_edge_columns(ontology);
+    let denorm_cols = &specs.denormalized_edge_columns;
     let branch_id = compute_branch_id(env.project_id, &env.branch);
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
@@ -412,7 +408,7 @@ fn convert_repository_edges(
         edge_kind: "IN_PROJECT",
         source_node_kind: "Branch",
         target_node_kind: "Project",
-        denormalized_column_names: &denorm_cols,
+        denormalized_column_names: denorm_cols,
     });
 
     edge_rows.push(IndexerEdgeRow {
@@ -422,7 +418,7 @@ fn convert_repository_edges(
         edge_kind: "CONTAINS",
         source_node_kind: "Project",
         target_node_kind: "Branch",
-        denormalized_column_names: &denorm_cols,
+        denormalized_column_names: denorm_cols,
     });
 
     edge_rows.extend(branch_contains_directory_rows(
@@ -430,41 +426,40 @@ fn convert_repository_edges(
         ids,
         env,
         branch_id,
-        &denorm_cols,
+        denorm_cols,
     ));
     edge_rows.extend(branch_contains_file_rows(
         graph,
         ids,
         env,
         branch_id,
-        &denorm_cols,
+        denorm_cols,
     ));
     edge_rows.extend(repository_on_branch_rows(
         graph,
         ids,
         env,
         branch_id,
-        &denorm_cols,
+        denorm_cols,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env, &denorm_cols));
+    edge_rows.extend(graph_edge_rows(graph, ids, env, denorm_cols));
 
-    edge_row_batch(edge_rows, &specs)
+    edge_row_batch(edge_rows, &specs.edge)
 }
 
 fn convert_semantic_edges(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
-    ontology: &Ontology,
+    specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let specs = edge_specs(ontology);
-    let denorm_cols = denormalized_edge_columns(ontology);
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &denorm_cols)
+    let denorm_cols = &specs.denormalized_edge_columns;
+    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, denorm_cols)
         .into_iter()
         .filter(|row| row.edge_kind != "CONTAINS")
         .collect();
 
-    edge_row_batch(edge_rows, &specs)
+    edge_row_batch(edge_rows, &specs.edge)
 }
 
 fn denormalized_edge_columns(ontology: &Ontology) -> Vec<String> {
@@ -634,11 +629,47 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
+pub struct ConverterSpecs {
+    directory: Arc<Vec<ColumnSpec>>,
+    file: Arc<Vec<ColumnSpec>>,
+    definition: Arc<Vec<ColumnSpec>>,
+    imported_symbol: Arc<Vec<ColumnSpec>>,
+    edge: Arc<Vec<ColumnSpec>>,
+    denormalized_edge_columns: Arc<[String]>,
+}
+
+impl ConverterSpecs {
+    pub fn from_ontology(ontology: &Ontology) -> Self {
+        Self {
+            directory: Arc::new(entity_specs(ontology, "Directory")),
+            file: Arc::new(entity_specs(ontology, "File")),
+            definition: Arc::new(entity_specs(ontology, "Definition")),
+            imported_symbol: Arc::new(entity_specs(ontology, "ImportedSymbol")),
+            edge: Arc::new(edge_specs(ontology)),
+            denormalized_edge_columns: denormalized_edge_columns(ontology).into(),
+        }
+    }
+}
+
 /// `GraphConverter` for the ClickHouse indexer. Wraps `convert_code_graph`.
 pub struct IndexerConverter {
     pub envelope: IndexerEnvelope,
-    pub ontology: Arc<Ontology>,
     pub table_names: Arc<super::config::CodeTableNames>,
+    specs: ConverterSpecs,
+}
+
+impl IndexerConverter {
+    pub fn new(
+        envelope: IndexerEnvelope,
+        ontology: &Ontology,
+        table_names: Arc<super::config::CodeTableNames>,
+    ) -> Self {
+        Self {
+            envelope,
+            table_names,
+            specs: ConverterSpecs::from_ontology(ontology),
+        }
+    }
 }
 
 impl code_graph::v2::GraphConverter for IndexerConverter {
@@ -646,7 +677,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         &self,
         graph: code_graph::v2::linker::CodeGraph,
     ) -> Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
-        let data = convert_code_graph(&graph, &self.envelope, &self.ontology)
+        let data = convert_code_graph(&graph, &self.envelope, &self.specs)
             .map_err(|e| code_graph::v2::SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
@@ -679,10 +710,28 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+            // edge_row_batch sorts edges by edge_kind, so adjacent rows share
+            // rel_kind: cache the last (rel_kind, table) to skip the lookup.
+            let mut last: Option<(&str, &str)> = None;
             for i in 0..data.edges.num_rows() {
                 let rel_kind = rel_array.value(i);
-                let table = self.table_names.edge_table_for(rel_kind);
+                let table = match last {
+                    Some((prev_kind, prev_table)) if prev_kind == rel_kind => prev_table,
+                    _ => {
+                        let t = self.table_names.edge_table_for(rel_kind);
+                        last = Some((rel_kind, t));
+                        t
+                    }
+                };
                 table_rows.entry(table).or_default().push(i as u32);
+            }
+
+            if table_rows.len() == 1 {
+                let table = *table_rows.keys().next().unwrap();
+                if table == self.table_names.default_edge_table() {
+                    result.push((table.to_string(), data.edges));
+                    return Ok(result);
+                }
             }
 
             for (table, indices) in table_rows {

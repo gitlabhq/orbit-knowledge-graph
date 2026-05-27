@@ -265,11 +265,11 @@ impl CodeIndexingPipeline {
         );
 
         let converter: Arc<dyn code_graph::v2::GraphConverter> =
-            Arc::new(arrow_converter::IndexerConverter {
+            Arc::new(arrow_converter::IndexerConverter::new(
                 envelope,
-                ontology: self.ontology.clone(),
-                table_names: self.table_names.clone(),
-            });
+                &self.ontology,
+                self.table_names.clone(),
+            ));
         let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
             context.destination.clone(),
         ));
