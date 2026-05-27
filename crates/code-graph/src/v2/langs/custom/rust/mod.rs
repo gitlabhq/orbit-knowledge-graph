@@ -54,9 +54,6 @@ use crate::v2::types::{
 
 type RustFileError = (String, AnalyzerError);
 
-/// Budget for the sequential edge resolution phase.
-const EDGE_RESOLVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
 mod local_flow;
 mod manifest;
 #[path = "ast.rs"]
@@ -188,14 +185,15 @@ impl LanguagePipeline for RustPipeline {
         // Edge resolution is sequential over all parsed files, so it
         // gets its own wall-clock budget separate from the per-file
         // sentinel used during the parallel parse phase.
-        let deadline = std::time::Instant::now() + EDGE_RESOLVE_TIMEOUT;
+        let deadline = std::time::Instant::now() + sentinel::CROSS_FILE_RESOLVE_TIMEOUT;
         let mut edge_timed_out = false;
 
         'edge_resolve: for file in &parsed {
             for edge in &file.edge_candidates {
                 if std::time::Instant::now() >= deadline {
                     tracing::warn!(
-                        "rust edge resolution timed out after {EDGE_RESOLVE_TIMEOUT:?}"
+                        "rust edge resolution timed out after {:?}",
+                        sentinel::CROSS_FILE_RESOLVE_TIMEOUT
                     );
                     edge_timed_out = true;
                     break 'edge_resolve;

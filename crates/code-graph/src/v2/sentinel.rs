@@ -9,6 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+/// Budget for sequential cross-file resolution phases (import edges,
+/// call edges, edge candidates). Shared by all custom pipelines.
+pub const CROSS_FILE_RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Error returned when the sentinel kills a file's processing.
 #[derive(Debug)]
 pub struct Killed;

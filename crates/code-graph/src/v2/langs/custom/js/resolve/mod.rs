@@ -14,12 +14,7 @@ use crate::v2::linker::{
     CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
 };
 use crate::v2::pipeline::PipelineContext;
-use crate::v2::sentinel::SentinelHandle;
-
-/// Budget for the cross-file resolution phase (import edges + call edges).
-/// This runs sequentially over all files so it needs a larger window than
-/// the per-file analysis timeout.
-const CROSS_FILE_RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
+use crate::v2::sentinel::{CROSS_FILE_RESOLVE_TIMEOUT, SentinelHandle};
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
