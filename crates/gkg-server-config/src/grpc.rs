@@ -19,10 +19,6 @@ pub struct GrpcConfig {
     // connection-age timer fires (hyperium/tonic#2522).
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
-    // Caps HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE the server advertises. Without
-    // this, tonic inherits hyper's 16 KiB default and GitLab requests carrying
-    // large authorization contexts (many traversal IDs in the JWT) are refused
-    // before reaching the application.
     pub max_header_list_size_bytes: u32,
 }
 
