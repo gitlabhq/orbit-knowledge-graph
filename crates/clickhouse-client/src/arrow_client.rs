@@ -25,6 +25,7 @@ use crate::error::ClickHouseError;
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
+    insert_settings: std::collections::HashMap<String, String>,
 }
 
 impl ArrowClickHouseClient {
@@ -34,6 +35,7 @@ impl ArrowClickHouseClient {
         username: &str,
         password: Option<&str>,
         query_settings: &std::collections::HashMap<String, String>,
+        insert_settings: &std::collections::HashMap<String, String>,
     ) -> Self {
         let mut client = Client::default()
             .with_url(url)
@@ -57,6 +59,7 @@ impl ArrowClickHouseClient {
         Self {
             client,
             base_url: url.to_string(),
+            insert_settings: insert_settings.clone(),
         }
     }
 
@@ -64,6 +67,32 @@ impl ArrowClickHouseClient {
         ArrowQuery {
             inner: self.client.query(sql),
         }
+    }
+
+    /// Returns an `ArrowQuery` with `insert_settings` pre-applied.
+    ///
+    /// Use this for `INSERT` queries so they inherit async-insert and
+    /// other write-specific settings. Use `query()` for read operations.
+    pub fn insert_query(&self, sql: &str) -> ArrowQuery {
+        let mut q = self.query(sql);
+        for (k, v) in &self.insert_settings {
+            q = q.with_setting(k, v);
+        }
+        q
+    }
+
+    /// Builds a ` SETTINGS k=v, ...` SQL fragment from `insert_settings`.
+    /// Returns an empty string when no insert settings are configured.
+    fn insert_settings_clause(&self) -> String {
+        if self.insert_settings.is_empty() {
+            return String::new();
+        }
+        let pairs: Vec<String> = self
+            .insert_settings
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        format!(" SETTINGS {}", pairs.join(", "))
     }
 
     pub async fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>, ClickHouseError> {
@@ -112,7 +141,8 @@ impl ArrowClickHouseClient {
             writer.finish().map_err(ClickHouseError::ArrowEncode)?;
         }
 
-        let sql = format!("INSERT INTO {table} FORMAT ArrowStream");
+        let settings_clause = self.insert_settings_clause();
+        let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
         let mut insert = self.client.insert_formatted_with(&sql);
         insert
             .send(Bytes::from(buffer))
@@ -143,7 +173,8 @@ impl ArrowClickHouseClient {
         let mut writer = StreamWriter::try_new_with_options(drain.clone(), &schema, options)
             .map_err(ClickHouseError::ArrowEncode)?;
 
-        let sql = format!("INSERT INTO {table} FORMAT ArrowStream");
+        let settings_clause = self.insert_settings_clause();
+        let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
         let mut insert = self.client.insert_formatted_with(&sql);
 
         flush_drain(&mut insert, &drain).await?;

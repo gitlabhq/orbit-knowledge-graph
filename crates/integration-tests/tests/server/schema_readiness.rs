@@ -45,6 +45,7 @@ fn dummy_clickhouse() -> ArrowClickHouseClient {
         "x",
         None,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
 }
 

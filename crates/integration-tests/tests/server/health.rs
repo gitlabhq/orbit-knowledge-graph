@@ -41,6 +41,7 @@ async fn live_returns_ok() {
         "x",
         None,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     );
     let router = create_router(client, None, ready_watcher());
 
@@ -74,6 +75,7 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         "default",
         "x",
         None,
+        &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
     );
     let router = create_router(client, None, ready_watcher());
