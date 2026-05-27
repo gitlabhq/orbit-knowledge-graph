@@ -270,16 +270,14 @@ impl CodeIndexingPipeline {
                 ontology: self.ontology.clone(),
                 table_names: self.table_names.clone(),
             });
-        let sink: Arc<dyn code_graph::v2::BatchSink> =
-            Arc::new(arrow_converter::ClickHouseSink::new(
-                context.destination.clone(),
-                tokio::runtime::Handle::current(),
-            ));
+        let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
+            context.destination.clone(),
+        ));
+        let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
 
         // Run the synchronous pipeline on a blocking thread so the tokio
-        // worker is freed. The writer thread inside the pipeline calls
-        // runtime.block_on() which would deadlock a single-threaded
-        // tokio runtime if we blocked the worker here.
+        // worker is freed. Batches are buffered in memory during execution
+        // and flushed to ClickHouse in parallel afterwards.
         let repo_dir_owned = repo_dir.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
             Pipeline::run_with_tracer(
@@ -293,6 +291,17 @@ impl CodeIndexingPipeline {
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
+
+        // Flush all buffered tables to ClickHouse in parallel (one HTTP
+        // request per distinct table, all concurrent).
+        if let Err(e) = buffered_sink.flush().await {
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during flush for project {project_id}: {e}"
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
+        }
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
