@@ -200,15 +200,6 @@ pub struct CodeIndexingPipelineConfig {
     /// specify a different value. 0 = no global timeout.
     #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
-    /// Cap on concurrent archive downloads per indexer pod. 0 = no cap.
-    #[serde(default)]
-    pub max_concurrent_downloads: usize,
-    /// Cap on concurrent graph build + ClickHouse write per indexer pod.
-    /// Set below `engine.concurrency_groups.code` so workers freed from
-    /// indexing can start the next download while others keep indexing.
-    /// 0 = no cap.
-    #[serde(default)]
-    pub max_concurrent_indexing: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -219,8 +210,6 @@ impl Default for CodeIndexingPipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
-            max_concurrent_downloads: 0,
-            max_concurrent_indexing: 0,
         }
     }
 }

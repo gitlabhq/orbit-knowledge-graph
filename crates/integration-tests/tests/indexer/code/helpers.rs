@@ -71,6 +71,7 @@ impl CodeIndexingDeps {
             table_names,
             Arc::new(ontology),
             CodeIndexingPipelineConfig::default(),
+            0,
         ));
 
         Self {

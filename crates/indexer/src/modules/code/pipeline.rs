@@ -51,6 +51,7 @@ pub struct CodeIndexingPipeline {
 }
 
 impl CodeIndexingPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -59,9 +60,10 @@ impl CodeIndexingPipeline {
         table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
+        concurrency_limit: usize,
     ) -> Self {
-        let download_slots = sem(pipeline_config.max_concurrent_downloads);
-        let indexing_slots = sem(pipeline_config.max_concurrent_indexing);
+        let download_slots = sem(concurrency_limit);
+        let indexing_slots = sem(concurrency_limit);
         Self {
             resolver,
             checkpoint_store,
