@@ -25,7 +25,10 @@ impl LanguagePipeline for JsPipeline {
             return Ok(());
         }
 
-        let sentinel = ctx.config.per_file_timeout.and_then(sentinel::spawn_sentinel);
+        let sentinel = ctx
+            .config
+            .per_file_timeout
+            .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
         let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);

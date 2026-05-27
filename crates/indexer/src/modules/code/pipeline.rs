@@ -226,14 +226,13 @@ impl CodeIndexingPipeline {
         } else {
             None
         };
-        let cross_file_resolve_timeout =
-            if self.pipeline_config.cross_file_resolve_timeout_ms > 0 {
-                Some(std::time::Duration::from_millis(
-                    self.pipeline_config.cross_file_resolve_timeout_ms,
-                ))
-            } else {
-                None
-            };
+        let cross_file_resolve_timeout = if self.pipeline_config.cross_file_resolve_timeout_ms > 0 {
+            Some(std::time::Duration::from_millis(
+                self.pipeline_config.cross_file_resolve_timeout_ms,
+            ))
+        } else {
+            None
+        };
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,

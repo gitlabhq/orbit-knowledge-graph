@@ -140,7 +140,10 @@ impl LanguagePipeline for RustPipeline {
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
 
-        let sentinel_pair = ctx.config.per_file_timeout.and_then(sentinel::spawn_sentinel);
+        let sentinel_pair = ctx
+            .config
+            .per_file_timeout
+            .and_then(sentinel::spawn_sentinel);
         let sentinel_handle = sentinel_pair.as_ref().map(|(h, _)| h);
 
         let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -185,7 +188,9 @@ impl LanguagePipeline for RustPipeline {
         // Edge resolution is sequential over all parsed files, so it
         // gets its own wall-clock budget separate from the per-file
         // sentinel used during the parallel parse phase.
-        let resolve_timeout = ctx.config.cross_file_resolve_timeout
+        let resolve_timeout = ctx
+            .config
+            .cross_file_resolve_timeout
             .unwrap_or(crate::utils::CROSS_FILE_RESOLVE_TIMEOUT);
         let deadline = std::time::Instant::now() + resolve_timeout;
         let mut edge_timed_out = false;
@@ -193,9 +198,7 @@ impl LanguagePipeline for RustPipeline {
         'edge_resolve: for file in &parsed {
             for edge in &file.edge_candidates {
                 if std::time::Instant::now() >= deadline {
-                    tracing::warn!(
-                        "rust edge resolution timed out after {resolve_timeout:?}",
-                    );
+                    tracing::warn!("rust edge resolution timed out after {resolve_timeout:?}",);
                     edge_timed_out = true;
                     break 'edge_resolve;
                 }

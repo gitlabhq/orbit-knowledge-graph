@@ -6,7 +6,7 @@ pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::utils::CROSS_FILE_RESOLVE_TIMEOUT;
 use crate::v2::error::FileSkip;
@@ -30,6 +30,7 @@ use super::{
     extract::ResolvedJsFile,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn attach_resolution_edges(
     graph: &mut CodeGraph,
     analyzed_files: &[ResolvedJsFile],
@@ -85,7 +86,9 @@ pub fn attach_resolution_edges(
     // Cross-file resolution is sequential over all imports and calls,
     // so it gets its own wall-clock budget separate from the per-file
     // sentinel timeout used during the parallel analysis phase.
-    let resolve_timeout = ctx.config.cross_file_resolve_timeout
+    let resolve_timeout = ctx
+        .config
+        .cross_file_resolve_timeout
         .unwrap_or(CROSS_FILE_RESOLVE_TIMEOUT);
     let deadline = Instant::now() + resolve_timeout;
     let timed_out = AtomicBool::new(false);
@@ -120,9 +123,7 @@ pub fn attach_resolution_edges(
         );
     } else {
         let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
-        for relationship in
-            resolver.resolve_calls(&imported_calls, modules_index, &deadline)
-        {
+        for relationship in resolver.resolve_calls(&imported_calls, modules_index, &deadline) {
             add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
         }
         add_unresolved_imported_call_edges(
