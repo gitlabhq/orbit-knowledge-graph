@@ -6,6 +6,7 @@ pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::v2::error::FileSkip;
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
@@ -14,6 +15,11 @@ use crate::v2::linker::{
 };
 use crate::v2::pipeline::PipelineContext;
 use crate::v2::sentinel::SentinelHandle;
+
+/// Budget for the cross-file resolution phase (import edges + call edges).
+/// This runs sequentially over all files so it needs a larger window than
+/// the per-file analysis timeout.
+const CROSS_FILE_RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
@@ -80,14 +86,11 @@ pub fn attach_resolution_edges(
     let mut resolver = JsCrossFileResolver::new(probe);
     resolver.apply_project_resolution_hints(probe);
 
-    // Use a shared kill flag for the cross-file resolution phases so
-    // the sentinel can abort the entire import + call resolution pass
-    // when any individual file's budget is exceeded.
-    let resolve_guard = sentinel.map(|s| s.file_start("js:cross-file-resolve"));
-    let resolve_killed = resolve_guard
-        .as_ref()
-        .map(|g| g.kill_flag())
-        .unwrap_or_else(|| std::sync::Arc::new(AtomicBool::new(false)));
+    // Cross-file resolution is sequential over all imports and calls,
+    // so it gets its own wall-clock budget separate from the per-file
+    // sentinel timeout used during the parallel analysis phase.
+    let deadline = Instant::now() + CROSS_FILE_RESOLVE_TIMEOUT;
+    let timed_out = AtomicBool::new(false);
 
     let import_nodes: Vec<_> = graph
         .imports_iter()
@@ -95,7 +98,9 @@ pub fn attach_resolution_edges(
         .collect();
     let mut locally_resolved_imports = FxHashSet::default();
     for (source_node, source_path) in import_nodes {
-        if resolve_killed.load(Ordering::Relaxed) {
+        if Instant::now() >= deadline {
+            tracing::warn!("js cross-file import resolution timed out after {CROSS_FILE_RESOLVE_TIMEOUT:?}");
+            timed_out.store(true, Ordering::Relaxed);
             break;
         }
         if add_import_edge(
@@ -109,10 +114,10 @@ pub fn attach_resolution_edges(
             locally_resolved_imports.insert(source_node);
         }
     }
-    if !resolve_killed.load(Ordering::Relaxed) {
+    if !timed_out.load(Ordering::Relaxed) {
         let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
         for relationship in
-            resolver.resolve_calls(&imported_calls, modules_index, &resolve_killed)
+            resolver.resolve_calls(&imported_calls, modules_index, &deadline)
         {
             add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
         }
