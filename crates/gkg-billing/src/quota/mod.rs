@@ -42,9 +42,9 @@ impl QuotaService {
 
         let cfg = &billing.quota;
 
-        if cfg.api_user.is_empty() || cfg.api_token.is_empty() {
+        if cfg.api_user.is_none() || cfg.api_token.is_none() {
             warn!(
-                "quota.enabled=true but api_user or api_token is empty; \
+                "quota.enabled=true but api_user or api_token is not set; \
                  disabling quota gate to avoid silent fail-open on 401"
             );
             return Ok(Self { inner: None });
@@ -52,8 +52,8 @@ impl QuotaService {
 
         let client = QuotaClient::new(
             cfg.customers_dot_url.clone(),
-            &cfg.api_user,
-            &cfg.api_token,
+            cfg.api_user.as_deref().unwrap_or(""),
+            cfg.api_token.as_deref().unwrap_or(""),
             Duration::from_millis(cfg.request_timeout_ms),
             Duration::from_secs(cfg.fallback_cache_ttl_secs),
         )?;
@@ -156,8 +156,6 @@ fn record_bypass(source_type: &str) {
     BYPASS_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-// Returns a `&'static str` label for metered source types, avoiding per-call
-// allocation and bounding OTel cardinality to the known set.
 fn metered_source_type_label(s: &str) -> &'static str {
     match s {
         "mcp" => "mcp",
@@ -166,7 +164,6 @@ fn metered_source_type_label(s: &str) -> &'static str {
     }
 }
 
-// Returns a `&'static str` label for bypass source types.
 fn bypass_source_type_label(s: &str) -> &'static str {
     match s {
         "frontend" => "frontend",
@@ -229,8 +226,8 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url,
-                api_user: "test@example.com".into(),
-                api_token: "test-token".into(),
+                api_user: Some("test@example.com".into()),
+                api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
             },
@@ -256,8 +253,8 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
-                api_user: "test@example.com".into(),
-                api_token: "test-token".into(),
+                api_user: Some("test@example.com".into()),
+                api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
             },
@@ -292,8 +289,8 @@ mod tests {
             quota: QuotaConfig {
                 enabled: true,
                 customers_dot_url: url,
-                api_user: String::new(),
-                api_token: String::new(),
+                api_user: None,
+                api_token: None,
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
             },

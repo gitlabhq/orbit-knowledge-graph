@@ -230,11 +230,9 @@ async fn run_webserver(
                  set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
             ));
         }
-        if config.billing.quota.api_user.trim().is_empty()
-            || config.billing.quota.api_token.trim().is_empty()
-        {
+        if config.billing.quota.api_user.is_none() || config.billing.quota.api_token.is_none() {
             return Err(anyhow::anyhow!(
-                "billing.quota.enabled=true but billing.quota.api_user or api_token is empty — \
+                "billing.quota.enabled=true but billing.quota.api_user or api_token is not set — \
                  set GKG_BILLING__QUOTA__API_USER and GKG_BILLING__QUOTA__API_TOKEN"
             ));
         }

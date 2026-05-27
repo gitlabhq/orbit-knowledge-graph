@@ -27,12 +27,10 @@ pub struct QuotaConfig {
     pub enabled: bool,
     #[serde(default)]
     pub customers_dot_url: String,
-    #[serde(default, skip_serializing)]
-    #[schemars(skip)]
-    pub api_user: String,
-    #[serde(default, skip_serializing)]
-    #[schemars(skip)]
-    pub api_token: String,
+    #[serde(default)]
+    pub api_user: Option<String>,
+    #[serde(default)]
+    pub api_token: Option<String>,
     #[serde(default = "default_quota_timeout_ms")]
     pub request_timeout_ms: u64,
     #[serde(default = "default_fallback_ttl_secs")]
@@ -44,8 +42,8 @@ impl Default for QuotaConfig {
         Self {
             enabled: false,
             customers_dot_url: String::new(),
-            api_user: String::new(),
-            api_token: String::new(),
+            api_user: None,
+            api_token: None,
             request_timeout_ms: default_quota_timeout_ms(),
             fallback_cache_ttl_secs: default_fallback_ttl_secs(),
         }

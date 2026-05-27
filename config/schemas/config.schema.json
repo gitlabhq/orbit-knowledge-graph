@@ -20,6 +20,8 @@
         "collector_url": "",
         "enabled": false,
         "quota": {
+          "api_token": null,
+          "api_user": null,
           "customers_dot_url": "",
           "enabled": false,
           "fallback_cache_ttl_secs": 3600,
@@ -287,6 +289,8 @@
         "quota": {
           "$ref": "#/$defs/QuotaConfig",
           "default": {
+            "api_token": null,
+            "api_user": null,
             "customers_dot_url": "",
             "enabled": false,
             "fallback_cache_ttl_secs": 3600,
@@ -1178,6 +1182,20 @@
     "QuotaConfig": {
       "type": "object",
       "properties": {
+        "api_token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "api_user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "customers_dot_url": {
           "type": "string",
           "default": ""
