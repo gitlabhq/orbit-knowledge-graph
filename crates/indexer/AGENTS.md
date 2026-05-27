@@ -26,7 +26,7 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 | Module | Directory | Purpose |
 |--------|-----------|---------|
 | `code::register_handlers` | `modules/code/` | Git repository indexing via Rails internal API, call graph extraction |
-| `sdlc::register_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.) |
+| `sdlc::register_handlers` | `modules/sdlc/` | SDLC entity indexing (projects, MRs, CI, issues, etc.). Includes the custom Rust system-notes edge handler (`handler/system_notes/`) — see ADR 013 |
 | `namespace_deletion::register_handlers` | `modules/namespace_deletion/` | Soft-deletes all graph data for a namespace across ontology-driven tables |
 
 ### Traits

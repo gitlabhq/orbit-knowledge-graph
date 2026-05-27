@@ -61,5 +61,10 @@ pre-commit:
         - "crates/gkg-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
         - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+    - name: system-note-actions-check
+      run: bash ./scripts/check-system-note-actions.sh
+      glob:
+        - "crates/indexer/src/modules/sdlc/handler/system_notes/vendored/icon_types.rs"
+        - "crates/indexer/src/modules/sdlc/handler/system_notes/parse.rs"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit

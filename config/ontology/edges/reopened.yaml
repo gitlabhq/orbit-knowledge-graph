@@ -1,0 +1,21 @@
+# config/ontology/edges/reopened.yaml
+#
+# User reopened a merge request or work item, materialised from system notes
+# with `action = 'reopened'`. The Rails source-of-truth FK is absent here —
+# unlike `merged_by_id` and `closed_by_id`, there is no `reopened_by_id`
+# column — so this edge is strictly net-new graph data (see ADR 013, "Scope
+# and edge kinds").
+#
+# ETL runs in the system-notes Rust handler at
+# `crates/indexer/src/modules/sdlc/handler/system_notes/`.
+
+description: User reopened a merge request or work item
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User reopened a merge request."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "User reopened a work item."

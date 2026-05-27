@@ -377,3 +377,5 @@ edges:
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   HAS_METADATA: edges/has_metadata.yaml
+  MENTIONS: edges/mentions.yaml
+  REOPENED: edges/reopened.yaml

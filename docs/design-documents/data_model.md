@@ -142,6 +142,8 @@ graph TD
 | `DEPLOYED_TO`                       | `MergeRequest` | `Deployment`   | Merge request was included in a deployment.                                                             |
 | `IN_ENVIRONMENT`                    | `Deployment`   | `Environment`  | Deployment targets a specific environment.                                                              |
 | `CREATED_FOR_MR`                    | `Environment`  | `MergeRequest` | Environment was first created by a merge request pipeline.                                              |
+| `MENTIONS`                          | `MergeRequest`, `WorkItem` | `MergeRequest`, `WorkItem` | One entity references another via a Rails system note (cross-references, relate/unrelate, hierarchy, move/clone, duplicate). Materialised by the system-notes handler — see ADR 013. |
+| `REOPENED`                          | `User`         | `MergeRequest`, `WorkItem` | A user reopened an entity. Net-new graph data: Rails has no `reopened_by_id` FK, so this edge is sourced exclusively from `system_note_metadata.action = 'reopened'`. See ADR 013. |
 
 ---
 

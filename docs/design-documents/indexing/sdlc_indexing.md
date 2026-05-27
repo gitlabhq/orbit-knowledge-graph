@@ -320,6 +320,19 @@ Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"`
 
 Rows deleted in the source database have `_siphon_deleted` set to `true`. The extraction query pulls these rows alongside live data, and the `_deleted` flag carries through to the graph table. Downstream queries filter on the flag. Periodic cleanup jobs remove flagged rows from the graph tables.
 
+**Custom Rust handler: system-notes edge materialization (ADR 013)**
+
+Not all SDLC ETL is ontology-driven. The system-notes handler at `crates/indexer/src/modules/sdlc/handler/system_notes/` is the first cross-reference-oriented handler that lives outside the YAML-plan path. It exists because:
+
+- Edge ETL YAML has no `WHERE` clause (verified against `config/schemas/ontology.schema.json::edgeEtlConfig`, which has `additionalProperties: false`).
+- A single source table (`siphon_notes` joined to `siphon_system_note_metadata`) needs to dispatch into multiple edge variants whose target type depends on body parsing, not on a fixed source-column enum.
+
+The handler reads system notes (the `system = true` complement of the user-note feed in `config/ontology/nodes/core/note.yaml`), parses the body via a regex-based GFM reference extractor (`parse.rs`), resolves targets with two batched IN-list queries (`resolve.rs`, see `ROUTES_SQL` + `MERGE_REQUESTS_SQL` + `WORK_ITEMS_SQL`), and emits `MENTIONS`, `REOPENED`, and supplemental `CLOSED` / `MERGED` edges via the standard `gl_edge` writer.
+
+Edge **kinds** are still declared in ontology YAML (`config/ontology/edges/mentions.yaml`, `config/ontology/edges/reopened.yaml`); only the ETL **logic** is Rust. Custom-handler precedent: `crates/indexer/src/modules/namespace_deletion/`.
+
+The handler's vendored Rails `ICON_TYPES` constant (`vendored/icon_types.rs`) plus the CI drift check `scripts/check-system-note-actions.sh` mirror the vendored-constant + drift-check pattern from ADR 012 (GOON format version) to bound Rails-side action drift.
+
 ##### Zero-downtime schema changes
 
 **Main PostgreSQL to Lake**

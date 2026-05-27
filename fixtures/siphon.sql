@@ -223,6 +223,31 @@ CREATE TABLE IF NOT EXISTS siphon_notes
 PRIMARY KEY (traversal_path, noteable_type, noteable_id, id)
 ORDER BY (traversal_path, noteable_type, noteable_id, id);
 
+-- Siphon source table for system note metadata (sidecar for siphon_notes).
+-- Replicates Rails system_note_metadata: a (note_id, action) discriminator
+-- plus a couple of typed columns. See ADR 013 for the Siphon-side
+-- prerequisite. The Mode A handler in
+-- crates/indexer/src/modules/sdlc/handler/system_notes/ joins this on
+-- siphon_notes.id = siphon_system_note_metadata.note_id and dispatches by
+-- the structured `action` column instead of body-text regex.
+CREATE TABLE IF NOT EXISTS siphon_system_note_metadata
+(
+    `id` Int64,
+    `note_id` Int64,
+    `commit_count` Nullable(Int32),
+    `action` LowCardinality(String),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `description_version_id` Nullable(Int64),
+    `namespace_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false,
+    INDEX idx_action action TYPE set(64) GRANULARITY 4
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, note_id)
+ORDER BY (traversal_path, note_id);
+
 -- Siphon source tables for merge requests
 CREATE TABLE IF NOT EXISTS merge_requests
 (

@@ -1,0 +1,30 @@
+# config/ontology/edges/mentions.yaml
+#
+# Cross-reference edge materialised from system notes (see ADR 013).
+# `relate`, `unrelate`, `relate_to_parent`, `relate_to_child`,
+# `unrelate_from_parent`, `unrelate_from_child`, `moved`, `cloned`,
+# `duplicate`, and Rails' `cross_reference` action all collapse to a single
+# `MENTIONS` edge in v1. Differentiation via a `link_type` property is an
+# open ADR question and is deferred to the implementation follow-up.
+#
+# ETL runs in the system-notes Rust handler at
+# `crates/indexer/src/modules/sdlc/handler/system_notes/`, not in YAML.
+
+description: One entity references another, materialised from system notes
+
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Merge request mentions another merge request."
+
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "Merge request mentions a work item."
+
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Work item mentions a merge request."
+
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "Work item mentions another work item."
