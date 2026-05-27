@@ -281,15 +281,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        "1/2/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit1", 1, "1/2/").await;
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_active_definitions(
@@ -314,15 +306,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         }",
         )],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
-        "1/2/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit2", 2, "1/2/").await;
 
     assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
     assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
@@ -364,15 +348,7 @@ async fn disk_is_clean_after_successful_indexing() {
     let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        commit_sha,
-        1,
-        "1/4/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, commit_sha, 1, "1/4/").await;
 
     assert_code_indexed(&clickhouse, project_id).await;
 
@@ -408,43 +384,19 @@ async fn disk_is_clean_after_multiple_reindexes() {
     let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        "1/5/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit1", 1, "1/5/").await;
 
     mock.replace_archive(
         project_id,
         &[("src/Main.java", "public class Main { public void v2() {} }")],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
-        "1/5/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit2", 2, "1/5/").await;
 
     mock.replace_archive(
         project_id,
         &[("src/Main.java", "public class Main { public void v3() {} }")],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit3",
-        3,
-        "1/5/",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit3", 3, "1/5/").await;
 
     assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v3"]).await;
 
