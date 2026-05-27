@@ -125,6 +125,7 @@
         "keepalive_timeout_secs": 20,
         "max_connection_age_grace_secs": 30,
         "max_connection_age_secs": 300,
+        "max_header_list_size_bytes": 65536,
         "stream_timeout_secs": 60,
         "stream_window_size": 1048576,
         "tcp_keepalive_secs": 60
@@ -637,6 +638,12 @@
           "type": "integer",
           "format": "uint64",
           "default": 300,
+          "minimum": 0
+        },
+        "max_header_list_size_bytes": {
+          "type": "integer",
+          "format": "uint32",
+          "default": 65536,
           "minimum": 0
         },
         "stream_timeout_secs": {
