@@ -171,10 +171,12 @@
     {
       "otel_name": "gkg.etl.destination.write.duration",
       "prom_name": "gkg_etl_destination_write_duration_seconds",
-      "description": "Time to write a batch to ClickHouse.",
+      "description": "Time to write a batch to ClickHouse per table.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [],
+      "labels": [
+        "table"
+      ],
       "buckets": [
         0.1,
         0.25,
