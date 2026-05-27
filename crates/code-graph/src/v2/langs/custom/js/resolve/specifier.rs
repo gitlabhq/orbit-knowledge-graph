@@ -172,7 +172,7 @@ impl JsCrossFileResolver {
         deadline: &Option<Instant>,
     ) -> Vec<JsResolvedCallRelationship> {
         let timed_out = AtomicBool::new(false);
-        calls_by_file
+        let results = calls_by_file
             .par_iter()
             .flat_map_iter(|(file_path, calls)| {
                 if timed_out.load(Ordering::Relaxed)
@@ -183,7 +183,11 @@ impl JsCrossFileResolver {
                 }
                 self.resolve_file_calls(file_path, calls, modules)
             })
-            .collect()
+            .collect();
+        if timed_out.load(Ordering::Relaxed) {
+            tracing::warn!("js cross-file call resolution timed out");
+        }
+        results
     }
 
     fn resolve_file_calls(
