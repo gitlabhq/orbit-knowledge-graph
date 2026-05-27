@@ -1065,7 +1065,8 @@ e2e:
         if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
           echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
         else
-          SCHEMA_DIR=/app/config/schemas cargo build -p gkg-server --locked
+          mkdir -p /build/config && cp -r config/schemas /build/config/schemas
+          SCHEMA_DIR=/build/config/schemas cargo build -p gkg-server --locked
           cp target/debug/gkg-server .
           docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
           docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
