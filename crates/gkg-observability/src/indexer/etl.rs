@@ -70,9 +70,9 @@ pub const NATS_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
 
 pub const DESTINATION_WRITE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.etl.destination.write.duration",
-    "Time to write a batch to ClickHouse.",
+    "Time to write a batch to ClickHouse per table.",
     Some("s"),
-    &[],
+    &[labels::TABLE],
     LATENCY,
     DOMAIN,
 );

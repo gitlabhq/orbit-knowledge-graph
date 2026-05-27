@@ -88,7 +88,8 @@ impl EngineMetrics {
 
     pub(crate) fn record_write_success(&self, table: &str, duration: f64, rows: u64, bytes: u64) {
         let label = KeyValue::new(etl::labels::TABLE, table.to_owned());
-        self.destination_write_duration.record(duration, &[]);
+        self.destination_write_duration
+            .record(duration, std::slice::from_ref(&label));
         self.destination_rows_written
             .add(rows, std::slice::from_ref(&label));
         self.destination_bytes_written
