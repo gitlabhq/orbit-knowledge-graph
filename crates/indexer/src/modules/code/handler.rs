@@ -329,6 +329,7 @@ mod tests {
                 table_names,
                 Arc::new(ontology),
                 gkg_server_config::CodeIndexingPipelineConfig::default(),
+                0,
             ));
 
             let handler = CodeIndexingTaskHandler::new(

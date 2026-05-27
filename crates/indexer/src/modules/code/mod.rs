@@ -75,6 +75,14 @@ pub fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
+    let concurrency_limit = config
+        .engine
+        .topics
+        .get(CODE_INDEXING_TASK_TOPIC)
+        .and_then(|t| t.concurrency_group.as_deref())
+        .and_then(|g| config.engine.concurrency_groups.get(g).copied())
+        .unwrap_or(0);
+
     let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         Arc::clone(&checkpoint_store),
@@ -83,6 +91,7 @@ pub fn register_handlers(
         table_names,
         Arc::new(ontology.clone()),
         code_indexing_task_config.pipeline.clone(),
+        concurrency_limit,
     ));
 
     let mut subscription = CodeIndexingTaskRequest::subscription();

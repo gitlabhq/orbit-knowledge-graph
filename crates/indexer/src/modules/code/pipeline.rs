@@ -5,6 +5,7 @@ use std::time::Instant;
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
@@ -45,9 +46,11 @@ pub struct CodeIndexingPipeline {
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
+    indexing_slots: Option<Arc<Semaphore>>,
 }
 
 impl CodeIndexingPipeline {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -56,7 +59,9 @@ impl CodeIndexingPipeline {
         table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
         pipeline_config: CodeIndexingPipelineConfig,
+        concurrency_limit: usize,
     ) -> Self {
+        let indexing_slots = sem(concurrency_limit / 2);
         Self {
             resolver,
             checkpoint_store,
@@ -65,6 +70,7 @@ impl CodeIndexingPipeline {
             table_names,
             ontology,
             pipeline_config,
+            indexing_slots,
         }
     }
 
@@ -122,6 +128,8 @@ impl CodeIndexingPipeline {
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
+
+        let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
         context.progress.notify_in_progress().await;
 
@@ -355,5 +363,24 @@ impl CodeIndexingPipeline {
         }
 
         Ok(())
+    }
+}
+
+fn sem(n: usize) -> Option<Arc<Semaphore>> {
+    (n > 0).then(|| Arc::new(Semaphore::new(n)))
+}
+
+async fn acquire(
+    slots: &Option<Arc<Semaphore>>,
+    name: &str,
+) -> Result<Option<OwnedSemaphorePermit>, HandlerError> {
+    match slots {
+        Some(s) => s
+            .clone()
+            .acquire_owned()
+            .await
+            .map(Some)
+            .map_err(|e| HandlerError::Processing(format!("{name} slot closed: {e}"))),
+        None => Ok(None),
     }
 }
