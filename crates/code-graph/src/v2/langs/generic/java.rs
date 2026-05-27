@@ -327,7 +327,6 @@ impl HasRules for JavaRules {
             ..Default::default()
         })
         .with_settings(ResolveSettings {
-            per_file_timeout: Some(std::time::Duration::from_millis(10000)),
             ..ResolveSettings::default()
         })
     }

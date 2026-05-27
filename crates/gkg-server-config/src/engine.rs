@@ -181,7 +181,7 @@ fn default_code_indexing_max_files() -> usize {
 }
 
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
-    5000
+    2000
 }
 
 fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {

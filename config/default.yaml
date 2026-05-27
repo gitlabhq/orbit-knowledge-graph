@@ -82,7 +82,7 @@ engine:
         max_files: 1000000
         worker_threads: 0
         max_concurrent_languages: 0
-        per_file_timeout_ms: 5000
+        per_file_timeout_ms: 2000
         cross_file_resolve_timeout_ms: 180000
 
 schedule:
