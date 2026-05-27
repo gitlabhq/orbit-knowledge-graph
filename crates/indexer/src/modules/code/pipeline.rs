@@ -15,6 +15,7 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
+use crate::observer::IndexingObserver;
 use opentelemetry::KeyValue;
 
 pub struct IndexingRequest {
@@ -78,6 +79,7 @@ impl CodeIndexingPipeline {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
+        observer: &mut dyn IndexingObserver,
     ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
         let repository = match self
@@ -145,6 +147,7 @@ impl CodeIndexingPipeline {
                 indexed_at,
                 &repository.path,
                 repository.file_inventory.clone(),
+                observer,
             )
             .await;
 
@@ -225,6 +228,7 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
         file_inventory: Arc<[code_graph::v2::FileInventoryEntry]>,
+        observer: &mut dyn IndexingObserver,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
         let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
@@ -305,23 +309,18 @@ impl CodeIndexingPipeline {
         let skipped_count = result.stats.files_skipped + result.skipped.len();
 
         self.metrics
-            .record_files_processed(result.stats.files_discovered as u64, "discovered");
-        self.metrics
             .record_repository_source_size(result.stats.bytes_discovered);
-        self.metrics
-            .record_files_processed(parsed_count as u64, "parsed");
-        self.metrics
-            .record_files_processed(skipped_count as u64, "skipped");
-        self.metrics
-            .record_nodes_indexed(result.stats.directories_indexed as u64, "directory");
-        self.metrics
-            .record_nodes_indexed(result.stats.files_indexed as u64, "file");
-        self.metrics
-            .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
-        self.metrics
-            .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
-        self.metrics
-            .record_nodes_indexed(result.stats.edges_count as u64, "edge");
+
+        observer.files_processed(
+            result.stats.files_discovered as u64,
+            parsed_count as u64,
+            skipped_count as u64,
+        );
+        observer.nodes_indexed("directory", result.stats.directories_indexed as u64);
+        observer.nodes_indexed("file", result.stats.files_indexed as u64);
+        observer.nodes_indexed("definition", result.stats.definitions_count as u64);
+        observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
+        observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
         for skipped in &result.skipped {
             self.metrics

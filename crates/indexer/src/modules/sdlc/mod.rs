@@ -2,6 +2,7 @@ mod datalake;
 pub mod dispatch;
 mod handler;
 mod metrics;
+pub(crate) mod observer;
 mod partitioning;
 mod pipeline;
 mod plan;

@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 use crate::destination::Destination;
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
+use crate::observer::IndexingObserver;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
@@ -25,6 +26,12 @@ use gkg_server_config::DatalakeRetryConfig;
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
 
 const MAX_RETRIES: u32 = 3;
+
+pub(in crate::modules::sdlc) struct PipelineContext {
+    pub destination: Arc<dyn Destination>,
+    pub progress: ProgressNotifier,
+    pub observer: Arc<std::sync::Mutex<dyn IndexingObserver>>,
+}
 
 pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
@@ -50,12 +57,11 @@ impl Pipeline {
 
     pub async fn run_plan(
         &self,
+        context: &PipelineContext,
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
         target_watermark: DateTime<Utc>,
-        destination: &dyn Destination,
-        progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -92,8 +98,16 @@ impl Pipeline {
             }
 
             let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let bytes_in_batch: u64 = batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum();
             total_rows += rows_in_batch;
-            self.metrics.record_batch_rows(&plan.name, rows_in_batch);
+            context
+                .observer
+                .lock()
+                .unwrap()
+                .extracted(rows_in_batch, bytes_in_batch);
 
             info!(
                 rows = rows_in_batch,
@@ -105,7 +119,13 @@ impl Pipeline {
             let has_more = rows_in_batch >= plan.batch_size;
 
             let write_futures = self
-                .transform(&session, &plan.name, batches, &plan.transforms, destination)
+                .transform(
+                    &session,
+                    &plan.name,
+                    batches,
+                    &plan.transforms,
+                    context.destination.as_ref(),
+                )
                 .await?;
 
             if has_more {
@@ -123,16 +143,26 @@ impl Pipeline {
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
 
-                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
-                    .await?;
+                self.save_batch_progress(
+                    position_key,
+                    target_watermark,
+                    &cursor,
+                    &context.progress,
+                )
+                .await?;
 
                 batches = next_batches;
                 extract_elapsed = next_elapsed;
             } else {
                 self.drain_writes(write_futures).await?;
 
-                self.save_batch_progress(position_key, target_watermark, &cursor, progress)
-                    .await?;
+                self.save_batch_progress(
+                    position_key,
+                    target_watermark,
+                    &cursor,
+                    &context.progress,
+                )
+                .await?;
 
                 break;
             }
@@ -407,6 +437,7 @@ mod tests {
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::test_helpers::test_metrics;
+    use crate::observer::NoOpObserver;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
@@ -483,6 +514,14 @@ mod tests {
     use crate::modules::sdlc::test_helpers::EmptyDatalake;
     use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
+
+    fn noop_context() -> PipelineContext {
+        PipelineContext {
+            destination: Arc::new(MockDestination::new()),
+            progress: ProgressNotifier::noop(),
+            observer: Arc::new(Mutex::new(NoOpObserver)),
+        }
+    }
 
     struct MultiBatchDatalake {
         call_count: Mutex<u32>,
@@ -596,17 +635,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Test");
 
         let result = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
             )
             .await;
         assert!(result.is_ok());
@@ -626,16 +663,13 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
-
         let result = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
             )
             .await;
 
@@ -666,17 +700,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Failing");
 
         let result = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
             )
             .await;
 
@@ -749,12 +781,11 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
             )
             .await;
 
@@ -791,12 +822,11 @@ mod tests {
         let plan = simple_plan("Test");
         let result = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -832,12 +862,11 @@ mod tests {
         let plan = simple_plan("Test");
         let _ = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &MockDestination::new(),
-                &ProgressNotifier::noop(),
             )
             .await;
 
@@ -865,17 +894,15 @@ mod tests {
             test_metrics(),
             Default::default(),
         );
-        let destination = MockDestination::new();
         let plan = simple_plan("Test");
 
         let result = pipeline
             .run_plan(
+                &noop_context(),
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
                 test_watermark(),
-                &destination,
-                &ProgressNotifier::noop(),
             )
             .await;
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -10,9 +10,11 @@ use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
+use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::Pipeline;
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
+use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -91,6 +93,15 @@ impl EntityHandler {
         context: HandlerContext,
         request: IndexingRequest,
     ) -> Result<(), HandlerError> {
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
+            SdlcOtelObserver::new(self.metrics.clone()),
+        )]);
+        observer.set_pipeline_type(PipelineType::Sdlc);
+        observer.set_entity_type(&self.plan.name);
+        if let Some(namespace_id) = request.namespace_id {
+            observer.set_namespace(namespace_id);
+        }
+
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
         let parent_checkpoint = self
             .checkpoint_store
@@ -101,6 +112,19 @@ impl EntityHandler {
             .as_ref()
             .map(|c| c.watermark)
             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+
+        observer.set_indexing_mode(if parent_checkpoint.is_none() {
+            IndexingMode::Full
+        } else {
+            IndexingMode::Incremental
+        });
+
+        let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
+        let pipeline_context = PipelineContext {
+            destination: Arc::clone(&context.destination),
+            progress: context.progress.clone(),
+            observer: Arc::clone(&observer),
+        };
 
         let base_query = self
             .plan
@@ -128,54 +152,67 @@ impl EntityHandler {
             Vec::new()
         };
 
-        if ranges.is_empty() {
-            return self
-                .pipeline
+        let result = if ranges.is_empty() {
+            self.pipeline
                 .run_plan(
+                    &pipeline_context,
                     &self.plan,
                     base_query,
                     &checkpoint_key,
                     request.watermark,
-                    context.destination.as_ref(),
-                    &context.progress,
+                )
+                .await
+        } else {
+            info!(
+                entity = %self.plan.name,
+                partitions = ranges.len(),
+                "running partitioned initial load"
+            );
+
+            let partition_result = self
+                .run_partitions(
+                    base_query.into_partitions(ranges),
+                    &checkpoint_key,
+                    request.watermark,
+                    &context,
+                    &pipeline_context,
                 )
                 .await;
+
+            if partition_result.is_ok() {
+                let partition_checkpoints = self
+                    .checkpoint_store
+                    .load_by_prefix(&format!(
+                        "{checkpoint_key}{}",
+                        PartitionAssignment::CHECKPOINT_PREFIX
+                    ))
+                    .await
+                    .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                let consolidated_watermark = partition_checkpoints
+                    .iter()
+                    .map(|(_, cp)| cp.watermark)
+                    .min()
+                    .unwrap_or(request.watermark);
+
+                self.checkpoint_store
+                    .consolidate(&checkpoint_key, &consolidated_watermark)
+                    .await
+                    .map_err(|err| HandlerError::Processing(err.to_string()))
+            } else {
+                partition_result
+            }
+        };
+
+        match &result {
+            Ok(()) => observer.lock().unwrap().finish(),
+            Err(e) => {
+                let mut obs = observer.lock().unwrap();
+                obs.record_error(&e.to_string());
+                obs.finish();
+            }
         }
 
-        info!(
-            entity = %self.plan.name,
-            partitions = ranges.len(),
-            "running partitioned initial load"
-        );
-
-        self.run_partitions(
-            base_query.into_partitions(ranges),
-            &checkpoint_key,
-            request.watermark,
-            &context,
-        )
-        .await?;
-
-        // Consolidate at min(partition watermarks) so the next incremental run
-        // covers data that arrived after the oldest completed partition.
-        let partition_checkpoints = self
-            .checkpoint_store
-            .load_by_prefix(&format!(
-                "{checkpoint_key}{}",
-                PartitionAssignment::CHECKPOINT_PREFIX
-            ))
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        let consolidated_watermark = partition_checkpoints
-            .iter()
-            .map(|(_, cp)| cp.watermark)
-            .min()
-            .unwrap_or(request.watermark);
-
-        self.checkpoint_store
-            .consolidate(&checkpoint_key, &consolidated_watermark)
-            .await
-            .map_err(|err| HandlerError::Processing(err.to_string()))
+        result
     }
 
     async fn run_partitions(
@@ -187,6 +224,7 @@ impl EntityHandler {
         checkpoint_key: &str,
         target_watermark: DateTime<Utc>,
         context: &HandlerContext,
+        parent_pipeline_context: &PipelineContext,
     ) -> Result<(), HandlerError> {
         let mut set: JoinSet<Result<(), HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
@@ -206,18 +244,20 @@ impl EntityHandler {
 
             let plan = self.plan.clone();
             let pipeline = Arc::clone(&self.pipeline);
-            let destination = Arc::clone(&context.destination);
-            let progress = context.progress.clone();
+            let partition_context = PipelineContext {
+                destination: Arc::clone(&context.destination),
+                progress: context.progress.clone(),
+                observer: Arc::clone(&parent_pipeline_context.observer),
+            };
 
             set.spawn(async move {
                 pipeline
                     .run_plan(
+                        &partition_context,
                         &plan,
                         query,
                         &position_key,
                         target_watermark,
-                        destination.as_ref(),
-                        &progress,
                     )
                     .await
             });

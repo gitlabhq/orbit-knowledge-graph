@@ -6,14 +6,14 @@ use gkg_observability::indexer::sdlc;
 
 #[derive(Clone)]
 pub struct SdlcMetrics {
-    pub(super) pipeline_duration: Histogram<f64>,
-    pub(super) pipeline_rows_processed: Counter<u64>,
-    pub(super) pipeline_errors: Counter<u64>,
-    pub(super) handler_duration: Histogram<f64>,
-    pub(super) datalake_query_duration: Histogram<f64>,
-    pub(super) datalake_query_bytes: Counter<u64>,
-    pub(super) transform_duration: Histogram<f64>,
-    pub(super) watermark_lag: Gauge<f64>,
+    pub(in crate::modules::sdlc) pipeline_duration: Histogram<f64>,
+    pub(in crate::modules::sdlc) pipeline_rows_processed: Counter<u64>,
+    pub(in crate::modules::sdlc) pipeline_errors: Counter<u64>,
+    pub(in crate::modules::sdlc) handler_duration: Histogram<f64>,
+    pub(in crate::modules::sdlc) datalake_query_duration: Histogram<f64>,
+    pub(in crate::modules::sdlc) datalake_query_bytes: Counter<u64>,
+    pub(in crate::modules::sdlc) transform_duration: Histogram<f64>,
+    pub(in crate::modules::sdlc) watermark_lag: Gauge<f64>,
 }
 
 impl SdlcMetrics {
@@ -37,7 +37,7 @@ impl SdlcMetrics {
 }
 
 impl SdlcMetrics {
-    pub(super) fn record_pipeline_error(&self, entity: &str, error_kind: &str) {
+    pub(in crate::modules::sdlc) fn record_pipeline_error(&self, entity: &str, error_kind: &str) {
         self.pipeline_errors.add(
             1,
             &[
@@ -47,19 +47,24 @@ impl SdlcMetrics {
         );
     }
 
-    pub(super) fn record_pipeline_completion(&self, entity: &str, duration: f64) {
+    pub(in crate::modules::sdlc) fn record_pipeline_completion(&self, entity: &str, duration: f64) {
         let labels = [KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())];
         self.pipeline_duration.record(duration, &labels);
     }
 
-    pub(super) fn record_batch_rows(&self, entity: &str, rows: u64) {
+    pub(in crate::modules::sdlc) fn record_batch_rows(&self, entity: &str, rows: u64) {
         self.pipeline_rows_processed.add(
             rows,
             &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
         );
     }
 
-    pub(super) fn record_datalake_query(&self, entity: &str, duration: f64, bytes: u64) {
+    pub(in crate::modules::sdlc) fn record_datalake_query(
+        &self,
+        entity: &str,
+        duration: f64,
+        bytes: u64,
+    ) {
         self.datalake_query_duration.record(duration, &[]);
         self.datalake_query_bytes.add(
             bytes,
@@ -67,18 +72,18 @@ impl SdlcMetrics {
         );
     }
 
-    pub(super) fn record_transform_duration(&self, duration: f64) {
+    pub(in crate::modules::sdlc) fn record_transform_duration(&self, duration: f64) {
         self.transform_duration.record(duration, &[]);
     }
 
-    pub(super) fn record_handler_duration(&self, handler: &str, duration: f64) {
+    pub(in crate::modules::sdlc) fn record_handler_duration(&self, handler: &str, duration: f64) {
         self.handler_duration.record(
             duration,
             &[KeyValue::new(sdlc::labels::HANDLER, handler.to_string())],
         );
     }
 
-    pub(super) fn record_watermark_lag(&self, watermark: &DateTime<Utc>) {
+    pub(in crate::modules::sdlc) fn record_watermark_lag(&self, watermark: &DateTime<Utc>) {
         let lag = Utc::now()
             .signed_duration_since(*watermark)
             .num_milliseconds()
