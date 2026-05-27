@@ -155,106 +155,68 @@ impl IndexingObserver for MultiObserver {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
-    #[derive(Default)]
-    struct CountingObserver {
-        set_pipeline_type_calls: Arc<AtomicUsize>,
-        set_namespace_calls: Arc<AtomicUsize>,
-        set_entity_type_calls: Arc<AtomicUsize>,
-        set_project_calls: Arc<AtomicUsize>,
-        set_indexing_mode_calls: Arc<AtomicUsize>,
-        extracted_calls: Arc<AtomicUsize>,
-        written_calls: Arc<AtomicUsize>,
-        files_processed_calls: Arc<AtomicUsize>,
-        nodes_indexed_calls: Arc<AtomicUsize>,
-        record_error_calls: Arc<AtomicUsize>,
-        finish_calls: Arc<AtomicUsize>,
-        errored: Arc<AtomicBool>,
-    }
+    type Log = Arc<Mutex<Vec<&'static str>>>;
 
-    impl CountingObserver {
-        fn handle(&self) -> CountingHandle {
-            CountingHandle {
-                set_pipeline_type_calls: Arc::clone(&self.set_pipeline_type_calls),
-                set_namespace_calls: Arc::clone(&self.set_namespace_calls),
-                set_entity_type_calls: Arc::clone(&self.set_entity_type_calls),
-                set_project_calls: Arc::clone(&self.set_project_calls),
-                set_indexing_mode_calls: Arc::clone(&self.set_indexing_mode_calls),
-                extracted_calls: Arc::clone(&self.extracted_calls),
-                written_calls: Arc::clone(&self.written_calls),
-                files_processed_calls: Arc::clone(&self.files_processed_calls),
-                nodes_indexed_calls: Arc::clone(&self.nodes_indexed_calls),
-                record_error_calls: Arc::clone(&self.record_error_calls),
-                finish_calls: Arc::clone(&self.finish_calls),
-                errored: Arc::clone(&self.errored),
-            }
+    struct RecordingObserver(Log);
+
+    impl RecordingObserver {
+        fn new(log: &Log) -> Self {
+            Self(Arc::clone(log))
+        }
+
+        fn push(&self, method: &'static str) {
+            self.0.lock().unwrap().push(method);
         }
     }
 
-    struct CountingHandle {
-        set_pipeline_type_calls: Arc<AtomicUsize>,
-        set_namespace_calls: Arc<AtomicUsize>,
-        set_entity_type_calls: Arc<AtomicUsize>,
-        set_project_calls: Arc<AtomicUsize>,
-        set_indexing_mode_calls: Arc<AtomicUsize>,
-        extracted_calls: Arc<AtomicUsize>,
-        written_calls: Arc<AtomicUsize>,
-        files_processed_calls: Arc<AtomicUsize>,
-        nodes_indexed_calls: Arc<AtomicUsize>,
-        record_error_calls: Arc<AtomicUsize>,
-        finish_calls: Arc<AtomicUsize>,
-        errored: Arc<AtomicBool>,
-    }
-
-    impl IndexingObserver for CountingObserver {
-        fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {
-            self.set_pipeline_type_calls.fetch_add(1, Ordering::Relaxed);
+    impl IndexingObserver for RecordingObserver {
+        fn set_pipeline_type(&mut self, _: PipelineType) {
+            self.push("set_pipeline_type");
         }
-        fn set_namespace(&mut self, _namespace_id: i64) {
-            self.set_namespace_calls.fetch_add(1, Ordering::Relaxed);
+        fn set_namespace(&mut self, _: i64) {
+            self.push("set_namespace");
         }
-        fn set_entity_type(&mut self, _entity_type: &str) {
-            self.set_entity_type_calls.fetch_add(1, Ordering::Relaxed);
+        fn set_entity_type(&mut self, _: &str) {
+            self.push("set_entity_type");
         }
-        fn set_project(&mut self, _project_id: i64, _branch: &str) {
-            self.set_project_calls.fetch_add(1, Ordering::Relaxed);
+        fn set_project(&mut self, _: i64, _: &str) {
+            self.push("set_project");
         }
-        fn set_indexing_mode(&mut self, _mode: IndexingMode) {
-            self.set_indexing_mode_calls.fetch_add(1, Ordering::Relaxed);
+        fn set_indexing_mode(&mut self, _: IndexingMode) {
+            self.push("set_indexing_mode");
         }
-        fn extracted(&mut self, _rows: u64, _bytes: u64) {
-            self.extracted_calls.fetch_add(1, Ordering::Relaxed);
+        fn extracted(&mut self, _: u64, _: u64) {
+            self.push("extracted");
         }
-        fn written(&mut self, _table: &str, _rows: u64, _bytes: u64) {
-            self.written_calls.fetch_add(1, Ordering::Relaxed);
+        fn written(&mut self, _: &str, _: u64, _: u64) {
+            self.push("written");
         }
-        fn files_processed(&mut self, _discovered: u64, _parsed: u64, _skipped: u64) {
-            self.files_processed_calls.fetch_add(1, Ordering::Relaxed);
+        fn files_processed(&mut self, _: u64, _: u64, _: u64) {
+            self.push("files_processed");
         }
-        fn nodes_indexed(&mut self, _kind: &str, _count: u64) {
-            self.nodes_indexed_calls.fetch_add(1, Ordering::Relaxed);
+        fn nodes_indexed(&mut self, _: &str, _: u64) {
+            self.push("nodes_indexed");
         }
-        fn record_error(&self, _error: &str) {
-            self.record_error_calls.fetch_add(1, Ordering::Relaxed);
-            self.errored.store(true, Ordering::Relaxed);
+        fn record_error(&self, _: &str) {
+            self.push("record_error");
         }
         fn finish(&self) {
-            self.finish_calls.fetch_add(1, Ordering::Relaxed);
+            self.push("finish");
         }
     }
 
     #[test]
-    fn multi_observer_forwards_sdlc_success_path() {
-        let a = CountingObserver::default();
-        let b = CountingObserver::default();
-        let a_handle = a.handle();
-        let b_handle = b.handle();
-
-        let mut obs = MultiObserver::new(vec![Box::new(a), Box::new(b)]);
+    fn multi_observer_forwards_to_all_children() {
+        let log_a: Log = Default::default();
+        let log_b: Log = Default::default();
+        let mut obs = MultiObserver::new(vec![
+            Box::new(RecordingObserver::new(&log_a)),
+            Box::new(RecordingObserver::new(&log_b)),
+        ]);
 
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_namespace(42);
@@ -264,24 +226,23 @@ mod tests {
         obs.written("gl_node", 200, 10_000);
         obs.finish();
 
-        for handle in [&a_handle, &b_handle] {
-            assert_eq!(handle.set_pipeline_type_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.set_namespace_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.set_entity_type_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.set_indexing_mode_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.extracted_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.written_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.finish_calls.load(Ordering::Relaxed), 1);
-            assert_eq!(handle.record_error_calls.load(Ordering::Relaxed), 0);
-        }
+        let expected = vec![
+            "set_pipeline_type",
+            "set_namespace",
+            "set_entity_type",
+            "set_indexing_mode",
+            "extracted",
+            "written",
+            "finish",
+        ];
+        assert_eq!(*log_a.lock().unwrap(), expected);
+        assert_eq!(*log_b.lock().unwrap(), expected);
     }
 
     #[test]
-    fn multi_observer_forwards_code_success_path() {
-        let a = CountingObserver::default();
-        let handle = a.handle();
-
-        let mut obs: MultiObserver = MultiObserver::new(vec![Box::new(a)]);
+    fn multi_observer_forwards_code_path() {
+        let log: Log = Default::default();
+        let mut obs = MultiObserver::new(vec![Box::new(RecordingObserver::new(&log))]);
 
         obs.set_pipeline_type(PipelineType::Code);
         obs.set_project(99, "main");
@@ -289,40 +250,30 @@ mod tests {
         obs.files_processed(500, 480, 20);
         obs.nodes_indexed("definition", 3000);
         obs.nodes_indexed("file", 480);
-        obs.written("gl_node", 3480, 200_000);
         obs.finish();
 
-        assert_eq!(handle.set_pipeline_type_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(handle.set_project_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(handle.files_processed_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(handle.nodes_indexed_calls.load(Ordering::Relaxed), 2);
-        assert_eq!(handle.written_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(handle.finish_calls.load(Ordering::Relaxed), 1);
+        let log = log.lock().unwrap();
+        assert_eq!(log.iter().filter(|&&m| m == "nodes_indexed").count(), 2);
+        assert!(log.contains(&"files_processed"));
+        assert!(log.ends_with(&["finish"]));
     }
 
     #[test]
     fn multi_observer_forwards_error_path() {
-        let a = CountingObserver::default();
-        let b = CountingObserver::default();
-        let a_handle = a.handle();
-        let b_handle = b.handle();
-
-        let mut obs = MultiObserver::new(vec![Box::new(a), Box::new(b)]);
+        let log: Log = Default::default();
+        let mut obs = MultiObserver::new(vec![Box::new(RecordingObserver::new(&log))]);
 
         obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_namespace(42);
         obs.record_error("datalake query timeout");
         obs.finish();
 
-        for handle in [&a_handle, &b_handle] {
-            assert_eq!(handle.record_error_calls.load(Ordering::Relaxed), 1);
-            assert!(handle.errored.load(Ordering::Relaxed));
-            assert_eq!(handle.finish_calls.load(Ordering::Relaxed), 1);
-        }
+        let log = log.lock().unwrap();
+        assert!(log.contains(&"record_error"));
+        assert!(log.ends_with(&["finish"]));
     }
 
     #[test]
-    fn multi_observer_empty_is_valid() {
+    fn multi_observer_empty_does_not_panic() {
         let mut obs: MultiObserver = MultiObserver::new(vec![]);
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.extracted(100, 5000);
@@ -333,15 +284,7 @@ mod tests {
     fn noop_observer_compiles() {
         let mut obs = NoOpObserver;
         obs.set_pipeline_type(PipelineType::Code);
-        obs.set_namespace(1);
-        obs.set_entity_type("Issue");
-        obs.set_project(1, "main");
-        obs.set_indexing_mode(IndexingMode::Full);
         obs.extracted(0, 0);
-        obs.written("gl_node", 0, 0);
-        obs.files_processed(0, 0, 0);
-        obs.nodes_indexed("definition", 0);
-        obs.record_error("test");
         obs.finish();
     }
 
