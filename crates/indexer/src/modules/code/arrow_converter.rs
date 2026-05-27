@@ -743,9 +743,9 @@ impl BufferedClickHouseSink {
             }));
         }
 
-        for handle in handles {
-            handle
-                .await
+        let results = futures::future::join_all(handles).await;
+        for result in results {
+            result
                 .map_err(|e| code_graph::v2::SinkError(format!("flush join: {e}")))??;
         }
         Ok(())
