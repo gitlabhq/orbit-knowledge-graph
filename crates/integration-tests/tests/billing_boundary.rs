@@ -4,28 +4,28 @@
 //! surface has not silently expanded. See ADR 013:
 //! docs/design-documents/decisions/013_billing_sox_scope.md
 
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
+
+use cargo_metadata::MetadataCommand;
 
 const PERMITTED_DEPENDENTS: &[&str] = &["gkg-server"];
 
 #[test]
 fn only_permitted_crates_depend_on_gkg_billing() {
     let workspace_root = workspace_root();
-    let workspace_toml =
-        fs::read_to_string(workspace_root.join("Cargo.toml")).expect("workspace Cargo.toml");
+    let metadata = MetadataCommand::new()
+        .manifest_path(workspace_root.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .expect("cargo metadata");
 
-    let violations: Vec<String> = workspace_members(&workspace_toml)
+    let violations: Vec<String> = metadata
+        .workspace_packages()
         .into_iter()
-        .filter_map(|member| {
-            let content =
-                fs::read_to_string(workspace_root.join(&member).join("Cargo.toml")).ok()?;
-            let name = crate_name(&content)?;
-            if name == "gkg-billing" {
-                return None;
-            }
-            let depends = content.lines().any(|l| l.trim().starts_with("gkg-billing"));
-            (depends && !PERMITTED_DEPENDENTS.contains(&name.as_str())).then_some(name)
-        })
+        .filter(|pkg| pkg.name != "gkg-billing")
+        .filter(|pkg| pkg.dependencies.iter().any(|dep| dep.name == "gkg-billing"))
+        .filter(|pkg| !PERMITTED_DEPENDENTS.contains(&pkg.name.as_str()))
+        .map(|pkg| pkg.name.to_string())
         .collect();
 
     assert!(
@@ -38,37 +38,15 @@ fn only_permitted_crates_depend_on_gkg_billing() {
 }
 
 fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // crates/integration-tests is two levels below the workspace root.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
         .expect("workspace root two levels up from crates/integration-tests")
-        .to_path_buf()
-}
-
-fn workspace_members(workspace_toml: &str) -> Vec<String> {
-    workspace_toml
-        .split("members = [")
-        .nth(1)
-        .expect("workspace members array")
-        .split(']')
-        .next()
-        .expect("closing bracket")
-        .lines()
-        .filter_map(|line| {
-            let s = line.trim().trim_end_matches(',').trim_matches('"');
-            s.starts_with("crates/").then_some(s.to_string())
-        })
-        .collect()
-}
-
-fn crate_name(cargo_toml: &str) -> Option<String> {
-    cargo_toml.lines().find_map(|line| {
-        let line = line.trim();
-        if line.starts_with("name") && line.contains('=') {
-            let val = line.split('=').nth(1)?.trim().trim_matches('"');
-            (!val.is_empty()).then_some(val.to_string())
-        } else {
-            None
-        }
-    })
+        .to_path_buf();
+    assert!(
+        root.join("Cargo.toml").exists(),
+        "workspace Cargo.toml not found at {root:?} — crate may have moved"
+    );
+    root
 }

@@ -480,6 +480,16 @@ compiler-integration-test:
     - cargo nextest run --profile ci -p integration-tests --test local --no-fail-fast
     - sccache --show-stats || true
 
+billing-boundary-check:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo nextest run --profile ci -p integration-tests --test billing_boundary
+    - sccache --show-stats || true
+
 integration-tests-codegraph:
   stage: test
   extends:
