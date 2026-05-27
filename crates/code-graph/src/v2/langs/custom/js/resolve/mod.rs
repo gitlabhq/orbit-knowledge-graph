@@ -5,10 +5,8 @@ mod webpack;
 pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use crate::utils::CROSS_FILE_RESOLVE_TIMEOUT;
 use crate::v2::error::FileSkip;
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{
@@ -86,12 +84,11 @@ pub fn attach_resolution_edges(
     // Cross-file resolution is sequential over all imports and calls,
     // so it gets its own wall-clock budget separate from the per-file
     // sentinel timeout used during the parallel analysis phase.
-    let resolve_timeout = ctx
+    let deadline = ctx
         .config
         .cross_file_resolve_timeout
-        .unwrap_or(CROSS_FILE_RESOLVE_TIMEOUT);
-    let deadline = Instant::now() + resolve_timeout;
-    let timed_out = AtomicBool::new(false);
+        .map(|d| Instant::now() + d);
+    let mut timed_out = false;
 
     let import_nodes: Vec<_> = graph
         .imports_iter()
@@ -99,9 +96,9 @@ pub fn attach_resolution_edges(
         .collect();
     let mut locally_resolved_imports = FxHashSet::default();
     for (source_node, source_path) in import_nodes {
-        if Instant::now() >= deadline {
-            tracing::warn!("js cross-file import resolution timed out after {resolve_timeout:?}");
-            timed_out.store(true, Ordering::Relaxed);
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            tracing::warn!("js cross-file import resolution timed out");
+            timed_out = true;
             break;
         }
         if add_import_edge(
@@ -115,7 +112,7 @@ pub fn attach_resolution_edges(
             locally_resolved_imports.insert(source_node);
         }
     }
-    if timed_out.load(Ordering::Relaxed) {
+    if timed_out {
         ctx.record_skip(
             "js:cross-file-resolve".to_string(),
             FileSkip::TimeoutSentinel,

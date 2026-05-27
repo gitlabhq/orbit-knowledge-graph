@@ -162,12 +162,12 @@ impl JsCrossFileResolver {
         &self,
         calls_by_file: &[(String, Vec<JsCallEdge>)],
         modules: &JsModuleIndex,
-        deadline: &Instant,
+        deadline: &Option<Instant>,
     ) -> Vec<JsResolvedCallRelationship> {
         let mut relationships = Vec::new();
 
         for (file_path, calls) in calls_by_file {
-            if Instant::now() >= *deadline {
+            if deadline.is_some_and(|d| Instant::now() >= d) {
                 tracing::warn!("js cross-file call resolution timed out");
                 break;
             }

@@ -65,10 +65,11 @@
         "handlers": {
           "code-indexing-task": {
             "pipeline": {
+              "cross_file_resolve_timeout_ms": 180000,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
-              "per_file_timeout_ms": 5000,
+              "per_file_timeout_ms": 2000,
               "worker_threads": 0
             }
           },
@@ -346,6 +347,13 @@
     "CodeIndexingPipelineConfig": {
       "type": "object",
       "properties": {
+        "cross_file_resolve_timeout_ms": {
+          "description": "Wall-clock budget for the sequential cross-file resolution phase\n(import edges, call edges). 0 = no timeout.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 180000,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -368,7 +376,7 @@
           "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
           "type": "integer",
           "format": "uint64",
-          "default": 5000,
+          "default": 2000,
           "minimum": 0
         },
         "worker_threads": {
@@ -386,10 +394,11 @@
         "pipeline": {
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
+            "cross_file_resolve_timeout_ms": 180000,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
-            "per_file_timeout_ms": 5000,
+            "per_file_timeout_ms": 2000,
             "worker_threads": 0
           }
         }
@@ -475,10 +484,11 @@
           "default": {
             "code-indexing-task": {
               "pipeline": {
+                "cross_file_resolve_timeout_ms": 180000,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
-                "per_file_timeout_ms": 5000,
+                "per_file_timeout_ms": 2000,
                 "worker_threads": 0
               }
             },
@@ -658,10 +668,11 @@
           "$ref": "#/$defs/CodeIndexingTaskHandlerConfig",
           "default": {
             "pipeline": {
+              "cross_file_resolve_timeout_ms": 180000,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
-              "per_file_timeout_ms": 5000,
+              "per_file_timeout_ms": 2000,
               "worker_threads": 0
             }
           }

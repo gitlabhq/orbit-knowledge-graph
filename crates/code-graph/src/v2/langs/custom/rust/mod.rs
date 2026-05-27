@@ -188,17 +188,16 @@ impl LanguagePipeline for RustPipeline {
         // Edge resolution is sequential over all parsed files, so it
         // gets its own wall-clock budget separate from the per-file
         // sentinel used during the parallel parse phase.
-        let resolve_timeout = ctx
+        let deadline = ctx
             .config
             .cross_file_resolve_timeout
-            .unwrap_or(crate::utils::CROSS_FILE_RESOLVE_TIMEOUT);
-        let deadline = std::time::Instant::now() + resolve_timeout;
+            .map(|d| std::time::Instant::now() + d);
         let mut edge_timed_out = false;
 
         'edge_resolve: for file in &parsed {
             for edge in &file.edge_candidates {
-                if std::time::Instant::now() >= deadline {
-                    tracing::warn!("rust edge resolution timed out after {resolve_timeout:?}",);
+                if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                    tracing::warn!("rust edge resolution timed out");
                     edge_timed_out = true;
                     break 'edge_resolve;
                 }
