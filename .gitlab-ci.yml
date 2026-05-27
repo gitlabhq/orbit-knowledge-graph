@@ -282,7 +282,7 @@ iglu-schema-check:
   needs: []
   script:
     - apk add --no-cache bash curl python3
-    - bash ./scripts/iglu/check.sh
+    - bash ./scripts/iglu/check.sh --remote-only
 
 fmt-check:
   stage: lint
