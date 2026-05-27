@@ -14,3 +14,6 @@
 
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
+
+[Analytics Instrumentation] @gitlab-org/analytics-section/analytics-instrumentation/engineers @gitlab-org/analytics-section/analytics-instrumentation/external-reviewers
+/config/events/
