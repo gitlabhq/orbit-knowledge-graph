@@ -13,8 +13,9 @@ use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{
     CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
 };
+use crate::utils::CROSS_FILE_RESOLVE_TIMEOUT;
 use crate::v2::pipeline::PipelineContext;
-use crate::v2::sentinel::{CROSS_FILE_RESOLVE_TIMEOUT, SentinelHandle};
+use crate::v2::sentinel::SentinelHandle;
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
