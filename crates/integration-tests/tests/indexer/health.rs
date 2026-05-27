@@ -74,6 +74,7 @@ async fn start_infra() -> Infra {
         CH_USER,
         Some(CH_PASS),
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     );
 
     // Wait for ClickHouse to accept queries

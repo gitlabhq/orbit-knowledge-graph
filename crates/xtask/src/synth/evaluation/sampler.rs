@@ -283,6 +283,7 @@ mod tests {
             "default",
             None,
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         let sampler = ParameterSampler::new(client, 100);
         assert_eq!(sampler.sample_size, 100);

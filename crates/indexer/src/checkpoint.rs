@@ -84,7 +84,7 @@ impl ClickHouseCheckpointStore {
         let cursor_json = serde_json::to_string(cursor_values).map_err(checkpoint_store_error)?;
 
         self.client
-            .query(&format!(
+            .insert_query(&format!(
                 "INSERT INTO {table} (key, watermark, cursor_values) \
                  VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}})"
             ))
@@ -103,7 +103,7 @@ impl ClickHouseCheckpointStore {
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
         self.client
-            .query(&format!(
+            .insert_query(&format!(
                 "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
                  VALUES ({{key:String}}, {{watermark:String}}, '', true)"
             ))

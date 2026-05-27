@@ -15,6 +15,13 @@ pub struct ClickHouseConfiguration {
     pub password: Option<String>,
     #[serde(default)]
     pub query_settings: HashMap<String, String>,
+    /// Settings applied to INSERT operations only (both bulk Arrow IPC and
+    /// parameterized `INSERT VALUES`).
+    ///
+    /// Typical use: enable server-side batching via `async_insert` to reduce
+    /// part creation when many small or concurrent writes hit the same tables.
+    #[serde(default)]
+    pub insert_settings: HashMap<String, String>,
     #[serde(default)]
     pub profiling: ProfilingConfig,
 }
@@ -42,6 +49,7 @@ impl Default for ClickHouseConfiguration {
             username: "default".to_string(),
             password: None,
             query_settings: HashMap::new(),
+            insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }
     }

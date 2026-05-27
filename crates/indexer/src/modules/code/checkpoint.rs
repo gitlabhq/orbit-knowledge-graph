@@ -152,7 +152,7 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
         let formatted_timestamp = checkpoint.indexed_at.format(TIMESTAMP_FORMAT).to_string();
 
         self.client
-            .query(&format!(
+            .insert_query(&format!(
                 r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)

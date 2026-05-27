@@ -37,6 +37,10 @@ graph:
   # password: ""
   query_settings:
     optimize_on_insert: "0"
+  insert_settings:
+    async_insert: "1"
+    wait_for_async_insert: "1"
+    async_insert_deduplicate: "0"
 
 # gitlab:
 #   base_url: "http://localhost:3000"
