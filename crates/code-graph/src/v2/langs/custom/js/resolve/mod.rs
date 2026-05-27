@@ -5,7 +5,10 @@ mod webpack;
 pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+use rayon::prelude::*;
 
 use crate::v2::error::FileSkip;
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
@@ -42,21 +45,36 @@ pub fn attach_resolution_edges(
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
 
-    for analyzed in analyzed_files {
-        let guard = sentinel.map(|s| s.file_start(&analyzed.relative_path));
-        add_local_call_edges(
-            graph,
-            analyzed,
-            file_infos.get(&analyzed.relative_path),
-            &mut seen,
-            tracer,
-        );
-        if guard.as_ref().is_some_and(|g| g.is_killed()) {
-            ctx.record_skip(
-                analyzed.relative_path.clone(),
-                FileSkip::TimeoutSentinel,
-                "per-file watchdog killed local call resolution",
-            );
+    // ── Phase 1: resolve local call edges in parallel ───────
+    // Each file's SSA-based local resolution is independent. Collect
+    // edges from all files concurrently, then insert sequentially.
+    let all_local_edges: Vec<Vec<(NodeIndex, NodeIndex, GraphEdge)>> = {
+        let graph: &CodeGraph = graph;
+        analyzed_files
+            .par_iter()
+            .map(|analyzed| {
+                let guard = sentinel.map(|s| s.file_start(&analyzed.relative_path));
+                let edges = resolve_local_call_edges(
+                    graph,
+                    analyzed,
+                    file_infos.get(&analyzed.relative_path),
+                    tracer,
+                );
+                if guard.as_ref().is_some_and(|g| g.is_killed()) {
+                    ctx.record_skip(
+                        analyzed.relative_path.clone(),
+                        FileSkip::TimeoutSentinel,
+                        "per-file watchdog killed local call resolution",
+                    );
+                }
+                edges
+            })
+            .collect()
+    };
+
+    for edges in all_local_edges {
+        for (source, target, edge) in edges {
+            add_edge(graph, &mut seen, source, target, edge);
         }
     }
 
@@ -78,41 +96,63 @@ pub fn attach_resolution_edges(
         })
         .collect();
 
-    let mut resolver = JsCrossFileResolver::new(probe);
-    resolver.apply_project_resolution_hints(probe);
+    let resolver = JsCrossFileResolver::new_with_hints(probe);
 
-    // Cross-file resolution is sequential over all imports and calls,
-    // so it gets its own wall-clock budget separate from the per-file
-    // sentinel timeout used during the parallel analysis phase.
+    // Wall-clock budget for the cross-file resolution phases.
     let deadline = ctx
         .config
         .cross_file_resolve_timeout
         .map(|d| Instant::now() + d);
-    let mut timed_out = false;
+    let timed_out = AtomicBool::new(false);
 
+    // ── Phase 2: resolve import edges in parallel ───────────
+    // import_target() only reads from the graph; parallelise the
+    // resolution and collect (source, target) pairs, then insert
+    // edges sequentially.
     let import_nodes: Vec<_> = graph
         .imports_iter()
         .map(|(node, file_path, _)| (node, file_path.as_ref().to_string()))
         .collect();
+
+    let import_results: Vec<_> = {
+        let graph: &CodeGraph = graph;
+        import_nodes
+            .par_iter()
+            .filter_map(|(source_node, source_path)| {
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    timed_out.store(true, Ordering::Relaxed);
+                    return None;
+                }
+                let (target_node, target_node_kind, target_def_kind) =
+                    import_target(graph, modules_index, &resolver, *source_node, source_path)?;
+                Some((*source_node, target_node, target_node_kind, target_def_kind))
+            })
+            .collect()
+    };
+
     let mut locally_resolved_imports = FxHashSet::default();
-    for (source_node, source_path) in import_nodes {
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            tracing::warn!("js cross-file import resolution timed out");
-            timed_out = true;
-            break;
-        }
-        if add_import_edge(
+    for (source_node, target_node, target_node_kind, target_def_kind) in import_results {
+        if add_edge(
             graph,
-            modules_index,
-            &resolver,
-            source_node,
-            &source_path,
             &mut seen,
+            source_node,
+            target_node,
+            GraphEdge {
+                relationship: Relationship {
+                    edge_kind: EdgeKind::Imports,
+                    source_node: NodeKind::ImportedSymbol,
+                    target_node: target_node_kind,
+                    source_def_kind: None,
+                    target_def_kind,
+                },
+            },
         ) {
             locally_resolved_imports.insert(source_node);
         }
     }
-    if timed_out {
+
+    if timed_out.load(Ordering::Relaxed) {
+        tracing::warn!("js cross-file import resolution timed out");
         ctx.record_skip(
             "js:cross-file-resolve".to_string(),
             FileSkip::TimeoutSentinel,
@@ -120,6 +160,8 @@ pub fn attach_resolution_edges(
         );
     } else {
         let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
+
+        // ── Phase 3: resolve call edges in parallel ─────────
         for relationship in resolver.resolve_calls(&imported_calls, modules_index, &deadline) {
             add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
         }
@@ -133,15 +175,14 @@ pub fn attach_resolution_edges(
     }
 }
 
-fn add_local_call_edges(
-    graph: &mut CodeGraph,
+fn resolve_local_call_edges(
+    graph: &CodeGraph,
     analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
-    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
     tracer: &crate::v2::trace::Tracer,
-) {
+) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
     let Some(file_info) = file_info else {
-        return;
+        return Vec::new();
     };
 
     let rules = js_local_rules();
@@ -190,10 +231,8 @@ fn add_local_call_edges(
 
         append_direct_class_invocations(graph, file_info, call, &mut filtered, &mut semantic_seen);
     }
-    drop(resolver);
-    for (source_node, target_node, edge) in filtered {
-        add_edge(graph, seen, source_node, target_node, edge);
-    }
+
+    filtered
 }
 
 fn js_local_rules() -> &'static ResolutionRules {
@@ -294,38 +333,6 @@ fn append_direct_class_invocations(
             },
         ));
     }
-}
-
-fn add_import_edge(
-    graph: &mut CodeGraph,
-    modules: &JsModuleIndex,
-    resolver: &JsCrossFileResolver,
-    source_node: NodeIndex,
-    source_path: &str,
-    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
-) -> bool {
-    let Some((target_node, target_node_kind, target_def_kind)) =
-        import_target(graph, modules, resolver, source_node, source_path)
-    else {
-        return false;
-    };
-
-    add_edge(
-        graph,
-        seen,
-        source_node,
-        target_node,
-        GraphEdge {
-            relationship: Relationship {
-                edge_kind: EdgeKind::Imports,
-                source_node: NodeKind::ImportedSymbol,
-                target_node: target_node_kind,
-                source_def_kind: None,
-                target_def_kind,
-            },
-        },
-    );
-    true
 }
 
 fn import_target(
@@ -609,10 +616,13 @@ fn add_edge(
     source: NodeIndex,
     target: NodeIndex,
     edge: GraphEdge,
-) {
+) -> bool {
     let key = (source.index(), target.index(), edge.relationship.edge_kind);
     if seen.insert(key) {
         graph.graph.add_edge(source, target, edge);
+        true
+    } else {
+        false
     }
 }
 
