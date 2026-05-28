@@ -333,17 +333,26 @@ impl CodeGraph {
             DefinitionRangeIndex::from_ranges(definition_ranges),
         );
 
-        // Containment edges.
+        // Containment edges. Index defs by FQN once (O(n)) so each child finds
+        // its parent by lookup rather than scanning every sibling (was O(n^2)).
+        let mut defs_by_fqn: FxHashMap<&str, SmallVec<[usize; 2]>> = FxHashMap::default();
+        for (j, gdef) in graph_defs.iter().enumerate() {
+            defs_by_fqn
+                .entry(self.strings.get(gdef.fqn))
+                .or_default()
+                .push(j);
+        }
         for (i, gdef) in graph_defs.iter().enumerate() {
             let fqn_str = self.strings.get(gdef.fqn);
             let Some(sep_pos) = fqn_str.rfind(gdef.fqn_sep) else {
                 continue;
             };
-            let parent_fqn = &fqn_str[..sep_pos];
-            for (j, parent_def) in graph_defs.iter().enumerate() {
+            let Some(candidates) = defs_by_fqn.get(&fqn_str[..sep_pos]) else {
+                continue;
+            };
+            for &j in candidates {
                 if j != i
-                    && self.strings.get(parent_def.fqn) == parent_fqn
-                    && let Some(rel) = containment_relationship(parent_def.kind, gdef.kind)
+                    && let Some(rel) = containment_relationship(graph_defs[j].kind, gdef.kind)
                 {
                     self.graph.add_edge(
                         def_nodes[j],
