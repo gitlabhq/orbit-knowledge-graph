@@ -431,7 +431,6 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
-        &tag_cache,
     ));
     edge_rows.extend(branch_contains_file_rows(
         graph,
