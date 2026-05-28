@@ -472,6 +472,25 @@ impl ColRef<'_> {
         }
     }
 
+    /// Push a `["a","b",...]` to a `StrList` column.
+    pub fn push_str_list(&mut self, values: &[&str]) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::StrList(b, _) => {
+                let vals = b.values();
+                for v in values {
+                    vals.append_value(v);
+                }
+                b.append(true);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_str_list on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
