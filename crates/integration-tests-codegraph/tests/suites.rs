@@ -251,6 +251,7 @@ yaml_test!(
 
 // C
 yaml_test!(c_resolution, "c/resolution.yaml");
+yaml_test!(c_include_scoping, "c/include_scoping.yaml");
 yaml_test!(c_hardcore, "c/hardcore.yaml");
 yaml_test!(
     c_imported_symbol_fallback_matrix,

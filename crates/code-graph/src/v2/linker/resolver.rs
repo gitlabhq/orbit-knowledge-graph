@@ -334,9 +334,9 @@ struct ResolveCtx<'a> {
     inferred_returns: FxHashMap<NodeIndex, String>,
     /// Precomputed or lazily built include index for C/C++ resolution.
     include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
-    /// Cached BFS result: files reachable via transitive includes from
-    /// this file. Computed once on first IncludeGraph resolve call.
-    include_reachable: Option<Vec<petgraph::graph::NodeIndex>>,
+    /// Cached BFS result: paths of files reachable via transitive includes
+    /// from this file. Computed once on first IncludeGraph resolve call.
+    include_reachable: Option<rustc_hash::FxHashSet<String>>,
 }
 
 impl<'a> ResolveCtx<'a> {

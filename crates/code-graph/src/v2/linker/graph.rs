@@ -1017,15 +1017,22 @@ impl CodeGraph {
     /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
     /// `NodeIndex::index()` — O(1) lookup, ~3x smaller than FxHashMap.
     pub fn assign_ids(&self, project_id: i64, branch: &str) -> Vec<i64> {
+        use std::fmt::Write as _;
         let pid = project_id.to_string();
         let mut ids = vec![0i64; self.graph.node_count()];
+        let mut range = String::new();
         for idx in self.graph.node_indices() {
             ids[idx.index()] = match &self.graph[idx] {
                 GraphNode::Directory(d) => compute_id(&[&pid, branch, "dir", &d.path]),
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    let range = format!("{}:{}", def.range.byte_offset.0, def.range.byte_offset.1);
+                    range.clear();
+                    let _ = write!(
+                        range,
+                        "{}:{}",
+                        def.range.byte_offset.0, def.range.byte_offset.1
+                    );
                     compute_id(&[
                         &pid,
                         branch,
@@ -1037,7 +1044,9 @@ impl CodeGraph {
                 }
                 GraphNode::Import { file_path, id } => {
                     let import = &self.imports[id.0 as usize];
-                    let range = format!(
+                    range.clear();
+                    let _ = write!(
+                        range,
                         "{}:{}",
                         import.range.byte_offset.0, import.range.byte_offset.1
                     );

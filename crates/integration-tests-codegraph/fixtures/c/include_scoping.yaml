@@ -1,0 +1,51 @@
+name: "C include-graph resolution scopes calls to #include-reachable files"
+
+fixtures:
+  - path: lib.h
+    content: |
+      #ifndef LIB_H
+      #define LIB_H
+      int compute(int x);
+      #endif
+
+  - path: lib.c
+    content: |
+      #include "lib.h"
+      int compute(int x) { return x + 1; }
+
+  - path: other.c
+    content: |
+      int compute(int x) { return x - 1; }
+
+  - path: app.c
+    content: |
+      #include "lib.h"
+      int run(void) { return compute(5); }
+
+tests:
+  - name: "Both same-named definitions exist (one per source file)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'compute' AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "lib::compute" } }
+      - { row: { fqn: "other::compute" } }
+
+  - name: "Call resolves to the #include-reachable definition (lib.c via lib.h pairing)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::run' AND callee.name = 'compute' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { callee: "lib::compute" } }
+
+  - name: "Call does NOT resolve to the non-reachable same-named definition (other.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::run' AND callee.fqn = 'other::compute'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 0 }

@@ -49,7 +49,7 @@ pub(crate) struct ImportResolver<'a> {
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
     pub include_index: Option<&'a super::graph::IncludeIndex>,
-    pub include_reachable: &'a mut Option<Vec<NodeIndex>>,
+    pub include_reachable: &'a mut Option<rustc_hash::FxHashSet<String>>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -338,25 +338,22 @@ impl<'a> ImportResolver<'a> {
                     }
                 }
             }
-            *self.include_reachable = Some(reachable);
+            *self.include_reachable = Some(
+                reachable
+                    .iter()
+                    .map(|&fi| idx.path_by_idx[&fi].clone())
+                    .collect(),
+            );
         }
 
         let reachable = self.include_reachable.as_ref().unwrap();
-        let mut results = Vec::new();
-        for &file_idx in reachable {
-            let file_path = self.graph.graph[file_idx].path();
-            for &def_idx in self
-                .graph
-                .indexes
-                .by_name
-                .lookup(name, |i| self.graph.def_name(i) == name)
-                .iter()
-                .filter(|&&i| self.graph.def_in_file(i, file_path))
-            {
-                results.push(def_idx);
-            }
-        }
-        results
+        self.graph
+            .indexes
+            .by_name
+            .lookup(name, |i| self.graph.def_name(i) == name)
+            .into_iter()
+            .filter(|&i| reachable.contains(self.graph.graph[i].path()))
+            .collect()
     }
 
     fn same_file(&self, name: &str) -> Vec<NodeIndex> {
