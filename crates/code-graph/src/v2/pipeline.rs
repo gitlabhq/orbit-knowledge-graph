@@ -720,7 +720,7 @@ impl Pipeline {
                         Some(Ok(())) => {
                             tracing::info!(
                                 family = %family,
-                                elapsed_ms = t_lang.elapsed().as_millis() as u64,
+                                duration_ms = t_lang.elapsed().as_millis() as u64,
                                 "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
@@ -1404,7 +1404,7 @@ impl FamilyPipeline {
         }
 
         tracing::info!(
-            elapsed_ms = t0.elapsed().as_millis() as u64,
+            duration_ms = t0.elapsed().as_millis() as u64,
             nodes = graph.graph.node_count(),
             edges = graph.graph.edge_count(),
             defs = graph.defs.len(),

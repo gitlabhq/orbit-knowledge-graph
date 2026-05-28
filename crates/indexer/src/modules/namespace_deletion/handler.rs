@@ -111,7 +111,7 @@ impl Handler for NamespaceDeletionHandler {
                     namespace_id = payload.namespace_id,
                     table = %outcome.table,
                     duration_ms = (outcome.duration_seconds * 1000.0) as u64,
-                    "deleted namespace data from table"
+                    "namespace data deleted from table"
                 );
             }
         }
@@ -142,7 +142,7 @@ impl Handler for NamespaceDeletionHandler {
         let elapsed = started_at.elapsed();
         info!(
             namespace_id = payload.namespace_id,
-            elapsed_ms = elapsed.as_millis() as u64,
+            duration_ms = elapsed.as_millis() as u64,
             "namespace deletion completed"
         );
 

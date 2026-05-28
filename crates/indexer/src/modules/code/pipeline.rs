@@ -160,7 +160,7 @@ impl CodeIndexingPipeline {
             .repository_fetch_duration
             .record(extraction_duration.as_secs_f64(), &[]);
         info!(
-            extraction_duration_ms = extraction_duration.as_millis() as u64,
+            duration_ms = extraction_duration.as_millis() as u64,
             "repository extraction completed"
         );
 
@@ -324,7 +324,7 @@ impl CodeIndexingPipeline {
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
         let code_graph_duration = code_graph_start.elapsed();
         info!(
-            code_graph_duration_ms = code_graph_duration.as_millis() as u64,
+            duration_ms = code_graph_duration.as_millis() as u64,
             "code-graph building completed"
         );
 
@@ -339,7 +339,7 @@ impl CodeIndexingPipeline {
         }
         let graph_write_duration = flush_start.elapsed();
         info!(
-            graph_write_duration_ms = graph_write_duration.as_millis() as u64,
+            duration_ms = graph_write_duration.as_millis() as u64,
             "graph writing completed"
         );
         self.metrics
@@ -415,7 +415,7 @@ impl CodeIndexingPipeline {
         }
         let stale_data_cleanup_duration = cleanup_start.elapsed();
         info!(
-            stale_data_cleanup_duration_ms = stale_data_cleanup_duration.as_millis() as u64,
+            duration_ms = stale_data_cleanup_duration.as_millis() as u64,
             "stale data cleanup completed"
         );
 
