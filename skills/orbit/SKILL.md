@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.10.0
+version: 0.9.0
 license: MIT
 metadata:
   audience: developers
@@ -151,52 +151,20 @@ Concrete rules:
 Cost grows linearly in attempts, both in CLI shell-out time and in agent
 context. A hard cap is cheaper than an ambiguous answer.
 
-## Repository maps (Orbit Local)
+## Repository map helpers
 
-When the user needs a high-level map of a locally checked-out repository — for
-example before planning a large refactor, entering an unfamiliar codebase, or
-deciding where new code should live — use the bundled repo-map helper over the
-Orbit Local DuckDB graph.
+For code-structure orientation before planning a change, use one of the bundled
+repo-map helpers and load the matching reference for details:
 
-Resolve helper paths relative to the directory containing this `SKILL.md` (the
-Orbit skill root), not relative to the user's current repository. In shell
-examples below, `cd` to the skill root first, then run `./scripts/...`.
+- **Local checkout / uncommitted or branch-local code:** use the Orbit Local
+  helper. See [`references/local_repo_map.md`](references/local_repo_map.md).
+- **Project already indexed in Orbit Remote / no local checkout needed:** use
+  the Orbit Remote helper. See
+  [`references/remote_repo_map.md`](references/remote_repo_map.md).
 
-```bash
-python3 ./scripts/local_repo_map.py /path/to/repo              # overview
-python3 ./scripts/local_repo_map.py /path/to/repo tree crates
-python3 ./scripts/local_repo_map.py /path/to/repo api crates/orbit-local
-python3 ./scripts/local_repo_map.py /path/to/repo --ext .rs    # only Rust files
-```
-
-The target repository must already be indexed at the current commit with
-`glab orbit local index .`; the helper preflights this and prints the indexing
-command when needed. Start with `overview`, then use one or two narrower
-`tree`, `api`, `class`, `extends`, or `imports` calls. See
-[`references/local_repo_map.md`](references/local_repo_map.md) for the full workflow,
-subcommands, budgets, and caveats.
-
-## Remote repository maps (Orbit Remote)
-
-When the user needs code-structure navigation for a project indexed in Orbit
-Remote but does not have or need a local checkout, use the bundled remote
-repo-map helper. It shells out to `glab orbit remote query` and supports
-inheritance, ancestor, class-member, path API, and caller lookups.
-
-```bash
-python3 ./scripts/remote_repo_map.py extends BasePolicy
-python3 ./scripts/remote_repo_map.py ancestors Ci::Build
-python3 ./scripts/remote_repo_map.py class MergeRequestPolicy
-python3 ./scripts/remote_repo_map.py api app/services/merge_requests
-python3 ./scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
-python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
-```
-
-Prefer the local repo-map helper for local, branch-local, or uncommitted code.
-Use the remote helper when the target is already indexed in Orbit Remote and a
-graph-backed directory/class/caller map is faster than hand-writing query JSON.
-See [`references/remote_repo_map.md`](references/remote_repo_map.md) for the
-full command reference and coverage caveats.
+Helper script paths are relative to the Orbit skill root (the directory
+containing this `SKILL.md`), not the user's current repository. The reference
+files include invocation examples and path-resolution notes.
 
 ## Reporting results
 
@@ -273,20 +241,12 @@ glab orbit local --update    # update to latest compatible version
 See [`references/local_cli.md`](references/local_cli.md) for full config keys,
 pass-through args, and usage examples.
 
-## Contributing Improvements
-
-If Orbit guidance, recipes, or helper script behavior is inaccurate or missing,
-update this skill in `gitlab-org/orbit/knowledge-graph` rather than working
-around the issue silently. Keep `SKILL.md`, `references/`, and `scripts/` in
-sync in the same MR, and validate meaningful behavior changes with
-`opencode run` so the skill works in practice.
-
-When updating helper scripts, prefer small focused changes and document the
-user-visible behavior in the matching reference file. If a helper should move
-into `glab orbit` later, keep the script self-contained until that CLI command
-exists.
-
 ## Contributing
+
+If Orbit guidance, recipes, or helper behavior is inaccurate, update this skill
+in `gitlab-org/orbit/knowledge-graph` rather than working around it silently.
+Keep `SKILL.md`, `references/`, and `scripts/` in sync, and use `opencode run`
+for meaningful behavior changes.
 
 `references/query_language.md` is synced from
 `docs/source/remote/queries/query-language.md`. Edit the upstream file, then run
