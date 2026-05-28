@@ -270,6 +270,23 @@ query-dsl-version-check:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
     - bash ./scripts/check-query-dsl-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
+skill-version-bump-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - apk add --no-cache git
+    - |
+      if ! git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1; then
+        git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
+        export BASE_REF_OVERRIDE="origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+      fi
+      python3 scripts/check-skill-version-bump.py --ci --no-worktree ${BASE_REF_OVERRIDE:+--base-ref "$BASE_REF_OVERRIDE"}
+
 iglu-schema-check:
   stage: lint
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
