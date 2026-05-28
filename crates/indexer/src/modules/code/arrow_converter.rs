@@ -397,8 +397,10 @@ fn convert_repository_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let denorm_cols = &specs.denormalized_edge_columns;
     let branch_id = compute_branch_id(env.project_id, &env.branch);
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    // TODO: derive from ontology when Branch becomes a real GraphNode
+    let branch_tags = vec!["is_default:true".to_string()];
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
     edge_rows.push(IndexerEdgeRow {
@@ -408,7 +410,8 @@ fn convert_repository_edges(
         edge_kind: "IN_PROJECT",
         source_node_kind: "Branch",
         target_node_kind: "Project",
-        denormalized_column_names: denorm_cols,
+        source_tags: branch_tags.clone(),
+        target_tags: Vec::new(),
     });
 
     edge_rows.push(IndexerEdgeRow {
@@ -418,7 +421,8 @@ fn convert_repository_edges(
         edge_kind: "CONTAINS",
         source_node_kind: "Project",
         target_node_kind: "Branch",
-        denormalized_column_names: denorm_cols,
+        source_tags: Vec::new(),
+        target_tags: branch_tags.clone(),
     });
 
     edge_rows.extend(branch_contains_directory_rows(
@@ -426,23 +430,25 @@ fn convert_repository_edges(
         ids,
         env,
         branch_id,
-        denorm_cols,
+        &branch_tags,
     ));
     edge_rows.extend(branch_contains_file_rows(
         graph,
         ids,
         env,
         branch_id,
-        denorm_cols,
+        &branch_tags,
+        &tag_cache,
     ));
     edge_rows.extend(repository_on_branch_rows(
         graph,
         ids,
         env,
         branch_id,
-        denorm_cols,
+        &branch_tags,
+        &tag_cache,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env, denorm_cols));
+    edge_rows.extend(graph_edge_rows(graph, ids, env, &tag_cache));
 
     edge_row_batch(edge_rows, &specs.edge)
 }
@@ -453,28 +459,13 @@ fn convert_semantic_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let denorm_cols = &specs.denormalized_edge_columns;
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, denorm_cols)
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &tag_cache)
         .into_iter()
         .filter(|row| row.edge_kind != "CONTAINS")
         .collect();
 
     edge_row_batch(edge_rows, &specs.edge)
-}
-
-fn denormalized_edge_columns(ontology: &Ontology) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut cols = Vec::new();
-    for table_name in ontology.edge_tables() {
-        if let Some(config) = ontology.edge_table_config(table_name) {
-            for col in &config.storage.denormalized_columns {
-                if seen.insert(col.name.clone()) {
-                    cols.push(col.name.clone());
-                }
-            }
-        }
-    }
-    cols
 }
 
 struct IndexerEdgeRow<'a> {
@@ -484,7 +475,8 @@ struct IndexerEdgeRow<'a> {
     edge_kind: &'a str,
     source_node_kind: &'a str,
     target_node_kind: &'a str,
-    denormalized_column_names: &'a [String],
+    source_tags: Vec<String>,
+    target_tags: Vec<String>,
 }
 
 impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -496,9 +488,10 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
         b.col("relationship_kind")?.push_str(self.edge_kind)?;
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
-        for col_name in self.denormalized_column_names {
-            b.col(col_name)?.push_empty_str_list()?;
-        }
+        let src: Vec<&str> = self.source_tags.iter().map(|s| s.as_str()).collect();
+        b.col("source_tags")?.push_str_list(&src)?;
+        let tgt: Vec<&str> = self.target_tags.iter().map(|s| s.as_str()).collect();
+        b.col("target_tags")?.push_str_list(&tgt)?;
         b.col("_version")?
             .push_timestamp_micros(self.env.version_micros)?;
         b.col("_deleted")?.push_bool(false)?;
@@ -511,7 +504,7 @@ fn branch_contains_directory_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    denorm_cols: &'a [String],
+    branch_tags: &[String],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .directories()
@@ -523,7 +516,8 @@ fn branch_contains_directory_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "Directory",
-            denormalized_column_names: denorm_cols,
+            source_tags: branch_tags.to_vec(),
+            target_tags: Vec::new(),
         })
         .collect()
 }
@@ -533,7 +527,8 @@ fn branch_contains_file_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    denorm_cols: &'a [String],
+    branch_tags: &[String],
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -545,7 +540,8 @@ fn branch_contains_file_rows<'a>(
             edge_kind: "CONTAINS",
             source_node_kind: "Branch",
             target_node_kind: "File",
-            denormalized_column_names: denorm_cols,
+            source_tags: branch_tags.to_vec(),
+            target_tags: tag_cache[idx.index()].clone(),
         })
         .collect()
 }
@@ -555,7 +551,8 @@ fn repository_on_branch_rows<'a>(
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
     branch_id: i64,
-    denorm_cols: &'a [String],
+    branch_tags: &[String],
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -566,7 +563,8 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "Directory",
         target_node_kind: "Branch",
-        denormalized_column_names: denorm_cols,
+        source_tags: Vec::new(),
+        target_tags: branch_tags.to_vec(),
     }));
     rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
         env,
@@ -575,7 +573,8 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        denormalized_column_names: denorm_cols,
+        source_tags: tag_cache[idx.index()].clone(),
+        target_tags: branch_tags.to_vec(),
     }));
 
     rows
@@ -585,7 +584,7 @@ fn graph_edge_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
-    denorm_cols: &'a [String],
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
     for ei in graph.graph.edge_indices() {
@@ -598,7 +597,8 @@ fn graph_edge_rows<'a>(
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
-            denormalized_column_names: denorm_cols,
+            source_tags: tag_cache[src.index()].clone(),
+            target_tags: tag_cache[tgt.index()].clone(),
         });
     }
     rows
@@ -633,13 +633,33 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
+/// Per-node-kind list of `(tag_key, property_name)` pairs derived from
+/// the ontology's denormalization declarations. Deduplicated because the
+/// ontology expands one declaration per edge relationship, but the tag
+/// values are the same regardless of which edge the node appears in.
+type TagProperties = std::collections::HashMap<String, Vec<(String, String)>>;
+
+fn build_tag_properties(ontology: &Ontology) -> TagProperties {
+    let mut map: TagProperties = std::collections::HashMap::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for dp in ontology.denormalized_properties() {
+        let key = (dp.node_kind.clone(), dp.property_name.clone());
+        if seen.insert(key) {
+            map.entry(dp.node_kind.clone())
+                .or_default()
+                .push((dp.tag_key.clone(), dp.property_name.clone()));
+        }
+    }
+    map
+}
+
 pub struct ConverterSpecs {
     directory: Vec<ColumnSpec>,
     file: Vec<ColumnSpec>,
     definition: Vec<ColumnSpec>,
     imported_symbol: Vec<ColumnSpec>,
     edge: Vec<ColumnSpec>,
-    denormalized_edge_columns: Vec<String>,
+    tag_properties: TagProperties,
 }
 
 impl ConverterSpecs {
@@ -650,7 +670,7 @@ impl ConverterSpecs {
             definition: entity_specs(ontology, "Definition"),
             imported_symbol: entity_specs(ontology, "ImportedSymbol"),
             edge: edge_specs(ontology),
-            denormalized_edge_columns: denormalized_edge_columns(ontology),
+            tag_properties: build_tag_properties(ontology),
         }
     }
 }
