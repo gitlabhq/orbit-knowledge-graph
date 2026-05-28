@@ -129,6 +129,7 @@ async fn run_deletion_handler(context: &TestContext, ontology: &ontology::Ontolo
     let request = NamespaceDeletionRequest {
         namespace_id: DELETED_NAMESPACE_ID,
         traversal_path: DELETED_NAMESPACE_PATH.to_string(),
+        dispatch_id: uuid::Uuid::new_v4(),
     };
     let envelope = Envelope::new(&request).unwrap();
     handler

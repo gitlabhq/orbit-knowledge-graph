@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
@@ -59,6 +60,7 @@ impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
+            dispatch_id: Uuid::new_v4(),
         })
         .map_err(|error| {
             self.metrics.record_error(self.name(), "publish");

@@ -130,7 +130,8 @@ pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
         &serde_json::json!({
             "namespace": namespace_id,
             "traversal_path": format!("{org_id}/{namespace_id}/"),
-            "watermark": default_test_watermark().to_rfc3339()
+            "watermark": default_test_watermark().to_rfc3339(),
+            "dispatch_id": uuid::Uuid::new_v4(),
         })
         .to_string(),
     )
@@ -139,7 +140,8 @@ pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
 pub fn global_envelope() -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
-            "watermark": default_test_watermark().to_rfc3339()
+            "watermark": default_test_watermark().to_rfc3339(),
+            "dispatch_id": uuid::Uuid::new_v4(),
         })
         .to_string(),
     )

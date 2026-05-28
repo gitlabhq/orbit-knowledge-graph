@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -108,6 +109,7 @@ impl NamespaceDispatcher {
                 namespace: *namespace_id,
                 traversal_path: traversal_path.clone(),
                 watermark,
+                dispatch_id: Uuid::new_v4(),
             };
 
             let subscription = request.publish_subscription();

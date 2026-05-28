@@ -78,6 +78,10 @@ _Avoid_: filtering (too generic), content masking (misleading — entire rows ar
 The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from GitLab's PostgreSQL through **Siphon** into the **Datalake**.
 _Avoid_: replication (too broad)
 
+**Dispatch ID**:
+A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
+_Avoid_: request ID, trace ID (dispatch_id groups many requests, not a single one)
+
 **Siphon**:
 GitLab's CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
 _Avoid_: CDC bridge, producer

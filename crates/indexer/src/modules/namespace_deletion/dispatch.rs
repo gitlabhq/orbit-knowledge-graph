@@ -4,6 +4,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use super::NamespaceDeletionStore;
 use crate::checkpoint::CheckpointStore;
@@ -135,6 +136,7 @@ impl NamespaceDeletionScheduler {
             TaskError::new(error)
         })?;
 
+        let dispatch_id = Uuid::new_v4();
         let mut dispatched = 0u64;
         let mut skipped = 0u64;
 
@@ -142,6 +144,7 @@ impl NamespaceDeletionScheduler {
             let request = NamespaceDeletionRequest {
                 namespace_id: entry.namespace_id,
                 traversal_path: entry.traversal_path.clone(),
+                dispatch_id,
             };
 
             let subscription = request.publish_subscription();

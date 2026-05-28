@@ -103,7 +103,7 @@ toml = "1.0.0"
 toon-format = { version = "0.4.1", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
-uuid = { version = "1.19.0", features = ["v4"] }
+uuid = { version = "1.19.0", features = ["v4", "serde"] }
 async-nats = { version = "0.48.0", features = ["server_2_11"] }
 arrow-ipc = "58.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
