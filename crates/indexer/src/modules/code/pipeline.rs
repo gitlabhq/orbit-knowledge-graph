@@ -24,10 +24,6 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub task_id: i64,
     pub commit_sha: Option<String>,
-    /// True when a checkpoint already exists for
-    /// `(traversal_path, project_id, branch)`. Lets the pipeline skip
-    /// stale-data cleanup on first-time / backfill indexing, where there is
-    /// by definition nothing to clean.
     pub had_prior_checkpoint: bool,
 }
 
