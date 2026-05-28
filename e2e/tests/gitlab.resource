@@ -127,9 +127,9 @@ Create Project
     ...                second WAL event so the MV re-fires with namespace_traversal_paths
     ...                populated. Remove once the upstream MV is idempotent or paired with
     ...                a reconciler. See gitlab-org/orbit/knowledge-graph/-/jobs/14221171727.
-    [Arguments]    ${name}    ${namespace_id}
+    [Arguments]    ${name}    ${namespace_id}    ${visibility}=public
     ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=public
+    ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=${visibility}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects
     ...    headers=${headers}    json=${body}    expected_status=201
     ${project}=    Set Variable    ${resp.json()}
@@ -278,3 +278,18 @@ Create Vulnerability
     ...    severity=${vuln["severity"]}    state=${vuln["state"]}
     ...    report_type=${vuln["reportType"]}    createdAt=${vuln["detectedAt"]}
     RETURN    ${result}
+
+Delete Note On Issue
+    [Arguments]    ${project_id}    ${issue_iid}    ${note_id}
+    ${headers}=    GitLab Auth Headers
+    DELETE    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}/notes/${note_id}
+    ...    headers=${headers}    expected_status=204
+
+Disable Knowledge Graph
+    [Documentation]    Tear down the enabled-namespace record (mirrors the admin DELETE used by
+    ...                ToggleNamespaceService). Existing graph data is retained until the deletion
+    ...                grace period elapses; only dispatching stops.
+    [Arguments]    ${namespace_id}
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${GITLAB_PAT}
+    DELETE    ${GITLAB_URL}/api/v4/admin/knowledge_graph/namespaces/${namespace_id}
+    ...    headers=${headers}    expected_status=204
