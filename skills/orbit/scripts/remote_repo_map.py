@@ -262,7 +262,10 @@ def cmd_class(args: argparse.Namespace) -> None:
             {
                 "id": "member", "entity": "Definition",
                 # content column omitted — triggers content_resolution_error on large classes
-                "filters": _base_filters(pid, branch),
+                "filters": {
+                    **_base_filters(pid, branch),
+                    "definition_type": {"op": "in", "value": MEMBER_KINDS},
+                },
                 "columns": ["id", "name", "fqn", "definition_type", "file_path", "start_line"],
             },
         ],

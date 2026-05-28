@@ -44,22 +44,26 @@ configuration, and pass-through argument details.
 
 ## Invocation
 
-From a checkout of this repository, the script is at:
+From the Orbit skill root (the directory containing `SKILL.md`), the script is
+at:
 
 ```text
-skills/orbit/scripts/local_repo_map.py
+./scripts/local_repo_map.py
 ```
 
-Run it from the repository root, or pass the target repository path as the
-first argument:
+Resolve that path relative to the skill root, not the user's current repository.
+When running from another directory, either `cd` to the skill root first or use
+the absolute path to the loaded skill directory.
+
+Pass the target repository path as the first argument:
 
 ```bash
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph tree crates
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph api crates/orbit-local
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph class Workspace
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph extends QueryCompiler
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph imports Workspace
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph tree crates
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph api crates/orbit-local
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph class Workspace
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph extends QueryCompiler
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph imports Workspace
 ```
 
 To focus on one or more file extensions, pass `--ext` before the subcommand.
@@ -67,9 +71,9 @@ Extensions may include or omit the leading dot and can be repeated or
 comma-separated:
 
 ```bash
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext .rs
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs api crates/orbit-local
-python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs,toml tree crates
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph --ext .rs
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs api crates/orbit-local
+python3 ./scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs,toml tree crates
 ```
 
 ## Recommended workflow

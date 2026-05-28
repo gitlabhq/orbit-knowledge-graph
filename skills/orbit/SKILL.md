@@ -158,11 +158,15 @@ example before planning a large refactor, entering an unfamiliar codebase, or
 deciding where new code should live — use the bundled repo-map helper over the
 Orbit Local DuckDB graph.
 
+Resolve helper paths relative to the directory containing this `SKILL.md` (the
+Orbit skill root), not relative to the user's current repository. In shell
+examples below, `cd` to the skill root first, then run `./scripts/...`.
+
 ```bash
-python3 skills/orbit/scripts/local_repo_map.py /path/to/repo              # overview
-python3 skills/orbit/scripts/local_repo_map.py /path/to/repo tree crates
-python3 skills/orbit/scripts/local_repo_map.py /path/to/repo api crates/orbit-local
-python3 skills/orbit/scripts/local_repo_map.py /path/to/repo --ext .rs    # only Rust files
+python3 ./scripts/local_repo_map.py /path/to/repo              # overview
+python3 ./scripts/local_repo_map.py /path/to/repo tree crates
+python3 ./scripts/local_repo_map.py /path/to/repo api crates/orbit-local
+python3 ./scripts/local_repo_map.py /path/to/repo --ext .rs    # only Rust files
 ```
 
 The target repository must already be indexed at the current commit with
@@ -180,12 +184,12 @@ repo-map helper. It shells out to `glab orbit remote query` and supports
 inheritance, ancestor, class-member, path API, and caller lookups.
 
 ```bash
-python3 skills/orbit/scripts/remote_repo_map.py extends BasePolicy
-python3 skills/orbit/scripts/remote_repo_map.py ancestors Ci::Build
-python3 skills/orbit/scripts/remote_repo_map.py class MergeRequestPolicy
-python3 skills/orbit/scripts/remote_repo_map.py api app/services/merge_requests
-python3 skills/orbit/scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
-python3 skills/orbit/scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
+python3 ./scripts/remote_repo_map.py extends BasePolicy
+python3 ./scripts/remote_repo_map.py ancestors Ci::Build
+python3 ./scripts/remote_repo_map.py class MergeRequestPolicy
+python3 ./scripts/remote_repo_map.py api app/services/merge_requests
+python3 ./scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
+python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
 ```
 
 Prefer the local repo-map helper for local, branch-local, or uncommitted code.
@@ -268,6 +272,19 @@ glab orbit local --update    # update to latest compatible version
 
 See [`references/local_cli.md`](references/local_cli.md) for full config keys,
 pass-through args, and usage examples.
+
+## Contributing Improvements
+
+If Orbit guidance, recipes, or helper script behavior is inaccurate or missing,
+update this skill in `gitlab-org/orbit/knowledge-graph` rather than working
+around the issue silently. Keep `SKILL.md`, `references/`, and `scripts/` in
+sync in the same MR, and validate meaningful behavior changes with
+`opencode run` so the skill works in practice.
+
+When updating helper scripts, prefer small focused changes and document the
+user-visible behavior in the matching reference file. If a helper should move
+into `glab orbit` later, keep the script self-contained until that CLI command
+exists.
 
 ## Contributing
 

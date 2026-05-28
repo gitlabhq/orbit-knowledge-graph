@@ -34,28 +34,33 @@ entity lookup or a cross-domain SDLC query.
 
 ## Invocation
 
-From a checkout of this repository, the script is at:
+From the Orbit skill root (the directory containing `SKILL.md`), the script is
+at:
 
 ```text
-skills/orbit/scripts/remote_repo_map.py
+./scripts/remote_repo_map.py
 ```
+
+Resolve that path relative to the skill root, not the user's current repository.
+When running from another directory, either `cd` to the skill root first or use
+the absolute path to the loaded skill directory.
 
 The default target is `gitlab-org/gitlab` (`project_id = 278964`) on `master`:
 
 ```bash
-python3 skills/orbit/scripts/remote_repo_map.py extends BasePolicy
-python3 skills/orbit/scripts/remote_repo_map.py extends ApplicationRecord --depth 3
-python3 skills/orbit/scripts/remote_repo_map.py ancestors Ci::Build
-python3 skills/orbit/scripts/remote_repo_map.py class MergeRequestPolicy
-python3 skills/orbit/scripts/remote_repo_map.py api app/services/merge_requests
-python3 skills/orbit/scripts/remote_repo_map.py callers execute
-python3 skills/orbit/scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
+python3 ./scripts/remote_repo_map.py extends BasePolicy
+python3 ./scripts/remote_repo_map.py extends ApplicationRecord --depth 3
+python3 ./scripts/remote_repo_map.py ancestors Ci::Build
+python3 ./scripts/remote_repo_map.py class MergeRequestPolicy
+python3 ./scripts/remote_repo_map.py api app/services/merge_requests
+python3 ./scripts/remote_repo_map.py callers execute
+python3 ./scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
 ```
 
 Override the project or branch with global flags before the subcommand:
 
 ```bash
-python3 skills/orbit/scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
+python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
 ```
 
 ## Subcommands
@@ -102,7 +107,8 @@ source search or another API. Known limitations:
 - `EXTENDS` depth is capped at 3 server-side, and large inheritance trees can be
   incomplete.
 - `CALLS` edges are not fully indexed for every language/project combination.
-- `extends --depth 3` performs three remote query round trips.
+- `extends --depth 3` performs one remote query per frontier entry at each hop;
+  wide inheritance roots can issue many round trips.
 - A branch filter is required. The default is `master`; pass `--branch main` for
   projects that use `main`.
 
