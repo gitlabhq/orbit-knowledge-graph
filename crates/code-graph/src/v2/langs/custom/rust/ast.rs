@@ -25,6 +25,7 @@ pub(super) fn build_parsed_rust_file(
         imports,
         edge_candidates,
         unresolved_imported_calls,
+        parse_ms: 0.0,
     }
 }
 

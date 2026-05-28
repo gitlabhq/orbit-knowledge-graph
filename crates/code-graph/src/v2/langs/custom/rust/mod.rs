@@ -46,7 +46,9 @@ use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::sentinel;
 
-use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
+use crate::v2::pipeline::{
+    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, PipelineContext, PipelineError,
+};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
     Position, Range, Relationship,
@@ -80,6 +82,7 @@ struct ParsedRustFile {
     imports: Vec<CanonicalImport>,
     edge_candidates: Vec<ResolvedEdgeCandidate>,
     unresolved_imported_calls: Vec<UnresolvedImportedCallCandidate>,
+    parse_ms: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -195,6 +198,7 @@ impl LanguagePipeline for RustPipeline {
         let mut edge_timed_out = false;
 
         'edge_resolve: for file in &parsed {
+            let t_resolve = std::time::Instant::now();
             for edge in &file.edge_candidates {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                     tracing::warn!("rust edge resolution timed out");
@@ -219,6 +223,15 @@ impl LanguagePipeline for RustPipeline {
                     graph.add_call_edge(source_node, target_node);
                 }
             }
+            let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
+            ctx.record_file_timing(FileTimingEntry {
+                path: file.relative_path.clone(),
+                size_bytes: file.file_size,
+                parse_ms: file.parse_ms,
+                resolve_ms,
+                total_ms: file.parse_ms + resolve_ms,
+                language: "rust".to_string(),
+            });
         }
         if !edge_timed_out {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
@@ -285,9 +298,11 @@ fn parse_rust_files_with_workspaces(
             .zip(workspace_files.par_iter())
             .map(|(workspace, file)| {
                 let guard = sentinel.map(|s| s.file_start(file));
+                let t_file = std::time::Instant::now();
                 let result = catch_rust_file_panic(file, || {
                     parse_workspace_file(file, root_path, &workspace)
                 });
+                let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
                     return Err((
                         file.to_string(),
@@ -297,7 +312,10 @@ fn parse_rust_files_with_workspaces(
                         ),
                     ));
                 }
-                result
+                result.map(|mut f| {
+                    f.parse_ms = parse_ms;
+                    f
+                })
             })
             .collect::<Vec<_>>();
 
@@ -313,9 +331,11 @@ fn parse_rust_files_with_workspaces(
         .par_iter()
         .map(|file_path| {
             let guard = sentinel.map(|s| s.file_start(file_path));
+            let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
                 parse_rust_file_standalone(file_path, root_path)
             });
+            let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Err((
                     file_path.to_string(),
@@ -325,7 +345,10 @@ fn parse_rust_files_with_workspaces(
                     ),
                 ));
             }
-            result
+            result.map(|mut f| {
+                f.parse_ms = parse_ms;
+                f
+            })
         })
         .collect::<Vec<_>>();
 
@@ -348,9 +371,11 @@ fn parse_rust_files_standalone(
         .par_iter()
         .map(|file_path| {
             let guard = sentinel.map(|s| s.file_start(file_path));
+            let t_file = std::time::Instant::now();
             let result = catch_rust_file_panic(file_path, || {
                 parse_rust_file_standalone(file_path, root_path)
             });
+            let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
                 return Err((
                     file_path.to_string(),
@@ -360,7 +385,10 @@ fn parse_rust_files_standalone(
                     ),
                 ));
             }
-            result
+            result.map(|mut f| {
+                f.parse_ms = parse_ms;
+                f
+            })
         })
         .collect::<Vec<_>>();
 
