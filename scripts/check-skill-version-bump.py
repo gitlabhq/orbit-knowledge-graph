@@ -171,12 +171,23 @@ def is_version_bumped(old_version: str | None, new_version: str | None) -> bool:
     old_match = SEMVER_RE.match(old_version)
     new_match = SEMVER_RE.match(new_version)
 
+    if old_match and not new_match:
+        return False
+
     if not old_match or not new_match:
         return old_version != new_version
 
     old_tuple = tuple(int(part) for part in old_match.groups())
     new_tuple = tuple(int(part) for part in new_match.groups())
     return new_tuple > old_tuple
+
+
+def skip_requested() -> bool:
+    if os.environ.get("SKIP_SKILL_VERSION_BUMP_CHECK") == "1":
+        return True
+    return "[skip skill-version-bump-check]" in os.environ.get(
+        "CI_MERGE_REQUEST_DESCRIPTION", ""
+    )
 
 
 def main() -> int:
@@ -194,10 +205,14 @@ def main() -> int:
     parser.add_argument(
         "--no-worktree",
         action="store_true",
-        help="Only compare base ref to HEAD when not using --staged",
+        help="Only compare base ref to HEAD; ignored because --staged already implies no worktree changes",
     )
     args = parser.parse_args()
     DEBUG = args.debug
+
+    if skip_requested():
+        print("✅ [skip skill-version-bump-check] — skipping.")
+        return 0
 
     base_ref = get_base_ref(args)
     changed_files = get_changed_files(
@@ -231,7 +246,12 @@ def main() -> int:
         has_errors = True
         changed_list = "\n".join(f"    - {filepath}" for filepath in files)
 
-        if old_version == new_version:
+        if old_version is None and new_version is None:
+            print(
+                f"❌ {skill_name}: SKILL.md not found or has no top-level "
+                f"'version:' field but {len(files)} file(s) changed:\n{changed_list}"
+            )
+        elif old_version == new_version:
             print(
                 f"❌ {skill_name}: version unchanged at {old_version} "
                 f"but {len(files)} file(s) changed:\n{changed_list}"
