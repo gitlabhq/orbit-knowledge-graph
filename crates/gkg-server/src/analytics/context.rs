@@ -122,6 +122,7 @@ fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
         SourceType::Mcp => ST::Mcp,
         SourceType::Core => ST::Core,
         SourceType::Rest => ST::Rest,
+        SourceType::CodeIntelligence => ST::CodeIntelligence,
     }
 }
 
@@ -338,6 +339,19 @@ mod tests {
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
                 "orbit_query (minimal)",
+            );
+        }
+
+        #[test]
+        fn code_intelligence_validates_against_iglu_schema() {
+            let mut claims = claims_with_paths(vec!["1/22/"]);
+            claims.source_type = crate::auth::SourceType::CodeIntelligence;
+            let query = build_query(&claims, "query_graph", None).unwrap();
+            assert_eq!(query.data()["source_type"], "code_intelligence");
+            assert_valid(
+                &ORBIT_QUERY_VALIDATOR,
+                &query.data(),
+                "orbit_query (code_intelligence)",
             );
         }
     }

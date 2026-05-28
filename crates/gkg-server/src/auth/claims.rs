@@ -75,6 +75,7 @@ pub enum SourceType {
     Mcp,
     Core,
     Rest,
+    CodeIntelligence,
 }
 
 fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType, D::Error> {
@@ -84,6 +85,31 @@ fn deserialize_source_type<'de, D: Deserializer<'de>>(d: D) -> Result<SourceType
         "dws" => SourceType::Dws,
         "mcp" => SourceType::Mcp,
         "core" => SourceType::Core,
+        "code_intelligence" => SourceType::CodeIntelligence,
         _ => SourceType::Rest,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    fn parse(raw: &str) -> SourceType {
+        deserialize_source_type(Value::String(raw.into())).unwrap()
+    }
+
+    #[test]
+    fn code_intelligence_round_trips() {
+        assert_eq!(parse("code_intelligence"), SourceType::CodeIntelligence);
+        assert_eq!(
+            <&str>::from(SourceType::CodeIntelligence),
+            "code_intelligence"
+        );
+    }
+
+    #[test]
+    fn unknown_source_type_falls_back_to_rest() {
+        assert_eq!(parse("something_else"), SourceType::Rest);
+    }
 }
