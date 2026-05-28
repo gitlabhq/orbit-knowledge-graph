@@ -748,10 +748,8 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_runner_type runner_type TYPE set(4) GRANULARITY 2,
-    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
     PROJECTION by_runner_type (SELECT _part_offset ORDER BY (runner_type, id))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
