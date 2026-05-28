@@ -117,7 +117,7 @@ impl WorkerPool {
             );
             debug!(
                 group = group_name,
-                wait_ms = wait_duration.as_millis() as u64,
+                duration_ms = wait_duration.as_millis() as u64,
                 "group permit acquired"
             );
             attributes.push(KeyValue::new("permit_kind", group_name.to_owned()));

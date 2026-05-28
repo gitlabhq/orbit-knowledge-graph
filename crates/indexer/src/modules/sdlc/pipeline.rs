@@ -111,7 +111,7 @@ impl Pipeline {
 
             info!(
                 rows = rows_in_batch,
-                extract_ms = extract_elapsed.as_millis() as u64,
+                duration_ms = extract_elapsed.as_millis() as u64,
                 "batch extracted"
             );
 
@@ -186,12 +186,12 @@ impl Pipeline {
         if total_rows > 0 {
             info!(
                 total_rows,
-                elapsed_ms = elapsed.as_millis() as u64,
+                duration_ms = elapsed.as_millis() as u64,
                 "pipeline completed"
             );
         } else {
             debug!(
-                elapsed_ms = elapsed.as_millis() as u64,
+                duration_ms = elapsed.as_millis() as u64,
                 "pipeline completed with no data"
             );
         }
@@ -347,8 +347,7 @@ impl Pipeline {
                     info!(
                         table = %destination_table,
                         rows = row_count,
-                        transform_ms = transform_elapsed.as_millis() as u64,
-                        write_ms = write_elapsed.as_millis() as u64,
+                        duration_ms = write_elapsed.as_millis() as u64,
                         "transform written"
                     );
 

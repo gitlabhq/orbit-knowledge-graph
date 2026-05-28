@@ -352,7 +352,7 @@ impl BatchTx<'_> {
             }
         };
         for (table, batch) in batches {
-            if self.tx.send((table.clone(), batch)).is_err() {
+            if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
                 self.errors.lock().unwrap().push(
                     crate::v2::error::CodeGraphError::SinkWrite {
                         table,
@@ -368,7 +368,7 @@ impl BatchTx<'_> {
 
     /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
-        if self.tx.send((table.clone(), batch)).is_err() {
+        if let Err(crossbeam_channel::SendError((table, _))) = self.tx.send((table, batch)) {
             self.errors.lock().unwrap().push(
                 crate::v2::error::CodeGraphError::SinkWrite {
                     table,
@@ -783,7 +783,7 @@ impl Pipeline {
                         Some(Ok(())) => {
                             tracing::info!(
                                 family = %family,
-                                elapsed_ms = t_lang.elapsed().as_millis() as u64,
+                                duration_ms = t_lang.elapsed().as_millis() as u64,
                                 "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
@@ -1490,7 +1490,7 @@ impl FamilyPipeline {
         }
 
         tracing::info!(
-            elapsed_ms = t0.elapsed().as_millis() as u64,
+            duration_ms = t0.elapsed().as_millis() as u64,
             nodes = graph.graph.node_count(),
             edges = graph.graph.edge_count(),
             defs = graph.defs.len(),

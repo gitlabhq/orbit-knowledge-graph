@@ -67,6 +67,10 @@ impl CodeTableNames {
             .unwrap_or(&self.default_edge_table)
     }
 
+    pub fn default_edge_table(&self) -> &str {
+        &self.default_edge_table
+    }
+
     /// All distinct edge table names (for stale data cleanup).
     pub fn edge_table_names(&self) -> Vec<&str> {
         let mut tables: Vec<&str> = self.edge_tables.values().map(|s| s.as_str()).collect();

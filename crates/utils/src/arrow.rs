@@ -3,6 +3,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
+
 use arrow::array::{
     Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Date32Array, Date64Array,
     Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray,
@@ -521,7 +523,7 @@ impl ColRef<'_> {
 pub struct BatchBuilder {
     names: Vec<String>,
     cols: Vec<Col>,
-    index: HashMap<String, usize>,
+    index: FxHashMap<String, usize>,
 }
 
 impl BatchBuilder {
@@ -529,7 +531,8 @@ impl BatchBuilder {
     pub fn new(specs: &[ColumnSpec], cap: usize) -> BatchResult<Self> {
         let mut names = Vec::with_capacity(specs.len());
         let mut cols = Vec::with_capacity(specs.len());
-        let mut index = HashMap::with_capacity(specs.len());
+        let mut index: FxHashMap<String, usize> = FxHashMap::default();
+        index.reserve(specs.len());
 
         for spec in specs {
             if index.contains_key(&spec.name) {
@@ -624,10 +627,6 @@ impl BatchBuilder {
 /// project ID, branch) that aren't part of the domain struct.
 /// Defaults to `()` for types that don't need external context.
 ///
-/// Nodes without assigned IDs should return `false` from
-/// [`should_include`](Self::should_include) and will be filtered out
-/// before building the batch.
-///
 /// ```ignore
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
@@ -647,27 +646,19 @@ pub trait RowEnvelope {
 }
 
 pub trait AsRecordBatch<Ctx = ()>: Sized {
-    /// Whether this item should be included in the batch.
-    /// Default: always include.
-    fn should_include(&self) -> bool {
-        true
-    }
-
     /// Write one row into `builder`. Must push exactly one value to
     /// every column declared in the specs that were used to create the
     /// builder. Returns `Err` if a referenced column is missing.
     fn write_row(&self, builder: &mut BatchBuilder, ctx: &Ctx) -> BatchResult<()>;
 
     /// Build a [`RecordBatch`] from a slice of items using the given
-    /// column specs, filtering out any where
-    /// [`should_include`](Self::should_include) returns `false`.
+    /// column specs.
     fn to_record_batch(
         items: &[Self],
         specs: &[ColumnSpec],
         ctx: &Ctx,
     ) -> BatchResult<RecordBatch> {
-        let included: Vec<&Self> = items.iter().filter(|i| i.should_include()).collect();
-        BatchBuilder::new(specs, included.len())?.build(&included, |item, b| {
+        BatchBuilder::new(specs, items.len())?.build(items, |item, b| {
             item.write_row(b, ctx)?;
             Ok(())
         })

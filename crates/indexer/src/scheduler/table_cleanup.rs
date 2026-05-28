@@ -65,28 +65,28 @@ impl TableCleanup {
             let statement = format!("OPTIMIZE TABLE {table} FINAL CLEANUP");
             let table_start = Instant::now();
 
-            let duration_secs = match self.graph.execute(&statement).await {
+            let elapsed_secs = match self.graph.execute(&statement).await {
                 Ok(()) => {
                     cleaned += 1;
                     let d = table_start.elapsed().as_secs_f64();
-                    info!(table, duration_secs = d, "cleaned up table");
+                    info!(table, duration_ms = (d * 1000.0) as u64, "cleaned up table");
                     d
                 }
                 Err(error) => {
                     failed += 1;
                     let d = table_start.elapsed().as_secs_f64();
                     self.metrics.record_error(self.name(), "cleanup");
-                    warn!(table, duration_secs = d, %error, "failed to clean up table");
+                    warn!(table, duration_ms = (d * 1000.0) as u64, %error, "failed to clean up table");
                     d
                 }
             };
-            total_duration += duration_secs;
+            total_duration += elapsed_secs;
         }
 
         info!(
             cleaned,
             failed,
-            duration_secs = total_duration,
+            duration_ms = (total_duration * 1000.0) as u64,
             "table cleanup complete"
         );
 

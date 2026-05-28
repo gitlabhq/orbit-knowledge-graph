@@ -95,6 +95,11 @@ impl ArrowClickHouseClient {
         format!(" SETTINGS {}", pairs.join(", "))
     }
 
+    pub fn build_insert_sql(&self, table: &str) -> String {
+        let settings_clause = self.insert_settings_clause();
+        format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream")
+    }
+
     pub async fn query_arrow(&self, sql: &str) -> Result<Vec<RecordBatch>, ClickHouseError> {
         self.query(sql).fetch_arrow().await
     }
@@ -158,6 +163,17 @@ impl ArrowClickHouseClient {
         table: &str,
         batches: &[RecordBatch],
     ) -> Result<(), ClickHouseError> {
+        let sql = self.build_insert_sql(table);
+        self.insert_arrow_streaming_with_sql(table, &sql, batches)
+            .await
+    }
+
+    pub async fn insert_arrow_streaming_with_sql(
+        &self,
+        table: &str,
+        sql: &str,
+        batches: &[RecordBatch],
+    ) -> Result<(), ClickHouseError> {
         if batches.is_empty() {
             return Ok(());
         }
@@ -173,9 +189,7 @@ impl ArrowClickHouseClient {
         let mut writer = StreamWriter::try_new_with_options(drain.clone(), &schema, options)
             .map_err(ClickHouseError::ArrowEncode)?;
 
-        let settings_clause = self.insert_settings_clause();
-        let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
-        let mut insert = self.client.insert_formatted_with(&sql);
+        let mut insert = self.client.insert_formatted_with(sql);
 
         flush_drain(&mut insert, &drain).await?;
 
