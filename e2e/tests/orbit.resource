@@ -62,6 +62,20 @@ Wait For Node Indexed
     Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
 
+Verify Node Removed
+    [Documentation]    Assert no live node of ${entity} with id=${node_id} is returned (deleted rows
+    ...                are tombstoned with _deleted and filtered out of query results).
+    [Arguments]    ${entity}    ${node_id}
+    ${result}=    Orbit Query Node    ${entity}    ${node_id}
+    Should Be Equal As Integers    ${result["row_count"]}    0
+    ...    ${entity} id=${node_id} still queryable after delete
+
+Wait For Node Removed
+    [Arguments]    ${entity}    ${node_id}    ${timeout}=180s    ${interval}=5s
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
+    ...    Verify Node Removed    ${entity}    ${node_id}
+
 Wait For Entity Population
     [Documentation]    Wait until at least one node of ${entity} is indexed.
     [Arguments]    ${entity}    ${minimum}=1    ${timeout}=120s    ${interval}=3s
