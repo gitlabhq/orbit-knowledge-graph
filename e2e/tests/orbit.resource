@@ -132,6 +132,43 @@ Orbit Query With Token
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
+Orbit Endpoint Smoke
+    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. When the endpoint is present (200)
+    ...                assert the body contains ${needle} (when given). A 404 is tolerated: the e2e
+    ...                stack pins a gitlab-org/gitlab image (versions.yaml) that can predate newer
+    ...                Orbit endpoints, and those routes are owned upstream, not by this repo. A 5xx
+    ...                or any other status still fails, so a real GKG-side regression is caught.
+    [Arguments]    ${path}    ${needle}=${None}    ${params}=${None}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}
+    ...    headers=${headers}    params=${params}    expected_status=any
+    IF    ${resp.status_code} == 404
+        Log    /orbit/${path} absent in the pinned GitLab image; content check skipped.    level=WARN
+        RETURN
+    END
+    Should Be Equal As Integers    ${resp.status_code}    200
+    ...    /orbit/${path} returned ${resp.status_code}: ${resp.text}
+    IF    $needle is not None
+        Should Contain    ${resp.text}    ${needle}    /orbit/${path} body missing '${needle}'
+    END
+
+Orbit Query LLM
+    [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the
+    ...                caller can assert on the GOON text body.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}    response_format=llm
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=200
+    RETURN    ${resp}
+
+Result Node Ids Contain
+    [Documentation]    Assert ${node_id} is among the ids of the nodes in a graph-shaped query
+    ...                response (neighbors / path_finding return result.nodes with string ids).
+    [Arguments]    ${resp}    ${node_id}
+    ${ids}=    Evaluate    [n["id"] for n in $resp["result"]["nodes"]]
+    Should Contain    ${ids}    ${{str($node_id)}}    node ${node_id} not in result nodes ${ids}
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30
