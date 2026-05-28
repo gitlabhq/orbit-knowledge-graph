@@ -382,16 +382,6 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     );
 }
 
-/// A first-time index (no prior checkpoint for `(traversal_path, project_id,
-/// branch)`) must not run the stale-data cleanup query. Cleanup is wasted
-/// work in that case — there is nothing to clean — and it is the dominant
-/// source of indexing latency in production. The second pass, with a
-/// checkpoint now in place, must still run the cleanup.
-///
-/// The test plants a synthetic stale `gl_file` row whose `_version` is set
-/// far in the past. A normal cleanup would tombstone it; if the skip is
-/// working, it remains active after the first index and only gets tombstoned
-/// after the second.
 #[tokio::test]
 async fn skips_stale_data_cleanup_on_first_index() {
     let project_id: i64 = 13;
