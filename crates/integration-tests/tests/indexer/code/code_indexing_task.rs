@@ -640,6 +640,133 @@ async fn empty_200_archive_checkpoints_as_empty_repository() {
     );
 }
 
+/// Verifies that stale edge cleanup is scoped to the specific project+branch
+/// and does not delete edges belonging to other projects in the same namespace.
+///
+/// This is the regression test for the fix in `stale_data_cleaner.rs` that
+/// replaced the namespace-wide `source_kind IN (...)` filter with a
+/// `source_id IN (subquery)` that pins to `project_id` and `branch`.
+#[tokio::test]
+async fn stale_edge_cleanup_does_not_affect_other_projects_in_namespace() {
+    // Two projects in the same namespace (traversal_path prefix "1/").
+    let project_a: i64 = 20;
+    let project_b: i64 = 21;
+    let traversal_path_a = "1/20/";
+    let traversal_path_b = "1/21/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+
+    // Project A: one Java file with two definitions.
+    mock.add_project(
+        project_a,
+        "main",
+        &[(
+            "src/Alpha.java",
+            "public class Alpha {
+                public void run() {}
+            }",
+        )],
+    );
+
+    // Project B: one Java file with two definitions.
+    mock.add_project(
+        project_b,
+        "main",
+        &[(
+            "src/Beta.java",
+            "public class Beta {
+                public void execute() {}
+            }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    // Index both projects.
+    index_code(
+        &handler,
+        &clickhouse,
+        project_a,
+        "commit_a1",
+        1,
+        traversal_path_a,
+    )
+    .await;
+    index_code(
+        &handler,
+        &clickhouse,
+        project_b,
+        "commit_b1",
+        2,
+        traversal_path_b,
+    )
+    .await;
+
+    // Verify both projects have active edges before reindexing.
+    let edges_a_before = count_active_edges(&clickhouse, project_a, "DEFINES").await;
+    let edges_b_before = count_active_edges(&clickhouse, project_b, "DEFINES").await;
+    assert!(
+        edges_a_before >= 1,
+        "project A should have DEFINES edges before reindex, got {edges_a_before}"
+    );
+    assert!(
+        edges_b_before >= 1,
+        "project B should have DEFINES edges before reindex, got {edges_b_before}"
+    );
+
+    // Reindex project A with different content (triggers stale data cleanup for A).
+    mock.replace_archive(
+        project_a,
+        &[(
+            "src/AlphaV2.java",
+            "public class AlphaV2 {
+                public void runV2() {}
+            }",
+        )],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_a,
+        "commit_a2",
+        3,
+        traversal_path_a,
+    )
+    .await;
+
+    // Project A's old edges should be gone, new ones present.
+    assert_no_active_definitions(&clickhouse, project_a, "src/Alpha.java").await;
+    assert_active_definitions(
+        &clickhouse,
+        project_a,
+        "src/AlphaV2.java",
+        &["AlphaV2", "runV2"],
+    )
+    .await;
+
+    // Project B's edges must be completely untouched by project A's stale cleanup.
+    let edges_b_after = count_active_edges(&clickhouse, project_b, "DEFINES").await;
+    assert_eq!(
+        edges_b_after, edges_b_before,
+        "stale edge cleanup for project A must not delete edges belonging to project B \
+         (same namespace). Before: {edges_b_before}, after: {edges_b_after}"
+    );
+    assert_active_definitions(
+        &clickhouse,
+        project_b,
+        "src/Beta.java",
+        &["Beta", "execute"],
+    )
+    .await;
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,

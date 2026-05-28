@@ -9,14 +9,6 @@ use tracing::debug;
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 
-const CODE_EDGE_SOURCE_KINDS: &[&str] = &[
-    "Branch",
-    "Directory",
-    "File",
-    "Definition",
-    "ImportedSymbol",
-];
-
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {
     async fn delete_stale_data(
@@ -50,8 +42,8 @@ pub struct ClickHouseStaleDataCleaner {
 
 impl ClickHouseStaleDataCleaner {
     pub fn new(client: Arc<ArrowClickHouseClient>, table_names: &CodeTableNames) -> Self {
-        let node_queries = table_names
-            .node_tables()
+        let node_tables = table_names.node_tables();
+        let node_queries = node_tables
             .iter()
             .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
             .collect();
@@ -59,7 +51,14 @@ impl ClickHouseStaleDataCleaner {
         let edge_queries = table_names
             .edge_table_names()
             .iter()
-            .map(|table| (table.to_string(), Self::build_edge_delete_query(table)))
+            .filter_map(|table| {
+                let query = Self::build_edge_delete_query(table, &node_tables);
+                if query.is_empty() {
+                    None
+                } else {
+                    Some((table.to_string(), query))
+                }
+            })
             .collect();
 
         Self {
@@ -79,22 +78,37 @@ impl ClickHouseStaleDataCleaner {
                 branch,
                 id,
                 true AS _deleted
-            FROM {table}
+            FROM {table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-            GROUP BY traversal_path, project_id, branch, id
-            HAVING max(_version) != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
 
-    fn build_edge_delete_query(edge_table: &str) -> String {
-        let source_kinds = CODE_EDGE_SOURCE_KINDS
+    fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
+        // Build a UNION ALL of source_ids from all code node tables for this
+        // project+branch. This scopes the edge scan to only edges whose source
+        // belongs to the project being indexed, instead of scanning the entire
+        // namespace.
+        let source_id_subqueries = node_tables
             .iter()
-            .map(|k| format!("'{k}'"))
-            .collect::<Vec<_>>()
-            .join(", ");
+            .map(|t| {
+                format!(
+                    "SELECT id FROM {t} FINAL \
+                     WHERE traversal_path = {{traversal_path:String}} \
+                       AND project_id = {{project_id:Int64}} \
+                       AND branch = {{branch:String}}"
+                )
+            })
+            .collect::<Vec<_>>();
+
+        if source_id_subqueries.is_empty() {
+            return String::new();
+        }
+
+        let source_id_union = source_id_subqueries.join(" UNION ALL ");
 
         format!(
             r#"
@@ -108,11 +122,10 @@ impl ClickHouseStaleDataCleaner {
                 target_id,
                 target_kind,
                 true AS _deleted
-            FROM {edge_table}
+            FROM {edge_table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
-              AND source_kind IN ({source_kinds})
-            GROUP BY traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind
-            HAVING max(_version) != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND source_id IN ({source_id_union})
+              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -151,22 +164,29 @@ impl ClickHouseStaleDataCleaner {
     async fn delete_stale_edges(
         &self,
         traversal_path: &str,
+        project_id: i64,
+        branch: &str,
         formatted_watermark: &str,
     ) -> Result<(), StaleDataCleanerError> {
         let futures = self.edge_queries.iter().map(|(table, query)| async move {
-            debug!(table, traversal_path, "deleting stale edges");
+            debug!(
+                table,
+                traversal_path, project_id, branch, "deleting stale edges"
+            );
 
             self.client
                 .insert_query(query)
                 .param("traversal_path", traversal_path)
+                .param("project_id", project_id)
+                .param("branch", branch)
                 .param("watermark_time", formatted_watermark)
                 .execute()
                 .await
                 .map_err(|e| StaleDataCleanerError::Query {
                     table: table.to_string(),
                     traversal_path: traversal_path.to_string(),
-                    project_id: 0,
-                    branch: String::new(),
+                    project_id,
+                    branch: branch.to_string(),
                     reason: e.to_string(),
                 })
         });
@@ -190,7 +210,7 @@ impl StaleDataCleaner for ClickHouseStaleDataCleaner {
         self.delete_stale_nodes(traversal_path, project_id, branch, &formatted_watermark)
             .await?;
 
-        self.delete_stale_edges(traversal_path, &formatted_watermark)
+        self.delete_stale_edges(traversal_path, project_id, branch, &formatted_watermark)
             .await?;
 
         debug!(project_id, branch, "stale data deletion complete");
