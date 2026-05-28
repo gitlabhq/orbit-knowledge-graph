@@ -383,6 +383,62 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
+async fn skips_stale_data_cleanup_on_first_index() {
+    let project_id: i64 = 13;
+    let traversal_path = "1/13/";
+    let branch = "main";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        branch,
+        &[("src/Main.java", "public class Main { public void v1() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    insert_stale_canary_file(&clickhouse, project_id, traversal_path, branch).await;
+    assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    assert_file_is_active(&clickhouse, project_id, "src/Canary.java").await;
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v2() {} }")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    assert_file_not_active(&clickhouse, project_id, "src/Canary.java").await;
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+}
+
+#[tokio::test]
 async fn disk_is_clean_after_successful_indexing() {
     let project_id: i64 = 4;
     let commit_sha = "abc123";
@@ -655,6 +711,23 @@ async fn index_code(
         .handle(context, envelope)
         .await
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
+}
+
+async fn insert_stale_canary_file(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    traversal_path: &str,
+    branch: &str,
+) {
+    let sql = format!(
+        "INSERT INTO {} \
+         (id, traversal_path, project_id, branch, path, name, extension, language, _version) \
+         VALUES (999999999, '{traversal_path}', {project_id}, '{branch}', \
+                 'src/Canary.java', 'Canary.java', 'java', 'java', \
+                 '2020-01-01 00:00:00.000000')",
+        t("gl_file")
+    );
+    clickhouse.execute(&sql).await;
 }
 
 struct FailingDestination;

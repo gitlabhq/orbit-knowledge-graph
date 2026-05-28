@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{Instrument, info, info_span, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
@@ -24,6 +24,7 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub task_id: i64,
     pub commit_sha: Option<String>,
+    pub had_prior_checkpoint: bool,
 }
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
@@ -180,6 +181,7 @@ impl CodeIndexingPipeline {
                 indexed_at,
                 &repository.path,
                 repository.file_inventory.clone(),
+                request.had_prior_checkpoint,
                 observer,
             )
             .await;
@@ -261,6 +263,7 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
         file_inventory: Arc<[code_graph::v2::FileInventoryEntry]>,
+        had_prior_checkpoint: bool,
         observer: &mut dyn IndexingObserver,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
@@ -408,24 +411,33 @@ impl CodeIndexingPipeline {
 
         context.progress.notify_in_progress().await;
 
-        let cleanup_start = Instant::now();
-        if let Err(error) = self
-            .stale_data_cleaner
-            .delete_stale_data(traversal_path, project_id, branch, indexed_at)
-            .await
-        {
-            warn!(
+        if had_prior_checkpoint {
+            let cleanup_start = Instant::now();
+            if let Err(error) = self
+                .stale_data_cleaner
+                .delete_stale_data(traversal_path, project_id, branch, indexed_at)
+                .await
+            {
+                warn!(
+                    project_id,
+                    branch = %branch,
+                    %error,
+                    "failed to delete stale data, will retry on next indexing"
+                );
+            }
+            let stale_data_cleanup_duration = cleanup_start.elapsed();
+            info!(
+                duration_ms = stale_data_cleanup_duration.as_millis() as u64,
+                "stale data cleanup completed"
+            );
+        } else {
+            debug!(
                 project_id,
                 branch = %branch,
-                %error,
-                "failed to delete stale data, will retry on next indexing"
+                traversal_path,
+                "first-time indexing detected, skipping stale data cleanup"
             );
         }
-        let stale_data_cleanup_duration = cleanup_start.elapsed();
-        info!(
-            duration_ms = stale_data_cleanup_duration.as_millis() as u64,
-            "stale data cleanup completed"
-        );
 
         Ok(())
     }
