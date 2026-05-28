@@ -68,7 +68,7 @@ GitLab Duoのクエリは無料で、GitLab Creditsを消費しません。
 ### MCP（Claude Code、Codex、その他のエージェント） {#mcp-claude-code-codex-other-agents}
 
 セットアップについては[MCPを使用したOrbitの利用](access/mcp.md)をご参照ください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが利用できます。
-
+<!-- markdownlint-disable-next-line MD044 -->
 ### REST API {#rest-api}
 
 `your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
