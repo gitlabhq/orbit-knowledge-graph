@@ -330,7 +330,7 @@ struct ResolveCtx<'a> {
     kill_flag: Arc<std::sync::atomic::AtomicBool>,
     scratch: ScratchBuf,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
-    nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
+    nested_cache: FxHashMap<String, Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
     /// Precomputed or lazily built include index for C/C++ resolution.
     include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
@@ -480,8 +480,10 @@ impl<'a> ResolveCtx<'a> {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let key = (scope_fqn.to_string(), member_name.to_string());
-        if let Some(cached) = self.nested_cache.get(&key) {
+        // `\u{1}` never appears in an FQN, so one combined key is collision-free
+        // and avoids the second per-probe allocation.
+        let key = format!("{scope_fqn}\u{1}{member_name}");
+        if let Some(cached) = self.nested_cache.get(key.as_str()) {
             if !cached.is_empty() {
                 out.extend_from_slice(cached);
                 return true;
@@ -564,23 +566,22 @@ impl<'a> ResolveCtx<'a> {
         }
 
         let found = !result.is_empty();
-        let result_fqns: Vec<String> = result
-            .iter()
-            .filter_map(|&n| {
-                self.graph.graph[n].def_id().map(|d| {
-                    self.graph
-                        .str(self.graph.defs[d.0 as usize].fqn)
-                        .to_string()
-                })
-            })
-            .collect();
         trace!(
             self.tracer,
             NestedLookup {
                 scope_fqn: scope_fqn.to_string(),
                 member_name: member_name.to_string(),
                 found: found,
-                result_fqns: result_fqns,
+                result_fqns: result
+                    .iter()
+                    .filter_map(|&n| {
+                        self.graph.graph[n].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
+                    })
+                    .collect(),
             }
         );
         if found {
@@ -619,21 +620,20 @@ impl<'a> ResolveCtx<'a> {
             self.resolve_bare(r)?
         };
 
-        let target_fqns: Vec<String> = result
-            .iter()
-            .filter_map(|&n| {
-                self.graph.graph[n].def_id().map(|d| {
-                    self.graph
-                        .str(self.graph.defs[d.0 as usize].fqn)
-                        .to_string()
-                })
-            })
-            .collect();
         trace!(
             self.tracer,
             ResolveResult {
                 name: r.name.to_string(),
-                targets: target_fqns,
+                targets: result
+                    .iter()
+                    .filter_map(|&n| {
+                        self.graph.graph[n].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
+                    })
+                    .collect(),
             }
         );
 
@@ -666,7 +666,6 @@ impl<'a> ResolveCtx<'a> {
         }
 
         for stage in &self.rules.bare_stages.clone() {
-            let stage_name = format!("{stage:?}");
             let result = match stage {
                 ResolveStage::SSA => {
                     if r.reaching.is_empty() {
@@ -697,23 +696,22 @@ impl<'a> ResolveCtx<'a> {
                     }
                 }
             };
-            let result_fqns: Vec<String> = result
-                .iter()
-                .filter_map(|&n| {
-                    self.graph.graph[n].def_id().map(|d| {
-                        self.graph
-                            .str(self.graph.defs[d.0 as usize].fqn)
-                            .to_string()
-                    })
-                })
-                .collect();
             trace!(
                 self.tracer,
                 ResolveBareStage {
-                    stage: stage_name,
+                    stage: format!("{stage:?}"),
                     name: r.name.to_string(),
                     result_count: result.len(),
-                    result_fqns: result_fqns,
+                    result_fqns: result
+                        .iter()
+                        .filter_map(|&n| {
+                            self.graph.graph[n].def_id().map(|d| {
+                                self.graph
+                                    .str(self.graph.defs[d.0 as usize].fqn)
+                                    .to_string()
+                            })
+                        })
+                        .collect(),
                 }
             );
             if !result.is_empty() {

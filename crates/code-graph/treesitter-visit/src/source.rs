@@ -122,6 +122,9 @@ pub trait Doc: Clone + 'static {
     fn get_source(&self) -> &Self::Source;
     fn root_node(&self) -> Self::Node<'_>;
     fn get_node_text<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str>;
+    /// Node kind name. Implementations may cache the `kind_id`→name mapping
+    /// to avoid re-validating the grammar's C kind string on every call.
+    fn node_kind<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str>;
 }
 
 /// Trait for source content encoding.

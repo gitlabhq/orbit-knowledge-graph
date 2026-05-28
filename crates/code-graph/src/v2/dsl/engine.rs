@@ -618,7 +618,17 @@ impl LanguageSpec {
         }
         state.top_level_depth = state.scope_stack.len();
 
-        self.walk_full(&root, &mut state, sep);
+        // `scope_stack[..top_level_depth]` is invariant for the whole walk, so
+        // compute the prefix once rather than rebuilding it on every node.
+        let module_prefix: Option<String> = (state.top_level_depth > 0).then(|| {
+            state.scope_stack[..state.top_level_depth]
+                .iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join(sep)
+        });
+
+        self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
 
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
@@ -762,6 +772,7 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         state: &mut WalkFullState<'a>,
         sep: &'static str,
+        module_prefix: Option<&str>,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
@@ -784,25 +795,12 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
-        // Module-level scope prefix for FQN resolution (package/module, not class/method)
-        let module_prefix: Option<String> = if state.top_level_depth > 0 {
-            Some(
-                state.scope_stack[..state.top_level_depth]
-                    .iter()
-                    .map(|s| s.as_ref())
-                    .collect::<Vec<_>>()
-                    .join(sep),
-            )
-        } else {
-            None
-        };
-
         // Scope matching → push def + optional SSA self/super writes
         if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
-            if let Some(prefix) = &module_prefix {
+            if let Some(prefix) = module_prefix {
                 return format!("{prefix}{sep}{bare}");
             }
             bare
@@ -901,12 +899,8 @@ impl LanguageSpec {
                     && let Some(meta) = &state.defs[def_index as usize].metadata
                     && let Some(super_type) = meta.super_types.first()
                 {
-                    let resolved = resolve_type_name(
-                        super_type,
-                        &state.import_map,
-                        module_prefix.as_deref(),
-                        sep,
-                    );
+                    let resolved =
+                        resolve_type_name(super_type, &state.import_map, module_prefix, sep);
                     let st = state.arena.alloc_str(&resolved);
                     let name = state.arena.alloc_str(super_name);
                     state.ssa.write_variable(
@@ -971,7 +965,7 @@ impl LanguageSpec {
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_branch(node, rule_idx, state, sep);
+                self.walk_full_branch(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -984,7 +978,7 @@ impl LanguageSpec {
 
             // Loop matching → SSA header/body/exit (handles own children)
             if let Some(&rule_idx) = self.loop_dispatch.get(nk).and_then(|v| v.first()) {
-                self.walk_full_loop(node, rule_idx, state, sep);
+                self.walk_full_loop(node, rule_idx, state, sep, module_prefix);
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
@@ -1047,24 +1041,16 @@ impl LanguageSpec {
                 let names = rule.extract_names(node);
                 for name in &names {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        let resolved = resolve_type_name(
-                            &type_ann,
-                            &state.import_map,
-                            module_prefix.as_deref(),
-                            sep,
-                        );
+                        let resolved =
+                            resolve_type_name(&type_ann, &state.import_map, module_prefix, sep);
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(ctor_type) = rule.extract_constructor_type(
                         node,
                         self,
                         self.ssa_config.constructor_methods,
                     ) {
-                        let resolved = resolve_type_name(
-                            &ctor_type,
-                            &state.import_map,
-                            module_prefix.as_deref(),
-                            sep,
-                        );
+                        let resolved =
+                            resolve_type_name(&ctor_type, &state.import_map, module_prefix, sep);
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
@@ -1181,7 +1167,7 @@ impl LanguageSpec {
                 node,
                 nk,
                 &state.import_map,
-                module_prefix.as_deref(),
+                module_prefix,
                 sep,
                 state.tracer,
             );
@@ -1254,7 +1240,7 @@ impl LanguageSpec {
 
         // Recurse children
         for child in node.children() {
-            self.walk_full(&child, state, sep);
+            self.walk_full(&child, state, sep, module_prefix);
         }
 
         // Clear return context after children
@@ -1287,6 +1273,7 @@ impl LanguageSpec {
         rule_idx: usize,
         state: &mut WalkFullState<'a>,
         sep: &'static str,
+        module_prefix: Option<&str>,
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
@@ -1302,7 +1289,7 @@ impl LanguageSpec {
         if let Some(cond_field) = rule.condition_field
             && let Some(cond_node) = node.field(cond_field)
         {
-            self.walk_full(&cond_node, state, sep);
+            self.walk_full(&cond_node, state, sep, module_prefix);
         }
 
         let has_catch_all = rule
@@ -1333,7 +1320,7 @@ impl LanguageSpec {
 
                 // Walk arm contents
                 for arm_child in child.children() {
-                    self.walk_full(&arm_child, state, sep);
+                    self.walk_full(&arm_child, state, sep, module_prefix);
                 }
 
                 end_blocks.push(state.current_block);
@@ -1344,7 +1331,7 @@ impl LanguageSpec {
                 let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
                 if !is_condition {
                     state.current_block = pre_block;
-                    self.walk_full(&child, state, sep);
+                    self.walk_full(&child, state, sep, module_prefix);
                 }
             }
         }
@@ -1374,6 +1361,7 @@ impl LanguageSpec {
         rule_idx: usize,
         state: &mut WalkFullState<'a>,
         sep: &'static str,
+        module_prefix: Option<&str>,
     ) {
         let rule = &self.loops[rule_idx];
         let pre_block = state.current_block;
@@ -1382,7 +1370,7 @@ impl LanguageSpec {
         if let Some(iter_field) = rule.iter_field
             && let Some(iter_node) = node.field(iter_field)
         {
-            self.walk_full(&iter_node, state, sep);
+            self.walk_full(&iter_node, state, sep, module_prefix);
         }
 
         // Header block (NOT sealed yet — back edge comes after body)
@@ -1406,11 +1394,11 @@ impl LanguageSpec {
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
-            self.walk_full(&body_node, state, sep);
+            self.walk_full(&body_node, state, sep, module_prefix);
         } else {
             // No explicit body field — walk all children
             for child in node.children() {
-                self.walk_full(&child, state, sep);
+                self.walk_full(&child, state, sep, module_prefix);
             }
         }
 

@@ -110,7 +110,7 @@ impl<'r, D: Doc> Node<'r, D> {
     }
 
     pub fn kind(&self) -> Cow<'_, str> {
-        self.inner.kind()
+        self.root.doc.node_kind(&self.inner)
     }
 
     pub fn kind_id(&self) -> KindId {
