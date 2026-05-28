@@ -11,6 +11,10 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 **Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
+## Ignored directories
+
+- **`docs-locale/`** contains machine-translated documentation. Never read, edit, or reference files under this directory. Treat it as build output.
+
 ## How the system works
 
 - **Read-only from the GitLab perspective.** SDLC data flows via Siphon CDC (PostgreSQL logical replication → NATS → ClickHouse). GKG only writes to its own ClickHouse tables.
