@@ -105,9 +105,6 @@ impl NamespaceDispatcher {
                 continue;
             }
 
-            // One dispatch_id per (namespace, cycle): all entity handlers that
-            // fan out from this namespace message share it, but each namespace
-            // in the cycle gets a distinct id.
             let request = NamespaceIndexingRequest {
                 namespace: *namespace_id,
                 traversal_path: traversal_path.clone(),
