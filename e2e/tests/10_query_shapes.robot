@@ -26,9 +26,11 @@ Path Finding Connects Issue To Project
     Should Be True    ${resp["row_count"]} >= 1    path_finding query found no path
 
 LLM Format Returns A GOON Body
+    [Documentation]    Use a neighbors query (which returns the project plus its adjacent rows) so the
+    ...                GOON encoder has rows to format; a node-only result encodes to an empty body.
     [Tags]    query-shapes
     ${query}=    Evaluate
-    ...    {"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}}
+    ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
     ${resp}=    Orbit Query LLM    ${query}
     Should Not Be Empty    ${resp.text}    llm response body was empty
 
