@@ -1,3 +1,9 @@
+## [0.65.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.65.0...v0.65.1) (2026-05-28)
+
+### Fixes
+
+* ensure musl release artifacts are published ([73e3790](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/73e3790b80c831dcffd89c6ab71b0c5c2f2561f1)) by Dmitry Gruzd
+
 ## [0.65.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.64.1...v0.65.0) (2026-05-28)
 
 ### Features
