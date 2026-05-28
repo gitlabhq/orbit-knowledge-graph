@@ -286,7 +286,7 @@ impl CodeIndexingPipeline {
         let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
             Some(std::sync::Arc::new(move || {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _ = handle.block_on(progress.notify_in_progress());
+                    handle.block_on(progress.notify_in_progress());
                 }));
             }));
         let config = PipelineConfig {
