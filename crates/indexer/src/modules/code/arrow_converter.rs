@@ -398,10 +398,11 @@ fn convert_repository_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
-    let tag_props = &specs.tag_properties;
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
     // Branch is synthetic (not a GraphNode), so build its tags from the
     // ontology config directly. is_default is always true in code indexing.
-    let branch_tags: Vec<String> = tag_props
+    let branch_tags: Vec<String> = specs
+        .tag_properties
         .get("Branch")
         .map(|props| {
             props
@@ -443,6 +444,7 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
+        &tag_cache,
     ));
     edge_rows.extend(branch_contains_file_rows(
         graph,
@@ -450,7 +452,7 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
-        tag_props,
+        &tag_cache,
     ));
     edge_rows.extend(repository_on_branch_rows(
         graph,
@@ -458,9 +460,9 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
-        tag_props,
+        &tag_cache,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env, tag_props));
+    edge_rows.extend(graph_edge_rows(graph, ids, env, &tag_cache));
 
     edge_row_batch(edge_rows, &specs.edge)
 }
@@ -471,39 +473,13 @@ fn convert_semantic_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &specs.tag_properties)
+    let tag_cache = graph.build_node_tags(&specs.tag_properties);
+    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &tag_cache)
         .into_iter()
         .filter(|row| row.edge_kind != "CONTAINS")
         .collect();
 
     edge_row_batch(edge_rows, &specs.edge)
-}
-
-/// Build `"key:value"` tag tokens for a graph node using the ontology-
-/// driven tag config. Returns an empty vec for node kinds with no
-/// denormalized properties.
-fn node_tags(
-    graph: &code_graph::v2::linker::CodeGraph,
-    node: petgraph::graph::NodeIndex,
-    tag_properties: &TagProperties,
-) -> Vec<String> {
-    let node_kind = match &graph.graph[node] {
-        code_graph::v2::linker::graph::GraphNode::File(_) => "File",
-        code_graph::v2::linker::graph::GraphNode::Definition { .. } => "Definition",
-        code_graph::v2::linker::graph::GraphNode::Import { .. } => "ImportedSymbol",
-        code_graph::v2::linker::graph::GraphNode::Directory(_) => return Vec::new(),
-    };
-    let Some(props) = tag_properties.get(node_kind) else {
-        return Vec::new();
-    };
-    props
-        .iter()
-        .filter_map(|(tag_key, prop_name)| {
-            graph
-                .node_property(node, prop_name)
-                .map(|val| format!("{tag_key}:{val}"))
-        })
-        .collect()
 }
 
 struct IndexerEdgeRow<'a> {
@@ -566,7 +542,7 @@ fn branch_contains_file_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &[String],
-    tag_props: &TagProperties,
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -579,7 +555,7 @@ fn branch_contains_file_rows<'a>(
             source_node_kind: "Branch",
             target_node_kind: "File",
             source_tags: branch_tags.to_vec(),
-            target_tags: node_tags(graph, idx, tag_props),
+            target_tags: tag_cache[idx.index()].clone(),
         })
         .collect()
 }
@@ -590,7 +566,7 @@ fn repository_on_branch_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &[String],
-    tag_props: &TagProperties,
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -611,7 +587,7 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        source_tags: node_tags(graph, idx, tag_props),
+        source_tags: tag_cache[idx.index()].clone(),
         target_tags: branch_tags.to_vec(),
     }));
 
@@ -622,16 +598,8 @@ fn graph_edge_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
-    tag_props: &TagProperties,
+    tag_cache: &[Vec<String>],
 ) -> Vec<IndexerEdgeRow<'a>> {
-    // Precompute tags per node so repeated source/target lookups across
-    // edges share the same allocation instead of O(edges) allocations.
-    let tag_cache: Vec<Vec<String>> = graph
-        .graph
-        .node_indices()
-        .map(|n| node_tags(graph, n, tag_props))
-        .collect();
-
     let mut rows = Vec::new();
     for ei in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();

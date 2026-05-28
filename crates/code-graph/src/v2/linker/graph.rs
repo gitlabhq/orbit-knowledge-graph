@@ -797,12 +797,10 @@ impl CodeGraph {
             .filter_map(|idx| self.graph[idx].as_file().map(|f| (idx, f)))
     }
 
-    /// Look up a named property on a graph node. Used by the indexer to
-    /// populate denormalized edge tags from the ontology config without
-    /// hardcoding property-to-node-type mappings. Returns `None` when
+    /// Look up a named property on a graph node. Returns `None` when
     /// the property is unknown or its value is empty (e.g. extension-less
     /// files like Makefile).
-    pub fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
         let value = match &self.graph[idx] {
             GraphNode::File(f) => match property {
                 "extension" => Some(f.extension.clone()),
@@ -820,6 +818,40 @@ impl CodeGraph {
             GraphNode::Directory(_) => None,
         };
         value.filter(|v| !v.is_empty())
+    }
+
+    /// Build `"key:value"` tag tokens for every node in the graph.
+    /// Returns a vec indexed by `NodeIndex`, so callers can look up
+    /// tags by the same indices used in the edge list.
+    ///
+    /// `tag_properties` maps node kind name (e.g. `"File"`) to a list
+    /// of `(tag_key, property_name)` pairs, typically built from
+    /// `ontology.denormalized_properties()`.
+    pub fn build_node_tags(
+        &self,
+        tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
+    ) -> Vec<Vec<String>> {
+        self.graph
+            .node_indices()
+            .map(|idx| {
+                let node_kind = match &self.graph[idx] {
+                    GraphNode::File(_) => "File",
+                    GraphNode::Definition { .. } => "Definition",
+                    GraphNode::Import { .. } => "ImportedSymbol",
+                    GraphNode::Directory(_) => return Vec::new(),
+                };
+                let Some(props) = tag_properties.get(node_kind) else {
+                    return Vec::new();
+                };
+                props
+                    .iter()
+                    .filter_map(|(tag_key, prop_name)| {
+                        self.node_property(idx, prop_name)
+                            .map(|val| format!("{tag_key}:{val}"))
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
