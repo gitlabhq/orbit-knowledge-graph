@@ -7,6 +7,12 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedSymlink {
+    pub relative_path: PathBuf,
+    pub target: PathBuf,
+}
+
 /// Canonicalize `path` and return it only if the real target lives
 /// inside `root`. The path-traversal guard every subsystem that turns
 /// a user-supplied specifier into a filesystem read should route
@@ -68,18 +74,18 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
     current
 }
 
-/// Walk a directory tree and reject any symlink that resolves outside
-/// `root`. Dangling symlinks are removed with a warning but do not
-/// cause an error. Escaping symlinks are deleted and the first error
-/// encountered is returned after the full traversal.
+/// Walk a directory tree and remove any symlink that resolves outside
+/// `root`. Dangling symlinks are also removed. Removed symlinks are
+/// returned for callers that need to observe skipped archive entries.
 ///
 /// The scan never short-circuits: every entry is visited and every bad
 /// symlink is deleted even if earlier entries failed. This prevents a
 /// malicious archive from planting multiple escaping symlinks where only
 /// the first gets cleaned up.
-pub fn validate_symlinks(root: &Path) -> io::Result<()> {
+pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
     // Accumulates the first error without stopping the scan.
     let mut first_err: Option<io::Error> = None;
+    let mut removed_symlinks = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
@@ -108,39 +114,46 @@ pub fn validate_symlinks(root: &Path) -> io::Result<()> {
             };
 
             if meta.is_symlink() {
-                // check_symlink deletes the symlink via remove_file before
-                // returning Err, so the bad link is gone regardless of
-                // whether we capture or propagate the error.
-                if let Err(e) = check_symlink(&path, root) {
-                    first_err = first_err.or(Some(e));
+                match check_symlink(&path, root) {
+                    Ok(Some(removed)) => {
+                        tracing::warn!(
+                            relative_path = %removed.relative_path.display(),
+                            target = %removed.target.display(),
+                            "removing symlink that points outside the target directory"
+                        );
+                        removed_symlinks.push(removed);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        first_err = first_err.or(Some(e));
+                    }
                 }
             } else if meta.is_dir() {
                 stack.push(path);
             }
         }
     }
-    first_err.map_or(Ok(()), Err)
+    first_err.map_or(Ok(removed_symlinks), Err)
 }
 
-fn check_symlink(path: &Path, root: &Path) -> io::Result<()> {
+fn check_symlink(path: &Path, root: &Path) -> io::Result<Option<RemovedSymlink>> {
     let relative = path.strip_prefix(root).unwrap_or(path);
     match path.canonicalize() {
-        Ok(r) if r.starts_with(root) => Ok(()),
+        Ok(r) if r.starts_with(root) => Ok(None),
         Ok(r) => {
             let _ = std::fs::remove_file(path);
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!(
-                    "symlink target escapes target directory: {} -> {}",
-                    relative.display(),
-                    r.display()
-                ),
-            ))
+            Ok(Some(RemovedSymlink {
+                relative_path: relative.to_path_buf(),
+                target: r,
+            }))
         }
         Err(_) => {
+            let target = path.read_link().unwrap_or_default();
             let _ = std::fs::remove_file(path);
-            tracing::warn!(path = %relative.display(), "removing dangling symlink");
-            Ok(())
+            Ok(Some(RemovedSymlink {
+                relative_path: relative.to_path_buf(),
+                target,
+            }))
         }
     }
 }
@@ -251,12 +264,12 @@ mod tests {
         {
             std::fs::create_dir_all(root.join("bin")).unwrap();
             std::os::unix::fs::symlink("../src/lib.rs", root.join("bin/run")).unwrap();
-            validate_symlinks(&root).unwrap();
+            assert!(validate_symlinks(&root).unwrap().is_empty());
         }
     }
 
     #[test]
-    fn validate_symlinks_rejects_escaping() {
+    fn validate_symlinks_removes_escaping() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
@@ -264,8 +277,15 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(outside.path(), root.join("escape")).unwrap();
-            let err = validate_symlinks(&root).unwrap_err();
-            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+            let removed = validate_symlinks(&root).unwrap();
+            assert_eq!(
+                removed,
+                vec![RemovedSymlink {
+                    relative_path: PathBuf::from("escape"),
+                    target: outside.path().canonicalize().unwrap(),
+                }]
+            );
+            assert!(root.join("escape").symlink_metadata().is_err());
         }
     }
 
@@ -277,7 +297,14 @@ mod tests {
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("nonexistent/target", root.join("bad")).unwrap();
-            validate_symlinks(&root).unwrap();
+            let removed = validate_symlinks(&root).unwrap();
+            assert_eq!(
+                removed,
+                vec![RemovedSymlink {
+                    relative_path: PathBuf::from("bad"),
+                    target: PathBuf::from("nonexistent/target"),
+                }]
+            );
             assert!(
                 root.join("bad").symlink_metadata().is_err(),
                 "dangling symlink must be removed"
@@ -297,8 +324,8 @@ mod tests {
             std::os::unix::fs::symlink("nonexistent", root.join("bad2")).unwrap();
             std::os::unix::fs::symlink(outside.path(), root.join("bad3")).unwrap();
 
-            let err = validate_symlinks(&root);
-            assert!(err.is_err());
+            let removed = validate_symlinks(&root).unwrap();
+            assert_eq!(removed.len(), 3);
             assert!(
                 root.join("bad1").symlink_metadata().is_err()
                     && root.join("bad2").symlink_metadata().is_err()
