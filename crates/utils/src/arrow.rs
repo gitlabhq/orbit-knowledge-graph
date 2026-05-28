@@ -1080,17 +1080,19 @@ mod tests {
             col_type: ColumnType::StrList,
             nullable: false,
         }];
-        let mut b = BatchBuilder::new(&specs, 2).unwrap();
+        struct TagRow<'a>(&'a [&'a str]);
+        let rows = [TagRow(&["extension:.py", "language:python"]), TagRow(&[])];
 
-        // Row with values
-        b.col("tags")
+        let batch = BatchBuilder::new(&specs, rows.len())
             .unwrap()
-            .push_str_list(&["extension:.py", "language:python"])
+            .build(&rows, |row, b| {
+                if row.0.is_empty() {
+                    b.col("tags")?.push_empty_str_list()
+                } else {
+                    b.col("tags")?.push_str_list(row.0)
+                }
+            })
             .unwrap();
-        // Row with empty list
-        b.col("tags").unwrap().push_empty_str_list().unwrap();
-
-        let batch = b.finish().unwrap();
         assert_eq!(
             ArrowUtils::get_string_list(&batch, "tags", 0),
             vec!["extension:.py", "language:python"]
