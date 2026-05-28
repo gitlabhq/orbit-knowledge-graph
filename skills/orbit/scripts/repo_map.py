@@ -20,7 +20,9 @@ planning a large refactor.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -156,7 +158,7 @@ def apply_extension_filter(raw_extensions: list[str]) -> None:
         return
 
     SOURCE_EXTS = tuple(dict.fromkeys(extensions))
-    pattern = "\\.(" + "|".join(extensions) + ")$"
+    pattern = "\\.(" + "|".join(re.escape(ext) for ext in extensions) + ")$"
     EXCLUDE_PATHS += f"  AND regexp_matches(file_path, {sql_lit(pattern)})\n"
     EXCLUDE_PATHS_FILE = EXCLUDE_PATHS.replace("file_path", "path")
 
@@ -170,7 +172,9 @@ def split_repo_path_arg(argv: list[str]) -> tuple[Path | None, list[str]]:
       repo_map.py --ext rs tree crates/foo
     """
     if argv and not argv[0].startswith("-") and argv[0] not in SUBCOMMANDS:
-        return Path(argv[0]).expanduser(), argv[1:]
+        path = Path(argv[0]).expanduser()
+        if path.is_dir() or "/" in argv[0] or argv[0].startswith((".", "~")):
+            return path, argv[1:]
     return None, argv
 
 
@@ -511,9 +515,9 @@ WHERE commit_sha={sql_lit(sha)}
         fmt="ndjson",
     )
     file_paths = [
-        line.split('"file_path":"', 1)[1].rsplit('"', 1)[0]
+        json.loads(line)["file_path"]
         for line in parent_files.splitlines()
-        if '"file_path":"' in line
+        if line.strip()
     ]
     if not file_paths:
         print(f"(no class/module/trait named {t})")
@@ -545,7 +549,7 @@ contained AS (
       OR d.fqn LIKE p.fqn || '.%'
       OR (d.file_path = p.file_path AND d.start_line BETWEEN p.start_line AND p.end_line)
     )
-  ORDER BY file_path, name, definition_type, start_line, length(fqn)
+  ORDER BY d.file_path, d.name, d.definition_type, d.start_line, length(d.fqn)
 ),
 src AS (
   SELECT filename, str_split(content, chr(10)) AS lines
