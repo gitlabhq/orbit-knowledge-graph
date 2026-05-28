@@ -385,46 +385,44 @@ pub async fn wait_until_ready(
 
     let deadline = Instant::now() + timeout;
     let mut attempt: u32 = 0;
-    let mut last_active = None;
-    let mut last_migrating = None;
 
     loop {
-        let active = read_active_version(graph).await;
-        let migrating = read_migrating_version(graph).await;
-
-        match (active, migrating) {
-            (Ok(active), Ok(migrating)) => {
-                last_active = active;
-                last_migrating = migrating;
-
-                match classify_readiness(active, migrating, target_version) {
-                    SchemaReadiness::Ready => {
-                        info!(target_version, "schema version is ready — proceeding");
-                        return Ok(());
-                    }
-                    SchemaReadiness::Outdated => {
-                        return Err(SchemaWaitError::Outdated {
-                            embedded: target_version,
-                            active: active.unwrap_or_default(),
-                        });
-                    }
-                    SchemaReadiness::Pending => {
-                        info!(
-                            target_version,
-                            active_version = ?active,
-                            migrating_version = ?migrating,
-                            "schema version not ready yet — dispatcher has not prepared it"
-                        );
-                    }
-                }
+        // A failed read is treated as "unknown" (None) so the other read can
+        // still drive an outdated/ready decision; both failing falls through to
+        // a retry within the budget.
+        let active = match read_active_version(graph).await {
+            Ok(version) => version,
+            Err(error) => {
+                warn!(%error, "failed to read active schema version — retrying");
+                None
             }
-            (active_result, migrating_result) => {
-                if let Err(error) = &active_result {
-                    warn!(%error, "failed to read active schema version — retrying");
-                }
-                if let Err(error) = &migrating_result {
-                    warn!(%error, "failed to read migrating schema version — retrying");
-                }
+        };
+        let migrating = match read_migrating_version(graph).await {
+            Ok(version) => version,
+            Err(error) => {
+                warn!(%error, "failed to read migrating schema version — retrying");
+                None
+            }
+        };
+
+        match classify_readiness(active, migrating, target_version) {
+            SchemaReadiness::Ready => {
+                info!(target_version, "schema version is ready — proceeding");
+                return Ok(());
+            }
+            SchemaReadiness::Outdated => {
+                return Err(SchemaWaitError::Outdated {
+                    embedded: target_version,
+                    active: active.expect("Outdated requires a known active version"),
+                });
+            }
+            SchemaReadiness::Pending => {
+                info!(
+                    target_version,
+                    active_version = ?active,
+                    migrating_version = ?migrating,
+                    "schema version not ready yet — dispatcher has not prepared it"
+                );
             }
         }
 
@@ -433,8 +431,8 @@ pub async fn wait_until_ready(
             return Err(SchemaWaitError::Timeout {
                 target: target_version,
                 seconds: timeout.as_secs(),
-                active: last_active,
-                migrating: last_migrating,
+                active,
+                migrating,
             });
         }
 
@@ -545,6 +543,11 @@ mod tests {
     #[test]
     fn readiness_no_version_is_pending() {
         assert_eq!(classify_readiness(None, None, 2), SchemaReadiness::Pending);
+    }
+
+    #[test]
+    fn readiness_migrating_without_active_is_ready() {
+        assert_eq!(classify_readiness(None, Some(2), 2), SchemaReadiness::Ready);
     }
 
     #[test]
