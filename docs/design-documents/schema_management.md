@@ -147,8 +147,9 @@ Implemented in `crates/gkg-server/src/schema_watcher.rs`.
 
 ```yaml
 schema:
-  max_retained_versions: 2          # total table-sets to keep (default: 2, minimum: 2)
-  version_poll_interval_secs: 5     # webserver readiness-gate poll cadence (default: 5, minimum: 1)
+  max_retained_versions: 2              # total table-sets to keep (default: 2, minimum: 2)
+  version_poll_interval_secs: 5         # readiness-gate poll cadence (default: 5, minimum: 1)
+  indexer_schema_wait_timeout_secs: 300 # indexer wait budget before exiting (default: 300, minimum: 1)
 ```
 
 With `max_retained_versions: 2`: after migrating to version N, the indexer keeps the N active
@@ -156,7 +157,11 @@ tables and the N−1 rollback target, and drops older table-sets automatically. 
 validated at startup — values below 2 are rejected.
 
 `version_poll_interval_secs` controls how often the webserver re-reads the active version from
-`gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below).
+`gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below); it is
+also the base backoff interval for the indexer readiness gate.
+
+`indexer_schema_wait_timeout_secs` is the total time the indexer waits for the dispatcher to
+prepare its schema version before exiting non-zero (see "Indexer readiness gate" below).
 
 ## CI and local enforcement
 
@@ -171,20 +176,22 @@ Non-schema ontology changes (descriptions, comments) can bypass the check by add
 
 ## Zero-downtime migration orchestrator
 
-When the indexer starts, it compares the embedded `SCHEMA_VERSION` with the active version in
-`gkg_schema_version`. If they differ, `schema_migration::run_if_needed()` runs the following
-flow **before** the NATS engine starts consuming messages:
+The **dispatcher** owns schema migration. At boot, before its task loops start, it compares the
+embedded `SCHEMA_VERSION` with the active version in `gkg_schema_version`. If they differ,
+`schema_migration::run_if_needed()` runs the following flow. Indexers do not run DDL; they gate on
+the version becoming ready (see "Indexer readiness gate" below).
 
 ### Migration flow
 
 1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based). If another pod
-   holds the lock, wait up to 5 minutes; the other pod is handling the migration.
+   holds the lock, wait up to 5 minutes; the other pod is handling the migration. The lock
+   serializes migration across dispatcher replicas.
 
 2. **Re-check after lock** — Another pod may have completed the migration while this pod was
    waiting. If the active version now matches, skip.
 
-3. **Drain** — The engine has not started; no in-flight NATS messages exist. This phase is a
-   no-op today and is reserved for future dual-write scenarios.
+3. **Drain** — A no-op: the dispatcher runs no engine, so no in-flight NATS messages exist.
+   Reserved for future dual-write scenarios.
 
 4. **Create new-prefix tables** — Generate DDL from the ontology via
    `generate_graph_tables_with_prefix()` and execute `CREATE TABLE IF NOT EXISTS vN_<table>`
@@ -193,13 +200,30 @@ flow **before** the NATS engine starts consuming messages:
    `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
 
 5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
-   The Webserver cutover (tracked in issue #441) switches reads to the new table-set.
+   This signals indexers that the new-prefix tables exist. The Webserver cutover (tracked in
+   issue #441) switches reads to the new table-set.
 
 6. **Release lock** — Allow other pods to proceed.
 
-After the orchestrator returns, the indexer starts normally and writes all data to the new-prefix
-tables. Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
+Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
 re-dispatches backfill work automatically — no explicit trigger is needed.
+
+### Indexer readiness gate
+
+Indexers do not migrate. At startup, before consuming NATS messages, the indexer calls
+`schema::version::wait_until_ready()`, which polls `gkg_schema_version` with exponential backoff
+and decides against the embedded version:
+
+| Status of embedded version `N` | Decision |
+|---|---|
+| `N` is `active` or `migrating` | proceed — the dispatcher prepared the tables |
+| only a version `< N` is active, or no version yet | wait and retry within the budget |
+| a version `> N` is active | outdated binary — fail fast, exit non-zero |
+
+If the budget (`schema.indexer_schema_wait_timeout_secs`, default `300`) is exhausted, the indexer
+exits non-zero and Kubernetes restarts it (`CrashLoopBackoff`), which self-heals once the
+dispatcher catches up. Transient ClickHouse read errors are retried within the budget. The wait
+gate lives in `crates/indexer/src/schema/version.rs`.
 
 ### Write path prefix enforcement
 
@@ -228,10 +252,10 @@ The metric `gkg_schema_migration_total` (counter) tracks migration phase outcome
 
 ## Migration completion detection
 
-After the indexer creates new-prefix tables and marks a version as `migrating`, the dispatcher's
-normal namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled
-task (`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks
-whether the migration is complete.
+After the dispatcher creates new-prefix tables and marks a version as `migrating`, its normal
+namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled task
+(`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks whether the
+migration is complete.
 
 Implemented in `crates/indexer/src/migration_completion.rs`.
 

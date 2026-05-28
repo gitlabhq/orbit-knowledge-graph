@@ -71,8 +71,8 @@ pub enum IndexerError {
     #[error("Schema version error: {0}")]
     SchemaVersion(#[from] crate::schema::version::SchemaVersionError),
 
-    #[error("Schema migration error: {0}")]
-    SchemaMigration(#[from] crate::schema::migration::MigrationError),
+    #[error("Schema readiness wait failed: {0}")]
+    SchemaWait(#[from] crate::schema::version::SchemaWaitError),
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
@@ -101,6 +101,9 @@ pub struct DispatcherConfig {
 pub enum DispatcherError {
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::scheduler::SchedulerError),
+
+    #[error("schema migration error: {0}")]
+    Migration(#[from] crate::schema::migration::MigrationError),
 
     #[error("health server failed: {0}")]
     Health(#[from] std::io::Error),

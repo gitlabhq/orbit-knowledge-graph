@@ -54,6 +54,7 @@ pub mod metrics {
 }
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
@@ -103,17 +104,22 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    let migration_metrics = schema::metrics::MigrationMetrics::new();
-    let nats_services: Arc<dyn nats::NatsServices> =
-        Arc::new(nats::NatsServicesImpl::new(broker.clone()));
-    let lock_service: Arc<dyn locking::LockService> =
-        Arc::new(locking::NatsLockService::new(nats_services.clone()));
     let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
         nats_client::KvServicesImpl::new(broker.client().clone()),
     )));
-    info!("running schema migration check");
-    schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
-        .await?;
+
+    let schema_version = *schema::version::SCHEMA_VERSION;
+    info!(
+        schema_version,
+        "waiting for dispatcher to prepare schema version before processing"
+    );
+    schema::version::wait_until_ready(
+        &graph_client,
+        schema_version,
+        Duration::from_secs(config.schema.indexer_schema_wait_timeout_secs),
+        Duration::from_secs(config.schema.version_poll_interval_secs),
+    )
+    .await?;
 
     let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
@@ -210,6 +216,10 @@ pub async fn run_dispatcher(
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
+
+    let migration_metrics = schema::metrics::MigrationMetrics::new();
+    info!("running schema migration check");
+    schema::migration::run_if_needed(&graph, &lock_service, ontology, &migration_metrics).await?;
 
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());

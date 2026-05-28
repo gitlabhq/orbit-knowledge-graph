@@ -243,6 +243,7 @@
     "schema": {
       "$ref": "#/$defs/SchemaConfig",
       "default": {
+        "indexer_schema_wait_timeout_secs": 300,
         "max_retained_versions": 2,
         "version_poll_interval_secs": 5
       }
@@ -1330,6 +1331,13 @@
       "description": "Schema configuration: version retention and related settings.",
       "type": "object",
       "properties": {
+        "indexer_schema_wait_timeout_secs": {
+          "description": "How long the indexer waits for the dispatcher to prepare its schema\nversion before exiting non-zero (relying on the orchestrator to restart\nit). The indexer retries with backoff within this budget. Must be at\nleast 1.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 1
+        },
         "max_retained_versions": {
           "description": "Number of schema version table-sets to retain.\n\nAfter migrating to version N, the indexer keeps the N active tables plus\nthe N-1 rollback target. Must be at least 2.",
           "type": "integer",
