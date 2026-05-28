@@ -111,7 +111,7 @@ impl Handler for NamespaceDeletionHandler {
                     namespace_id = payload.namespace_id,
                     table = %outcome.table,
                     duration_ms = (outcome.duration_seconds * 1000.0) as u64,
-                    "namespace data deleted from table"
+                    "deleted namespace data from table"
                 );
             }
         }
