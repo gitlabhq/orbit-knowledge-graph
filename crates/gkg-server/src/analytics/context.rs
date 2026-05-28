@@ -59,9 +59,7 @@ pub(crate) fn build_query(
                 .map_err(validation("tool_name"))?,
         ),
         coding_agent: coding_agent
-            .map(str::parse::<orbit_query::OrbitQueryCodingAgent>)
-            .transpose()
-            .map_err(validation("coding_agent"))?,
+            .and_then(|a| a.parse::<orbit_query::OrbitQueryCodingAgent>().ok()),
         queried_namespace_ids: if queried.is_empty() {
             None
         } else {
@@ -249,6 +247,13 @@ mod tests {
         let claims = claims_with_paths(vec![]);
         let data = query_data(&claims, "query_graph");
         assert!(data.get("coding_agent").is_none());
+    }
+
+    #[test]
+    fn build_query_drops_oversized_coding_agent() {
+        let claims = claims_with_paths(vec![]);
+        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65))).unwrap();
+        assert!(query.data().get("coding_agent").is_none());
     }
 
     #[test]
