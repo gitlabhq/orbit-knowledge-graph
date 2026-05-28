@@ -15,7 +15,7 @@ settings:
   default_entity_sort_key: [traversal_path, id]
   edge_tables:
     gl_edge:
-      sort_key: [traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind]
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
       columns:
         - {name: traversal_path, type: string}
         - {name: relationship_kind, type: string}
@@ -25,7 +25,7 @@ settings:
         - {name: target_kind, type: string}
       storage:
         index_granularity: 1024
-        primary_key: [traversal_path, source_id, relationship_kind]
+        primary_key: [traversal_path, relationship_kind, source_id]
         settings:
           auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
@@ -36,20 +36,14 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_relationship, column: relationship_kind, type: "set(50)", granularity: 2}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - type: reorder
-            name: by_source
-            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
+          # Reverse traversals (target_id lookup) need a reorder projection
+          # because target_id is position 4 in the sort key and resets with
+          # each source_id. Forward traversals use the 3-column PK directly.
           - type: reorder
             name: by_target
-            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
-          - type: reorder
-            name: by_rel_source_kind
-            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
-          - type: reorder
-            name: by_rel_target_kind
-            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+            order_by: [traversal_path, relationship_kind, target_id, source_id, target_kind, source_kind]
           - type: aggregate
             name: agg_counts
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
@@ -63,7 +57,7 @@ settings:
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
             group_by: [traversal_path, source_kind, target_kind, relationship_kind]
     gl_code_edge:
-      sort_key: [traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind]
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
       columns:
         - {name: traversal_path, type: string}
         - {name: relationship_kind, type: string}
@@ -73,7 +67,7 @@ settings:
         - {name: target_kind, type: string}
       storage:
         index_granularity: 1024
-        primary_key: [traversal_path, source_id, relationship_kind]
+        primary_key: [traversal_path, relationship_kind, source_id]
         settings:
           auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
@@ -84,20 +78,13 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_relationship, column: relationship_kind, type: "set(50)", granularity: 2}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - type: reorder
-            name: by_source
-            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
-          - type: reorder
-            name: by_target
-            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
-          - type: reorder
-            name: by_rel_source_kind
-            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
-          - type: reorder
-            name: by_rel_target_kind
-            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+          # Code graph queries are overwhelmingly forward (File→Definition
+          # via DEFINES, File→ImportedSymbol via IMPORTS). Reverse lookups
+          # are rare enough that the bloom_filter on target_id suffices;
+          # no by_target reorder projection needed.
+          #
           # `count(target) GROUP BY source` — e.g. definitions per file via
           # DEFINES. Without this, the wildcard scan over vendored JS bundles
           # (`echarts.js` ≈ 13K defs, `pdf.worker.js` ≈ 12K defs) materializes
@@ -114,7 +101,7 @@ settings:
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
             group_by: [relationship_kind, source_kind, target_id, traversal_path]
     gl_ci_edge:
-      sort_key: [traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind]
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
       columns:
         - {name: traversal_path, type: string}
         - {name: relationship_kind, type: string}
@@ -124,7 +111,9 @@ settings:
         - {name: target_kind, type: string}
       storage:
         index_granularity: 1024
-        primary_key: [traversal_path, source_id, relationship_kind]
+        primary_key: [traversal_path, relationship_kind, source_id]
+        settings:
+          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
@@ -133,20 +122,10 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_relationship, column: relationship_kind, type: "set(50)", granularity: 2}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - type: reorder
-            name: by_source
-            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
-          - type: reorder
-            name: by_target
-            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
-          - type: reorder
-            name: by_rel_source_kind
-            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
-          - type: reorder
-            name: by_rel_target_kind
-            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+          # CI traversals are overwhelmingly forward (Pipeline→Stage→Job).
+          # Reverse lookups are rare; bloom_filter on target_id suffices.
           - type: aggregate
             name: agg_counts_by_source
             select: [relationship_kind, target_kind, source_id, traversal_path, "count()"]

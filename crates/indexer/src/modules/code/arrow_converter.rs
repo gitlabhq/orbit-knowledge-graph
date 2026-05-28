@@ -608,12 +608,16 @@ fn edge_row_batch(
     mut edge_rows: Vec<IndexerEdgeRow<'_>>,
     specs: &[ColumnSpec],
 ) -> Result<RecordBatch, ArrowError> {
-    // Sort edges by low-cardinality columns so run-length encoding
-    // (and dictionary encoding) on relationship_kind, source_kind,
-    // target_kind produce long runs of identical values.
+    // Sort edges to match the ClickHouse edge table ORDER BY:
+    // (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind).
+    // traversal_path is constant within a batch so we skip it. Pre-sorted
+    // inserts create parts that are already in primary key order, reducing
+    // merge work and improving compression via delta encoding on source_id.
     edge_rows.sort_by(|a, b| {
         a.edge_kind
             .cmp(b.edge_kind)
+            .then_with(|| a.source_id.cmp(&b.source_id))
+            .then_with(|| a.target_id.cmp(&b.target_id))
             .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
             .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
     });
