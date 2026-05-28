@@ -132,6 +132,24 @@ Orbit Query With Token
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
+Orbit Get
+    [Documentation]    GET /api/v4/orbit/${path} with the bot PAT. Returns parsed JSON (dict or list).
+    [Arguments]    ${path}    ${params}=${None}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    GET    ${GITLAB_URL}/api/v4/orbit/${path}
+    ...    headers=${headers}    params=${params}    expected_status=200
+    RETURN    ${resp.json()}
+
+Orbit Query LLM
+    [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the
+    ...                caller can assert on the GOON text body.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}    response_format=llm
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=200
+    RETURN    ${resp}
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30
