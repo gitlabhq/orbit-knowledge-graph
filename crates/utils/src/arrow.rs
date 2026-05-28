@@ -472,6 +472,25 @@ impl ColRef<'_> {
         }
     }
 
+    /// Push a `["a","b",...]` to a `StrList` column.
+    pub fn push_str_list(&mut self, values: &[&str]) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::StrList(b, _) => {
+                let vals = b.values();
+                for v in values {
+                    vals.append_value(v);
+                }
+                b.append(true);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_str_list on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
@@ -1052,6 +1071,33 @@ mod tests {
             vec!["a", "b"]
         );
         assert!(ArrowUtils::get_string_list(&batch, "missing", 0).is_empty());
+    }
+
+    #[test]
+    fn push_str_list_roundtrips_through_get_string_list() {
+        let specs = vec![ColumnSpec {
+            name: "tags".into(),
+            col_type: ColumnType::StrList,
+            nullable: false,
+        }];
+        struct TagRow<'a>(&'a [&'a str]);
+        let rows = [TagRow(&["extension:.py", "language:python"]), TagRow(&[])];
+
+        let batch = BatchBuilder::new(&specs, rows.len())
+            .unwrap()
+            .build(&rows, |row, b| {
+                if row.0.is_empty() {
+                    b.col("tags")?.push_empty_str_list()
+                } else {
+                    b.col("tags")?.push_str_list(row.0)
+                }
+            })
+            .unwrap();
+        assert_eq!(
+            ArrowUtils::get_string_list(&batch, "tags", 0),
+            vec!["extension:.py", "language:python"]
+        );
+        assert!(ArrowUtils::get_string_list(&batch, "tags", 1).is_empty());
     }
 
     #[test]

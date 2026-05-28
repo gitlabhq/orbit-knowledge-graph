@@ -797,6 +797,63 @@ impl CodeGraph {
             .filter_map(|idx| self.graph[idx].as_file().map(|f| (idx, f)))
     }
 
+    /// Look up a named property on a graph node. Returns `None` when
+    /// the property is unknown or its value is empty (e.g. extension-less
+    /// files like Makefile).
+    fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+        let value = match &self.graph[idx] {
+            GraphNode::File(f) => match property {
+                "extension" => Some(f.extension.clone()),
+                "language" => Some(f.language_name().to_string()),
+                _ => None,
+            },
+            GraphNode::Definition { id, .. } => match property {
+                "definition_type" => Some(self.defs[id.0 as usize].definition_type.to_string()),
+                _ => None,
+            },
+            GraphNode::Import { id, .. } => match property {
+                "import_type" => Some(self.imports[id.0 as usize].import_type.to_string()),
+                _ => None,
+            },
+            GraphNode::Directory(_) => None,
+        };
+        value.filter(|v| !v.is_empty())
+    }
+
+    /// Build `"key:value"` tag tokens for every node in the graph.
+    /// Returns a vec indexed by `NodeIndex`, so callers can look up
+    /// tags by the same indices used in the edge list.
+    ///
+    /// `tag_properties` maps node kind name (e.g. `"File"`) to a list
+    /// of `(tag_key, property_name)` pairs, typically built from
+    /// `ontology.denormalized_properties()`.
+    pub fn build_node_tags(
+        &self,
+        tag_properties: &std::collections::HashMap<String, Vec<(String, String)>>,
+    ) -> Vec<Vec<String>> {
+        self.graph
+            .node_indices()
+            .map(|idx| {
+                let node_kind = match &self.graph[idx] {
+                    GraphNode::File(_) => "File",
+                    GraphNode::Definition { .. } => "Definition",
+                    GraphNode::Import { .. } => "ImportedSymbol",
+                    GraphNode::Directory(_) => return Vec::new(),
+                };
+                let Some(props) = tag_properties.get(node_kind) else {
+                    return Vec::new();
+                };
+                props
+                    .iter()
+                    .filter_map(|(tag_key, prop_name)| {
+                        self.node_property(idx, prop_name)
+                            .map(|val| format!("{tag_key}:{val}"))
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Definition { file_path, id } = &self.graph[idx] {

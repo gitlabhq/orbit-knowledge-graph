@@ -4,7 +4,7 @@
   "self": {
     "vendor": "com.gitlab",
     "name": "orbit_query",
-    "version": "2-0-1",
+    "version": "2-1-0",
     "format": "jsonschema"
   },
   "type": "object",
@@ -14,7 +14,7 @@
     "source_type": {
       "description": "Source type of the request, matching the value emitted in the GKG JWT source_type claim by Rails.",
       "type": "string",
-      "enum": ["frontend", "dws", "mcp", "core", "rest"]
+      "enum": ["frontend", "dws", "mcp", "core", "rest", "code_intelligence"]
     },
     "tool_name": {
       "description": "Name of the Orbit tool invoked (e.g. query_graph, get_graph_schema). Left as a free-form string so new tools can be added without a schema bump.",

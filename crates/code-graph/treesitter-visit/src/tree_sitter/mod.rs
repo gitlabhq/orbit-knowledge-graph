@@ -43,6 +43,10 @@ pub struct StrDoc<L: LanguageExt> {
     pub src: String,
     pub lang: L,
     pub tree: Tree,
+    // Node-kind names by `kind_id`. `tree_sitter::Node::kind()` reruns
+    // `str::from_utf8` on the C kind string every call; this lets the walk
+    // index by id in O(1) instead.
+    kind_names: std::sync::Arc<[&'static str]>,
 }
 
 /// Default stall limit for the progress callback. 100K iterations at the same
@@ -63,6 +67,7 @@ impl<L: LanguageExt> StrDoc<L> {
         max_stall: u64,
     ) -> Result<Self, String> {
         let src = src.to_string();
+        let kind_names = lang.kind_names();
         let ts_lang = lang.get_ts_language();
         let tree = parse_lang(
             |p| {
@@ -97,7 +102,12 @@ impl<L: LanguageExt> StrDoc<L> {
             ts_lang,
         )
         .map_err(|e| e.to_string())?;
-        Ok(Self { src, lang, tree })
+        Ok(Self {
+            src,
+            lang,
+            tree,
+            kind_names,
+        })
     }
 
     pub fn new(src: &str, lang: L) -> Self {
@@ -123,10 +133,17 @@ impl<L: LanguageExt> Doc for StrDoc<L> {
     }
 
     fn get_node_text<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str> {
-        Cow::Borrowed(
-            node.utf8_text(self.src.as_bytes())
-                .expect("invalid source text encoding"),
-        )
+        // `src` is valid UTF-8 and node offsets land on char boundaries, so
+        // slice it (O(1)) instead of revalidating bytes with `str::from_utf8`.
+        Cow::Borrowed(&self.src[node.start_byte()..node.end_byte()])
+    }
+
+    fn node_kind<'a>(&'a self, node: &Self::Node<'a>) -> Cow<'a, str> {
+        match self.kind_names.get(node.kind_id() as usize) {
+            Some(&name) => Cow::Borrowed(name),
+            // Out-of-range ids (e.g. ERROR/MISSING) fall back to the slow path.
+            None => Cow::Borrowed(Node::kind(node)),
+        }
     }
 }
 
@@ -316,6 +333,16 @@ pub trait LanguageExt: Language {
 
     /// tree sitter language to parse the source
     fn get_ts_language(&self) -> TSLanguage;
+
+    /// Grammar node-kind names indexed by `kind_id`. Implementations should
+    /// memoize per language; the default rebuilds on each call and
+    /// `SupportLang` overrides with a per-language cache.
+    fn kind_names(&self) -> std::sync::Arc<[&'static str]> {
+        let ts = self.get_ts_language();
+        (0..ts.node_kind_count())
+            .map(|id| ts.node_kind_for_id(id as u16).unwrap_or(""))
+            .collect()
+    }
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {

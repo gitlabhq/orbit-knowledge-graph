@@ -6,15 +6,16 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StrId(u32);
 
-/// Pool of strings packed contiguously in a single `Vec<u8>` buffer.
+/// Pool of strings packed contiguously in a single `String` buffer.
 ///
 /// An index `Vec` stores `(offset, len)` pairs for O(1) retrieval. One large
 /// allocation instead of many individual `Box<str>` heap allocs.
 ///
 /// No lifetime parameter, no global lock, no unsafe.
 pub struct StringPool {
-    /// Contiguous UTF-8 byte buffer. All strings packed end-to-end.
-    buf: Vec<u8>,
+    // `String`, not `Vec<u8>`, so `get` slices in O(1) instead of revalidating
+    // UTF-8 on every access (it is the hot accessor for every graph string).
+    buf: String,
     /// (byte_offset, byte_len) into `buf` for each StrId.
     index: Vec<(u32, u32)>,
 }
@@ -28,14 +29,14 @@ impl Default for StringPool {
 impl StringPool {
     pub fn new() -> Self {
         Self {
-            buf: Vec::new(),
+            buf: String::new(),
             index: Vec::new(),
         }
     }
 
     pub fn with_capacity(cap: usize) -> Self {
         Self {
-            buf: Vec::with_capacity(cap * 32),
+            buf: String::with_capacity(cap * 32),
             index: Vec::with_capacity(cap),
         }
     }
@@ -44,7 +45,7 @@ impl StringPool {
     pub fn alloc(&mut self, s: &str) -> StrId {
         let id = StrId(self.index.len() as u32);
         let offset = self.buf.len() as u32;
-        self.buf.extend_from_slice(s.as_bytes());
+        self.buf.push_str(s);
         self.index.push((offset, s.len() as u32));
         id
     }
@@ -53,8 +54,7 @@ impl StringPool {
     #[inline]
     pub fn get(&self, id: StrId) -> &str {
         let (offset, len) = self.index[id.0 as usize];
-        let bytes = &self.buf[offset as usize..(offset + len) as usize];
-        std::str::from_utf8(bytes).expect("StringPool: invalid UTF-8")
+        &self.buf[offset as usize..(offset + len) as usize]
     }
 
     pub fn len(&self) -> usize {

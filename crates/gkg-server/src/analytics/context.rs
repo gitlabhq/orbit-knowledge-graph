@@ -59,9 +59,7 @@ pub(crate) fn build_query(
                 .map_err(validation("tool_name"))?,
         ),
         coding_agent: coding_agent
-            .map(str::parse::<orbit_query::OrbitQueryCodingAgent>)
-            .transpose()
-            .map_err(validation("coding_agent"))?,
+            .and_then(|a| a.parse::<orbit_query::OrbitQueryCodingAgent>().ok()),
         queried_namespace_ids: if queried.is_empty() {
             None
         } else {
@@ -122,6 +120,7 @@ fn source_type(source: SourceType) -> orbit_query::OrbitQuerySourceType {
         SourceType::Mcp => ST::Mcp,
         SourceType::Core => ST::Core,
         SourceType::Rest => ST::Rest,
+        SourceType::CodeIntelligence => ST::CodeIntelligence,
     }
 }
 
@@ -251,6 +250,13 @@ mod tests {
     }
 
     #[test]
+    fn build_query_drops_oversized_coding_agent() {
+        let claims = claims_with_paths(vec![]);
+        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65))).unwrap();
+        assert!(query.data().get("coding_agent").is_none());
+    }
+
+    #[test]
     fn build_common_sets_schema_version() {
         let claims = claims_with_paths(vec![]);
         let data = common_data(&claims, "33");
@@ -338,6 +344,19 @@ mod tests {
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
                 "orbit_query (minimal)",
+            );
+        }
+
+        #[test]
+        fn code_intelligence_validates_against_iglu_schema() {
+            let mut claims = claims_with_paths(vec!["1/22/"]);
+            claims.source_type = crate::auth::SourceType::CodeIntelligence;
+            let query = build_query(&claims, "query_graph", None).unwrap();
+            assert_eq!(query.data()["source_type"], "code_intelligence");
+            assert_valid(
+                &ORBIT_QUERY_VALIDATOR,
+                &query.data(),
+                "orbit_query (code_intelligence)",
             );
         }
     }

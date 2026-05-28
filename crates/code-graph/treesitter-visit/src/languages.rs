@@ -101,6 +101,25 @@ impl LanguageExt for SupportLang {
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
         }
     }
+
+    fn kind_names(&self) -> std::sync::Arc<[&'static str]> {
+        thread_local! {
+            static CACHE: std::cell::RefCell<
+                std::collections::HashMap<SupportLang, std::sync::Arc<[&'static str]>>,
+            > = std::cell::RefCell::new(std::collections::HashMap::new());
+        }
+        CACHE.with(|c| {
+            if let Some(cached) = c.borrow().get(self).cloned() {
+                return cached;
+            }
+            let ts = self.get_ts_language();
+            let names: std::sync::Arc<[&'static str]> = (0..ts.node_kind_count())
+                .map(|id| ts.node_kind_for_id(id as u16).unwrap_or(""))
+                .collect();
+            c.borrow_mut().insert(*self, names.clone());
+            names
+        })
+    }
 }
 
 #[cfg(test)]
