@@ -386,11 +386,11 @@ run = "cargo xtask ddl --target local 2>/dev/null > config/graph_local.sql.tmp &
 description = "Regenerate config/graph_local.sql (DuckDB) from ontology"
 
 [tasks."lint:markdown"]
-run = "markdownlint-cli2 '*.md' 'docs/**/*.md'"
+run = "markdownlint-cli2 '*.md' 'docs/**/*.md' 'docs-locale/**/*.md'"
 description = "Run markdownlint on all markdown files"
 
 [tasks."lint:vale"]
-run = "vale --minAlertLevel error *.md docs"
+run = "vale --minAlertLevel error *.md docs docs-locale"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
