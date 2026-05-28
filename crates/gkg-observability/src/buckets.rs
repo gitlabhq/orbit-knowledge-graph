@@ -4,13 +4,19 @@
 //! so that bucket choice is a review conversation at the catalog level, not a
 //! per-call-site decision.
 
-/// General request-latency buckets (100 ms to 10 s). Suitable for most ETL and
-/// query pipelines.
-pub const LATENCY: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
+/// General request-latency buckets (25 ms to 60 s). Suitable for most ETL and
+/// query pipelines. Tail extends past 10 s to keep p99 measurable under load.
+pub const LATENCY: &[f64] = &[0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0];
 
-/// Coarse pipeline buckets (500 ms to 5 min). For operations that routinely
+/// Coarse pipeline buckets (100 ms to 10 min). For operations that routinely
 /// exceed 10 s: project indexing, repository fetch, full pipeline runs.
-pub const LATENCY_SLOW: &[f64] = &[0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0];
+pub const LATENCY_SLOW: &[f64] = &[
+    0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0,
+];
+
+/// Sub-second buckets (5 ms to 1 s) for paths where the bulk of observations
+/// sit under 100 ms: NATS fetch, scheduler queries, SQL compile, transforms.
+pub const LATENCY_FAST_FINE: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0];
 
 /// Tighter latency buckets for Gitaly, content resolution, and other
 /// sub-second RPC paths.
@@ -27,11 +33,14 @@ pub const BLOB_BYTES: &[f64] = &[
 /// Result-set row counts (1 row through ~1 M rows).
 pub const ROW_COUNT: &[f64] = &[1.0, 10.0, 100.0, 1_000.0, 10_000.0, 100_000.0, 1_000_000.0];
 
-/// Memory-usage buckets (1 MB through 10 GB). Used for per-query peak memory.
+/// Memory-usage buckets (1 MB through 100 GB). Used for per-query peak memory
+/// and per-run repository source size. Top bucket reaches 100 GB because peak
+/// ClickHouse memory and total source bytes both saturate the 10 GB ceiling.
 pub const MEMORY_BYTES: &[f64] = &[
     1_048_576.0,
     10_485_760.0,
     104_857_600.0,
     1_073_741_824.0,
     10_737_418_240.0,
+    107_374_182_400.0,
 ];

@@ -231,13 +231,17 @@
         "table"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.etl"
@@ -275,13 +279,17 @@
         "handler"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.etl"
@@ -308,13 +316,17 @@
         "topic"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.etl"
@@ -341,13 +353,14 @@
         "outcome"
       ],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "indexer.etl"
@@ -363,13 +376,17 @@
         "group"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.etl"
@@ -471,13 +488,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.1,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
         60.0,
-        300.0
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -490,13 +511,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.1,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
         60.0,
-        300.0
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -535,13 +560,17 @@
         "phase"
       ],
       "buckets": [
+        0.1,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
         60.0,
-        300.0
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -567,13 +596,17 @@
         "phase"
       ],
       "buckets": [
+        0.1,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
         60.0,
-        300.0
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -608,13 +641,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.1,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
         60.0,
-        300.0
+        120.0,
+        300.0,
+        600.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -653,7 +690,8 @@
         10485760.0,
         104857600.0,
         1073741824.0,
-        10737418240.0
+        10737418240.0,
+        107374182400.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -666,13 +704,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.namespace_deletion"
@@ -706,13 +748,14 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -727,13 +770,17 @@
         "handler"
       ],
       "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
-        60.0,
-        300.0
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -748,13 +795,17 @@
         "entity"
       ],
       "buckets": [
+        0.025,
+        0.05,
+        0.1,
+        0.25,
         0.5,
         1.0,
+        2.5,
         5.0,
         10.0,
         30.0,
-        60.0,
-        300.0
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -790,13 +841,14 @@
       "unit": "s",
       "labels": [],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -832,13 +884,17 @@
         "query_type"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -878,7 +934,8 @@
         10485760.0,
         104857600.0,
         1073741824.0,
-        10737418240.0
+        10737418240.0,
+        107374182400.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -918,13 +975,14 @@
         "query_type"
       ],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -940,13 +998,17 @@
         "status"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -961,13 +1023,17 @@
         "query_type"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -993,13 +1059,14 @@
         "query_type"
       ],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "query.pipeline"
@@ -1066,13 +1133,17 @@
         "task"
       ],
       "buckets": [
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
         1.0,
         2.5,
         5.0,
-        10.0
+        10.0,
+        30.0,
+        60.0
       ],
       "stability": "stable",
       "domain": "indexer.scheduler"
@@ -1099,13 +1170,14 @@
         "query"
       ],
       "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
         0.1,
         0.25,
         0.5,
-        1.0,
-        2.5,
-        5.0,
-        10.0
+        1.0
       ],
       "stability": "stable",
       "domain": "indexer.scheduler"

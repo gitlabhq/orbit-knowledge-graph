@@ -2,7 +2,7 @@
 //! worker pool, ClickHouse writes).
 
 use crate::MetricSpec;
-use crate::buckets::LATENCY;
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 
 pub mod labels {
     pub const TOPIC: &str = "topic";
@@ -64,7 +64,7 @@ pub const NATS_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time to fetch a batch of messages from NATS.",
     Some("s"),
     &[labels::OUTCOME],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 

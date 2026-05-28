@@ -1,7 +1,7 @@
 //! Scheduler metrics: per-task cadence, duration, publish/skip counts, errors.
 
 use crate::MetricSpec;
-use crate::buckets::LATENCY;
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 
 pub mod labels {
     pub const TASK: &str = "task";
@@ -50,7 +50,7 @@ pub const QUERY_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of a scheduled task's ClickHouse query.",
     Some("s"),
     &[labels::QUERY],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 

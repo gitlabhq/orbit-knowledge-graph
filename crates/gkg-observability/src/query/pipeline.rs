@@ -7,7 +7,7 @@
 //! Renamed here to `batches`, `redactions`, and `result_set.rows`.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, MEMORY_BYTES, ROW_COUNT};
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE, MEMORY_BYTES, ROW_COUNT};
 
 pub mod labels {
     pub const QUERY_TYPE: &str = "query_type";
@@ -31,7 +31,7 @@ pub const COMPILE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent compiling a query from JSON to parameterised SQL.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 
@@ -67,7 +67,7 @@ pub const HYDRATION_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Time spent hydrating neighbour properties from ClickHouse.",
     Some("s"),
     &[labels::QUERY_TYPE],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 

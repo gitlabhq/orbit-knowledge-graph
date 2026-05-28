@@ -2,7 +2,7 @@
 //! datalake query and transform latency.
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, LATENCY_SLOW};
+use crate::buckets::{LATENCY, LATENCY_FAST_FINE};
 
 pub mod labels {
     pub const ENTITY: &str = "entity";
@@ -17,7 +17,7 @@ pub const PIPELINE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end duration of a single entity or edge pipeline run.",
     Some("s"),
     &[labels::ENTITY],
-    LATENCY_SLOW,
+    LATENCY,
     DOMAIN,
 );
 
@@ -42,7 +42,7 @@ pub const HANDLER_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of a full handler invocation across all its pipelines.",
     Some("s"),
     &[labels::HANDLER],
-    LATENCY_SLOW,
+    LATENCY,
     DOMAIN,
 );
 
@@ -51,7 +51,7 @@ pub const DATALAKE_QUERY_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of ClickHouse datalake extraction queries.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 
@@ -70,7 +70,7 @@ pub const TRANSFORM_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of DataFusion SQL transform per batch.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_FAST_FINE,
     DOMAIN,
 );
 
