@@ -131,17 +131,17 @@ engine:
     code: 4
 ```
 
-## Handler configuration
+## Topic configuration
 
-Each handler has retry and concurrency settings under `engine.handlers.<name>`:
+Each NATS subscription has retry and concurrency settings under `engine.topics.<name>`:
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `handlers.<name>.concurrency_group` | None | Which group semaphore to use |
-| `handlers.<name>.max_attempts` | None | Total attempts (1 = no retry, 5 = 4 retries) |
-| `handlers.<name>.retry_interval_secs` | None | Delay between retries (NATS nack delay) |
+| `topics.<name>.concurrency_group` | None | Which group semaphore to use |
+| `topics.<name>.max_attempts` | None | Total attempts (1 = no retry, 5 = 4 retries) |
+| `topics.<name>.retry_interval_secs` | None | Delay between retries (NATS nack delay) |
 
-### Default handler settings
+### Default topic settings
 
 From `config/default.yaml`:
 
@@ -151,7 +151,7 @@ engine:
   concurrency_groups:
     sdlc: 12
     code: 4
-  handlers:
+  topics:
     global-handler:
       concurrency_group: sdlc
       max_attempts: 1
@@ -164,11 +164,7 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
-      pipeline:
-        max_file_size_bytes: 5000000
-        max_files: 1000000
-        worker_threads: 0
-        max_concurrent_languages: 0
+      dead_letter_on_exhaustion: true
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1
@@ -176,17 +172,13 @@ engine:
 
 ### Handler-specific settings
 
-#### SDLC global handler
+#### SDLC entity handler
 
 | Config path | Default | Description |
 |-------------|---------|-------------|
-| `engine.handlers.global-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
-
-#### SDLC namespace handler
-
-| Config path | Default | Description |
-|-------------|---------|-------------|
-| `engine.handlers.namespace-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.entity-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+| `engine.handlers.entity-handler.batch_size_overrides.<Entity>` | None | Per-entity override for datalake batch size |
+| `engine.handlers.entity-handler.partition_overrides.<Entity>` | None | Number of partitions for initial load parallelism |
 
 #### Code indexing task handler
 
@@ -197,14 +189,14 @@ engine:
 | `engine.handlers.code-indexing-task.pipeline.worker_threads` | `0` | Rayon workers per language; `0` uses Rayon default |
 | `engine.handlers.code-indexing-task.pipeline.max_concurrent_languages` | `0` | Concurrent language pipelines; `0` uses the pipeline default |
 
-### Retry strategy by handler type
+### Retry strategy by topic
 
-| Handler | max_attempts | DLQ | Rationale |
-|---------|-------------|-----|-----------|
-| Global (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
-| Namespace (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
-| Code indexing task | 5 | Yes | Event-driven. Won't be re-dispatched. Must retry and DLQ. |
-| Namespace deletion | 1 | No | Re-dispatched on next scheduler cycle. |
+| Topic | max_attempts | DLQ | Rationale |
+|-------|-------------|-----|-----------|
+| `global-handler` (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
+| `namespace-handler` (SDLC) | 1 | No | Re-dispatched every cycle. No need to retry. |
+| `code-indexing-task` | 5 | Yes | Event-driven. Won't be re-dispatched. Must retry and DLQ. |
+| `namespace-deletion` | 1 | No | Re-dispatched on next scheduler cycle. |
 
 ## Scheduler configuration
 
@@ -304,6 +296,7 @@ These settings are used by the Webserver mode.
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
 | `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
+| `grpc.max_header_list_size_bytes` | `65536` (64 KiB) | HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` advertised to clients. tonic/hyper default of 16 KiB is too small for GitLab JWTs carrying many traversal IDs. |
 
 ### Query settings
 
@@ -408,7 +401,7 @@ Increase SDLC batch sizes for large namespaces:
 ```yaml
 engine:
   handlers:
-    namespace-handler:
+    entity-handler:
       datalake_batch_size: 5000000
 ```
 
@@ -554,7 +547,7 @@ engine:
   concurrency_groups:
     sdlc: 12
     code: 4
-  handlers:
+  topics:
     global-handler:
       concurrency_group: sdlc
       max_attempts: 1
@@ -567,14 +560,19 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
+      dead_letter_on_exhaustion: true
+    namespace-deletion:
+      concurrency_group: code
+      max_attempts: 1
+  handlers:
+    entity-handler:
+      datalake_batch_size: 1000000
+    code-indexing-task:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
         worker_threads: 0
         max_concurrent_languages: 0
-    namespace-deletion:
-      concurrency_group: code
-      max_attempts: 1
 
 schedule:
   tasks:

@@ -149,7 +149,7 @@ pub struct IndexerConfig {
 }
 ```
 
-`EngineConfiguration` controls concurrency and per-handler settings:
+`EngineConfiguration` controls concurrency and per-topic/handler settings:
 
 ```toml
 # config.toml
@@ -159,11 +159,11 @@ max_concurrent_workers = 16
 sdlc = 12
 code = 4
 
-[handlers.global-handler]
+[topics.global-handler]
 concurrency_group = "sdlc"
 max_attempts = 1
 
-[handlers.code-indexing-task]
+[topics.code-indexing-task]
 concurrency_group = "code"
 max_attempts = 5
 retry_interval_secs = 60
@@ -173,7 +173,7 @@ retry_interval_secs = 60
 
 The global limit (`max_concurrent_workers`) caps total concurrency across the engine, protecting shared resources like CPU and database connections.
 
-Per-handler concurrency groups let you run multiple handler types in a single pod without one starving the others. For example, give the SDLC and Code handlers each a group limit so neither can monopolize all workers, but both can burst when the other is idle.
+Per-topic concurrency groups let you run multiple subscription types in a single pod without one starving the others. For example, give the SDLC and Code topics each a group limit so neither can monopolize all workers, but both can burst when the other is idle.
 
 If you only need a global limit, skip the concurrency group config.
 

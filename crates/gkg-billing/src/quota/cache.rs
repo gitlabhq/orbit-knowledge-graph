@@ -2,8 +2,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use moka::future::Cache;
+use opentelemetry::metrics::ObservableGauge;
 
-use super::client::{QuotaClient, QuotaDecision, QuotaOutcome};
+use super::client::{DenyReason, QuotaClient, QuotaDecision, QuotaOutcome};
 use super::key::{CacheKey, CdotRequest};
 
 // Cached decision plus the instant at which it should be treated as expired.
@@ -24,9 +25,28 @@ fn jittered(ttl: Duration) -> Duration {
     Duration::from_nanos((nanos * factor).max(0.0) as u64)
 }
 
+/// Decision surfaced to `QuotaService`. Distinct from the internal
+/// `QuotaDecision` so that fail-open is visible as its own label value in
+/// the metrics rather than being collapsed into `Allow`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum QuotaGateDecision {
+    Allow,
+    Deny(DenyReason),
+    FailOpen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CacheOutcome {
+    Hit,
+    Miss,
+}
+
 pub(crate) struct QuotaCache {
     inner: Cache<CacheKey, CachedDecision>,
     client: Arc<QuotaClient>,
+    // Kept alive for the lifetime of the cache so the OTel SDK keeps invoking
+    // the registered callback. Dropping the handle deregisters the gauge.
+    _entries_gauge: ObservableGauge<i64>,
 }
 
 impl QuotaCache {
@@ -34,37 +54,98 @@ impl QuotaCache {
         // Per-entry TTL: moka calls the expire_after closure on each access, and
         // we use the stored `expires_at` rather than a uniform cache-wide TTL so
         // each key can carry the TTL CDot returned for it.
-        let inner = Cache::builder()
+        let inner: Cache<CacheKey, CachedDecision> = Cache::builder()
             .max_capacity(max_entries)
             .expire_after(ExpireByInstant)
             .build();
-        Self { inner, client }
+
+        // The OTel SDK owns the callback and invokes it independently of `QuotaCache`.
+        // Cloning is cheap (moka Cache is Arc-backed) and gives the closure its own
+        // owned handle so the SDK can hold it as 'static without borrowing from self.
+        let cache_for_gauge = inner.clone();
+        let meter = gkg_observability::meter();
+        let entries_gauge = gkg_observability::billing::quota::QUOTA_CACHE_ENTRIES
+            .build_observable_gauge_i64(&meter, move |observer| {
+                observer.observe(cache_for_gauge.entry_count() as i64, &[]);
+            });
+
+        Self {
+            inner,
+            client,
+            _entries_gauge: entries_gauge,
+        }
     }
 
-    // Returns the cached decision or fetches one on miss. On fetch failure
-    // (FailOpen), does not cache and propagates a plain Allow — callers treat
-    // fail-open as identical to allow at the call site.
-    pub(crate) async fn check(&self, request: CdotRequest) -> QuotaDecision {
-        let client = self.client.clone();
+    /// Returns the gate decision and whether it was served from cache.
+    ///
+    /// `FailOpen` means CDot was unreachable or returned an unexpected status.
+    /// The caller should still allow the request through but record the
+    /// outcome separately from a genuine `Allow`.
+    pub(crate) async fn check(&self, request: CdotRequest) -> (QuotaGateDecision, CacheOutcome) {
         let key = request.key.clone();
+
+        // Fast path: cache hit. Done as a separate `get` so we can label the
+        // metric on the service side; `try_get_with` below masks hit-vs-miss.
+        if let Some(cached) = self.inner.get(&key).await {
+            return (gate_from_decision(cached.decision), CacheOutcome::Hit);
+        }
+
+        // Cache miss: fetch from CDot with moka coalescing for concurrent callers.
+        let client = self.client.clone();
         let entry = self
             .inner
             .try_get_with(key, async move {
+                let start = Instant::now();
                 match client.check(&request).await {
-                    QuotaOutcome::Decided { decision, ttl } => Ok(CachedDecision {
-                        decision,
-                        expires_at: Instant::now() + jittered(ttl),
-                    }),
-                    QuotaOutcome::FailOpen => Err(FailOpen),
+                    QuotaOutcome::Decided { decision, ttl } => {
+                        record_cdot_duration(
+                            start.elapsed().as_secs_f64(),
+                            outcome_label(&decision),
+                        );
+                        Ok(CachedDecision {
+                            decision,
+                            expires_at: Instant::now() + jittered(ttl),
+                        })
+                    }
+                    QuotaOutcome::FailOpen => {
+                        record_cdot_duration(
+                            start.elapsed().as_secs_f64(),
+                            gkg_observability::billing::quota::values::FAIL_OPEN,
+                        );
+                        Err(FailOpen)
+                    }
                 }
             })
             .await;
 
-        match entry {
-            Ok(cached) => cached.decision,
-            Err(_) => QuotaDecision::Allow,
-        }
+        let gate = match entry {
+            Ok(cached) => gate_from_decision(cached.decision),
+            Err(_) => QuotaGateDecision::FailOpen,
+        };
+        (gate, CacheOutcome::Miss)
     }
+}
+
+fn gate_from_decision(decision: QuotaDecision) -> QuotaGateDecision {
+    match decision {
+        QuotaDecision::Allow => QuotaGateDecision::Allow,
+        QuotaDecision::Deny(reason) => QuotaGateDecision::Deny(reason),
+    }
+}
+
+fn outcome_label(decision: &QuotaDecision) -> &'static str {
+    use gkg_observability::billing::quota::values::{ALLOW, DENY};
+    match decision {
+        QuotaDecision::Allow => ALLOW,
+        QuotaDecision::Deny(_) => DENY,
+    }
+}
+
+fn record_cdot_duration(secs: f64, outcome: &'static str) {
+    use gkg_observability::billing::quota::labels::OUTCOME;
+    super::metrics::QUOTA_METRICS
+        .cdot_duration
+        .record(secs, &[opentelemetry::KeyValue::new(OUTCOME, outcome)]);
 }
 
 #[derive(Debug)]
@@ -104,7 +185,6 @@ impl moka::Expiry<CacheKey, CachedDecision> for ExpireByInstant {
 
 #[cfg(test)]
 mod tests {
-    use super::super::client::DenyReason;
     use super::*;
     use axum::Router;
     use axum::http::StatusCode as AxumStatus;
@@ -190,7 +270,10 @@ mod tests {
         let cache = QuotaCache::new(client, 1024);
 
         for _ in 0..3 {
-            assert_eq!(cache.check(request_with("1")).await, QuotaDecision::Allow);
+            assert_eq!(
+                cache.check(request_with("1")).await.0,
+                QuotaGateDecision::Allow
+            );
         }
 
         // First call hits the server; the next two are cache hits.
@@ -217,8 +300,8 @@ mod tests {
 
         for _ in 0..3 {
             assert_eq!(
-                cache.check(request_with("denied")).await,
-                QuotaDecision::Deny(DenyReason::QuotaExhausted)
+                cache.check(request_with("denied")).await.0,
+                QuotaGateDecision::Deny(DenyReason::QuotaExhausted)
             );
         }
 
@@ -248,7 +331,7 @@ mod tests {
             }));
         }
         for h in handles {
-            assert_eq!(h.await.unwrap(), QuotaDecision::Allow);
+            assert_eq!(h.await.unwrap().0, QuotaGateDecision::Allow);
         }
 
         // 20 concurrent callers, single upstream request due to get_with coalescing.

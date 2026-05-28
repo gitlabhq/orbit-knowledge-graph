@@ -19,6 +19,7 @@ pub struct GrpcConfig {
     // connection-age timer fires (hyperium/tonic#2522).
     pub max_connection_age_grace_secs: u64,
     pub stream_timeout_secs: u64,
+    pub max_header_list_size_bytes: u32,
 }
 
 impl Default for GrpcConfig {
@@ -33,6 +34,7 @@ impl Default for GrpcConfig {
             max_connection_age_secs: 300,
             max_connection_age_grace_secs: 30,
             stream_timeout_secs: 60,
+            max_header_list_size_bytes: 64 * 1024,
         }
     }
 }
@@ -64,5 +66,11 @@ mod tests {
         "#;
         let cfg: GrpcConfig = serde_yaml::from_str(yaml).expect("valid config");
         assert_eq!(cfg.max_connection_age_grace_secs, 30);
+    }
+
+    #[test]
+    fn default_max_header_list_size_exceeds_hyper_default() {
+        let cfg = GrpcConfig::default();
+        assert!(cfg.max_header_list_size_bytes > 16 * 1024);
     }
 }

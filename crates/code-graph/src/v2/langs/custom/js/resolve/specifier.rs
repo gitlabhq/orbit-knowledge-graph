@@ -1,8 +1,10 @@
 use crate::utils::Range;
 use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
+use rayon::prelude::*;
 use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use super::super::types::{
@@ -125,8 +127,6 @@ impl FileSystem for RepoFileSystem {
 
 impl JsCrossFileResolver {
     pub fn new(probe: &WorkspaceProbe) -> Self {
-        // Probe canonicalized root already; reuse it so every subsystem
-        // compares paths against the same absolute form.
         let root_dir = probe.root_dir().to_path_buf();
         let import_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Import, vec![]);
         let require_resolver = create_resolver(probe, &root_dir, JsResolutionMode::Require, vec![]);
@@ -135,6 +135,13 @@ impl JsCrossFileResolver {
             require_resolver,
             root_dir,
         }
+    }
+
+    /// Create a resolver with project alias hints already applied.
+    pub fn new_with_hints(probe: &WorkspaceProbe) -> Self {
+        let mut resolver = Self::new(probe);
+        resolver.apply_project_resolution_hints(probe);
+        resolver
     }
 
     /// Apply explicit project alias config when the repository exposes it
@@ -155,85 +162,100 @@ impl JsCrossFileResolver {
 
     /// Resolve cross-file CALLS edges for imported function calls.
     ///
-    /// For each file's `ImportedCall` edges, resolves the import specifier to a
-    /// target file, finds the matching exported definition, and produces a
-    /// definition-to-definition CALLS relationship across files.
+    /// Files are resolved in parallel via rayon. Each file's calls are
+    /// processed sequentially within the file, but different files run
+    /// concurrently.
     pub fn resolve_calls(
         &self,
         calls_by_file: &[(String, Vec<JsCallEdge>)],
         modules: &JsModuleIndex,
         deadline: &Option<Instant>,
     ) -> Vec<JsResolvedCallRelationship> {
+        let timed_out = AtomicBool::new(false);
+        let results = calls_by_file
+            .par_iter()
+            .flat_map_iter(|(file_path, calls)| {
+                if timed_out.load(Ordering::Relaxed)
+                    || deadline.is_some_and(|d| Instant::now() >= d)
+                {
+                    timed_out.store(true, Ordering::Relaxed);
+                    return Vec::new();
+                }
+                self.resolve_file_calls(file_path, calls, modules)
+            })
+            .collect();
+        if timed_out.load(Ordering::Relaxed) {
+            tracing::warn!("js cross-file call resolution timed out");
+        }
+        results
+    }
+
+    fn resolve_file_calls(
+        &self,
+        file_path: &str,
+        calls: &[JsCallEdge],
+        modules: &JsModuleIndex,
+    ) -> Vec<JsResolvedCallRelationship> {
+        let abs_path = self.root_dir.join(file_path);
         let mut relationships = Vec::new();
 
-        for (file_path, calls) in calls_by_file {
-            if deadline.is_some_and(|d| Instant::now() >= d) {
-                tracing::warn!("js cross-file call resolution timed out");
-                break;
-            }
-            let abs_path = self.root_dir.join(file_path);
-
-            'call_loop: for call in calls {
-                let JsCallTarget::ImportedCall {
-                    imported_call:
-                        super::super::types::JsImportedCall {
-                            fallback_binding: _,
-                            binding,
-                            member_path,
-                            invocation_kind,
-                        },
-                } = &call.callee;
-
-                let resolved = match self.resolve_specifier(
-                    &abs_path,
-                    &binding.specifier,
-                    binding.resolution_mode,
-                ) {
-                    Ok(r) => r,
-                    Err(_) => continue,
-                };
-                let resolved_path = resolved.into_path_buf();
-                let relative_resolved = match resolved_path.strip_prefix(&self.root_dir) {
-                    Ok(rel) => rel.to_string_lossy().to_string(),
-                    Err(_) => continue,
-                };
-
-                let Some((mut final_path, mut final_binding)) =
-                    self.resolve_binding(&binding.imported_name, &relative_resolved, modules)
-                else {
-                    continue;
-                };
-
-                for member_name in member_path {
-                    let Some((next_path, next_binding)) = self.resolve_member_binding(
-                        &final_path,
-                        &final_binding,
-                        member_name,
-                        modules,
-                    ) else {
-                        continue 'call_loop;
-                    };
-                    final_path = next_path;
-                    final_binding = next_binding;
-                }
-
-                if !binding_supports_invocation(&final_binding, *invocation_kind) {
-                    continue;
-                }
-                let Some(final_range) = self.binding_definition_range(&final_binding) else {
-                    continue;
-                };
-
-                relationships.push(JsResolvedCallRelationship {
-                    source_path: file_path.clone(),
-                    source_definition_range: match &call.caller {
-                        JsCallSite::Definition { range, .. } => Some(*range),
-                        JsCallSite::ModuleLevel => None,
+        'call_loop: for call in calls {
+            let JsCallTarget::ImportedCall {
+                imported_call:
+                    super::super::types::JsImportedCall {
+                        fallback_binding: _,
+                        binding,
+                        member_path,
+                        invocation_kind,
                     },
-                    target_path: final_path,
-                    target_definition_range: final_range,
-                });
+            } = &call.callee;
+
+            let resolved = match self.resolve_specifier(
+                &abs_path,
+                &binding.specifier,
+                binding.resolution_mode,
+            ) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let resolved_path = resolved.into_path_buf();
+            let relative_resolved = match resolved_path.strip_prefix(&self.root_dir) {
+                Ok(rel) => rel.to_string_lossy().to_string(),
+                Err(_) => continue,
+            };
+
+            let Some((mut final_path, mut final_binding)) =
+                self.resolve_binding(&binding.imported_name, &relative_resolved, modules)
+            else {
+                continue;
+            };
+
+            for member_name in member_path {
+                let Some((next_path, next_binding)) =
+                    self.resolve_member_binding(&final_path, &final_binding, member_name, modules)
+                else {
+                    continue 'call_loop;
+                };
+                final_path = next_path;
+                final_binding = next_binding;
             }
+
+            if !binding_supports_invocation(&final_binding, *invocation_kind) {
+                continue;
+            }
+            let Some(final_range) = self.binding_definition_range(&final_binding) else {
+                continue;
+            };
+
+            relationships.push(JsResolvedCallRelationship {
+                source_path: file_path.to_string(),
+                source_definition_range: match &call.caller {
+                    JsCallSite::Definition { range, .. } => Some(*range),
+                    JsCallSite::ModuleLevel => None,
+                },
+                target_path: final_path,
+                target_definition_range: final_range,
+            });
         }
 
         relationships

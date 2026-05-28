@@ -198,6 +198,12 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
 
+    nats.ensure_kv_bucket_exists(
+        indexer::indexing_status::INDEXING_PROGRESS_BUCKET,
+        nats_client::KvBucketConfig::default(),
+    )
+    .await?;
+
     let kv_services: Arc<dyn nats_client::KvServices> =
         Arc::new(nats_client::KvServicesImpl::new(Arc::clone(&nats)));
     let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(kv_services);
@@ -209,6 +215,7 @@ async fn run_webserver(
     }
 
     gkg_billing::register_metrics();
+    gkg_billing::register_quota_metrics();
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(

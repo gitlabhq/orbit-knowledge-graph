@@ -49,6 +49,7 @@ pub fn catalog() -> Vec<&'static MetricSpec> {
     v.extend(server::schema_watcher::CATALOG);
     v.extend(resilience::CATALOG);
     v.extend(billing::events::CATALOG);
+    v.extend(billing::quota::CATALOG);
     v
 }
 
@@ -60,7 +61,7 @@ mod tests {
     #[test]
     fn catalog_is_nonempty() {
         assert!(
-            catalog().len() >= 58,
+            catalog().len() >= 62,
             "catalog shrank unexpectedly; did a module fail to register?"
         );
     }

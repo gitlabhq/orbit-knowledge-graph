@@ -56,6 +56,7 @@ impl TestContext {
             TEST_USERNAME,
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
     }
 

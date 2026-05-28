@@ -179,6 +179,17 @@ The billing observer instruments the path from a successful query to a Snowplow 
 | `gkg.billing.events.dropped` | Counter | count | `reason` (realm_missing / realm_unrecognized / event_build_failed) | Billing events not emitted because event construction failed |
 | `gkg.billing.events.rejected` | Counter | count | | Billing events refused by the labkit tracker at enqueue (queue full or shutdown). HTTP delivery failures occur in labkit's background loop and are not surfaced through this counter. |
 
+*Quota gate metrics:*
+
+The quota gate instruments every decision made by the CDot-backed quota check. All series are pre-registered at zero on startup. `cache=miss` does not imply a 1:1 CDot call ratio — moka coalesces concurrent misses for the same key, so use `cdot.duration_seconds_count` for actual upstream call counts.
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.billing.quota.decisions` | Counter | count | `decision` (allow/deny/fail_open), `cache` (hit/miss), `source_type` (mcp/rest) | Quota gate decisions per request |
+| `gkg.billing.quota.cdot.duration` | Histogram | s | `outcome` (allow/deny/fail_open) | Latency of upstream CDot HEAD requests; count gives actual CDot call rate |
+| `gkg.billing.quota.bypassed` | Counter | count | `source_type` (frontend/core/dws) | Requests that skipped the quota gate because their source type is not metered |
+| `gkg.billing.quota.cache.entries` | Gauge | count | | Current number of entries in the per-pod quota decision cache |
+
 **Shared Infrastructure Metrics:**
 
 - Disk and Memory usage per container

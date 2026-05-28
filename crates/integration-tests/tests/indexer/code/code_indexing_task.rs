@@ -68,7 +68,7 @@ async fn indexes_repository() {
 async fn indexes_file_nodes_for_all_archive_files() {
     let project_id: i64 = 8;
     let commit_sha = "allfiles";
-    let traversal_path = "/all-files";
+    let traversal_path = "1/8/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -161,7 +161,7 @@ async fn indexes_file_nodes_for_all_archive_files() {
 async fn indexes_calls_and_extends_edges() {
     let project_id: i64 = 99;
     let commit_sha = "callsdef";
-    let traversal_path = "1/99";
+    let traversal_path = "1/99/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -281,15 +281,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        "/stale-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit1", 1, "1/2/").await;
 
     assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
     assert_active_definitions(
@@ -314,15 +306,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         }",
         )],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
-        "/stale-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit2", 2, "1/2/").await;
 
     assert_file_not_active(&clickhouse, project_id, "src/Main.java").await;
     assert_no_active_definitions(&clickhouse, project_id, "src/Main.java").await;
@@ -364,15 +348,7 @@ async fn disk_is_clean_after_successful_indexing() {
     let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        commit_sha,
-        1,
-        "/cleanup-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, commit_sha, 1, "1/4/").await;
 
     assert_code_indexed(&clickhouse, project_id).await;
 
@@ -408,43 +384,19 @@ async fn disk_is_clean_after_multiple_reindexes() {
     let cache_dir = deps.cache_dir_path().to_path_buf();
     let handler = deps.code_indexing_task_handler();
 
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit1",
-        1,
-        "/multi-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit1", 1, "1/5/").await;
 
     mock.replace_archive(
         project_id,
         &[("src/Main.java", "public class Main { public void v2() {} }")],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit2",
-        2,
-        "/multi-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit2", 2, "1/5/").await;
 
     mock.replace_archive(
         project_id,
         &[("src/Main.java", "public class Main { public void v3() {} }")],
     );
-    index_code(
-        &handler,
-        &clickhouse,
-        project_id,
-        "commit3",
-        3,
-        "/multi-test",
-    )
-    .await;
+    index_code(&handler, &clickhouse, project_id, "commit3", 3, "1/5/").await;
 
     assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v3"]).await;
 
@@ -462,7 +414,7 @@ async fn disk_is_clean_after_multiple_reindexes() {
 #[tokio::test]
 async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
     let project_id: i64 = 6;
-    let traversal_path = "/write-failure-test";
+    let traversal_path = "1/6/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
@@ -543,7 +495,7 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
 #[tokio::test]
 async fn empty_200_archive_checkpoints_as_empty_repository() {
     let project_id: i64 = 7;
-    let traversal_path = "/empty-archive-test";
+    let traversal_path = "1/7/";
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,

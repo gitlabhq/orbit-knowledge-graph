@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{info, warn};
+use tracing::{Instrument, info, info_span, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
@@ -81,6 +81,34 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
         observer: &mut dyn IndexingObserver,
     ) -> Result<IndexOutcome, HandlerError> {
+        let Some(namespace_id) =
+            gkg_utils::traversal_path::top_level_namespace_id(&request.traversal_path)
+        else {
+            return Err(HandlerError::Processing(format!(
+                "traversal_path {:?} has no namespace_id",
+                request.traversal_path
+            )));
+        };
+
+        let span = info_span!(
+            "code_indexing_project",
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %request.branch,
+        );
+
+        self.index_project_inner(context, request, observer)
+            .instrument(span)
+            .await
+    }
+
+    async fn index_project_inner(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+        observer: &mut dyn IndexingObserver,
+    ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
         let repository = match self
             .resolver
@@ -127,9 +155,14 @@ impl CodeIndexingPipeline {
                 return Err(err);
             }
         };
+        let extraction_duration = fetch_start.elapsed();
         self.metrics
             .repository_fetch_duration
-            .record(fetch_start.elapsed().as_secs_f64(), &[]);
+            .record(extraction_duration.as_secs_f64(), &[]);
+        info!(
+            extraction_duration_ms = extraction_duration.as_millis() as u64,
+            "repository extraction completed"
+        );
 
         let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
@@ -270,16 +303,12 @@ impl CodeIndexingPipeline {
                 ontology: self.ontology.clone(),
                 table_names: self.table_names.clone(),
             });
-        let sink: Arc<dyn code_graph::v2::BatchSink> =
-            Arc::new(arrow_converter::ClickHouseSink::new(
-                context.destination.clone(),
-                tokio::runtime::Handle::current(),
-            ));
+        let buffered_sink = Arc::new(arrow_converter::BufferedClickHouseSink::new(
+            context.destination.clone(),
+        ));
+        let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
 
-        // Run the synchronous pipeline on a blocking thread so the tokio
-        // worker is freed. The writer thread inside the pipeline calls
-        // runtime.block_on() which would deadlock a single-threaded
-        // tokio runtime if we blocked the worker here.
+        let code_graph_start = Instant::now();
         let repo_dir_owned = repo_dir.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
             Pipeline::run_with_tracer(
@@ -293,15 +322,30 @@ impl CodeIndexingPipeline {
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
+        let code_graph_duration = code_graph_start.elapsed();
+        info!(
+            code_graph_duration_ms = code_graph_duration.as_millis() as u64,
+            "code-graph building completed"
+        );
+
+        let flush_start = Instant::now();
+        if let Err(e) = buffered_sink.flush().await {
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during flush for project {project_id}: {e}"
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
+        }
+        let graph_write_duration = flush_start.elapsed();
+        info!(
+            graph_write_duration_ms = graph_write_duration.as_millis() as u64,
+            "graph writing completed"
+        );
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
-        // The pipeline orchestrator increments `stats.files_parsed` by
-        // the full batch size for each language whose `process_files`
-        // returns `Ok(())` — including files that recorded a per-file
-        // skip or fault. Subtract those out here so the reported parsed
-        // count is the truly successful one.
         let parsed_count = result
             .stats
             .files_parsed
@@ -356,6 +400,7 @@ impl CodeIndexingPipeline {
 
         context.progress.notify_in_progress().await;
 
+        let cleanup_start = Instant::now();
         if let Err(error) = self
             .stale_data_cleaner
             .delete_stale_data(traversal_path, project_id, branch, indexed_at)
@@ -368,6 +413,11 @@ impl CodeIndexingPipeline {
                 "failed to delete stale data, will retry on next indexing"
             );
         }
+        let stale_data_cleanup_duration = cleanup_start.elapsed();
+        info!(
+            stale_data_cleanup_duration_ms = stale_data_cleanup_duration.as_millis() as u64,
+            "stale data cleanup completed"
+        );
 
         Ok(())
     }

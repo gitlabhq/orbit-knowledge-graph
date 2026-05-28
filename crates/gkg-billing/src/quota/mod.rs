@@ -2,19 +2,29 @@ mod cache;
 mod client;
 pub mod inputs;
 mod key;
+mod metrics;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use gkg_server_config::BillingConfig;
 use tonic::Status;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::constants::{METERED_SOURCE_TYPES, QUOTA_MAX_CACHE_ENTRIES};
-use cache::QuotaCache;
-use client::{QuotaClient, QuotaDecision};
+use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
+use client::QuotaClient;
 pub use inputs::QuotaCheckInputs;
 use key::CdotRequest;
+
+pub use metrics::register as register_metrics;
+
+#[cfg(test)]
+pub(crate) static DECISION_RECORD_HITS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+pub(crate) static BYPASS_RECORD_HITS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 pub struct QuotaService {
     inner: Option<QuotaServiceInner>,
@@ -64,6 +74,7 @@ impl QuotaService {
         };
 
         if !METERED_SOURCE_TYPES.contains(&inputs.source_type.as_str()) {
+            record_bypass(&inputs.source_type);
             return Ok(());
         }
 
@@ -83,10 +94,13 @@ impl QuotaService {
             ));
         };
 
-        match inner.cache.check(request).await {
-            QuotaDecision::Allow => Ok(()),
-            QuotaDecision::Deny(reason) => {
-                info!(
+        let (gate_decision, cache_outcome) = inner.cache.check(request).await;
+        record_decision(&gate_decision, cache_outcome, &inputs.source_type);
+
+        match gate_decision {
+            QuotaGateDecision::Allow | QuotaGateDecision::FailOpen => Ok(()),
+            QuotaGateDecision::Deny(reason) => {
+                debug!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
                     root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
@@ -100,6 +114,62 @@ impl QuotaService {
                 Err(Status::resource_exhausted(reason.message()))
             }
         }
+    }
+}
+
+fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
+    use gkg_observability::billing::quota::labels::{CACHE as CACHE_LABEL, DECISION, SOURCE_TYPE};
+    use gkg_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
+
+    let decision_label = match gate {
+        QuotaGateDecision::Allow => ALLOW,
+        QuotaGateDecision::Deny(_) => DENY,
+        QuotaGateDecision::FailOpen => FAIL_OPEN,
+    };
+    let cache_label = match cache {
+        CacheOutcome::Hit => HIT,
+        CacheOutcome::Miss => MISS,
+    };
+
+    metrics::QUOTA_METRICS.decisions.add(
+        1,
+        &[
+            opentelemetry::KeyValue::new(DECISION, decision_label),
+            opentelemetry::KeyValue::new(CACHE_LABEL, cache_label),
+            opentelemetry::KeyValue::new(SOURCE_TYPE, metered_source_type_label(source_type)),
+        ],
+    );
+    #[cfg(test)]
+    DECISION_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn record_bypass(source_type: &str) {
+    use gkg_observability::billing::quota::labels::SOURCE_TYPE;
+    metrics::QUOTA_METRICS.bypassed.add(
+        1,
+        &[opentelemetry::KeyValue::new(
+            SOURCE_TYPE,
+            bypass_source_type_label(source_type),
+        )],
+    );
+    #[cfg(test)]
+    BYPASS_RECORD_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn metered_source_type_label(s: &str) -> &'static str {
+    match s {
+        "mcp" => "mcp",
+        "rest" => "rest",
+        _ => "other",
+    }
+}
+
+fn bypass_source_type_label(s: &str) -> &'static str {
+    match s {
+        "frontend" => "frontend",
+        "core" => "core",
+        "dws" => "dws",
+        _ => "other",
     }
 }
 
@@ -236,34 +306,59 @@ mod tests {
         let (url, counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let svc = service_for(url);
 
+        let before = BYPASS_RECORD_HITS.load(Ordering::Relaxed);
+
         assert!(svc.check(&inputs_with_source("frontend")).await.is_ok());
         assert!(svc.check(&inputs_with_source("core")).await.is_ok());
         assert!(svc.check(&inputs_with_source("dws")).await.is_ok());
 
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+        let after = BYPASS_RECORD_HITS.load(Ordering::Relaxed);
+        assert!(
+            after >= before + 3,
+            "record_bypass must fire once per non-metered source (before={before}, after={after})"
+        );
     }
 
     #[tokio::test]
     async fn mcp_denies_on_payment_required() {
         let (url, _counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let svc = service_for(url);
+        let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+        assert!(
+            after > before,
+            "record_decision must fire on deny (before={before}, after={after})"
+        );
     }
 
     #[tokio::test]
     async fn rest_denies_on_payment_required() {
         let (url, _counter) = counting_server(AxumStatus::PAYMENT_REQUIRED).await;
         let svc = service_for(url);
+        let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         let err = svc.check(&inputs_with_source("rest")).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+        let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+        assert!(
+            after > before,
+            "record_decision must fire on deny (before={before}, after={after})"
+        );
     }
 
     #[tokio::test]
     async fn mcp_allowed_on_ok() {
         let (url, _counter) = counting_server(AxumStatus::OK).await;
         let svc = service_for(url);
+        let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+        let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+        assert!(
+            after > before,
+            "record_decision must fire on allow (before={before}, after={after})"
+        );
     }
 
     #[tokio::test]
@@ -294,6 +389,12 @@ mod tests {
     async fn fails_open_on_upstream_5xx() {
         let (url, _counter) = counting_server(AxumStatus::INTERNAL_SERVER_ERROR).await;
         let svc = service_for(url);
+        let before = DECISION_RECORD_HITS.load(Ordering::Relaxed);
         assert!(svc.check(&inputs_with_source("mcp")).await.is_ok());
+        let after = DECISION_RECORD_HITS.load(Ordering::Relaxed);
+        assert!(
+            after > before,
+            "record_decision must fire on fail-open (before={before}, after={after})"
+        );
     }
 }
