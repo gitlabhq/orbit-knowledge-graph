@@ -1049,6 +1049,7 @@ CREATE TABLE IF NOT EXISTS gl_ci_edge (
     INDEX idx_target_id target_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
     PROJECTION agg_counts_by_source (
       SELECT relationship_kind, target_kind, source_id, traversal_path, count()
       GROUP BY relationship_kind, target_kind, source_id, traversal_path
@@ -1060,7 +1061,7 @@ CREATE TABLE IF NOT EXISTS gl_ci_edge (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -1076,6 +1077,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     INDEX idx_target_id target_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
     PROJECTION agg_counts_by_source (
       SELECT relationship_kind, target_kind, source_id, traversal_path, count()
       GROUP BY relationship_kind, target_kind, source_id, traversal_path
@@ -1087,7 +1089,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, relationship_kind, source_id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
