@@ -4,12 +4,14 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use super::NamespaceDeletionStore;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::schema::campaign::CampaignState;
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
 use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
@@ -23,6 +25,7 @@ pub struct NamespaceDeletionScheduler {
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDeletionSchedulerConfig,
+    campaign_state: CampaignState,
 }
 
 impl NamespaceDeletionScheduler {
@@ -32,6 +35,7 @@ impl NamespaceDeletionScheduler {
         nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDeletionSchedulerConfig,
+        campaign_state: CampaignState,
     ) -> Self {
         Self {
             store,
@@ -39,6 +43,7 @@ impl NamespaceDeletionScheduler {
             nats,
             metrics,
             config,
+            campaign_state,
         }
     }
 }
@@ -135,6 +140,8 @@ impl NamespaceDeletionScheduler {
             TaskError::new(error)
         })?;
 
+        let dispatch_id = Uuid::new_v4();
+        let campaign_id = *self.campaign_state.read().unwrap();
         let mut dispatched = 0u64;
         let mut skipped = 0u64;
 
@@ -142,6 +149,8 @@ impl NamespaceDeletionScheduler {
             let request = NamespaceDeletionRequest {
                 namespace_id: entry.namespace_id,
                 traversal_path: entry.traversal_path.clone(),
+                dispatch_id,
+                campaign_id,
             };
 
             let subscription = request.publish_subscription();
@@ -254,6 +263,7 @@ mod tests {
             Arc::new(MockNatsServices::new()),
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),
+            crate::schema::campaign::new_campaign_state(),
         )
     }
 
@@ -293,6 +303,7 @@ mod tests {
             nats.clone(),
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),
+            crate::schema::campaign::new_campaign_state(),
         );
 
         scheduler.run().await.unwrap();
@@ -346,6 +357,7 @@ mod tests {
             nats,
             ScheduledTaskMetrics::new(),
             NamespaceDeletionSchedulerConfig::default(),
+            crate::schema::campaign::new_campaign_state(),
         );
 
         scheduler.run().await.unwrap();

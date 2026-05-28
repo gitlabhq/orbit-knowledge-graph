@@ -5,12 +5,14 @@ use std::time::Instant;
 use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::modules::code::config::subjects;
 use crate::modules::code::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
+use crate::schema::campaign::CampaignState;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use gkg_server_config::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
@@ -21,6 +23,7 @@ pub struct SiphonCodeIndexingTaskDispatcher {
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
     config: SiphonCodeIndexingTaskDispatcherConfig,
+    campaign_state: CampaignState,
 }
 
 impl SiphonCodeIndexingTaskDispatcher {
@@ -28,11 +31,13 @@ impl SiphonCodeIndexingTaskDispatcher {
         nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: SiphonCodeIndexingTaskDispatcherConfig,
+        campaign_state: CampaignState,
     ) -> Self {
         Self {
             nats,
             metrics,
             config,
+            campaign_state,
         }
     }
 
@@ -75,6 +80,8 @@ impl ScheduledTask for SiphonCodeIndexingTaskDispatcher {
 impl SiphonCodeIndexingTaskDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         let subscription = self.siphon_subscription();
+        let dispatch_id = Uuid::new_v4();
+        let campaign_id = *self.campaign_state.read().unwrap();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -92,7 +99,7 @@ impl SiphonCodeIndexingTaskDispatcher {
                 break;
             }
 
-            let requests = self.collect_latest_requests(&messages)?;
+            let requests = self.collect_latest_requests(&messages, dispatch_id, campaign_id)?;
 
             for request in requests.into_values() {
                 let envelope = Envelope::new(&request).map_err(|error| {
@@ -153,6 +160,8 @@ impl SiphonCodeIndexingTaskDispatcher {
     fn collect_latest_requests(
         &self,
         messages: &[crate::nats::NatsMessage],
+        dispatch_id: Uuid,
+        campaign_id: Option<Uuid>,
     ) -> Result<HashMap<ProjectBranch, CodeIndexingTaskRequest>, TaskError> {
         let mut latest: HashMap<ProjectBranch, CodeIndexingTaskRequest> = HashMap::new();
 
@@ -205,6 +214,8 @@ impl SiphonCodeIndexingTaskDispatcher {
                     branch: Some(branch),
                     commit_sha: Some(commit_sha.to_string()),
                     traversal_path: traversal_path.to_string(),
+                    dispatch_id,
+                    campaign_id,
                 };
                 latest
                     .entry(key)
@@ -243,6 +254,7 @@ mod tests {
             nats,
             test_metrics(),
             SiphonCodeIndexingTaskDispatcherConfig::default(),
+            crate::schema::campaign::new_campaign_state(),
         )
     }
 

@@ -6164,6 +6164,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tower",
+ "uuid",
 ]
 
 [[package]]

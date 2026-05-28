@@ -4,10 +4,12 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
+use crate::schema::campaign::CampaignState;
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
 use gkg_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};
@@ -16,6 +18,7 @@ pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
     config: GlobalDispatcherConfig,
+    campaign_state: CampaignState,
 }
 
 impl GlobalDispatcher {
@@ -23,11 +26,13 @@ impl GlobalDispatcher {
         nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: GlobalDispatcherConfig,
+        campaign_state: CampaignState,
     ) -> Self {
         Self {
             nats,
             metrics,
             config,
+            campaign_state,
         }
     }
 }
@@ -57,8 +62,11 @@ impl ScheduledTask for GlobalDispatcher {
 
 impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
+        let campaign_id = *self.campaign_state.read().unwrap();
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
+            dispatch_id: Uuid::new_v4(),
+            campaign_id,
         })
         .map_err(|error| {
             self.metrics.record_error(self.name(), "publish");

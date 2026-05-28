@@ -66,6 +66,9 @@ fn version_table_ddl() -> CreateTable {
     }
 }
 
+const ADD_CAMPAIGN_ID_COLUMN: &str = "\
+ALTER TABLE gkg_schema_version ADD COLUMN IF NOT EXISTS campaign_id Nullable(UUID) DEFAULT NULL";
+
 fn read_active_version_query() -> (
     String,
     std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
@@ -102,20 +105,8 @@ fn write_version_query(
     emit_simple_query(&Node::Insert(Box::new(insert))).expect("write_version query must be valid")
 }
 
-fn write_migrating_version_query(
-    version: u32,
-) -> (
-    String,
-    std::collections::HashMap<String, gkg_utils::clickhouse::ParamValue>,
-) {
-    let insert = Insert::new(
-        VERSION_TABLE,
-        vec!["version".into(), "status".into()],
-        vec![vec![Expr::uint32(version), Expr::string("migrating")]],
-    );
-    emit_simple_query(&Node::Insert(Box::new(insert)))
-        .expect("write_migrating_version query must be valid")
-}
+const WRITE_MIGRATING_VERSION_WITH_CAMPAIGN: &str = "\
+INSERT INTO gkg_schema_version (version, status, campaign_id) VALUES ({version:UInt32}, 'migrating', {campaign_id:UUID})";
 
 #[derive(Debug, Error)]
 pub enum SchemaVersionError {
@@ -191,26 +182,27 @@ pub async fn write_schema_version(
     Ok(())
 }
 
-/// Records a schema version as `migrating` in ClickHouse.
-///
-/// Used by the migration orchestrator to signal that new-prefix tables are
-/// being populated. The version remains `migrating` until the Webserver
-/// cutover (tracked in a subsequent issue).
+/// Records a schema version as `migrating` in ClickHouse with a campaign_id
+/// for analytics correlation.
 pub async fn write_migrating_version(
     graph: &ArrowClickHouseClient,
     version: u32,
+    campaign_id: uuid::Uuid,
 ) -> Result<(), SchemaVersionError> {
-    let (sql, params) = write_migrating_version_query(version);
-    let mut query = graph.query(&sql);
-    for (name, param) in &params {
-        query = query.param(name, &param.value);
-    }
-    query.execute().await?;
+    graph
+        .query(WRITE_MIGRATING_VERSION_WITH_CAMPAIGN)
+        .param("version", version)
+        .param("campaign_id", campaign_id.to_string())
+        .execute()
+        .await?;
     Ok(())
 }
 
 const READ_MIGRATING_VERSION: &str = "\
 SELECT version FROM gkg_schema_version FINAL WHERE status = 'migrating' ORDER BY created_at DESC LIMIT 1";
+
+const READ_MIGRATING_CAMPAIGN_ID: &str = "\
+SELECT campaign_id FROM gkg_schema_version FINAL WHERE status = 'migrating' ORDER BY created_at DESC LIMIT 1";
 
 const READ_ALL_VERSIONS: &str = "\
 SELECT version, CAST(status AS String) AS status FROM gkg_schema_version FINAL ORDER BY version DESC";
@@ -237,6 +229,26 @@ pub async fn read_migrating_version(
             continue;
         }
         return Ok(ArrowUtils::get_column::<UInt32Type>(batch, "version", 0));
+    }
+
+    Ok(None)
+}
+
+/// Reads the campaign_id of the migrating schema version from ClickHouse.
+///
+/// Returns `None` if no version is currently migrating or if the migrating
+/// version has no campaign_id (pre-migration rows before this feature).
+pub async fn read_migrating_campaign_id(
+    graph: &ArrowClickHouseClient,
+) -> Result<Option<uuid::Uuid>, SchemaVersionError> {
+    let batches = graph.query_arrow(READ_MIGRATING_CAMPAIGN_ID).await?;
+
+    for batch in &batches {
+        if batch.num_rows() == 0 {
+            continue;
+        }
+        let value = ArrowUtils::get_column_string(batch, "campaign_id", 0);
+        return Ok(value.and_then(|s| s.parse::<uuid::Uuid>().ok()));
     }
 
     Ok(None)
@@ -308,7 +320,7 @@ pub async fn mark_version_dropped(
     Ok(())
 }
 
-/// Ensures the `gkg_schema_version` table exists.
+/// Ensures the `gkg_schema_version` table exists and has all expected columns.
 ///
 /// Called by all service modes (Indexer, Webserver, DispatchIndexing) at
 /// startup so the control table is always present. Fresh install handling
@@ -316,6 +328,7 @@ pub async fn mark_version_dropped(
 /// orchestrator in `schema::migration::run_if_needed`.
 pub async fn init(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionError> {
     ensure_version_table(graph).await?;
+    graph.execute(ADD_CAMPAIGN_ID_COLUMN).await?;
     Ok(())
 }
 
@@ -391,11 +404,17 @@ mod tests {
 
     #[test]
     fn migrating_query_uses_migrating_status() {
-        let (sql, params) = write_migrating_version_query(1);
         assert!(
-            sql.contains("gkg_schema_version"),
-            "migrating query must target version table: {sql}"
+            WRITE_MIGRATING_VERSION_WITH_CAMPAIGN.contains("gkg_schema_version"),
+            "migrating query must target version table"
         );
-        assert!(!params.is_empty(), "migrating query must have parameters");
+        assert!(
+            WRITE_MIGRATING_VERSION_WITH_CAMPAIGN.contains("migrating"),
+            "migrating query must use migrating status"
+        );
+        assert!(
+            WRITE_MIGRATING_VERSION_WITH_CAMPAIGN.contains("campaign_id"),
+            "migrating query must include campaign_id"
+        );
     }
 }

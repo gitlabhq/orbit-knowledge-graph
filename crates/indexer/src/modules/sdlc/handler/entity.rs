@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use tokio::task::JoinSet;
 use tracing::{Instrument, info, info_span};
+use uuid::Uuid;
 
 use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
@@ -35,6 +36,8 @@ struct IndexingRequest {
     scope_key: String,
     traversal_path: Option<String>,
     namespace_id: Option<i64>,
+    dispatch_id: Uuid,
+    campaign_id: Option<Uuid>,
 }
 
 impl EntityHandler {
@@ -73,6 +76,8 @@ impl EntityHandler {
                     scope_key: "global".to_string(),
                     traversal_path: None,
                     namespace_id: None,
+                    dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
             EtlScope::Namespaced => {
@@ -83,6 +88,8 @@ impl EntityHandler {
                     scope_key: namespace_position_key(payload.namespace),
                     traversal_path: Some(payload.traversal_path),
                     namespace_id: Some(payload.namespace),
+                    dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
         }
@@ -96,6 +103,8 @@ impl EntityHandler {
         let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
             SdlcOtelObserver::new(self.metrics.clone()),
         )]);
+        observer.set_dispatch_id(request.dispatch_id);
+        observer.set_campaign_id(request.campaign_id);
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
         if let Some(namespace_id) = request.namespace_id {
@@ -308,8 +317,15 @@ impl Handler for EntityHandler {
                 "entity_indexing",
                 entity = %self.plan.name,
                 namespace_id = id,
+                dispatch_id = %request.dispatch_id,
+                campaign_id = ?request.campaign_id,
             ),
-            None => info_span!("entity_indexing", entity = %self.plan.name),
+            None => info_span!(
+                "entity_indexing",
+                entity = %self.plan.name,
+                dispatch_id = %request.dispatch_id,
+                campaign_id = ?request.campaign_id,
+            ),
         };
         let traversal_path = request.traversal_path.clone();
 

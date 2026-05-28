@@ -25,6 +25,7 @@ use std::time::Duration;
 use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
 use thiserror::Error;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use super::metrics::MigrationMetrics;
 
@@ -157,12 +158,15 @@ async fn run_migration(
         return create_result;
     }
 
-    // Phase 4: mark migrating in gkg_schema_version.
+    // Phase 4: mark migrating in gkg_schema_version with a campaign_id for
+    // analytics correlation across all dispatch cycles in this migration.
+    let campaign_id = Uuid::new_v4();
     info!(
         version = *SCHEMA_VERSION,
+        %campaign_id,
         "marking schema version as migrating"
     );
-    let mark_result = write_migrating_version(graph, *SCHEMA_VERSION).await;
+    let mark_result = write_migrating_version(graph, *SCHEMA_VERSION, campaign_id).await;
     if let Err(e) = mark_result {
         warn!(error = %e, "failed to mark migrating version — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;

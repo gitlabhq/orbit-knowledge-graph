@@ -164,7 +164,9 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
     write_schema_version(&graph, 0).await.unwrap();
-    write_migrating_version(&graph, 1).await.unwrap();
+    write_migrating_version(&graph, 1, uuid::Uuid::new_v4())
+        .await
+        .unwrap();
 
     // Build and run the dispatcher once.
     let services = indexer::scheduler::connect(&context.nats_config())
@@ -180,6 +182,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
+        indexer::schema::campaign::new_campaign_state(),
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)
@@ -221,7 +224,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
     write_schema_version(&graph, 0).await.unwrap();
-    write_migrating_version(&graph, *SCHEMA_VERSION)
+    write_migrating_version(&graph, *SCHEMA_VERSION, uuid::Uuid::new_v4())
         .await
         .unwrap();
 
@@ -251,6 +254,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
+        indexer::schema::campaign::new_campaign_state(),
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)

@@ -4,11 +4,13 @@ use std::time::Instant;
 use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
+use crate::schema::campaign::CampaignState;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
@@ -26,6 +28,7 @@ pub struct NamespaceDispatcher {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
+    campaign_state: CampaignState,
 }
 
 impl NamespaceDispatcher {
@@ -34,12 +37,14 @@ impl NamespaceDispatcher {
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
+        campaign_state: CampaignState,
     ) -> Self {
         Self {
             nats,
             datalake,
             metrics,
             config,
+            campaign_state,
         }
     }
 }
@@ -91,6 +96,8 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
+        let dispatch_id = Uuid::new_v4();
+        let campaign_id = *self.campaign_state.read().unwrap();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -108,6 +115,8 @@ impl NamespaceDispatcher {
                 namespace: *namespace_id,
                 traversal_path: traversal_path.clone(),
                 watermark,
+                dispatch_id,
+                campaign_id,
             };
 
             let subscription = request.publish_subscription();
