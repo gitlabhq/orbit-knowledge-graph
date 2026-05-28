@@ -752,17 +752,18 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 table_rows.entry(table).or_default().push(i as u32);
             }
 
-            if table_rows.len() == 1 {
-                let table = *table_rows.keys().next().unwrap();
-                if table == self.table_names.default_edge_table() {
-                    result.push((table.to_string(), data.edges));
-                    return Ok(result);
-                }
-            }
-
             // Columns that only exist on gl_code_edge. Sub-batches going
             // to other edge tables (gl_edge) must have them stripped.
             let code_only_cols: &[&str] = &["project_id", "branch"];
+
+            if table_rows.len() == 1 {
+                let table = *table_rows.keys().next().unwrap();
+                if table == self.table_names.default_edge_table() {
+                    let batch = drop_columns(&data.edges, code_only_cols);
+                    result.push((table.to_string(), batch));
+                    return Ok(result);
+                }
+            }
 
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
