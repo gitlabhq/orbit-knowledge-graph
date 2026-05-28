@@ -96,7 +96,6 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
-        let dispatch_id = Uuid::new_v4();
         let campaign_id = *self.campaign_state.read().unwrap();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
@@ -111,11 +110,14 @@ impl NamespaceDispatcher {
                 continue;
             }
 
+            // One dispatch_id per (namespace, cycle): all entity handlers that
+            // fan out from this namespace message share it, but each namespace
+            // in the cycle gets a distinct id.
             let request = NamespaceIndexingRequest {
                 namespace: *namespace_id,
                 traversal_path: traversal_path.clone(),
                 watermark,
-                dispatch_id,
+                dispatch_id: Uuid::new_v4(),
                 campaign_id,
             };
 
