@@ -215,8 +215,15 @@ where
             .map_err(|e| ArchiveError::Io(e.to_string()))?;
     }
 
-    gkg_utils::fs::validate_symlinks(&target_canonical)
+    let removed_symlinks = gkg_utils::fs::validate_symlinks(&target_canonical)
         .map_err(|e| ArchiveError::Archive(e.to_string()))?;
+    if !removed_symlinks.is_empty() {
+        let removed_paths: std::collections::HashSet<String> = removed_symlinks
+            .iter()
+            .map(|removed| removed.relative_path.to_string_lossy().into_owned())
+            .collect();
+        inventory.retain(|entry| !removed_paths.contains(&entry.path));
+    }
 
     Ok(inventory)
 }
@@ -484,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_symlink_escaping_target_directory() {
+    fn skips_symlink_escaping_target_directory() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let data = build_archive(&[
@@ -492,18 +499,33 @@ mod tests {
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
 
-        let result = extract_tar_gz(&data, dir.path());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("symlink target escapes")
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
+            "hello"
         );
+        assert!(!dir.path().join("escape").exists());
     }
 
     #[test]
-    fn rejects_chained_symlink_attack() {
+    fn skips_nested_symlink_escaping_target_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/sub/legit.txt", b"hello"),
+            Entry::Symlink("root/sub/escape", outside.path().to_str().unwrap()),
+        ]);
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("sub/legit.txt")).unwrap(),
+            "hello"
+        );
+        assert!(!dir.path().join("sub/escape").exists());
+    }
+
+    #[test]
+    fn skips_chained_symlink_via_internal_link() {
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
             Entry::File("root/legit.txt", b"legit"),
@@ -511,14 +533,32 @@ mod tests {
             Entry::Symlink("root/b", "a/.."),
         ]);
 
-        let result = extract_tar_gz(&data, dir.path());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("symlink target escapes")
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
+            "legit"
         );
+        assert!(dir.path().join("a").exists());
+        assert!(!dir.path().join("b").exists());
+    }
+
+    #[test]
+    fn skips_direct_escape_and_dependent_dangling_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"legit"),
+            Entry::Symlink("root/a", outside.path().to_str().unwrap()),
+            Entry::Symlink("root/b", "a/.."),
+        ]);
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
+            "legit"
+        );
+        assert!(!dir.path().join("a").exists());
+        assert!(!dir.path().join("b").exists());
     }
 
     #[test]
@@ -551,6 +591,22 @@ mod tests {
             !outside.path().join("b").exists(),
             "create_dir_all must not follow symlink outside target"
         );
+    }
+
+    #[test]
+    fn removes_skipped_symlinks_from_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("root/legit.txt", b"hello"),
+            Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
+        ]);
+
+        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), accept_all_filter)
+            .expect("archive should extract after deleting escaping symlink");
+
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["legit.txt"]);
     }
 
     #[test]
