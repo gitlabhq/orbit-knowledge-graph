@@ -118,11 +118,11 @@ tests:
       - { where: { kind: "Calls" }, row_count: 1 }
       - { where: { kind: "Calls" }, row: { parent: "service.UserService.create_user", child: "service.UserService.get_user" } }
 
-  - name: Definition start_char and end_char are populated
+  - name: Definition start_char and end_char are populated (1-indexed)
     query: |
       MATCH (d:Definition)
       RETURN d.name AS name, d.start_char AS start_char
     assert:
-      - { row: { name: "UserService", start_char: 0 } }
-      - { row: { name: "get_user", start_char: 4 } }
-      - { row: { name: "create_user", start_char: 4 } }
+      - { row: { name: "UserService", start_char: 1 } }
+      - { row: { name: "get_user", start_char: 5 } }
+      - { row: { name: "create_user", start_char: 5 } }
