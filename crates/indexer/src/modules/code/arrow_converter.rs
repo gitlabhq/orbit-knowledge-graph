@@ -630,23 +630,23 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
 }
 
 pub struct ConverterSpecs {
-    directory: Arc<Vec<ColumnSpec>>,
-    file: Arc<Vec<ColumnSpec>>,
-    definition: Arc<Vec<ColumnSpec>>,
-    imported_symbol: Arc<Vec<ColumnSpec>>,
-    edge: Arc<Vec<ColumnSpec>>,
-    denormalized_edge_columns: Arc<[String]>,
+    directory: Vec<ColumnSpec>,
+    file: Vec<ColumnSpec>,
+    definition: Vec<ColumnSpec>,
+    imported_symbol: Vec<ColumnSpec>,
+    edge: Vec<ColumnSpec>,
+    denormalized_edge_columns: Vec<String>,
 }
 
 impl ConverterSpecs {
     pub fn from_ontology(ontology: &Ontology) -> Self {
         Self {
-            directory: Arc::new(entity_specs(ontology, "Directory")),
-            file: Arc::new(entity_specs(ontology, "File")),
-            definition: Arc::new(entity_specs(ontology, "Definition")),
-            imported_symbol: Arc::new(entity_specs(ontology, "ImportedSymbol")),
-            edge: Arc::new(edge_specs(ontology)),
-            denormalized_edge_columns: denormalized_edge_columns(ontology).into(),
+            directory: entity_specs(ontology, "Directory"),
+            file: entity_specs(ontology, "File"),
+            definition: entity_specs(ontology, "Definition"),
+            imported_symbol: entity_specs(ontology, "ImportedSymbol"),
+            edge: edge_specs(ontology),
+            denormalized_edge_columns: denormalized_edge_columns(ontology),
         }
     }
 }
