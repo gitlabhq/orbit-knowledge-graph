@@ -281,6 +281,14 @@ impl CodeIndexingPipeline {
         } else {
             None
         };
+        let handle = tokio::runtime::Handle::current();
+        let progress = context.progress.clone();
+        let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
+            Some(std::sync::Arc::new(move || {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handle.block_on(progress.notify_in_progress());
+                }));
+            }));
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
@@ -288,6 +296,7 @@ impl CodeIndexingPipeline {
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,
             cross_file_resolve_timeout,
+            on_progress,
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -345,6 +354,8 @@ impl CodeIndexingPipeline {
             duration_ms = graph_write_duration.as_millis() as u64,
             "graph writing completed"
         );
+        context.progress.notify_in_progress().await;
+
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
