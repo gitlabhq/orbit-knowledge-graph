@@ -391,7 +391,7 @@ async fn process_message(
     info!(
         %subject,
         outcome = outcome_label,
-        elapsed_ms = elapsed.as_millis() as u64,
+        duration_ms = elapsed.as_millis() as u64,
         handlers = handler_count,
         "message processed"
     );
