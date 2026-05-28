@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 pub struct RemovedSymlink {
     pub relative_path: PathBuf,
     pub target: PathBuf,
+    pub reason: RemovedSymlinkReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovedSymlinkReason {
+    EscapesRoot,
+    Dangling,
 }
 
 /// Canonicalize `path` and return it only if the real target lives
@@ -119,7 +126,8 @@ pub fn validate_symlinks(root: &Path) -> io::Result<Vec<RemovedSymlink>> {
                         tracing::warn!(
                             relative_path = %removed.relative_path.display(),
                             target = %removed.target.display(),
-                            "removing symlink that points outside the target directory"
+                            reason = ?removed.reason,
+                            "removing symlink"
                         );
                         removed_symlinks.push(removed);
                     }
@@ -145,6 +153,7 @@ fn check_symlink(path: &Path, root: &Path) -> io::Result<Option<RemovedSymlink>>
             Ok(Some(RemovedSymlink {
                 relative_path: relative.to_path_buf(),
                 target: r,
+                reason: RemovedSymlinkReason::EscapesRoot,
             }))
         }
         Err(_) => {
@@ -153,6 +162,7 @@ fn check_symlink(path: &Path, root: &Path) -> io::Result<Option<RemovedSymlink>>
             Ok(Some(RemovedSymlink {
                 relative_path: relative.to_path_buf(),
                 target,
+                reason: RemovedSymlinkReason::Dangling,
             }))
         }
     }
@@ -283,6 +293,7 @@ mod tests {
                 vec![RemovedSymlink {
                     relative_path: PathBuf::from("escape"),
                     target: outside.path().canonicalize().unwrap(),
+                    reason: RemovedSymlinkReason::EscapesRoot,
                 }]
             );
             assert!(root.join("escape").symlink_metadata().is_err());
@@ -303,6 +314,7 @@ mod tests {
                 vec![RemovedSymlink {
                     relative_path: PathBuf::from("bad"),
                     target: PathBuf::from("nonexistent/target"),
+                    reason: RemovedSymlinkReason::Dangling,
                 }]
             );
             assert!(
@@ -326,6 +338,20 @@ mod tests {
 
             let removed = validate_symlinks(&root).unwrap();
             assert_eq!(removed.len(), 3);
+            assert_eq!(
+                removed
+                    .iter()
+                    .filter(|removed| removed.reason == RemovedSymlinkReason::EscapesRoot)
+                    .count(),
+                2
+            );
+            assert_eq!(
+                removed
+                    .iter()
+                    .filter(|removed| removed.reason == RemovedSymlinkReason::Dangling)
+                    .count(),
+                1
+            );
             assert!(
                 root.join("bad1").symlink_metadata().is_err()
                     && root.join("bad2").symlink_metadata().is_err()
