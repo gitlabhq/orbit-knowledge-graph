@@ -7,10 +7,10 @@ Keep it short.
 
 Long-form output — file-by-file walkthroughs, profiler dumps, alternatives
 considered, full benchmark tables, raw logs, agent reasoning — goes in the
-<details> block at the bottom, not in the sections above.
+Agent context block at the bottom, not in the sections above.
 
 Agents: if you feel the urge to write a wall of text, write it inside the
-<details> block. The top sections stay terse.
+Agent context block. The top sections stay terse.
 -->
 
 ### What does this MR do and why?
