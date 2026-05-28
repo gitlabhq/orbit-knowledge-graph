@@ -438,6 +438,7 @@ impl CodeIndexingPipeline {
             debug!(
                 project_id,
                 branch = %branch,
+                traversal_path,
                 "first-time indexing detected, skipping stale data cleanup"
             );
         }
