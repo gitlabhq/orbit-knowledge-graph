@@ -89,7 +89,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: null, alias: "Json", import_type: "AliasedImport" } }
+      - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: "JsonConvert", alias: "Json", import_type: "AliasedImport" } }
 
   - name: "console logging calls do not target ambient namespace imports"
     query: |

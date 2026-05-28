@@ -1,0 +1,59 @@
+name: "Exported symbols are a single definition row, not a proxy duplicate"
+
+pipeline: js
+
+fixtures:
+  - path: lib/widget.ts
+    content: |
+      export interface Widget { id: string; }
+      export class WidgetImpl implements Widget { id = "x"; }
+      export const VERSION = 1;
+      export function make(): Widget { return new WidgetImpl(); }
+      export default function bootstrap(): void {}
+      function privateHelper(): number { return 1; }
+  - path: lib/barrel.ts
+    content: |
+      export { Widget, WidgetImpl } from './widget';
+
+tests:
+  - name: Each exported local symbol is a single definition row
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/widget.ts'
+        AND d.name IN ['Widget', 'WidgetImpl', 'VERSION', 'make', 'bootstrap', 'privateHelper']
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 6 }
+      - { row: { name: "VERSION", fqn: "VERSION", type: "Variable" } }
+      - { row: { name: "Widget", fqn: "Widget", type: "Interface" } }
+      - { row: { name: "WidgetImpl", fqn: "WidgetImpl", type: "Class" } }
+      - { row: { name: "bootstrap", fqn: "bootstrap", type: "Function" } }
+      - { row: { name: "make", fqn: "make", type: "Function" } }
+      - { row: { name: "privateHelper", fqn: "privateHelper", type: "Function" } }
+
+  - name: Local exports have no module-prefixed proxy duplicate
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'lib/widget.ts::Widget',
+        'lib/widget.ts::WidgetImpl',
+        'lib/widget.ts::VERSION',
+        'lib/widget.ts::make',
+        'lib/widget.ts::default'
+      ]
+      RETURN d.fqn AS fqn
+    assert:
+      - { empty: true }
+
+  - name: Re-export barrels still synthesize ModuleExport proxies for cross-file wiring
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/barrel.ts'
+        AND d.definition_type = 'ModuleExport'
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "Widget" } }
+      - { row: { name: "WidgetImpl" } }

@@ -1,6 +1,7 @@
 use crate::types::{Event, Subscription};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub const INDEXER_STREAM: &str = "GKG_INDEXER";
 
@@ -26,6 +27,8 @@ pub const NAMESPACE_INDEXING_SUBJECT_PATTERN: &str = "sdlc.namespace.indexing.re
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalIndexingRequest {
     pub watermark: DateTime<Utc>,
+    #[serde(default)]
+    pub dispatch_id: Uuid,
 }
 
 impl Event for GlobalIndexingRequest {
@@ -39,6 +42,8 @@ pub struct NamespaceIndexingRequest {
     pub namespace: i64,
     pub traversal_path: String,
     pub watermark: DateTime<Utc>,
+    #[serde(default)]
+    pub dispatch_id: Uuid,
 }
 
 impl NamespaceIndexingRequest {
@@ -67,6 +72,8 @@ pub struct CodeIndexingTaskRequest {
     pub branch: Option<String>,
     pub commit_sha: Option<String>,
     pub traversal_path: String,
+    #[serde(default)]
+    pub dispatch_id: Uuid,
 }
 
 impl CodeIndexingTaskRequest {
@@ -101,6 +108,8 @@ pub const NAMESPACE_DELETION_SUBJECT_PATTERN: &str = "sdlc.namespace.deletion.re
 pub struct NamespaceDeletionRequest {
     pub namespace_id: i64,
     pub traversal_path: String,
+    #[serde(default)]
+    pub dispatch_id: Uuid,
 }
 
 impl NamespaceDeletionRequest {

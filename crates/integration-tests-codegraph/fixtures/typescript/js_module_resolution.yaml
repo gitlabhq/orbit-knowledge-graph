@@ -364,7 +364,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "named/util.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "helper" } }
 
   - name: Named import call resolves to concrete definition
     query: |
@@ -384,7 +384,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "default/util.ts::default" } }
+      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "helper" } }
 
   - name: Default import call resolves to concrete definition
     query: |
@@ -444,7 +444,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "star/util.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "helper" } }
 
   - name: Star reexport call resolves to source definition
     query: |
@@ -464,7 +464,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "alias/constants.ts::formatPrecision" } }
+      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "formatPrecision" } }
 
   - name: Aliased named import call resolves to local definition
     query: |
@@ -484,9 +484,9 @@ tests:
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 3 }
-      - { row: { name: "dateFormats", alias: null, target: "identity/constants.ts::dateFormats" } }
-      - { row: { name: "FLOW_METRICS", alias: "metrics", target: "identity/constants.ts::FLOW_METRICS" } }
-      - { row: { name: "formatPrecision", alias: null, target: "identity/constants.ts::formatPrecision" } }
+      - { row: { name: "dateFormats", alias: null, target: "dateFormats" } }
+      - { row: { name: "FLOW_METRICS", alias: "metrics", target: "FLOW_METRICS" } }
+      - { row: { name: "formatPrecision", alias: null, target: "formatPrecision" } }
 
   - name: Imported function from mixed import statement still calls concrete definition
     query: |

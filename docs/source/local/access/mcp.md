@@ -49,6 +49,9 @@ DuckDB SQL — agents compose SQL directly against the property graph tables.
 > write the MCP config for you. Until it ships, configure your MCP client
 > manually as shown below.
 
+You can also [install the Orbit skill manually](../../ai_coding_agents.md)
+today to give the agent query recipes, DSL guidance, and troubleshooting.
+
 ## Manual config: Claude Code
 
 Add the following to `~/.claude/mcp_servers.json` or your project's

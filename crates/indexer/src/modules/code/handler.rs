@@ -81,6 +81,7 @@ impl Handler for CodeIndexingTaskHandler {
             task_id = request.task_id,
             project_id = request.project_id,
             branch = ?request.branch,
+            dispatch_id = %request.dispatch_id,
             "received code indexing task"
         );
 
@@ -172,12 +173,14 @@ impl CodeIndexingTaskHandler {
             project_id = request.project_id,
             branch = %branch,
             had_prior_checkpoint,
+            dispatch_id = %request.dispatch_id,
             "starting code indexing"
         );
 
         let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
             CodeOtelObserver::new(self.metrics.clone()),
         )]);
+        observer.set_dispatch_id(request.dispatch_id);
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
         observer.set_traversal_path(&request.traversal_path);
@@ -409,6 +412,7 @@ mod tests {
                 branch: Some(branch.to_string()),
                 commit_sha: Some("abc123".to_string()),
                 traversal_path: format!("1/{project_id}/"),
+                dispatch_id: uuid::Uuid::new_v4(),
             })
             .unwrap()
         }
@@ -478,6 +482,7 @@ mod tests {
             branch: None,
             commit_sha: None,
             traversal_path: "1/123/".to_string(),
+            dispatch_id: uuid::Uuid::new_v4(),
         })
         .unwrap();
 
@@ -503,6 +508,7 @@ mod tests {
             branch: None,
             commit_sha: None,
             traversal_path: "1/123/".to_string(),
+            dispatch_id: uuid::Uuid::new_v4(),
         })
         .unwrap();
 
@@ -546,6 +552,7 @@ mod tests {
             branch: None,
             commit_sha: None,
             traversal_path: "1/123/".to_string(),
+            dispatch_id: uuid::Uuid::new_v4(),
         })
         .unwrap();
 

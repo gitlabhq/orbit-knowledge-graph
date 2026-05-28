@@ -124,12 +124,12 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
         fqn_b.append_value(graph.str(d.fqn));
         name_b.append_value(graph.str(d.name));
         dt_b.append_value(d.definition_type);
-        sl_b.append_value(d.range.start.line as i64);
-        el_b.append_value(d.range.end.line as i64);
+        sl_b.append_value(d.range.start.line as i64 + 1);
+        el_b.append_value(d.range.end.line as i64 + 1);
         sb_b.append_value(d.range.byte_offset.0 as i64);
         eb_b.append_value(d.range.byte_offset.1 as i64);
-        sc_b.append_value(d.range.start.column as i64);
-        ec_b.append_value(d.range.end.column as i64);
+        sc_b.append_value(d.range.start.column as i64 + 1);
+        ec_b.append_value(d.range.end.column as i64 + 1);
     }
 
     make_batch(
@@ -173,6 +173,12 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
     let mut alias_b = StringBuilder::with_capacity(n, n * 16);
     let mut type_only_b = BooleanBuilder::with_capacity(n);
     let mut has_target_b = BooleanBuilder::with_capacity(n);
+    let mut sl_b = Int64Builder::with_capacity(n);
+    let mut el_b = Int64Builder::with_capacity(n);
+    let mut sb_b = Int64Builder::with_capacity(n);
+    let mut eb_b = Int64Builder::with_capacity(n);
+    let mut sc_b = Int64Builder::with_capacity(n);
+    let mut ec_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, imp) in &imports {
         id_b.append_value(ids[idx.index()]);
@@ -194,6 +200,12 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
                 .neighbors_directed(*idx, petgraph::Direction::Outgoing)
                 .any(|neighbor| graph.graph[neighbor].def_id().is_some()),
         );
+        sl_b.append_value(imp.range.start.line as i64 + 1);
+        el_b.append_value(imp.range.end.line as i64 + 1);
+        sb_b.append_value(imp.range.byte_offset.0 as i64);
+        eb_b.append_value(imp.range.byte_offset.1 as i64);
+        sc_b.append_value(imp.range.start.column as i64 + 1);
+        ec_b.append_value(imp.range.end.column as i64 + 1);
     }
 
     make_batch(
@@ -206,6 +218,12 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             ("alias", DataType::Utf8, true),
             ("is_type_only", DataType::Boolean, false),
             ("has_target", DataType::Boolean, false),
+            ("start_line", DataType::Int64, false),
+            ("end_line", DataType::Int64, false),
+            ("start_byte", DataType::Int64, false),
+            ("end_byte", DataType::Int64, false),
+            ("start_char", DataType::Int64, false),
+            ("end_char", DataType::Int64, false),
         ],
         vec![
             Box::new(id_b),
@@ -216,6 +234,12 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             Box::new(alias_b),
             Box::new(type_only_b),
             Box::new(has_target_b),
+            Box::new(sl_b),
+            Box::new(el_b),
+            Box::new(sb_b),
+            Box::new(eb_b),
+            Box::new(sc_b),
+            Box::new(ec_b),
         ],
     )
 }

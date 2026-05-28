@@ -109,3 +109,4 @@ Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, 
 
 - [Enable Orbit Remote and run your first query](remote/getting-started.md)
 - [Build a local code graph with Orbit Local](local/getting-started.md)
+- [Set up AI coding agents with the Orbit skill](ai_coding_agents.md)

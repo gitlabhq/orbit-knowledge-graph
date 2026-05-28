@@ -139,6 +139,7 @@ storage:
   settings:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
+    allow_part_offset_column_in_projections: "1"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -160,5 +161,5 @@ storage:
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

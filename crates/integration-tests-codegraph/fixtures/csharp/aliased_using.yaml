@@ -1,0 +1,68 @@
+name: "C# aliased `using` surfaces the bound symbol"
+
+fixtures:
+  - path: Services/Worker.cs
+    content: |
+      using System;
+      using LogLevel = Microsoft.Extensions.Logging.LogLevel;
+      using Result = GitLab.Extension.Utility.Results.Result;
+      using MyList = System.Collections.Generic.List<int>;
+      using GlobalOrder = global::App.Domain.Order;
+      using GlobalThing = global::Standalone;
+
+      namespace App.Services
+      {
+          public class Worker
+          {
+              public Result Run() => null;
+              public LogLevel Level => LogLevel.Information;
+              public MyList Items => null;
+              public GlobalOrder Order => null;
+              public GlobalThing Thing => null;
+          }
+      }
+
+tests:
+  - name: Aliased `using` surfaces the last path segment as the symbol name
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.alias IN ['LogLevel', 'Result']
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
+      ORDER BY alias
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: "LogLevel", name: "LogLevel", path: "Microsoft.Extensions.Logging.LogLevel" } }
+      - { row: { alias: "Result", name: "Result", path: "GitLab.Extension.Utility.Results.Result" } }
+
+  - name: Plain `using` still has no symbol name (namespace import)
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.path = 'System'
+      RETURN i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: null } }
+
+  - name: Generic-typed alias strips the generic parameter from `name`
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.alias = 'MyList'
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { alias: "MyList", name: "List", path: "System.Collections.Generic.List<int>" } }
+
+  - name: Alias-qualified target strips the `global::` prefix from `name`
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'Services/Worker.cs'
+        AND i.alias IN ['GlobalOrder', 'GlobalThing']
+      RETURN i.alias AS alias, i.name AS name, i.path AS path
+      ORDER BY alias
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: "GlobalOrder", name: "Order", path: "global::App.Domain.Order" } }
+      - { row: { alias: "GlobalThing", name: "Standalone", path: "global::Standalone" } }

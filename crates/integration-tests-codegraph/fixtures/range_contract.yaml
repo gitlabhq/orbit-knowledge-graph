@@ -1,0 +1,131 @@
+name: "Range contract — bytes 0-indexed, lines + chars 1-indexed, every language"
+
+fixtures:
+  - path: pkg/user.py
+    content: |
+      class User:
+          def name(self) -> str:
+              return "u"
+
+  - path: pkg/imports.py
+    content: |
+      import os
+      from collections import OrderedDict
+
+  - path: lib/user.rb
+    content: |
+      class User
+        def name
+          "u"
+        end
+      end
+
+  - path: user.go
+    content: |
+      package user
+
+      type User struct{}
+
+      func Name() string { return "u" }
+
+  - path: User.java
+    content: |
+      public class User {
+          public String name() { return "u"; }
+      }
+
+  - path: src/user.rs
+    content: |
+      pub struct User;
+
+      impl User {
+          pub fn name(&self) -> &'static str { "u" }
+      }
+
+tests:
+  - name: Python class is 1-indexed start and end, at byte 0
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'User'
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, el: 3, sc: 1, ec: 19, sb: 0 } }
+
+  - name: Python method is 1-indexed, at 4-space indent
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'pkg/user.py' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, sc: 5, sb: 16 } }
+
+  - name: Python imports are 1-indexed
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'pkg/imports.py'
+      RETURN i.path AS path, i.name AS name, i.start_line AS sl, i.end_line AS el, i.start_char AS sc, i.start_byte AS sb
+      ORDER BY sl
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "os", name: null, sl: 1, el: 1, sc: 1, sb: 0 } }
+      - { row: { path: "collections", name: "OrderedDict", sl: 2, el: 2, sc: 1, sb: 10 } }
+
+  - name: Ruby class starts at `class` keyword on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'User'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  - name: Ruby method is 1-indexed start and end
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/user.rb' AND d.name = 'name'
+      RETURN d.start_line AS sl, d.end_line AS el, d.start_char AS sc, d.end_char AS ec, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 2, el: 4, sc: 3, ec: 6, sb: 13 } }
+
+  - name: Go struct is 1-indexed on line 3, anchored on the identifier
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'user.go' AND d.name = 'User'
+        AND d.definition_type = 'Struct'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 3, sc: 6, sb: 19 } }
+
+  - name: Go function starts at `func` keyword on line 5
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'user.go' AND d.name = 'Name'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 5, sc: 1, sb: 34 } }
+
+  - name: Java class starts at `public class User` on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'User.java' AND d.name = 'User'
+        AND d.definition_type = 'Class'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }
+
+  - name: Rust struct starts at `pub struct User` on line 1
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/user.rs' AND d.name = 'User'
+        AND d.definition_type = 'Struct'
+      RETURN d.start_line AS sl, d.start_char AS sc, d.start_byte AS sb
+    assert:
+      - { row_count: 1 }
+      - { row: { sl: 1, sc: 1, sb: 0 } }

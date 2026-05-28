@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use rand::seq::SliceRandom;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::modules::code::config::subjects;
@@ -129,6 +130,7 @@ impl NamespaceCodeBackfillDispatcher {
     /// Consume CDC events for newly-enabled namespaces and dispatch backfill.
     async fn dispatch_cdc_events(&self) -> Result<(), TaskError> {
         let subscription = self.siphon_subscription();
+        let dispatch_id = Uuid::new_v4();
         let mut total = DispatchOutcome {
             dispatched: 0,
             skipped: 0,
@@ -161,7 +163,7 @@ impl NamespaceCodeBackfillDispatcher {
             // across namespaces; otherwise FIFO consumption processes one
             // namespace's entire batch before any other namespace gets a turn.
             all_pending.shuffle(&mut rand::rng());
-            let outcome = self.publish_pending(&all_pending).await?;
+            let outcome = self.publish_pending(&all_pending, dispatch_id).await?;
             total.dispatched += outcome.dispatched;
             total.skipped += outcome.skipped;
 
@@ -202,6 +204,7 @@ impl NamespaceCodeBackfillDispatcher {
     /// projects that hadn't been indexed during the brief migration window.
     async fn dispatch_active_backfill(&self) -> Result<(), TaskError> {
         let version = *SCHEMA_VERSION;
+        let dispatch_id = Uuid::new_v4();
 
         // Datalake unreachable is a transient issue, not a task error. Mirror
         // the tolerance the old `read_migrating_version` gate had: log and
@@ -230,7 +233,7 @@ impl NamespaceCodeBackfillDispatcher {
         // across namespaces; otherwise FIFO consumption processes one
         // namespace's entire batch before any other namespace gets a turn.
         all_pending.shuffle(&mut rand::rng());
-        let total = self.publish_pending(&all_pending).await?;
+        let total = self.publish_pending(&all_pending, dispatch_id).await?;
 
         if total.dispatched > 0 || total.skipped > 0 {
             self.metrics
@@ -395,6 +398,7 @@ impl NamespaceCodeBackfillDispatcher {
     async fn publish_pending(
         &self,
         projects: &[PendingProject],
+        dispatch_id: Uuid,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome {
             dispatched: 0,
@@ -408,6 +412,7 @@ impl NamespaceCodeBackfillDispatcher {
                 branch: None,
                 commit_sha: None,
                 traversal_path: project.traversal_path.clone(),
+                dispatch_id,
             };
 
             let subscription = request.publish_subscription();
@@ -599,7 +604,10 @@ mod tests {
         }));
 
         projects.shuffle(&mut rand::rng());
-        let outcome = dispatcher.publish_pending(&projects).await.unwrap();
+        let outcome = dispatcher
+            .publish_pending(&projects, Uuid::new_v4())
+            .await
+            .unwrap();
         assert_eq!(outcome.dispatched, 200);
 
         let published = nats.get_published();

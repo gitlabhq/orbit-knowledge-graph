@@ -515,6 +515,10 @@ pub struct PipelineConfig {
     /// emit parsed nodes and relationships while a separate structural graph
     /// owns repository file/directory rows.
     pub emit_file_inventory_graph: bool,
+    /// Called after each language family finishes processing. The indexer
+    /// uses this to send NATS progress heartbeats so the message is not
+    /// redelivered during long pipeline runs.
+    pub on_progress: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for PipelineConfig {
@@ -528,6 +532,7 @@ impl Default for PipelineConfig {
             per_file_timeout: None,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
+            on_progress: None,
         }
     }
 }
@@ -958,6 +963,9 @@ impl Pipeline {
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
+                    }
+                    if let Some(cb) = &ctx.config.on_progress {
+                        cb();
                     }
                     // Release permit — next family can start
                     sem_tx.send(()).ok();

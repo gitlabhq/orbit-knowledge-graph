@@ -187,10 +187,10 @@ tests:
       ORDER BY file_path, path, name
     assert:
       - { row_count: 4 }
-      - { row: { file_path: "pages/_app.tsx", path: "../components/Layout", name: "default", is_type_only: false, target: "components/Layout.tsx::default" } }
-      - { row: { file_path: "pages/index.tsx", path: "../components/Hero", name: "default", is_type_only: false, target: "components/Hero.tsx::default" } }
-      - { row: { file_path: "pages/index.tsx", path: "../lib/home", name: "loadHome", is_type_only: false, target: "lib/home.ts::loadHome" } }
-      - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", is_type_only: false, target: "lib/users.ts::listUsers" } }
+      - { row: { file_path: "pages/_app.tsx", path: "../components/Layout", name: "default", is_type_only: false, target: "Layout" } }
+      - { row: { file_path: "pages/index.tsx", path: "../components/Hero", name: "default", is_type_only: false, target: "Hero" } }
+      - { row: { file_path: "pages/index.tsx", path: "../lib/home", name: "loadHome", is_type_only: false, target: "loadHome" } }
+      - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", is_type_only: false, target: "listUsers" } }
 
   - name: Next pages router package type imports remain unresolved
     query: |

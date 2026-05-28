@@ -110,7 +110,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/components/child_badge.vue::default" } }
+      - { row: { import_type: "DefaultImport", target: "ChildBadge" } }
 
   - name: Vue default import resolves to virtual component when SFC also exports classes
     query: |

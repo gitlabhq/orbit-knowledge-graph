@@ -127,7 +127,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "ee/app/assets/javascripts/sidebar/constants.js::dropdowni18nText" } }
+      - { row: { import_type: "NamedImport", target: "dropdowni18nText" } }
 
   - name: Vue computed property resolves ee_else_ce helper call
     query: |
@@ -148,7 +148,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue::default" } }
+      - { row: { import_type: "DefaultImport", target: "CeBlobOverflowMenu" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
     query: |

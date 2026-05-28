@@ -1,5 +1,7 @@
 use std::fmt;
 
+use uuid::Uuid;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineType {
     Sdlc,
@@ -31,6 +33,8 @@ impl fmt::Display for IndexingMode {
 }
 
 pub trait IndexingObserver: Send {
+    fn set_dispatch_id(&mut self, _dispatch_id: Uuid) {}
+
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
     fn set_traversal_path(&mut self, traversal_path: &str) {
@@ -67,6 +71,12 @@ impl IndexingObserver for NoOpObserver {}
 pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn IndexingObserver>;
 
 impl IndexingObserver for MultiObserver {
+    fn set_dispatch_id(&mut self, dispatch_id: Uuid) {
+        for o in self.iter_mut() {
+            o.set_dispatch_id(dispatch_id);
+        }
+    }
+
     fn set_pipeline_type(&mut self, pipeline_type: PipelineType) {
         for o in self.iter_mut() {
             o.set_pipeline_type(pipeline_type);
@@ -155,6 +165,9 @@ mod tests {
     }
 
     impl IndexingObserver for RecordingObserver {
+        fn set_dispatch_id(&mut self, _: Uuid) {
+            self.push("set_dispatch_id");
+        }
         fn set_pipeline_type(&mut self, _: PipelineType) {
             self.push("set_pipeline_type");
         }
@@ -196,6 +209,7 @@ mod tests {
             Box::new(RecordingObserver::new(&log_b)),
         ]);
 
+        obs.set_dispatch_id(Uuid::new_v4());
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_traversal_path("42/100/");
         obs.set_entity_type("MergeRequest");
@@ -204,6 +218,7 @@ mod tests {
         obs.finish();
 
         let expected = vec![
+            "set_dispatch_id",
             "set_pipeline_type",
             "set_traversal_path",
             "set_entity_type",

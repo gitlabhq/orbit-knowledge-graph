@@ -58,11 +58,11 @@ tests:
       ORDER BY file_path, name
     assert:
       - { row_count: 5 }
-      - { row: { file_path: "src/Button.tsx", name: "ButtonProps", is_type_only: true, target: "src/types.ts::ButtonProps" } }
-      - { row: { file_path: "src/Button.tsx", name: "ButtonVariant", is_type_only: true, target: "src/types.ts::ButtonVariant" } }
-      - { row: { file_path: "src/Button.tsx", name: "useButtonLabel", is_type_only: false, target: "src/use_button_label.ts::useButtonLabel" } }
-      - { row: { file_path: "src/Toolbar.tsx", name: "Button", is_type_only: false, target: "src/Button.tsx::Button" } }
-      - { row: { file_path: "src/Toolbar.tsx", name: "ButtonProps", is_type_only: true, target: "src/types.ts::ButtonProps" } }
+      - { row: { file_path: "src/Button.tsx", name: "ButtonProps", is_type_only: true, target: "ButtonProps" } }
+      - { row: { file_path: "src/Button.tsx", name: "ButtonVariant", is_type_only: true, target: "ButtonVariant" } }
+      - { row: { file_path: "src/Button.tsx", name: "useButtonLabel", is_type_only: false, target: "useButtonLabel" } }
+      - { row: { file_path: "src/Toolbar.tsx", name: "Button", is_type_only: false, target: "Button" } }
+      - { row: { file_path: "src/Toolbar.tsx", name: "ButtonProps", is_type_only: true, target: "ButtonProps" } }
 
   - name: TSX runtime calls exclude type-only definitions
     query: |
