@@ -78,12 +78,11 @@ impl ClickHouseStaleDataCleaner {
                 branch,
                 id,
                 true AS _deleted
-            FROM {table}
+            FROM {table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-            GROUP BY traversal_path, project_id, branch, id
-            HAVING max(_version) != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -97,7 +96,7 @@ impl ClickHouseStaleDataCleaner {
             .iter()
             .map(|t| {
                 format!(
-                    "SELECT DISTINCT id FROM {t} \
+                    "SELECT id FROM {t} FINAL \
                      WHERE traversal_path = {{traversal_path:String}} \
                        AND project_id = {{project_id:Int64}} \
                        AND branch = {{branch:String}}"
@@ -123,11 +122,10 @@ impl ClickHouseStaleDataCleaner {
                 target_id,
                 target_kind,
                 true AS _deleted
-            FROM {edge_table}
+            FROM {edge_table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND source_id IN ({source_id_union})
-            GROUP BY traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind
-            HAVING max(_version) != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
