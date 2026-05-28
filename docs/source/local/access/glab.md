@@ -80,6 +80,9 @@ The MCP config points at `orbit mcp serve` instead of the remote endpoint.
 Your agent can call `query_graph` and `get_graph_schema` against the local
 DuckDB graph.
 
+You can also [install the Orbit skill manually](../../ai_coding_agents.md)
+today with `glab skills install --global orbit`.
+
 ## Index a repository
 
 ```shell
