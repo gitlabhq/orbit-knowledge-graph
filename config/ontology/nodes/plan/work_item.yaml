@@ -208,6 +208,11 @@ storage:
     - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_namespace_id, column: namespace_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}

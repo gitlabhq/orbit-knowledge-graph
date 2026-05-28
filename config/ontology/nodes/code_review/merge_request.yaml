@@ -580,6 +580,16 @@ storage:
     - {name: idx_target_branch, column: target_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_target_branch_ngram, column: target_branch, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_merge_user_id, column: merge_user_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_source_project_id, column: source_project_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_updated_by_id, column: updated_by_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_last_edited_by_id, column: last_edited_by_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}

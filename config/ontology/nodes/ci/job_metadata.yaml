@@ -131,6 +131,7 @@ storage:
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_build_id, order_by: [build_id]}

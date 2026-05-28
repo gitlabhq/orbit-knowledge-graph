@@ -98,6 +98,7 @@ storage:
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_external_id, column: external_id, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_external_id_ngram, column: external_id, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
