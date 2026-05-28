@@ -680,6 +680,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_note note TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_note_ngram note TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_discussion_id discussion_id TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_noteable_id noteable_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_author_id author_id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT _part_offset ORDER BY id),
