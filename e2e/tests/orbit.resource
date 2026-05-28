@@ -152,6 +152,23 @@ Orbit Endpoint Smoke
         Should Contain    ${resp.text}    ${needle}    /orbit/${path} body missing '${needle}'
     END
 
+Orbit Query LLM
+    [Documentation]    POST /orbit/query with response_format=llm. Returns the raw response so the
+    ...                caller can assert on the GOON text body.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}    response_format=llm
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=200
+    RETURN    ${resp}
+
+Result Node Ids Contain
+    [Documentation]    Assert ${node_id} is among the ids of the nodes in a graph-shaped query
+    ...                response (neighbors / path_finding return result.nodes with string ids).
+    [Arguments]    ${resp}    ${node_id}
+    ${ids}=    Evaluate    [n["id"] for n in $resp["result"]["nodes"]]
+    Should Contain    ${ids}    ${{str($node_id)}}    node ${node_id} not in result nodes ${ids}
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30
