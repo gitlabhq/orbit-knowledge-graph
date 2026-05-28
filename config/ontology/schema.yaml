@@ -71,10 +71,12 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.01)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
           - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
           - {name: idx_branch, column: branch, type: "bloom_filter(0.01)", granularity: 1}
         projections:
+          - {type: lightweight, name: by_source, order_by: [traversal_path, source_id, relationship_kind]}
           - {type: lightweight, name: by_target, order_by: [traversal_path, project_id, branch, target_id, relationship_kind]}
           - type: aggregate
             name: node_edge_counts

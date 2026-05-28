@@ -1134,11 +1134,13 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     target_tags Array(LowCardinality(String)) CODEC(LZ4),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
+    INDEX idx_source_id source_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_target_id target_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_branch branch TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    PROJECTION by_source (SELECT _part_offset ORDER BY (traversal_path, source_id, relationship_kind)),
     PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, project_id, branch, target_id, relationship_kind)),
     PROJECTION node_edge_counts (
       SELECT traversal_path, project_id, branch, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
