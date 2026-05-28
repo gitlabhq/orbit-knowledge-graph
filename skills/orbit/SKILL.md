@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.9.0
+version: 0.10.0
 license: MIT
 metadata:
   audience: developers
@@ -172,6 +172,28 @@ command when needed. Start with `overview`, then use one or two narrower
 [`references/repo_map.md`](references/repo_map.md) for the full workflow,
 subcommands, budgets, and caveats.
 
+## Remote repository maps (Orbit Remote)
+
+When the user needs code-structure navigation for a project indexed in Orbit
+Remote but does not have or need a local checkout, use the bundled remote
+repo-map helper. It shells out to `glab orbit remote query` and supports
+inheritance, ancestor, class-member, path API, and caller lookups.
+
+```bash
+python3 skills/orbit/scripts/remote_repo_map.py extends BasePolicy
+python3 skills/orbit/scripts/remote_repo_map.py ancestors Ci::Build
+python3 skills/orbit/scripts/remote_repo_map.py class MergeRequestPolicy
+python3 skills/orbit/scripts/remote_repo_map.py api app/services/merge_requests
+python3 skills/orbit/scripts/remote_repo_map.py callers "MergeRequests::RefreshService#execute"
+python3 skills/orbit/scripts/remote_repo_map.py --project-id 77960826 --branch main api crates/orbit-local
+```
+
+Prefer the local repo-map helper for local, branch-local, or uncommitted code.
+Use the remote helper when the target is already indexed in Orbit Remote and a
+graph-backed directory/class/caller map is faster than hand-writing query JSON.
+See [`references/remote_repo_map.md`](references/remote_repo_map.md) for the
+full command reference and coverage caveats.
+
 ## Reporting results
 
 Orbit answers are graph queries against ClickHouse, not an authoritative
@@ -219,6 +241,7 @@ Not:
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
 | Local repository map helper | [`references/repo_map.md`](references/repo_map.md) |
+| Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5) and common errors | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | `glab orbit local` install, update, config, and usage | [`references/local_cli.md`](references/local_cli.md) |
 
