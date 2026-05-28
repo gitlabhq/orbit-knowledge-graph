@@ -502,12 +502,78 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.language.bytes",
+      "prom_name": "gkg_indexer_code_language_bytes_bytes_total",
+      "description": "Source bytes processed per language family.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "language"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.language.files",
+      "prom_name": "gkg_indexer_code_language_files_total",
+      "description": "Files processed per language family.",
+      "kind": "counter",
+      "labels": [
+        "language"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.language.phase_duration",
+      "prom_name": "gkg_indexer_code_language_phase_duration_seconds",
+      "description": "Per-language pipeline phase duration. Labels: language (ruby, java_script, type_script, rust, ...), phase (parse, graph_build, resolve).",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "language",
+        "phase"
+      ],
+      "buckets": [
+        0.5,
+        1.0,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        300.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.nodes.indexed",
       "prom_name": "gkg_indexer_code_nodes_indexed_total",
       "description": "Total graph nodes and edges indexed by the code handler.",
       "kind": "counter",
       "labels": [
         "kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.pipeline.phase_duration",
+      "prom_name": "gkg_indexer_code_pipeline_phase_duration_seconds",
+      "description": "Top-level pipeline phase duration. Labels: phase (file_discovery, structural_graph, language_processing).",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "phase"
+      ],
+      "buckets": [
+        0.5,
+        1.0,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
