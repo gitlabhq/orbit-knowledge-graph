@@ -209,7 +209,7 @@ storage:
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: lightweight, name: by_author_id, order_by: [author_id]}
     - {type: lightweight, name: by_milestone_id, order_by: [milestone_id]}
