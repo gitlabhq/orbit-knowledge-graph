@@ -1,6 +1,6 @@
 # Orbit repo map reference
 
-`repo_map.py` builds a fast, hierarchical picture of a locally checked-out
+`local_repo_map.py` builds a fast, hierarchical picture of a locally checked-out
 repository from the Orbit Local DuckDB property graph. Use it before planning a
 large code change, when first opening an unfamiliar repository, or when a
 directory-level map is more useful than reading files one by one.
@@ -47,19 +47,19 @@ configuration, and pass-through argument details.
 From a checkout of this repository, the script is at:
 
 ```text
-skills/orbit/scripts/repo_map.py
+skills/orbit/scripts/local_repo_map.py
 ```
 
 Run it from the repository root, or pass the target repository path as the
 first argument:
 
 ```bash
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph tree crates
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph api crates/orbit-local
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph class Workspace
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph extends QueryCompiler
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph imports Workspace
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph tree crates
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph api crates/orbit-local
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph class Workspace
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph extends QueryCompiler
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph imports Workspace
 ```
 
 To focus on one or more file extensions, pass `--ext` before the subcommand.
@@ -67,9 +67,9 @@ Extensions may include or omit the leading dot and can be repeated or
 comma-separated:
 
 ```bash
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph --ext .rs
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph --ext rs api crates/orbit-local
-python3 skills/orbit/scripts/repo_map.py ~/workspace/knowledge-graph --ext rs,toml tree crates
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext .rs
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs api crates/orbit-local
+python3 skills/orbit/scripts/local_repo_map.py ~/workspace/knowledge-graph --ext rs,toml tree crates
 ```
 
 ## Recommended workflow
@@ -79,12 +79,12 @@ task usually means the investigation has become enumeration instead of design.
 
 | Phase | Call | What it tells you |
 |---|---|---|
-| 1. Orient | `repo_map.py REPO overview` | Languages, top directories, definition totals, key abstractions, most-imported defined symbols, and most-called callables |
-| 2. Locate | `repo_map.py REPO tree PATH_PREFIX` | Types grouped by file under a subtree, without method-level noise |
-| 3. Drill in | `repo_map.py REPO api PATH_PREFIX` | Types, callables, and extracted signature lines under a subtree |
-| 4. Focus | `repo_map.py REPO class NAME` | One class/module/trait and its members, including same-named overrides |
-| 5. Check inheritance | `repo_map.py REPO extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6 |
-| 6. Check imports | `repo_map.py REPO imports PATTERN` | Files importing matching symbols or paths |
+| 1. Orient | `local_repo_map.py REPO overview` | Languages, top directories, definition totals, key abstractions, most-imported defined symbols, and most-called callables |
+| 2. Locate | `local_repo_map.py REPO tree PATH_PREFIX` | Types grouped by file under a subtree, without method-level noise |
+| 3. Drill in | `local_repo_map.py REPO api PATH_PREFIX` | Types, callables, and extracted signature lines under a subtree |
+| 4. Focus | `local_repo_map.py REPO class NAME` | One class/module/trait and its members, including same-named overrides |
+| 5. Check inheritance | `local_repo_map.py REPO extends NAME` | Descendants of a base type through `EXTENDS` edges, up to depth 6 |
+| 6. Check imports | `local_repo_map.py REPO imports PATTERN` | Files importing matching symbols or paths |
 
 ## Subcommands
 

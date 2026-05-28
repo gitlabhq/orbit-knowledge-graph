@@ -159,17 +159,17 @@ deciding where new code should live — use the bundled repo-map helper over the
 Orbit Local DuckDB graph.
 
 ```bash
-python3 skills/orbit/scripts/repo_map.py /path/to/repo              # overview
-python3 skills/orbit/scripts/repo_map.py /path/to/repo tree crates
-python3 skills/orbit/scripts/repo_map.py /path/to/repo api crates/orbit-local
-python3 skills/orbit/scripts/repo_map.py /path/to/repo --ext .rs    # only Rust files
+python3 skills/orbit/scripts/local_repo_map.py /path/to/repo              # overview
+python3 skills/orbit/scripts/local_repo_map.py /path/to/repo tree crates
+python3 skills/orbit/scripts/local_repo_map.py /path/to/repo api crates/orbit-local
+python3 skills/orbit/scripts/local_repo_map.py /path/to/repo --ext .rs    # only Rust files
 ```
 
 The target repository must already be indexed at the current commit with
 `glab orbit local index .`; the helper preflights this and prints the indexing
 command when needed. Start with `overview`, then use one or two narrower
 `tree`, `api`, `class`, `extends`, or `imports` calls. See
-[`references/repo_map.md`](references/repo_map.md) for the full workflow,
+[`references/local_repo_map.md`](references/local_repo_map.md) for the full workflow,
 subcommands, budgets, and caveats.
 
 ## Remote repository maps (Orbit Remote)
@@ -240,7 +240,7 @@ Not:
 |---|---|
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
-| Local repository map helper | [`references/repo_map.md`](references/repo_map.md) |
+| Local repository map helper | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5) and common errors | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | `glab orbit local` install, update, config, and usage | [`references/local_cli.md`](references/local_cli.md) |
