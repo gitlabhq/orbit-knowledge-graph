@@ -124,9 +124,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 ## MR and issue descriptions
 
-Templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/` follow a fixed convention: the visible sections at the top are for the *important* content a reviewer needs (headline, diagram, key numbers, repro steps). Long-form output — file-by-file walkthroughs, profiler dumps, full benchmark tables, alternatives considered, agent reasoning — belongs inside the `<details><summary>Agent context</summary>` block at the bottom.
-
-When you fill out a template, keep the top sections terse and put extended narrative into the Agent context block. Do not delete that block.
+Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 
 ## Design docs
 
