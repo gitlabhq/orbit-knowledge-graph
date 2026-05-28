@@ -390,10 +390,13 @@ impl CodeIndexingPipeline {
                 .record_files_processed(result.faults.len() as u64, "errored");
         }
 
-        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
+        for error in &result.errors {
             self.metrics
                 .errors
                 .add(1, &[KeyValue::new("stage", error.stage)]);
+        }
+
+        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
             return Err(HandlerError::Permanent {
                 message: format!(
                     "fatal code indexing pipeline error during {} for {}: {}",

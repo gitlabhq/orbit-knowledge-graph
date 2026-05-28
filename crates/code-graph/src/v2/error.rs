@@ -95,6 +95,8 @@ impl CodeGraphError {
 pub enum FileSkip {
     Oversize,
     OversizeCombined,
+    ParserOversize,
+    ArrowOffsetOverflow,
     LineTooLong,
     Minified,
     NotUtf8,
@@ -108,6 +110,8 @@ impl FileSkip {
         match self {
             Self::Oversize => "oversize",
             Self::OversizeCombined => "oversize_combined",
+            Self::ParserOversize => "parser_oversize",
+            Self::ArrowOffsetOverflow => "arrow_offset_overflow",
             Self::LineTooLong => "line_too_long",
             Self::Minified => "minified",
             Self::NotUtf8 => "not_utf8",
@@ -218,6 +222,14 @@ mod tests {
         assert_eq!(
             FileSkip::OversizeCombined.as_metric_label(),
             "oversize_combined"
+        );
+        assert_eq!(
+            FileSkip::ParserOversize.as_metric_label(),
+            "parser_oversize"
+        );
+        assert_eq!(
+            FileSkip::ArrowOffsetOverflow.as_metric_label(),
+            "arrow_offset_overflow"
         );
         assert_eq!(FileSkip::LineTooLong.as_metric_label(), "line_too_long");
         assert_eq!(FileSkip::Minified.as_metric_label(), "minified");

@@ -15,6 +15,11 @@ use std::sync::{Arc, Mutex};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::trace::Tracer;
 
+// This is a parse-cost guard for generated Go blobs, not the cumulative Arrow
+// offset-overflow fix. A batch can still overflow with many files below this
+// limit; `arrow_overflow` panic recovery keeps that case self-healing.
+const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
 /// Set `cancel()` from any thread to request pipeline shutdown.
 #[derive(Clone, Default)]
@@ -112,6 +117,51 @@ fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
         s.clone()
     } else {
         "unknown panic".to_string()
+    }
+}
+
+/// Returns `true` when `message` matches Arrow's offset-overflow panic family.
+///
+/// Verified against Arrow 58.3.0 panic sites in `arrow-buffer`'s
+/// `OffsetBuffer::from_repeated_length` (`"offset overflow"`) and
+/// `arrow-array`'s `GenericByteBuilder::next_offset`
+/// (`"byte array offset overflow"`). Re-validate this substring after Arrow
+/// upgrades; a mismatch makes these panics fatal again.
+fn is_offset_overflow_message(message: &str) -> bool {
+    message.to_ascii_lowercase().contains("offset overflow")
+}
+
+fn parser_max_file_size(language: Language) -> Option<u64> {
+    match language {
+        Language::Go => Some(GO_PARSER_MAX_FILE_SIZE),
+        _ => None,
+    }
+}
+
+fn affected_file_scope(files: &[FamilyFileInput]) -> String {
+    let mut paths = files
+        .iter()
+        .take(3)
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if files.len() > 3 {
+        paths.push_str(&format!(", ... ({} files total)", files.len()));
+    }
+    paths
+}
+
+fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput], detail: String) {
+    // Arrow reports only the batch-level offset overflow, not the row/file that
+    // crossed the cumulative `i32` limit. Marking the whole family batch is
+    // intentionally conservative so the repository self-heals without implying
+    // precise per-file attribution.
+    for file in files {
+        ctx.record_skip(
+            file.path.clone(),
+            crate::v2::error::FileSkip::ArrowOffsetOverflow,
+            detail.clone(),
+        );
     }
 }
 
@@ -573,6 +623,19 @@ impl PipelineError {
             fatal: false,
         }
     }
+
+    fn nonfatal(
+        file_path: impl Into<String>,
+        error: impl Into<String>,
+        stage: &'static str,
+    ) -> Self {
+        Self {
+            file_path: file_path.into(),
+            error: error.into(),
+            stage,
+            fatal: false,
+        }
+    }
 }
 
 impl From<crate::v2::error::CodeGraphError> for PipelineError {
@@ -811,15 +874,50 @@ impl Pipeline {
                         // (e.g. an UnexpectedNodeType from the linker), surface
                         // it directly so its `stage` reaches the dashboard
                         // instead of collapsing into `internal`.
+                        let affected_files = affected_file_scope(files);
                         let err = match payload.downcast::<crate::v2::error::CodeGraphError>() {
-                            Ok(typed) => *typed,
-                            Err(payload) => crate::v2::error::CodeGraphError::Internal {
+                            Ok(typed) => {
+                                let err = *typed;
+                                if let crate::v2::error::CodeGraphError::ArrowConversion { message } = &err
+                                    && is_offset_overflow_message(message)
+                                {
+                                    record_offset_overflow_skips(
+                                        ctx,
+                                        files,
+                                        format!(
+                                            "skipped after Arrow conversion panic in {family}: {message}"
+                                        ),
+                                    );
+                                    return Some(Err(vec![PipelineError::nonfatal(
+                                        affected_files,
+                                        format!("language worker panicked during Arrow conversion: {message}"),
+                                        "arrow_overflow",
+                                    )]));
+                                }
+                                err
+                            }
+                            Err(payload) => {
+                                let message = panic_payload_message(&payload);
+                                if is_offset_overflow_message(&message) {
+                                    record_offset_overflow_skips(
+                                        ctx,
+                                        files,
+                                        format!(
+                                            "skipped after offset-overflow panic in {family}: {message}"
+                                        ),
+                                    );
+                                    return Some(Err(vec![PipelineError::nonfatal(
+                                        affected_files,
+                                        format!("language worker panicked: {message}"),
+                                        "arrow_overflow",
+                                    )]));
+                                }
+
+                                crate::v2::error::CodeGraphError::Internal {
                                 context: format!("language_panic:{family}"),
-                                message: format!(
-                                    "language worker panicked: {}",
-                                    panic_payload_message(&payload)
-                                ),
-                            },
+                                    message: format!("language worker panicked: {message}"),
+                                }
+                            }
                         };
                         Some(Err(vec![err.into()]))
                     }) {
@@ -1168,6 +1266,23 @@ impl FamilyPipeline {
                 }
                 let lctx = &member_ctxs[&f.language];
                 let abs_path = format!("{root_path}/{}", f.path);
+                if let Some(limit) = parser_max_file_size(f.language)
+                    && let Ok(metadata) = std::fs::metadata(&abs_path)
+                    && metadata.len() > limit
+                {
+                    ctx.record_skip(
+                        f.path.clone(),
+                        crate::v2::error::FileSkip::ParserOversize,
+                        format!(
+                            "{} file is {} bytes, parser limit is {} bytes",
+                            f.language,
+                            metadata.len(),
+                            limit
+                        ),
+                    );
+                    pb.inc(1);
+                    return None;
+                }
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
                     Err(e) => {
@@ -1623,6 +1738,32 @@ mod tests {
         }
     }
 
+    struct OffsetOverflowOnParsedGraph;
+
+    impl GraphConverter for OffsetOverflowOnParsedGraph {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+            if graph.output.writes_repository_structure() {
+                Ok(Vec::new())
+            } else {
+                panic!("byte array offset overflow")
+            }
+        }
+    }
+
+    struct TypedOffsetOverflowOnParsedGraph;
+
+    impl GraphConverter for TypedOffsetOverflowOnParsedGraph {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
+            if graph.output.writes_repository_structure() {
+                Ok(Vec::new())
+            } else {
+                std::panic::panic_any(crate::v2::error::CodeGraphError::ArrowConversion {
+                    message: "byte array offset overflow".into(),
+                })
+            }
+        }
+    }
+
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         format!("{manifest}/../../fixtures/code/{relative}")
@@ -1692,6 +1833,116 @@ mod tests {
         let accepted = groups.values().map(Vec::len).sum::<usize>();
 
         assert_eq!(accepted, 2);
+    }
+
+    #[test]
+    fn arrow_string_offsets_reproduce_i32_offset_overflow() {
+        // Memory-safe as of Arrow 58.3.0: `new_repeated` calls
+        // `OffsetBuffer::from_repeated_length` first, which panics on the
+        // `i32` overflow check before allocating the value buffer.
+        let result = std::panic::catch_unwind(|| {
+            let repeats = (i32::MAX as usize / "hello".len()) + 1;
+            let _ = arrow::array::StringArray::new_repeated("hello", repeats);
+        });
+
+        let payload = result.expect_err("expected Arrow offset overflow panic");
+        assert!(is_offset_overflow_message(&panic_payload_message(&payload)));
+    }
+
+    #[test]
+    fn go_parser_skips_files_above_parser_size_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = root.join("proto.gen.go");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(GO_PARSER_MAX_FILE_SIZE + 1).unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "proto.gen.go".into(),
+                size: GO_PARSER_MAX_FILE_SIZE + 1,
+            }]),
+            PipelineConfig {
+                max_file_size: u64::MAX,
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ParserOversize
+        );
+        assert_eq!(result.skipped[0].path, "proto.gen.go");
+    }
+
+    #[test]
+    fn offset_overflow_panic_is_recorded_as_nonfatal_skip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("main.go"), "package main\nfunc main() {}\n").unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "main.go".into(),
+                size: 27,
+            }]),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(OffsetOverflowOnParsedGraph),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].stage, "arrow_overflow");
+        assert_eq!(result.errors[0].file_path, "main.go");
+        assert!(!result.errors[0].fatal);
+        assert!(
+            result.errors[0]
+                .error
+                .contains("byte array offset overflow")
+        );
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ArrowOffsetOverflow
+        );
+        assert_eq!(result.skipped[0].path, "main.go");
+    }
+
+    #[test]
+    fn typed_arrow_conversion_overflow_panic_is_recorded_as_nonfatal_skip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("main.go"), "package main\nfunc main() {}\n").unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "main.go".into(),
+                size: 27,
+            }]),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TypedOffsetOverflowOnParsedGraph),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].stage, "arrow_overflow");
+        assert_eq!(result.errors[0].file_path, "main.go");
+        assert!(!result.errors[0].fatal);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ArrowOffsetOverflow
+        );
     }
 
     #[test]
