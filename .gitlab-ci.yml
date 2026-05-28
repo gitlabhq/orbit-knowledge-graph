@@ -278,9 +278,12 @@ iglu-schema-check:
   extends:
     - .mr-only-rules
   needs: []
+  # Full check (local file vs upstream content from the public Iglu
+  # Pages CDN). Drift between committed schema JSON and upstream fails
+  # the job.
   script:
     - apk add --no-cache bash curl python3
-    - bash ./scripts/iglu/check.sh --remote-only
+    - bash ./scripts/iglu/check.sh
 
 fmt-check:
   stage: lint
