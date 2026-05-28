@@ -646,12 +646,6 @@ pub trait RowEnvelope {
 }
 
 pub trait AsRecordBatch<Ctx = ()>: Sized {
-    /// Whether this item should be included in the batch.
-    /// Default: always include.
-    fn should_include(&self) -> bool {
-        true
-    }
-
     /// Write one row into `builder`. Must push exactly one value to
     /// every column declared in the specs that were used to create the
     /// builder. Returns `Err` if a referenced column is missing.
