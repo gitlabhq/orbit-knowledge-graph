@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gkg_analytics::{OrbitCommonContext, OrbitCommonData, OrbitQueryContext, OrbitQueryData};
+use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use labkit_events::Tracker;
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -108,11 +108,11 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         .build()
         .expect("tracker build");
 
-    let common = OrbitCommonContext::new(OrbitCommonData {
-        deployment_type: ".com",
-        environment: "staging",
-        correlation_id: Some("corr-it-1"),
-        instance_id: Some("inst-it"),
+    let common = OrbitCommonContext::new(orbit_common::OrbitCommon {
+        deployment_type: orbit_common::OrbitCommonDeploymentType::Com,
+        environment: "staging".parse().expect("environment"),
+        correlation_id: Some("corr-it-1".parse().expect("correlation_id")),
+        instance_id: Some("inst-it".parse().expect("instance_id")),
         unique_instance_id: None,
         host_name: None,
         organization_id: Some(42),
@@ -120,14 +120,16 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         schema_version: None,
     });
 
-    let query = OrbitQueryContext::new(OrbitQueryData {
-        source_type: "mcp",
-        tool_name: Some("query_graph"),
+    let query = OrbitQueryContext::new(orbit_query::OrbitQuery {
+        source_type: orbit_query::OrbitQuerySourceType::Mcp,
+        tool_name: Some("query_graph".parse().expect("tool_name")),
         coding_agent: None,
         queried_namespace_ids: None,
         root_namespace_id: Some(99),
-        global_user_id: Some("guser-it"),
-        session_id: Some("sess-it"),
+        global_user_id: Some("guser-it".parse().expect("global_user_id")),
+        session_id: Some("sess-it".parse().expect("session_id")),
+        user_type: None,
+        plan: None,
         is_gitlab_team_member: None,
     });
 
@@ -174,11 +176,15 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         })
         .unwrap_or_default();
     assert!(
-        context_schemas.contains(&*gkg_analytics::ORBIT_COMMON_SCHEMA),
+        context_schemas
+            .iter()
+            .any(|s| s == gkg_analytics::ORBIT_COMMON_SCHEMA),
         "missing orbit_common context, contexts={context_schemas:?}"
     );
     assert!(
-        context_schemas.contains(&*gkg_analytics::ORBIT_QUERY_SCHEMA),
+        context_schemas
+            .iter()
+            .any(|s| s == gkg_analytics::ORBIT_QUERY_SCHEMA),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 

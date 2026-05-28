@@ -3,7 +3,6 @@ target/
 report.xml
 public
 node_modules
-vendor/
 bindings/go/.idea/
 .idea/
 profile.json.gz
