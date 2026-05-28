@@ -154,6 +154,67 @@ async fn indexes_file_nodes_for_all_archive_files() {
     assert_active_definitions(&clickhouse, project_id, "src/main.py", &["hello"]).await;
 }
 
+#[tokio::test]
+async fn skips_oversized_go_parser_input_and_indexes_repository() {
+    let project_id: i64 = 12;
+    let commit_sha = "biggo";
+    let traversal_path = "1/12/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mut oversized_go = String::from("package generated\n\n");
+    oversized_go.push_str("/*\n");
+    while oversized_go.len() <= 10 * 1024 * 1024 {
+        oversized_go.push_str("generated generated generated generated generated generated\n");
+    }
+    oversized_go.push_str("*/\n");
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            ("proto.gen.go", oversized_go.as_str()),
+            ("main.go", "package main\n\nfunc main() {}\n"),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new_with_pipeline_config(
+        &mock,
+        &clickhouse,
+        gkg_server_config::CodeIndexingPipelineConfig {
+            max_file_size_bytes: u64::MAX,
+            ..Default::default()
+        },
+    );
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        traversal_path,
+    )
+    .await;
+
+    let files = active_file_rows(&clickhouse, project_id).await;
+    let paths: BTreeSet<_> = files.iter().map(|row| row.0.clone()).collect();
+    assert_eq!(
+        paths,
+        BTreeSet::from(["main.go".to_string(), "proto.gen.go".to_string()])
+    );
+    assert_eq!(language_for(&files, "main.go"), Some("go"));
+    assert_eq!(language_for(&files, "proto.gen.go"), Some("go"));
+
+    assert_no_active_definitions(&clickhouse, project_id, "proto.gen.go").await;
+    assert_active_definitions(&clickhouse, project_id, "main.go", &["main"]).await;
+}
+
 /// End-to-end test for CALLS and EXTENDS edges:
 /// indexes Java code with class inheritance and a method call, then
 /// queries `gl_code_edge` to verify both relationship kinds were written.

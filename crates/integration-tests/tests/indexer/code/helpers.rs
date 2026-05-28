@@ -42,6 +42,14 @@ pub struct CodeIndexingDeps {
 
 impl CodeIndexingDeps {
     pub fn new(mock: &MockGitlabServer, clickhouse: &TestContext) -> Self {
+        Self::new_with_pipeline_config(mock, clickhouse, CodeIndexingPipelineConfig::default())
+    }
+
+    pub fn new_with_pipeline_config(
+        mock: &MockGitlabServer,
+        clickhouse: &TestContext,
+        pipeline_config: CodeIndexingPipelineConfig,
+    ) -> Self {
         let repository_service = RailsRepositoryService::create(Arc::new(mock.gitlab_client()));
         let graph_client = Arc::new(clickhouse.config.build_client());
         let checkpoint_store = Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(
@@ -70,7 +78,7 @@ impl CodeIndexingDeps {
             metrics.clone(),
             table_names,
             Arc::new(ontology),
-            CodeIndexingPipelineConfig::default(),
+            pipeline_config,
             0,
         ));
 
