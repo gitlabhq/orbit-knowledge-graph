@@ -186,22 +186,42 @@ impl PipelineContext {
         }
     }
 
+    /// Record a file timing entry into the bounded top-N heap.
+    /// Only retains the slowest `MAX_FILE_TIMINGS` entries, so peak
+    /// memory is proportional to the cap, not the repo file count.
     pub fn record_file_timing(&self, entry: FileTimingEntry) {
         if let Ok(mut timings) = self.file_timings.lock() {
-            timings.push(entry);
+            if timings.len() < MAX_FILE_TIMINGS {
+                timings.push(entry);
+            } else if let Some(min) = timings
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    a.total_ms
+                        .partial_cmp(&b.total_ms)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+            {
+                if entry.total_ms > timings[min].total_ms {
+                    timings[min] = entry;
+                }
+            }
         }
     }
 
-    /// Drain collected timings, sort by total_ms descending, and keep
-    /// only the top N entries.
+    /// Drain collected timings, sorted by total_ms descending.
     pub fn drain_slowest_files(&self) -> Vec<FileTimingEntry> {
         let mut timings = self
             .file_timings
             .lock()
             .map(|mut t| std::mem::take(&mut *t))
             .unwrap_or_default();
-        timings.sort_by(|a, b| b.total_ms.partial_cmp(&a.total_ms).unwrap_or(std::cmp::Ordering::Equal));
-        timings.truncate(MAX_FILE_TIMINGS);
+        timings.sort_by(|a, b| {
+            b.total_ms
+                .partial_cmp(&a.total_ms)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         timings
     }
 }
@@ -462,6 +482,11 @@ pub struct FileInventoryEntry {
 }
 
 /// Per-file timing captured during pipeline execution.
+///
+/// `resolve_ms` reflects per-file SSA/edge resolution for generic
+/// (tree-sitter) and Rust pipelines. For JS/TS (OXC), cross-file
+/// resolution runs as a bulk phase and is not attributed per-file,
+/// so `resolve_ms` will be 0 and `total_ms` reflects parse time only.
 #[derive(Debug, Clone)]
 pub struct FileTimingEntry {
     pub path: String,

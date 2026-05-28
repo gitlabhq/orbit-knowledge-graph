@@ -203,6 +203,15 @@ impl LanguagePipeline for RustPipeline {
                 if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                     tracing::warn!("rust edge resolution timed out");
                     edge_timed_out = true;
+                    let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
+                    ctx.record_file_timing(FileTimingEntry {
+                        path: file.relative_path.clone(),
+                        size_bytes: file.file_size,
+                        parse_ms: file.parse_ms,
+                        resolve_ms,
+                        total_ms: file.parse_ms + resolve_ms,
+                        language: "rust".to_string(),
+                    });
                     break 'edge_resolve;
                 }
                 let Some(source_node) = graph.enclosing_definition_for_range(
