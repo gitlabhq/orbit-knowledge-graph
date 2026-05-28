@@ -1080,7 +1080,7 @@ mod tests {
             col_type: ColumnType::StrList,
             nullable: false,
         }];
-        let mut b = BatchBuilder::new(&specs);
+        let mut b = BatchBuilder::new(&specs, 2).unwrap();
 
         // Row with values
         b.col("tags")
