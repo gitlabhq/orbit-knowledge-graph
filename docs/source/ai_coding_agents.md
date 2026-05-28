@@ -8,8 +8,8 @@ title: Set up AI coding agents with the Orbit skill
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Experiment
 
 {{< /details >}}
@@ -31,9 +31,9 @@ The skill works with both [Orbit Remote](remote/_index.md) and
 
 ## Prerequisites
 
-- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) v1.94.0 or later,
-  with the `glab skills install` subcommand available. If `glab skills install`
-  is not recognized, update `glab` first.
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) v1.95.0 or later,
+  which introduced `glab skills install`. If the subcommand is not recognized,
+  update `glab` first.
 
 ## Install the skill
 
