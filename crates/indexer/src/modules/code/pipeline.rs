@@ -354,6 +354,8 @@ impl CodeIndexingPipeline {
             duration_ms = graph_write_duration.as_millis() as u64,
             "graph writing completed"
         );
+        context.progress.notify_in_progress().await;
+
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
