@@ -3,7 +3,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::v2::error::AnalyzerError;
-use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
+use crate::v2::pipeline::{
+    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, PipelineContext, PipelineError,
+};
 use crate::v2::sentinel;
 use rustc_hash::FxHashMap;
 
@@ -57,6 +59,14 @@ impl LanguagePipeline for JsPipeline {
         let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         let mut resolved_files = Vec::with_capacity(analyzed_files.len());
         for file in analyzed_files {
+            ctx.record_file_timing(FileTimingEntry {
+                path: file.relative_path.clone(),
+                size_bytes: file.phase1.size,
+                parse_ms: file.parse_ms,
+                resolve_ms: 0.0,
+                total_ms: file.parse_ms,
+                language: format!("{}", file.phase1.language),
+            });
             let info = builder.add_file(file.phase1);
             file_infos.insert(file.relative_path.clone(), info);
             resolved_files.push(ResolvedJsFile {
@@ -125,6 +135,7 @@ mod tests {
             root_path: root.to_string_lossy().into_owned(),
             skipped: Mutex::new(Vec::new()),
             faults: Mutex::new(Vec::new()),
+            file_timings: Mutex::new(Vec::new()),
         })
     }
 

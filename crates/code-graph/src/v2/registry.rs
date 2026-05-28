@@ -217,6 +217,7 @@ mod tests {
             root_path: "/".to_string(),
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
+            file_timings: std::sync::Mutex::new(Vec::new()),
         })
     }
 

@@ -132,6 +132,9 @@ pub struct FamilyFileInput {
 ///
 /// Owned so it can be stored in `Arc` and shared across threads
 /// and into structs like `CodeGraph`.
+/// Max file timing entries retained (top-N by total_ms).
+const MAX_FILE_TIMINGS: usize = 100;
+
 pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
@@ -143,6 +146,8 @@ pub struct PipelineContext {
     /// `gkg.indexer.code.file_faults{kind}` and contribute to
     /// `files.processed{outcome="errored"}`.
     pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
+    /// Per-file timing entries collected across all languages.
+    pub file_timings: std::sync::Mutex<Vec<FileTimingEntry>>,
 }
 
 impl PipelineContext {
@@ -179,6 +184,25 @@ impl PipelineContext {
                 detail: detail.into(),
             });
         }
+    }
+
+    pub fn record_file_timing(&self, entry: FileTimingEntry) {
+        if let Ok(mut timings) = self.file_timings.lock() {
+            timings.push(entry);
+        }
+    }
+
+    /// Drain collected timings, sort by total_ms descending, and keep
+    /// only the top N entries.
+    pub fn drain_slowest_files(&self) -> Vec<FileTimingEntry> {
+        let mut timings = self
+            .file_timings
+            .lock()
+            .map(|mut t| std::mem::take(&mut *t))
+            .unwrap_or_default();
+        timings.sort_by(|a, b| b.total_ms.partial_cmp(&a.total_ms).unwrap_or(std::cmp::Ordering::Equal));
+        timings.truncate(MAX_FILE_TIMINGS);
+        timings
     }
 }
 
@@ -437,6 +461,17 @@ pub struct FileInventoryEntry {
     pub size: u64,
 }
 
+/// Per-file timing captured during pipeline execution.
+#[derive(Debug, Clone)]
+pub struct FileTimingEntry {
+    pub path: String,
+    pub size_bytes: u64,
+    pub parse_ms: f64,
+    pub resolve_ms: f64,
+    pub total_ms: f64,
+    pub language: String,
+}
+
 pub struct PipelineResult {
     pub stats: PipelineStats,
     /// Task-level errors. Fatal entries route to `code_errors_total{stage}`.
@@ -457,6 +492,8 @@ pub struct PipelineStats {
     pub imports_count: usize,
     pub references_count: usize,
     pub edges_count: usize,
+    /// Per-file timing entries, sorted by total_ms descending.
+    pub slowest_files: Vec<FileTimingEntry>,
 }
 
 #[derive(Debug)]
@@ -560,6 +597,7 @@ impl Pipeline {
             root_path: root_str,
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
+            file_timings: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -773,6 +811,8 @@ impl Pipeline {
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
 
+        let slowest_files = ctx.drain_slowest_files();
+
         PipelineResult {
             stats: PipelineStats {
                 files_discovered: total_files,
@@ -785,6 +825,7 @@ impl Pipeline {
                 imports_count: imports_count.into_inner(),
                 references_count: 0,
                 edges_count: edges_count.into_inner(),
+                slowest_files,
             },
             errors: all_errors.into_inner().unwrap_or_default(),
             skipped,
@@ -1028,6 +1069,7 @@ impl FamilyPipeline {
             result: ParseFullResult,
             ext: String,
             file_size: u64,
+            parse_ms: f64,
         }
 
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
@@ -1053,6 +1095,7 @@ impl FamilyPipeline {
                     }
                 };
 
+                let t_parse = std::time::Instant::now();
                 let result = match lctx
                     .spec
                     .parse_full_collect(&source, &f.path, f.language, tracer)
@@ -1073,6 +1116,7 @@ impl FamilyPipeline {
                         }));
                     }
                 };
+                let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
 
                 let ext = f
                     .path
@@ -1088,6 +1132,7 @@ impl FamilyPipeline {
                     result,
                     ext,
                     file_size,
+                    parse_ms,
                 }))
             })
             .collect();
@@ -1118,6 +1163,8 @@ impl FamilyPipeline {
             refs: Vec<CollectedRef>,
             inferred_returns: Vec<(u32, String)>,
             unresolved_aliases: Vec<(usize, String)>,
+            parse_ms: f64,
+            file_size: u64,
         }
 
         let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
@@ -1153,6 +1200,8 @@ impl FamilyPipeline {
                 refs: parsed_file.result.refs,
                 inferred_returns: parsed_file.result.inferred_returns,
                 unresolved_aliases: parsed_file.result.unresolved_aliases,
+                parse_ms: parsed_file.parse_ms,
+                file_size: parsed_file.file_size,
             });
         }
 
@@ -1210,7 +1259,8 @@ impl FamilyPipeline {
 
         let resolve_results: Vec<Phase2Result> = files_with_refs
             .into_par_iter()
-            .map(|fwr_opt| -> Phase2Result {
+            .enumerate()
+            .map(|(file_idx, fwr_opt)| -> Phase2Result {
                 if ctx.is_cancelled() {
                     pb2.inc(1);
                     return Default::default();
@@ -1237,6 +1287,7 @@ impl FamilyPipeline {
                     resolver.set_include_index(Arc::clone(idx));
                 }
 
+                let t_resolve = std::time::Instant::now();
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut killed = false;
@@ -1269,6 +1320,16 @@ impl FamilyPipeline {
                         edges.extend(import_edges);
                     }
                 }
+                let resolve_ms = t_resolve.elapsed().as_secs_f64() * 1000.0;
+
+                ctx.record_file_timing(FileTimingEntry {
+                    path: files[file_idx].path.clone(),
+                    size_bytes: fwr.file_size,
+                    parse_ms: fwr.parse_ms,
+                    resolve_ms,
+                    total_ms: fwr.parse_ms + resolve_ms,
+                    language: format!("{}", fwr.language),
+                });
 
                 dedupe_edge_triples(&mut edges);
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
@@ -1461,6 +1522,7 @@ mod tests {
             root_path: "/".to_string(),
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
+            file_timings: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();
@@ -1859,6 +1921,7 @@ namespace MyApp {
             root_path: "/".to_string(),
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
+            file_timings: std::sync::Mutex::new(Vec::new()),
         });
         ctx.record_skip(
             "src/slow.rs",

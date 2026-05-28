@@ -80,6 +80,7 @@ struct IndexRunResult {
     faulted_files: Vec<code_graph::v2::FaultedFile>,
     graph_stats: IndexGraphStats,
     database_path: Option<String>,
+    slowest_files: Vec<code_graph::v2::FileTimingEntry>,
 }
 
 #[derive(Serialize)]
@@ -88,8 +89,20 @@ struct DetailedStats {
     skipped_files: Vec<SkippedFile>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     errored_files: Vec<ErroredFile>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    slowest_files: Vec<SlowFile>,
     relationship_types: HashMap<String, usize>,
     definition_types: HashMap<String, usize>,
+}
+
+#[derive(Serialize)]
+struct SlowFile {
+    path: String,
+    language: String,
+    size_bytes: u64,
+    parse_ms: f64,
+    resolve_ms: f64,
+    total_ms: f64,
 }
 
 #[derive(Serialize)]
@@ -645,6 +658,7 @@ async fn index_repo(
             definition_types: HashMap::new(),
         },
         database_path: Some(db_path.display().to_string()),
+        slowest_files: v2_result.stats.slowest_files,
     })
 }
 
@@ -718,6 +732,18 @@ fn build_index_output(
                 path: f.path.clone(),
                 kind: f.kind.as_metric_label().to_string(),
                 detail: f.detail.clone(),
+            })
+            .collect(),
+        slowest_files: result
+            .slowest_files
+            .iter()
+            .map(|f| SlowFile {
+                path: f.path.clone(),
+                language: f.language.clone(),
+                size_bytes: f.size_bytes,
+                parse_ms: (f.parse_ms * 100.0).round() / 100.0,
+                resolve_ms: (f.resolve_ms * 100.0).round() / 100.0,
+                total_ms: (f.total_ms * 100.0).round() / 100.0,
             })
             .collect(),
         relationship_types: stats.relationship_types.clone(),

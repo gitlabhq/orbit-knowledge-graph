@@ -21,6 +21,8 @@ pub struct AnalyzedJsFile {
     pub relative_path: String,
     pub analysis: JsFileAnalysis,
     pub phase1: JsPhase1File,
+    /// Wall-clock time for OXC parse + semantic + extraction.
+    pub parse_ms: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +45,7 @@ pub fn analyze_files(
         .par_iter()
         .map(|relative_path| {
             let guard = sentinel.map(|s| s.file_start(relative_path));
+            let t_file = std::time::Instant::now();
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 analyze_file(relative_path, root_path)
             }))
@@ -53,6 +56,7 @@ pub fn analyze_files(
                     format!("panic during analysis: {message}"),
                 ))
             });
+            let parse_ms = t_file.elapsed().as_secs_f64() * 1000.0;
             // If the sentinel killed this file while OXC was running,
             // convert whatever result we got into a timeout skip.
             if guard.as_ref().is_some_and(|g| g.is_killed()) {
@@ -64,7 +68,7 @@ pub fn analyze_files(
                     )),
                 );
             }
-            (relative_path.clone(), outcome)
+            (relative_path.clone(), outcome.map(|mut f| { f.parse_ms = parse_ms; f }))
         })
         .collect();
 
@@ -178,7 +182,7 @@ fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
 /// Per-file ceiling for the JS pipeline. The walker also applies a cap,
 /// but callers that bypass the walker (`WorkspaceProbe`, SFC block
 /// recombination) rely on this constant to stay bounded.
-pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     let raw = if let Some(s) = payload.downcast_ref::<&'static str>() {
@@ -262,6 +266,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         relative_path,
         analysis,
         phase1,
+        parse_ms: 0.0,
     })
 }
 
@@ -292,6 +297,7 @@ fn file_backed_module(
             classes: Vec::new(),
             module_info: JsModuleInfo::default(),
         },
+        parse_ms: 0.0,
         phase1: JsPhase1File {
             path: relative_path.to_string(),
             extension: extension.to_string(),
