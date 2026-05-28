@@ -156,16 +156,33 @@ impl JsModuleGraphBuilder {
             .iter()
             .map(|def| (def.fqn.as_str().to_string(), def))
             .collect();
+        let binding_local_fqns: Vec<Option<String>> = file
+            .bindings
+            .iter()
+            .map(|binding| match &binding.target {
+                JsModuleBindingTargetInput::LocalDefinition { fqn }
+                    if local_defs_by_fqn.contains_key(fqn) =>
+                {
+                    Some(fqn.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
         let export_defs: Vec<_> = file
             .bindings
             .iter()
-            .map(|binding| synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn))
+            .zip(&binding_local_fqns)
+            .filter(|(_, local)| local.is_none())
+            .map(|(binding, _)| {
+                synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn)
+            })
             .collect();
 
         let local_def_count = file.definitions.len();
-        let export_def_count = export_defs.len();
+        let proxy_def_count = export_defs.len();
 
-        let mut graph_defs = Vec::with_capacity(1 + local_def_count + export_def_count);
+        let mut graph_defs = Vec::with_capacity(1 + local_def_count + proxy_def_count);
         graph_defs.push(module_def);
         graph_defs.extend(file.definitions.iter().cloned());
         graph_defs.extend(export_defs);
@@ -181,8 +198,8 @@ impl JsModuleGraphBuilder {
 
         let module_node = def_nodes[0];
         let local_def_nodes = def_nodes[1..1 + local_def_count].to_vec();
-        let export_def_nodes =
-            def_nodes[1 + local_def_count..1 + local_def_count + export_def_count].to_vec();
+        let proxy_def_nodes =
+            &def_nodes[1 + local_def_count..1 + local_def_count + proxy_def_count];
 
         let local_nodes_by_fqn: FxHashMap<_, _> = file
             .definitions
@@ -191,11 +208,18 @@ impl JsModuleGraphBuilder {
             .map(|(def, node)| (def.fqn.as_str().to_string(), node))
             .collect();
 
+        let mut proxy_nodes = proxy_def_nodes.iter().copied();
         let bindings = file
             .bindings
             .iter()
-            .zip(export_def_nodes.iter().copied())
-            .map(|(binding, export_node)| {
+            .zip(&binding_local_fqns)
+            .map(|(binding, local_fqn)| {
+                let export_node = match local_fqn {
+                    Some(fqn) => local_nodes_by_fqn[fqn],
+                    None => proxy_nodes
+                        .next()
+                        .expect("one proxy node per non-local binding"),
+                };
                 let target = match &binding.target {
                     JsModuleBindingTargetInput::LocalDefinition { fqn } => local_nodes_by_fqn
                         .get(fqn)
@@ -392,20 +416,13 @@ mod tests {
             .get(&JsExportName::Primary)
             .expect("primary export should be tracked");
 
-        let mut hits = Vec::new();
-        assert!(graph.lookup_nested_from_node_with_hierarchy(
-            module.module_node,
-            "normalize",
-            &mut hits,
-        ));
-        assert!(hits.contains(&named.export_node));
-        hits.clear();
-        assert!(graph.lookup_nested_from_node_with_hierarchy(
-            module.module_node,
-            "default",
-            &mut hits,
-        ));
-        assert!(hits.contains(&primary.export_node));
+        assert_eq!(named.export_node, info.local_def_nodes[0]);
+        assert_eq!(primary.export_node, info.local_def_nodes[0]);
+
+        let exported = graph.def(named.export_node);
+        assert_eq!(graph.str(exported.name), "normalize");
+        assert_eq!(exported.definition_type, "Function");
+        assert_eq!(graph.def(primary.export_node).fqn, exported.fqn);
     }
 
     #[test]

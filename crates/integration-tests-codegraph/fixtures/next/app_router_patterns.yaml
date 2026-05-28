@@ -159,12 +159,12 @@ tests:
       ORDER BY file_path, path, name
     assert:
       - { row_count: 6 }
-      - { row: { file_path: "app/api/health/route.ts", path: "@/lib/health", name: "getHealth", is_type_only: false, target: "src/lib/health.ts::getHealth" } }
-      - { row: { file_path: "app/layout.tsx", path: "@/components/Header", name: "default", is_type_only: false, target: "src/components/Header.tsx::default" } }
-      - { row: { file_path: "app/page.tsx", path: "@/features/dashboard/Dashboard", name: "default", is_type_only: false, target: "src/features/dashboard/Dashboard.tsx::default" } }
-      - { row: { file_path: "app/page.tsx", path: "@/lib/dashboard", name: "getDashboard", is_type_only: false, target: "src/lib/dashboard.ts::getDashboard" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/components/PostView", name: "default", is_type_only: false, target: "src/components/PostView.tsx::default" } }
-      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", is_type_only: false, target: "src/lib/posts.ts::fetchPost" } }
+      - { row: { file_path: "app/api/health/route.ts", path: "@/lib/health", name: "getHealth", is_type_only: false, target: "getHealth" } }
+      - { row: { file_path: "app/layout.tsx", path: "@/components/Header", name: "default", is_type_only: false, target: "Header" } }
+      - { row: { file_path: "app/page.tsx", path: "@/features/dashboard/Dashboard", name: "default", is_type_only: false, target: "Dashboard" } }
+      - { row: { file_path: "app/page.tsx", path: "@/lib/dashboard", name: "getDashboard", is_type_only: false, target: "getDashboard" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/components/PostView", name: "default", is_type_only: false, target: "PostView" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", is_type_only: false, target: "fetchPost" } }
 
   - name: Next app router external Next imports remain unresolved
     query: |

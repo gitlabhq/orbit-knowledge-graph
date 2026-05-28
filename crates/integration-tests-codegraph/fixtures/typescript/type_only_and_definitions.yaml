@@ -56,10 +56,10 @@ tests:
       ORDER BY name
     assert:
       - { row_count: 4 }
-      - { row: { name: "Status", is_type_only: false, target: "types/contracts.ts::Status" } }
-      - { row: { name: "User", is_type_only: true, target: "types/contracts.ts::User" } }
-      - { row: { name: "UserId", is_type_only: true, target: "types/contracts.ts::UserId" } }
-      - { row: { name: "makeStatus", is_type_only: false, target: "types/contracts.ts::makeStatus" } }
+      - { row: { name: "Status", is_type_only: false, target: "Status" } }
+      - { row: { name: "User", is_type_only: true, target: "User" } }
+      - { row: { name: "UserId", is_type_only: true, target: "UserId" } }
+      - { row: { name: "makeStatus", is_type_only: false, target: "makeStatus" } }
 
   - name: Type-only imports do not fabricate runtime call edges
     query: |

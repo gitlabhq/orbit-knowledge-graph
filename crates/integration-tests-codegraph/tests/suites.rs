@@ -71,6 +71,7 @@ yaml_test!(
     typescript_type_only_and_definitions,
     "typescript/type_only_and_definitions.yaml"
 );
+yaml_test!(typescript_export_dedup, "typescript/export_dedup.yaml");
 yaml_test!(typescript_line_indexing, "typescript/line_indexing.yaml");
 yaml_test!(
     react_jsx_component_matrix,

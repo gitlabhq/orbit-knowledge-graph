@@ -214,39 +214,32 @@ tests:
       - { row: { file_path: "src/app/default.tsx", fqn: "src/app/default.tsx", type: "Module" } }
       - { row: { file_path: "src/app/api/items/[id]/route.ts", fqn: "src/app/api/items/[id]/route.ts", type: "Module" } }
 
-  - name: Next route export proxies are synthesized for route conventions
+  - name: Route convention exports are indexed as their real definitions
     query: |
       MATCH (d:Definition)
       WHERE d.fqn IN [
-        'src/app/(marketing)/blog/[...slug]/page.tsx::default',
-        'src/app/shop/[[...filters]]/page.tsx::default',
-        'src/app/shop/[[...filters]]/page.tsx::generateStaticParams',
-        'src/app/api/items/[id]/route.ts::GET',
-        'src/app/api/items/[id]/route.ts::PUT',
-        'src/app/api/items/[id]/route.ts::PATCH',
-        'src/app/api/items/[id]/route.ts::DELETE',
-        'src/app/api/items/[id]/route.ts::HEAD',
-        'src/app/api/items/[id]/route.ts::OPTIONS',
-        'src/app/api/items/[id]/route.ts::runtime',
-        'src/app/api/items/[id]/route.ts::dynamic',
-        'src/app/api/items/[id]/route.ts::revalidate'
+        'MarketingCatchAll',
+        'ShopOptionalCatchAll',
+        'generateStaticParams',
+        'GET', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',
+        'runtime', 'dynamic', 'revalidate'
       ]
       RETURN d.fqn AS fqn, d.definition_type AS type
       ORDER BY fqn
     assert:
       - { row_count: 12 }
-      - { row: { fqn: "src/app/(marketing)/blog/[...slug]/page.tsx::default", type: "Function" } }
-      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::default", type: "Function" } }
-      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::generateStaticParams", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::GET", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::PUT", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::PATCH", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::DELETE", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::HEAD", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::OPTIONS", type: "Function" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::runtime", type: "Variable" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::dynamic", type: "Variable" } }
-      - { row: { fqn: "src/app/api/items/[id]/route.ts::revalidate", type: "Variable" } }
+      - { row: { fqn: "MarketingCatchAll", type: "Function" } }
+      - { row: { fqn: "ShopOptionalCatchAll", type: "Function" } }
+      - { row: { fqn: "generateStaticParams", type: "Function" } }
+      - { row: { fqn: "GET", type: "Function" } }
+      - { row: { fqn: "PUT", type: "Function" } }
+      - { row: { fqn: "PATCH", type: "Function" } }
+      - { row: { fqn: "DELETE", type: "Function" } }
+      - { row: { fqn: "HEAD", type: "Function" } }
+      - { row: { fqn: "OPTIONS", type: "Function" } }
+      - { row: { fqn: "runtime", type: "Variable" } }
+      - { row: { fqn: "dynamic", type: "Variable" } }
+      - { row: { fqn: "revalidate", type: "Variable" } }
 
   - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
     query: |
@@ -264,13 +257,13 @@ tests:
       - { row_count: 9 }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "src/components/index.ts::Banner" } }
       - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "src/components/index.ts::Nav" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "src/features/dashboard/index.tsx::default" } }
-      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "src/lib/index.ts::getMarketing" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "Dashboard" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "getMarketing" } }
       - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: null, import_type: "NamespaceImport", target: "src/components/index.ts" } }
-      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "src/components/Banner.tsx::Banner" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "src/lib/index.ts::getItem" } }
-      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "src/lib/index.ts::updateItem" } }
-      - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "src/app/actions.ts::savePost" } }
+      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "Banner" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "getItem" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "updateItem" } }
+      - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "savePost" } }
 
   - name: Next route components resolve through baseUrl aliases barrels and folder indexes
     query: |

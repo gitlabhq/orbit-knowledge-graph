@@ -194,7 +194,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "named/util.js::helper" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "helper" } }
 
   - name: Destructured require call resolves to concrete definition
     query: |
@@ -234,7 +234,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "alias/util.js::resolve" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "resolve" } }
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
@@ -254,7 +254,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "default/util.js::default" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "main" } }
 
   - name: Default module.exports require call resolves to the exported function
     query: |
@@ -297,7 +297,7 @@ tests:
     assert:
       - { row_count: 2 }
       - { row: { name: "HTTP_STATUS_OK", alias: null, target: "no_false_call/util.js::HTTP_STATUS_OK" } }
-      - { row: { name: "trimValue", alias: null, target: "no_false_call/util.js::trimValue" } }
+      - { row: { name: "trimValue", alias: null, target: "trimValue" } }
 
   - name: Imported CJS constants do not create false call edges
     query: |

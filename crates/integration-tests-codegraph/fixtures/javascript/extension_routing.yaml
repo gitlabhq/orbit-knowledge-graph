@@ -117,12 +117,12 @@ tests:
       ORDER BY file_path
     assert:
       - { row_count: 6 }
-      - { row: { file_path: "cjs/consumer.js", path: "./component.cjs", name: "runCjs", import_type: "CjsRequire", target: "cjs/component.cjs::runCjs" } }
-      - { row: { file_path: "cts/consumer.ts", path: "./component.cts", name: "formatCts", import_type: "NamedImport", target: "cts/component.cts::formatCts" } }
-      - { row: { file_path: "esm/consumer.js", path: "./component.mjs", name: "normalizeMjs", import_type: "NamedImport", target: "esm/component.mjs::normalizeMjs" } }
-      - { row: { file_path: "jsx/consumer.js", path: "./component.jsx", name: "renderBadge", import_type: "NamedImport", target: "jsx/component.jsx::renderBadge" } }
-      - { row: { file_path: "mts/consumer.ts", path: "./component.mts", name: "formatMts", import_type: "NamedImport", target: "mts/component.mts::formatMts" } }
-      - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", import_type: "NamedImport", target: "tsx/component.tsx::renderPanel" } }
+      - { row: { file_path: "cjs/consumer.js", path: "./component.cjs", name: "runCjs", import_type: "CjsRequire", target: "runCjs" } }
+      - { row: { file_path: "cts/consumer.ts", path: "./component.cts", name: "formatCts", import_type: "NamedImport", target: "formatCts" } }
+      - { row: { file_path: "esm/consumer.js", path: "./component.mjs", name: "normalizeMjs", import_type: "NamedImport", target: "normalizeMjs" } }
+      - { row: { file_path: "jsx/consumer.js", path: "./component.jsx", name: "renderBadge", import_type: "NamedImport", target: "renderBadge" } }
+      - { row: { file_path: "mts/consumer.ts", path: "./component.mts", name: "formatMts", import_type: "NamedImport", target: "formatMts" } }
+      - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", import_type: "NamedImport", target: "renderPanel" } }
 
   - name: Generic pipeline resolves cross-file calls for JS-family extensions
     query: |

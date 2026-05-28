@@ -65,7 +65,7 @@ tests:
       RETURN i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { name: "normalizeValue", target: "components/helpers.ts::normalizeValue" } }
+      - { row: { name: "normalizeValue", target: "normalizeValue" } }
 
   - name: script setup function bodies resolve imported helper calls
     query: |

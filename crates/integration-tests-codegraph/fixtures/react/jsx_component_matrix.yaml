@@ -191,13 +191,13 @@ tests:
       ORDER BY import_type, name, target
     assert:
       - { row_count: 9 }
-      - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "src/components/card.tsx::default" } }
-      - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "src/components/button.tsx::Button" } }
+      - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "Card" } }
+      - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "Button" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "src/components/index.ts::Card" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "src/components/index.ts::CardFooter" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "src/components/icons.tsx::Icons" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "Icons" } }
       - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "src/components/index.ts::PrimaryButton" } }
-      - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "src/components/icons.tsx::StatusIcon" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "StatusIcon" } }
       - { row: { import_type: "NamespaceImport", path: "./components/card", name: null, alias: "CardModule", target: "src/components/card.tsx" } }
       - { row: { import_type: "NamespaceImport", path: "./components", name: null, alias: "Reexported", target: "src/components/index.ts" } }
 
@@ -325,7 +325,7 @@ tests:
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { path: "./components/button", name: "Button", target: "src/components/button.tsx::Button" } }
+      - { row: { path: "./components/button", name: "Button", target: "Button" } }
 
   - name: TSX type declarations do not create runtime call edges
     query: |
