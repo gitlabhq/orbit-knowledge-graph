@@ -218,6 +218,7 @@ mod tests {
             skipped: std::sync::Mutex::new(Vec::new()),
             faults: std::sync::Mutex::new(Vec::new()),
             file_timings: std::sync::Mutex::new(Vec::new()),
+            language_timings: std::sync::Mutex::new(Vec::new()),
         })
     }
 

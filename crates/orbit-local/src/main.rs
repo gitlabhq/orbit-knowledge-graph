@@ -81,6 +81,8 @@ struct IndexRunResult {
     graph_stats: IndexGraphStats,
     database_path: Option<String>,
     slowest_files: Vec<code_graph::v2::FileTimingEntry>,
+    language_timings: Vec<code_graph::v2::LanguageTimings>,
+    phase_timings: code_graph::v2::PhaseTimings,
 }
 
 #[derive(Serialize)]
@@ -91,8 +93,29 @@ struct DetailedStats {
     errored_files: Vec<ErroredFile>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     slowest_files: Vec<SlowFile>,
+    language_timings: Vec<LanguageTiming>,
+    phase_timings: PhaseTiming,
     relationship_types: HashMap<String, usize>,
     definition_types: HashMap<String, usize>,
+}
+
+#[derive(Serialize)]
+struct LanguageTiming {
+    language: String,
+    file_count: usize,
+    total_bytes: u64,
+    parse_ms: f64,
+    graph_build_ms: f64,
+    resolve_ms: f64,
+    total_ms: f64,
+}
+
+#[derive(Serialize)]
+struct PhaseTiming {
+    file_discovery_ms: f64,
+    structural_graph_ms: f64,
+    language_processing_ms: f64,
+    total_ms: f64,
 }
 
 #[derive(Serialize)]
@@ -659,6 +682,8 @@ async fn index_repo(
         },
         database_path: Some(db_path.display().to_string()),
         slowest_files: v2_result.stats.slowest_files,
+        language_timings: v2_result.stats.language_timings,
+        phase_timings: v2_result.stats.phase_timings,
     })
 }
 
@@ -746,6 +771,26 @@ fn build_index_output(
                 total_ms: (f.total_ms * 100.0).round() / 100.0,
             })
             .collect(),
+        language_timings: result
+            .language_timings
+            .iter()
+            .map(|lt| LanguageTiming {
+                language: lt.language.clone(),
+                file_count: lt.file_count,
+                total_bytes: lt.total_bytes,
+                parse_ms: (lt.parse_ms * 100.0).round() / 100.0,
+                graph_build_ms: (lt.graph_build_ms * 100.0).round() / 100.0,
+                resolve_ms: (lt.resolve_ms * 100.0).round() / 100.0,
+                total_ms: (lt.total_ms * 100.0).round() / 100.0,
+            })
+            .collect(),
+        phase_timings: PhaseTiming {
+            file_discovery_ms: (result.phase_timings.file_discovery_ms * 100.0).round() / 100.0,
+            structural_graph_ms: (result.phase_timings.structural_graph_ms * 100.0).round() / 100.0,
+            language_processing_ms: (result.phase_timings.language_processing_ms * 100.0).round()
+                / 100.0,
+            total_ms: (result.phase_timings.total_ms * 100.0).round() / 100.0,
+        },
         relationship_types: stats.relationship_types.clone(),
         definition_types: stats.definition_types.clone(),
     });

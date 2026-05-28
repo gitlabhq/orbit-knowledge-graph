@@ -354,6 +354,11 @@ impl CodeIndexingPipeline {
 
         self.metrics
             .record_repository_source_size(result.stats.bytes_discovered);
+        self.metrics
+            .record_phase_timing(&result.stats.phase_timings);
+        for lt in &result.stats.language_timings {
+            self.metrics.record_language_timing(lt);
+        }
 
         observer.files_processed(
             result.stats.files_discovered as u64,

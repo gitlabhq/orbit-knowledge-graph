@@ -24,6 +24,10 @@ pub struct CodeMetrics {
     pub(in crate::modules::code) file_faults: Counter<u64>,
     pub(in crate::modules::code) archive_entries_skipped: Counter<u64>,
     pub(in crate::modules::code) archive_bytes_skipped: Counter<u64>,
+    pub(in crate::modules::code) language_phase_duration: Histogram<f64>,
+    pub(in crate::modules::code) language_files: Counter<u64>,
+    pub(in crate::modules::code) language_bytes: Counter<u64>,
+    pub(in crate::modules::code) pipeline_phase_duration: Histogram<f64>,
 }
 
 impl CodeMetrics {
@@ -52,6 +56,10 @@ impl CodeMetrics {
             file_faults: code::FILE_FAULTS.build_counter_u64(meter),
             archive_entries_skipped: code::ARCHIVE_ENTRIES_SKIPPED.build_counter_u64(meter),
             archive_bytes_skipped: code::ARCHIVE_BYTES_SKIPPED.build_counter_u64(meter),
+            language_phase_duration: code::LANGUAGE_PHASE_DURATION.build_histogram_f64(meter),
+            language_files: code::LANGUAGE_FILES.build_counter_u64(meter),
+            language_bytes: code::LANGUAGE_BYTES.build_counter_u64(meter),
+            pipeline_phase_duration: code::PIPELINE_PHASE_DURATION.build_histogram_f64(meter),
         }
     }
 }
@@ -123,6 +131,50 @@ impl CodeMetrics {
         let labels = [KeyValue::new(code::labels::REASON, reason)];
         self.archive_entries_skipped.add(1, &labels);
         self.archive_bytes_skipped.add(bytes, &labels);
+    }
+
+    pub(in crate::modules::code) fn record_language_timing(
+        &self,
+        timing: &code_graph::v2::LanguageTimings,
+    ) {
+        let lang = timing.language.as_str();
+        self.language_files.add(
+            timing.file_count as u64,
+            &[KeyValue::new(code::labels::LANGUAGE, lang.to_owned())],
+        );
+        self.language_bytes.add(
+            timing.total_bytes,
+            &[KeyValue::new(code::labels::LANGUAGE, lang.to_owned())],
+        );
+        for (phase, duration_ms) in [
+            ("parse", timing.parse_ms),
+            ("graph_build", timing.graph_build_ms),
+            ("resolve", timing.resolve_ms),
+        ] {
+            self.language_phase_duration.record(
+                duration_ms / 1000.0,
+                &[
+                    KeyValue::new(code::labels::LANGUAGE, lang.to_owned()),
+                    KeyValue::new(code::labels::PHASE, phase),
+                ],
+            );
+        }
+    }
+
+    pub(in crate::modules::code) fn record_phase_timing(
+        &self,
+        timing: &code_graph::v2::PhaseTimings,
+    ) {
+        for (phase, duration_ms) in [
+            ("file_discovery", timing.file_discovery_ms),
+            ("structural_graph", timing.structural_graph_ms),
+            ("language_processing", timing.language_processing_ms),
+        ] {
+            self.pipeline_phase_duration.record(
+                duration_ms / 1000.0,
+                &[KeyValue::new(code::labels::PHASE, phase)],
+            );
+        }
     }
 }
 

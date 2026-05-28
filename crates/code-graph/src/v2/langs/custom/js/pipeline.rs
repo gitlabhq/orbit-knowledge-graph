@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::v2::error::AnalyzerError;
 use crate::v2::pipeline::{
-    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, PipelineContext, PipelineError,
+    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
+    PipelineError,
 };
 use crate::v2::sentinel;
 use rustc_hash::FxHashMap;
@@ -23,6 +24,7 @@ impl LanguagePipeline for JsPipeline {
     ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
+        let t0 = std::time::Instant::now();
         if files.is_empty() {
             return Ok(());
         }
@@ -34,6 +36,7 @@ impl LanguagePipeline for JsPipeline {
         let sentinel_handle = sentinel.as_ref().map(|(h, _)| h);
 
         let (analyzed_files, errors) = analyze_files(files, root_path, sentinel_handle);
+        let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         // Route per-file outcomes to the typed collections regardless of
         // whether at least one file analyzed; the orchestrator no longer
@@ -81,6 +84,7 @@ impl LanguagePipeline for JsPipeline {
         let probe = WorkspaceProbe::load(Path::new(root_path), files);
 
         let (mut graph, modules) = builder.into_parts();
+        let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -95,6 +99,26 @@ impl LanguagePipeline for JsPipeline {
             ctx,
         );
         graph.finalize(tracer);
+        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let resolve_ms = total_ms - parse_ms - graph_build_ms;
+        let total_bytes: u64 = resolved_files
+            .iter()
+            .map(|f| {
+                std::fs::metadata(format!("{root_path}/{}", f.relative_path))
+                    .map(|m| m.len())
+                    .unwrap_or(0)
+            })
+            .sum();
+
+        ctx.record_language_timing(LanguageTimings {
+            language: "java_script".to_string(),
+            file_count: resolved_files.len(),
+            total_bytes,
+            parse_ms,
+            graph_build_ms,
+            resolve_ms,
+            total_ms,
+        });
 
         btx.send_graph(graph);
 
@@ -136,6 +160,7 @@ mod tests {
             skipped: Mutex::new(Vec::new()),
             faults: Mutex::new(Vec::new()),
             file_timings: Mutex::new(Vec::new()),
+            language_timings: Mutex::new(Vec::new()),
         })
     }
 

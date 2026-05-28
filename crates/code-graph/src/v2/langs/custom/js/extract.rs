@@ -68,7 +68,13 @@ pub fn analyze_files(
                     )),
                 );
             }
-            (relative_path.clone(), outcome.map(|mut f| { f.parse_ms = parse_ms; f }))
+            (
+                relative_path.clone(),
+                outcome.map(|mut f| {
+                    f.parse_ms = parse_ms;
+                    f
+                }),
+            )
         })
         .collect();
 

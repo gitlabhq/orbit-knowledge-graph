@@ -47,7 +47,8 @@ use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::sentinel;
 
 use crate::v2::pipeline::{
-    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, PipelineContext, PipelineError,
+    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
+    PipelineError,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
@@ -140,6 +141,7 @@ impl LanguagePipeline for RustPipeline {
     ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
+        let t0 = std::time::Instant::now();
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
 
@@ -170,6 +172,7 @@ impl LanguagePipeline for RustPipeline {
             }
         };
         let output = parse_rust_files(files, root_path, workspaces.as_ref(), sentinel_handle);
+        let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
         for (path, error) in &output.errors {
             match error {
                 AnalyzerError::Skip { kind, detail } => {
@@ -184,6 +187,7 @@ impl LanguagePipeline for RustPipeline {
         }
         let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
+        let graph_build_ms = t0.elapsed().as_secs_f64() * 1000.0 - parse_ms;
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -246,6 +250,19 @@ impl LanguagePipeline for RustPipeline {
             add_unresolved_imported_call_edges(&mut graph, &parsed);
         }
         graph.finalize(tracer);
+
+        let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let resolve_ms = total_ms - parse_ms - graph_build_ms;
+        let total_bytes: u64 = parsed.iter().map(|f| f.file_size).sum();
+        ctx.record_language_timing(LanguageTimings {
+            language: "rust".to_string(),
+            file_count: parsed.len(),
+            total_bytes,
+            parse_ms,
+            graph_build_ms,
+            resolve_ms,
+            total_ms,
+        });
 
         btx.send_graph(graph);
 

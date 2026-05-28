@@ -10,6 +10,8 @@ pub mod labels {
     pub const REASON: &str = "reason";
     pub const KIND: &str = "kind";
     pub const STAGE: &str = "stage";
+    pub const LANGUAGE: &str = "language";
+    pub const PHASE: &str = "phase";
 }
 
 const DOMAIN: &str = "indexer.code";
@@ -161,6 +163,42 @@ pub const ARCHIVE_BYTES_SKIPPED: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const LANGUAGE_PHASE_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.language.phase_duration",
+    "Per-language pipeline phase duration. Labels: language (ruby, java_script, \
+     type_script, rust, ...), phase (parse, graph_build, resolve).",
+    Some("s"),
+    &[labels::LANGUAGE, labels::PHASE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
+pub const LANGUAGE_FILES: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.language.files",
+    "Files processed per language family.",
+    None,
+    &[labels::LANGUAGE],
+    DOMAIN,
+);
+
+pub const LANGUAGE_BYTES: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.language.bytes",
+    "Source bytes processed per language family.",
+    Some("By"),
+    &[labels::LANGUAGE],
+    DOMAIN,
+);
+
+pub const PIPELINE_PHASE_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.pipeline.phase_duration",
+    "Top-level pipeline phase duration. Labels: phase (file_discovery, \
+     structural_graph, language_processing).",
+    Some("s"),
+    &[labels::PHASE],
+    LATENCY_SLOW,
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
@@ -178,4 +216,8 @@ pub const CATALOG: &[&MetricSpec] = &[
     &FILE_FAULTS,
     &ARCHIVE_ENTRIES_SKIPPED,
     &ARCHIVE_BYTES_SKIPPED,
+    &LANGUAGE_PHASE_DURATION,
+    &LANGUAGE_FILES,
+    &LANGUAGE_BYTES,
+    &PIPELINE_PHASE_DURATION,
 ];
