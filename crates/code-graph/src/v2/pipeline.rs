@@ -204,10 +204,9 @@ impl PipelineContext {
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .map(|(i, _)| i)
+                .filter(|&i| entry.total_ms > timings[i].total_ms)
             {
-                if entry.total_ms > timings[min].total_ms {
-                    timings[min] = entry;
-                }
+                timings[min] = entry;
             }
         }
     }

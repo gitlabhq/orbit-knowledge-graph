@@ -4240,7 +4240,178 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Total graph nodes and edges indexed by the code handler.",
+               "description": "Source bytes processed per language family.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "Bps"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 205
+               },
+               "id": 86,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (language) (rate(gkg_indexer_code_language_bytes_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{language}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_language_bytes_bytes_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Files processed per language family.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 213
+               },
+               "id": 87,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (language) (rate(gkg_indexer_code_language_files_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{language}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_language_files_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Per-language pipeline phase duration. Labels: language (ruby, java_script, type_script, rust, ...), phase (parse, graph_build, resolve).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "s"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 213
+               },
+               "id": 88,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le, language, phase) (rate(gkg_indexer_code_language_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 {{language}} / {{phase}}",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le, language, phase) (rate(gkg_indexer_code_language_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 {{language}} / {{phase}}",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le, language, phase) (rate(gkg_indexer_code_language_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 {{language}} / {{phase}}",
+                     "refId": "C"
+                  }
+               ],
+               "title": "gkg_indexer_code_language_phase_duration_seconds — p50/p95/p99",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Per-language pipeline phase duration. Labels: language (ruby, java_script, type_script, rust, ...), phase (parse, graph_build, resolve).",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
@@ -4256,9 +4427,60 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 205
+                  "y": 213
                },
-               "id": 86,
+               "id": 89,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (language, phase) (rate(gkg_indexer_code_language_phase_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{language}} / {{phase}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_language_phase_duration_seconds — observation rate",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Total graph nodes and edges indexed by the code handler.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 221
+               },
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4291,6 +4513,126 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "description": "Top-level pipeline phase duration. Labels: phase (file_discovery, structural_graph, language_processing).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "s"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 221
+               },
+               "id": 91,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le, phase) (rate(gkg_indexer_code_pipeline_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 {{phase}}",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le, phase) (rate(gkg_indexer_code_pipeline_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 {{phase}}",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le, phase) (rate(gkg_indexer_code_pipeline_phase_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 {{phase}}",
+                     "refId": "C"
+                  }
+               ],
+               "title": "gkg_indexer_code_pipeline_phase_duration_seconds — p50/p95/p99",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Top-level pipeline phase duration. Labels: phase (file_discovery, structural_graph, language_processing).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 221
+               },
+               "id": 92,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (phase) (rate(gkg_indexer_code_pipeline_phase_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{phase}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_pipeline_phase_duration_seconds — observation rate",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "description": "Repository disk cleanup outcomes (success, failure).",
                "fieldConfig": {
                   "defaults": {
@@ -4307,9 +4649,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 213
+                  "y": 229
                },
-               "id": 87,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4358,9 +4700,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 213
+                  "y": 229
                },
-               "id": 88,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4409,9 +4751,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 213
+                  "y": 229
                },
-               "id": 89,
+               "id": 95,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4478,9 +4820,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 221
+                  "y": 237
                },
-               "id": 90,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4529,9 +4871,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 221
+                  "y": 237
                },
-               "id": 91,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4580,9 +4922,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 221
+                  "y": 237
                },
-               "id": 92,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4631,9 +4973,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 229
+                  "y": 245
                },
-               "id": 93,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4700,9 +5042,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 229
+                  "y": 245
                },
-               "id": 94,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4740,9 +5082,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 237
+            "y": 253
          },
-         "id": 95,
+         "id": 101,
          "panels": [
             {
                "datasource": {
@@ -4765,9 +5107,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 238
+                  "y": 254
                },
-               "id": 96,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4816,9 +5158,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 238
+                  "y": 254
                },
-               "id": 97,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4885,9 +5227,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 238
+                  "y": 254
                },
-               "id": 98,
+               "id": 104,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4936,9 +5278,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 246
+                  "y": 262
                },
-               "id": 99,
+               "id": 105,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5005,9 +5347,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 246
+                  "y": 262
                },
-               "id": 100,
+               "id": 106,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5056,9 +5398,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 246
+                  "y": 262
                },
-               "id": 101,
+               "id": 107,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5125,9 +5467,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 254
+                  "y": 270
                },
-               "id": 102,
+               "id": 108,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5176,9 +5518,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 254
+                  "y": 270
                },
-               "id": 103,
+               "id": 109,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5227,9 +5569,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 254
+                  "y": 270
                },
-               "id": 104,
+               "id": 110,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5278,9 +5620,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 262
+                  "y": 278
                },
-               "id": 105,
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5347,9 +5689,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 262
+                  "y": 278
                },
-               "id": 106,
+               "id": 112,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5398,9 +5740,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 262
+                  "y": 278
                },
-               "id": 107,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5438,9 +5780,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 270
+            "y": 286
          },
-         "id": 108,
+         "id": 114,
          "panels": [
             {
                "datasource": {
@@ -5463,9 +5805,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 0,
-                  "y": 271
+                  "y": 287
                },
-               "id": 109,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5538,9 +5880,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 12,
-                  "y": 271
+                  "y": 287
                },
-               "id": 110,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5596,9 +5938,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 0,
-                  "y": 279
+                  "y": 295
                },
-               "id": 111,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5648,9 +5990,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 12,
-                  "y": 279
+                  "y": 295
                },
-               "id": 112,
+               "id": 118,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5723,9 +6065,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 0,
-                  "y": 287
+                  "y": 303
                },
-               "id": 113,
+               "id": 119,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5781,9 +6123,9 @@
                   "h": 8,
                   "w": 12,
                   "x": 12,
-                  "y": 287
+                  "y": 303
                },
-               "id": 114,
+               "id": 120,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5833,9 +6175,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 295
+                  "y": 311
                },
-               "id": 115,
+               "id": 121,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5902,9 +6244,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 295
+                  "y": 311
                },
-               "id": 116,
+               "id": 122,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5953,9 +6295,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 295
+                  "y": 311
                },
-               "id": 117,
+               "id": 123,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5993,9 +6335,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 303
+            "y": 319
          },
-         "id": 118,
+         "id": 124,
          "panels": [
             {
                "datasource": {
@@ -6018,9 +6360,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 304
+                  "y": 320
                },
-               "id": 119,
+               "id": 125,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6087,9 +6429,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 304
+                  "y": 320
                },
-               "id": 120,
+               "id": 126,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6138,9 +6480,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 304
+                  "y": 320
                },
-               "id": 121,
+               "id": 127,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6189,9 +6531,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 312
+                  "y": 328
                },
-               "id": 122,
+               "id": 128,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6258,9 +6600,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 312
+                  "y": 328
                },
-               "id": 123,
+               "id": 129,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6309,9 +6651,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 312
+                  "y": 328
                },
-               "id": 124,
+               "id": 130,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6360,9 +6702,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 320
+                  "y": 336
                },
-               "id": 125,
+               "id": 131,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6411,9 +6753,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 320
+                  "y": 336
                },
-               "id": 126,
+               "id": 132,
                "options": {
                   "legend": {
                      "calcs": [
