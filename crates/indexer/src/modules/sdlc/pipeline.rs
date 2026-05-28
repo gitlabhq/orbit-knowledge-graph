@@ -317,6 +317,12 @@ impl Pipeline {
             let transform_elapsed = transform_start.elapsed();
             total_transform_duration += transform_elapsed;
 
+            info!(
+                table = %transform.destination_table,
+                duration_ms = transform_elapsed.as_millis() as u64,
+                "transform executed"
+            );
+
             prepare_batches(&mut result_batches, &transform.dict_encode_columns);
 
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
