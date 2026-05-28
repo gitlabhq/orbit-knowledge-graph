@@ -279,11 +279,14 @@ Create Vulnerability
     ...    report_type=${vuln["reportType"]}    createdAt=${vuln["detectedAt"]}
     RETURN    ${result}
 
-Update Issue Title
-    [Arguments]    ${project_id}    ${issue_iid}    ${title}
+Rename Project
+    [Documentation]    Change a project's display name (not its path). Re-indexes through the same
+    ...                PUT path Touch Project relies on, so propagation is deterministic (no
+    ...                materialized-view hop, unlike a WorkItem update).
+    [Arguments]    ${project_id}    ${name}
     ${headers}=    GitLab Auth Headers
-    ${body}=    Create Dictionary    title=${title}
-    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}
+    ${body}=    Create Dictionary    name=${name}
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
