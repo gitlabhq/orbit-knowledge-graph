@@ -1,3 +1,42 @@
+## [0.65.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.64.1...v0.65.0) (2026-05-28)
+
+### Features
+
+* **analytics:** proto-style typify codegen of iglu schemas, drop vendir ([a595dea](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a595deae5eb7d7a17a24a5821b63d523da265e98)) by Michael Angelo Rivera
+* **billing:** add OTel metrics for quota gate ([573c9eb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/573c9eb2bbff8500b66c78ad08a52b4f67376329)) by Sharmad Nachnolkar
+* **code-graph:** add per-file timing stats to pipeline output ([99f635c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/99f635ce2309aa1dd42c98210f0211dbf4a96e2b)) by Michael Usachenko
+* **indexer:** add per-phase timing logs to code indexing pipeline ([97f644d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97f644d43b94699675b059de75ffbf16b2c0c62d)) by Jean-Gabriel Doyon
+* **indexer:** buffer code indexing writes and flush tables in parallel ([732dd16](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/732dd163dfc055c2f18e46ab004933598caa8861)) by Michael Usachenko
+* **indexer:** enable async inserts for ClickHouse writes ([bd667e1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bd667e10737b5ccc03324f558723f0bac4332bf1)) by Michael Usachenko
+* **indexer:** introduce IndexingObserver trait and wire into handlers ([36a8733](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36a8733c5b2e529d3cbd4e93c802658fde66f70a)) by Jean-Gabriel Doyon
+* **local:** add musl target for fully static Linux binary ([213da6d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/213da6ddf31e9dc5f6fe98cdc0ce71646f53c9b0)) by Dmitry Gruzd
+
+### Fixes
+
+* **grpc:** raise max header list size to 64 KiB ([1317a31](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1317a31ed3b5a2011332973e8b87686e99bed1a0)) by Bohdan Parkhomchuk
+* **indexer:** restore transform duration log in SDLC pipeline ([966641e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/966641e72623a850032bae1a32a5d51c42e8cebe)) by Jean-Gabriel Doyon
+* **observability:** label CH write duration by table ([12d11e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/12d11e855ef78f44422c1e7427605812392a1b35)) by Bohdan Parkhomchuk
+* register NATS KV indexing progress bucket in webserver startup ([4b1bd3c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4b1bd3c07d11fb7f6885ebd495cdcada600cdf18)) by Jean-Gabriel Doyon
+* scope code indexer stale data cleaner to code-domain edge tables ([01d8b92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/01d8b923d58b2a6d9d1180dc80c1b70379b3f362)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **code-graph:** parallelize OXC cross-file resolution and lower file size cap ([f1f7f05](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f1f7f05ea9851c144c16c397a0fb0126021313c6)) by Michael Usachenko
+* **indexer:** cache INSERT SQL in ClickHouse batch writer ([96ca73b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/96ca73b835f41638001d4a64f2604d75d78b7d02)) by Michael Angelo Rivera
+* **indexer:** drop redundant allocations on hot path ([ff382a4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff382a48466015e3b025a713f47fae0965d64e04)) by Michael Angelo Rivera
+* **indexer:** precompute converter specs and fast-path edge routing ([ac422ed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ac422ed610086c074bde2911a51d2fd8b435ac57)) by Michael Angelo Rivera
+
+### Other
+
+* add Duo/Orbit prompt routing architecture whitepaper ([24d161a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24d161abef05dd0b0b8de8e9ee2eb3c3430febb4)) by Dmitry Gruzd
+* bump SCHEMA_VERSION to 47 ([418dc5c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/418dc5ccd3ae7e2512e947d8875d2aa6b3d1e4ef)) by Michael Usachenko
+* **deps:** update rust crate either to v1.16.0 ([3042abc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3042abc8dbe4be08e08f289caf1810518da1f274)) by GitLab Renovate Bot
+* **deps:** update rust crate mimalloc to v0.1.51 ([c58198a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c58198a3ab7acd9e6026273273e297586c6c3bb7)) by GitLab Renovate Bot
+* **indexer:** unify duration log field names to duration_ms ([d6ddc8b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d6ddc8b489582ca9e540a32c6a13205c2f12206f)) by Jean-Gabriel Doyon
+* **observability:** rebalance histogram buckets ([8af2a4c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8af2a4c246c70ada58e9ad4cf422c8f4be988cae)) by Bohdan Parkhomchuk
+* remove stale GlobalHandler/NamespaceHandler references ([56735b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/56735b788738d4c6df918747d352166b2a001cc3)) by Jean-Gabriel Doyon
+* **templates:** prevent agent slop via templates ([e0b6298](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e0b62980538efabf26077f4d713ee338e579cda1)) by Michael Angelo Rivera
+
 ## [0.64.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.64.0...v0.64.1) (2026-05-27)
 
 ### Fixes
