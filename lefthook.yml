@@ -9,14 +9,18 @@ commit-msg:
     - name: commitlint
       run: mise exec -- npx --yes -p @commitlint/config-conventional -p @commitlint/cli commitlint --edit {1}
 
+pre-push:
+  parallel: true
+  jobs:
+    - name: clippy
+      run: mise run lint:code
+      glob: "**/*.rs"
+
 pre-commit:
   parallel: true
   jobs:
     - name: fmt
       run: mise run lint:fmt
-      glob: "**/*.rs"
-    - name: clippy
-      run: mise run lint:code
       glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
