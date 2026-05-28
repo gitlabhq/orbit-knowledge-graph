@@ -799,9 +799,11 @@ impl CodeGraph {
 
     /// Look up a named property on a graph node. Used by the indexer to
     /// populate denormalized edge tags from the ontology config without
-    /// hardcoding property-to-node-type mappings.
+    /// hardcoding property-to-node-type mappings. Returns `None` when
+    /// the property is unknown or its value is empty (e.g. extension-less
+    /// files like Makefile).
     pub fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
-        match &self.graph[idx] {
+        let value = match &self.graph[idx] {
             GraphNode::File(f) => match property {
                 "extension" => Some(f.extension.clone()),
                 "language" => Some(f.language_name().to_string()),
@@ -816,7 +818,8 @@ impl CodeGraph {
                 _ => None,
             },
             GraphNode::Directory(_) => None,
-        }
+        };
+        value.filter(|v| !v.is_empty())
     }
 
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {

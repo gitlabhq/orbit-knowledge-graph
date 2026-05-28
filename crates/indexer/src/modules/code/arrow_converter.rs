@@ -624,6 +624,14 @@ fn graph_edge_rows<'a>(
     env: &'a IndexerEnvelope,
     tag_props: &TagProperties,
 ) -> Vec<IndexerEdgeRow<'a>> {
+    // Precompute tags per node so repeated source/target lookups across
+    // edges share the same allocation instead of O(edges) allocations.
+    let tag_cache: Vec<Vec<String>> = graph
+        .graph
+        .node_indices()
+        .map(|n| node_tags(graph, n, tag_props))
+        .collect();
+
     let mut rows = Vec::new();
     for ei in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
@@ -635,8 +643,8 @@ fn graph_edge_rows<'a>(
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
-            source_tags: node_tags(graph, src, tag_props),
-            target_tags: node_tags(graph, tgt, tag_props),
+            source_tags: tag_cache[src.index()].clone(),
+            target_tags: tag_cache[tgt.index()].clone(),
         });
     }
     rows

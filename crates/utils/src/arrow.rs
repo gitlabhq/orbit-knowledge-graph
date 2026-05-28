@@ -1074,6 +1074,31 @@ mod tests {
     }
 
     #[test]
+    fn push_str_list_roundtrips_through_get_string_list() {
+        let specs = vec![ColumnSpec {
+            name: "tags".into(),
+            col_type: ColumnType::StrList,
+            nullable: false,
+        }];
+        let mut b = BatchBuilder::new(&specs);
+
+        // Row with values
+        b.col("tags")
+            .unwrap()
+            .push_str_list(&["extension:.py", "language:python"])
+            .unwrap();
+        // Row with empty list
+        b.col("tags").unwrap().push_empty_str_list().unwrap();
+
+        let batch = b.finish().unwrap();
+        assert_eq!(
+            ArrowUtils::get_string_list(&batch, "tags", 0),
+            vec!["extension:.py", "language:python"]
+        );
+        assert!(ArrowUtils::get_string_list(&batch, "tags", 1).is_empty());
+    }
+
+    #[test]
     fn get_i64_string_pairs_returns_pairs() {
         let list = make_i64_string_list(&[Some(&[(10, "User"), (20, "Project")]), None]);
         let batch = make_batch(vec![("path", Arc::new(list))]);
