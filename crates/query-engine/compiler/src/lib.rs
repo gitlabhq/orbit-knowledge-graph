@@ -338,10 +338,9 @@ mod tests {
     }
 
     /// Org-wide `count(target) GROUP BY group` with no filters and no pinned
-    /// IDs must emit bare `COUNT()` so ClickHouse can route to the
-    /// `agg_counts` projection. With `COUNT(e0.source_id)`, projection
-    /// routing fails and the query scans the full edge slice (1B+ rows for
-    /// File → Project on production scale).
+    /// IDs must emit bare `COUNT()`. A column argument like
+    /// `COUNT(e0.source_id)` forces ClickHouse to read and null-check that
+    /// column, which is unnecessary when counting rows.
     #[test]
     fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
         let query = r#"{
@@ -369,7 +368,7 @@ mod tests {
         );
         assert!(
             !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),
-            "must not emit COUNT(source_id) -- breaks agg_counts projection routing, \
+            "must not emit COUNT(source_id) -- forces unnecessary column read, \
              got:\n{sql}"
         );
     }

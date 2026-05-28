@@ -1050,13 +1050,9 @@ CREATE TABLE IF NOT EXISTS gl_ci_edge (
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
-    PROJECTION agg_counts_by_source (
-      SELECT relationship_kind, target_kind, source_id, traversal_path, count()
-      GROUP BY relationship_kind, target_kind, source_id, traversal_path
-    ),
-    PROJECTION agg_counts_by_target (
-      SELECT relationship_kind, source_kind, target_id, traversal_path, count()
-      GROUP BY relationship_kind, source_kind, target_id, traversal_path
+    PROJECTION node_edge_counts (
+      SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
+      GROUP BY traversal_path, source_kind, target_kind, relationship_kind
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
@@ -1078,13 +1074,9 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
-    PROJECTION agg_counts_by_source (
-      SELECT relationship_kind, target_kind, source_id, traversal_path, count()
-      GROUP BY relationship_kind, target_kind, source_id, traversal_path
-    ),
-    PROJECTION agg_counts_by_target (
-      SELECT relationship_kind, source_kind, target_id, traversal_path, count()
-      GROUP BY relationship_kind, source_kind, target_id, traversal_path
+    PROJECTION node_edge_counts (
+      SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
+      GROUP BY traversal_path, source_kind, target_kind, relationship_kind
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)
@@ -1106,14 +1098,6 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
-    PROJECTION agg_counts (
-      SELECT relationship_kind, source_kind, target_id, traversal_path, count()
-      GROUP BY relationship_kind, source_kind, target_id, traversal_path
-    ),
-    PROJECTION agg_counts_by_source (
-      SELECT relationship_kind, target_kind, source_id, traversal_path, count()
-      GROUP BY relationship_kind, target_kind, source_id, traversal_path
-    ),
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
