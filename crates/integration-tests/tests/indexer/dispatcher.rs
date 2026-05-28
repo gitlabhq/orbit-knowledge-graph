@@ -182,20 +182,17 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     let datalake = context.clickhouse.config.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-    let campaign_state = indexer::schema::campaign::new_campaign_state();
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
             GlobalDispatcherConfig::default(),
-            campaign_state.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
             datalake,
             metrics,
             NamespaceDispatcherConfig::default(),
-            campaign_state,
         )),
     ];
 

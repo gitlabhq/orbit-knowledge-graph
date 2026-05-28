@@ -79,12 +79,8 @@ The pattern of capturing row-level changes from a source database as a stream of
 _Avoid_: replication (too broad)
 
 **Dispatch ID**:
-A UUID assigned per (dispatcher × scheduler tick). Groups all NATS messages published in one dispatch cycle. Carried in every indexing request message and propagated to the `IndexingObserver` for analytics correlation.
+A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
 _Avoid_: request ID, trace ID (dispatch_id groups many requests, not a single one)
-
-**Campaign ID**:
-An optional, human-readable label that groups all dispatch cycles triggered by a single re-indexing decision (schema migration), e.g. `schema-migration-v48`. Derived deterministically from the migrating schema version rather than stored, so any process recomputes it and analysts can query it directly in Snowflake. Null during steady-state incremental indexing.
-_Avoid_: migration ID (campaign_id is the analytics concept; the migration has a version number)
 
 **Siphon**:
 GitLab's CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.

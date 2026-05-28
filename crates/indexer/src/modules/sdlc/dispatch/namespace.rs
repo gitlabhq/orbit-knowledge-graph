@@ -10,7 +10,6 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
-use crate::schema::campaign::CampaignState;
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
@@ -28,7 +27,6 @@ pub struct NamespaceDispatcher {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
-    campaign_state: CampaignState,
 }
 
 impl NamespaceDispatcher {
@@ -37,14 +35,12 @@ impl NamespaceDispatcher {
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
-        campaign_state: CampaignState,
     ) -> Self {
         Self {
             nats,
             datalake,
             metrics,
             config,
-            campaign_state,
         }
     }
 }
@@ -96,7 +92,6 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
-        let campaign_id = self.campaign_state.read().unwrap().clone();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -118,7 +113,6 @@ impl NamespaceDispatcher {
                 traversal_path: traversal_path.clone(),
                 watermark,
                 dispatch_id: Uuid::new_v4(),
-                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();

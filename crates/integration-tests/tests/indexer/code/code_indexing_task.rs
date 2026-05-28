@@ -932,7 +932,6 @@ fn code_indexing_task_envelope(
         commit_sha: Some(commit_sha.to_string()),
         traversal_path: traversal_path.to_string(),
         dispatch_id: uuid::Uuid::new_v4(),
-        campaign_id: None,
     })
     .expect("failed to create envelope")
 }

@@ -180,7 +180,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
-        indexer::schema::campaign::new_campaign_state(),
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)
@@ -252,7 +251,6 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
-        indexer::schema::campaign::new_campaign_state(),
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)

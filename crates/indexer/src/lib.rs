@@ -210,7 +210,6 @@ pub async fn run_dispatcher(
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
-    let campaign_state = schema::campaign::new_campaign_state();
 
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());
@@ -234,20 +233,17 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
-            campaign_state.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
             datalake,
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
-            campaign_state.clone(),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.code_indexing_task.clone(),
-            campaign_state.clone(),
         )),
         Box::new(NamespaceCodeBackfillDispatcher::new(
             services.nats.clone(),
@@ -255,7 +251,6 @@ pub async fn run_dispatcher(
             config.datalake.build_client(),
             metrics.clone(),
             config.schedule.tasks.namespace_code_backfill.clone(),
-            campaign_state.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,
@@ -269,7 +264,6 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
-            campaign_state.clone(),
         )),
         Box::new(schema::completion::MigrationCompletionChecker::new(
             config.graph.build_client(),
@@ -279,7 +273,6 @@ pub async fn run_dispatcher(
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
             metrics,
-            campaign_state,
         )),
     ];
 

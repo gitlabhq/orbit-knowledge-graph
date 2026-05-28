@@ -188,7 +188,6 @@ mod tests {
             namespace_id,
             traversal_path: traversal_path.to_string(),
             dispatch_id: uuid::Uuid::new_v4(),
-            campaign_id: None,
         };
         Envelope::new(&request).unwrap()
     }

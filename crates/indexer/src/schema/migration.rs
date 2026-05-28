@@ -157,9 +157,7 @@ async fn run_migration(
         return create_result;
     }
 
-    // Phase 4: mark migrating in gkg_schema_version. The analytics campaign_id
-    // is derived deterministically from the version (see schema::campaign), so
-    // nothing needs to be persisted here.
+    // Phase 4: mark migrating in gkg_schema_version.
     info!(
         version = *SCHEMA_VERSION,
         "marking schema version as migrating"

@@ -24,7 +24,6 @@ use super::metrics::CompletionMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::campaign::{CampaignState, campaign_id_for_version};
 use crate::schema::version::{
     SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
@@ -103,11 +102,9 @@ pub struct MigrationCompletionChecker {
     config: MigrationCompletionConfig,
     metrics: CompletionMetrics,
     _task_metrics: ScheduledTaskMetrics,
-    campaign_state: CampaignState,
 }
 
 impl MigrationCompletionChecker {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
@@ -116,7 +113,6 @@ impl MigrationCompletionChecker {
         schema_config: SchemaConfig,
         config: MigrationCompletionConfig,
         task_metrics: ScheduledTaskMetrics,
-        campaign_state: CampaignState,
     ) -> Self {
         Self {
             graph,
@@ -127,7 +123,6 @@ impl MigrationCompletionChecker {
             config,
             metrics: CompletionMetrics::new(),
             _task_metrics: task_metrics,
-            campaign_state,
         }
     }
 }
@@ -186,18 +181,12 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
-            // No migration in progress — clear campaign state and keep the
-            // age gauge accurate so an alert on `migrating_age_seconds > N`
-            // doesn't fire on the post-promotion last-recorded value.
-            *self.campaign_state.write().unwrap() = None;
+            // No migration in progress — keep the age gauge accurate so an
+            // alert on `migrating_age_seconds > N` doesn't fire on the
+            // post-promotion last-recorded value.
             self.metrics.record_migrating_age(0);
             return Ok(None);
         };
-
-        // Publish the migration's campaign_id so dispatchers tag their messages
-        // with it. It's derived from the migrating version, so this is an
-        // idempotent recompute rather than a stored-value lookup.
-        *self.campaign_state.write().unwrap() = Some(campaign_id_for_version(migrating_version));
 
         // Surface "is migration stuck?" as a direct gauge. A bounded query
         // failure here shouldn't block completion; log and continue with an
@@ -252,7 +241,6 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
 
         self.metrics.record_migration_completed();
-        *self.campaign_state.write().unwrap() = None;
 
         // Reflect the mutations in the in-memory list so cleanup doesn't
         // need to re-read and risk write-visibility lag.
