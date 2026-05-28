@@ -158,7 +158,6 @@ pub enum LogicalReplicationEventType {
     CdcEvent = 1,
     ClickhouseRefreshEvent = 2,
     ReferencedCdcEvent = 3,
-    Heartbeat = 4,
 }
 impl LogicalReplicationEventType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -173,7 +172,6 @@ impl LogicalReplicationEventType {
                 "LOGICAL_REPLICATION_EVENT_TYPE_CLICKHOUSE_REFRESH_EVENT"
             }
             Self::ReferencedCdcEvent => "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT",
-            Self::Heartbeat => "LOGICAL_REPLICATION_EVENT_TYPE_HEARTBEAT",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -185,7 +183,6 @@ impl LogicalReplicationEventType {
                 Some(Self::ClickhouseRefreshEvent)
             }
             "LOGICAL_REPLICATION_EVENT_TYPE_REFERENCED_CDC_EVENT" => Some(Self::ReferencedCdcEvent),
-            "LOGICAL_REPLICATION_EVENT_TYPE_HEARTBEAT" => Some(Self::Heartbeat),
             _ => None,
         }
     }
