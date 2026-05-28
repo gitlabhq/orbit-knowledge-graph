@@ -100,6 +100,9 @@ paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
 > write this MCP config in one step. Until it ships, configure your MCP client
 > manually as shown above.
 
+You can also [install the Orbit skill manually](../../ai_coding_agents.md)
+today to give the agent query recipes, DSL guidance, and troubleshooting.
+
 ### Test it
 
 In your AI agent, ask:

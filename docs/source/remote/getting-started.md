@@ -70,6 +70,18 @@ GitLab Duo queries are zero-rated and do not consume GitLab Credits.
 
 See [Use Orbit via MCP](access/mcp.md) for setup. Once configured, you have two tools: `query_graph` and `get_graph_schema`.
 
+### Install the Orbit skill for AI agents
+
+The Orbit skill gives your AI agent query recipes, DSL guidance, and
+troubleshooting so it writes correct Orbit queries on the first attempt:
+
+```shell
+glab skills install --global orbit
+```
+
+See [Set up AI coding agents with the Orbit skill](../ai_coding_agents.md)
+for project-scoped install, update instructions, and what the skill contains.
+
 ### REST API
 
 Replace `your-group` with the top-level group path you enabled Orbit on. The `full_path` filter scopes the query so it passes Orbit's selectivity validation.
