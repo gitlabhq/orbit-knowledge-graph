@@ -151,6 +151,27 @@ Concrete rules:
 Cost grows linearly in attempts, both in CLI shell-out time and in agent
 context. A hard cap is cheaper than an ambiguous answer.
 
+## Repository maps (Orbit Local)
+
+When the user needs a high-level map of a locally checked-out repository — for
+example before planning a large refactor, entering an unfamiliar codebase, or
+deciding where new code should live — use the bundled repo-map helper over the
+Orbit Local DuckDB graph.
+
+```bash
+python3 skills/orbit/scripts/repo_map.py /path/to/repo              # overview
+python3 skills/orbit/scripts/repo_map.py /path/to/repo tree crates
+python3 skills/orbit/scripts/repo_map.py /path/to/repo api crates/orbit-local
+python3 skills/orbit/scripts/repo_map.py /path/to/repo --ext .rs    # only Rust files
+```
+
+The target repository must already be indexed at the current commit with
+`glab orbit local index .`; the helper preflights this and prints the indexing
+command when needed. Start with `overview`, then use one or two narrower
+`tree`, `api`, `class`, `extends`, or `imports` calls. See
+[`references/repo_map.md`](references/repo_map.md) for the full workflow,
+subcommands, budgets, and caveats.
+
 ## Reporting results
 
 Orbit answers are graph queries against ClickHouse, not an authoritative
@@ -197,6 +218,7 @@ Not:
 |---|---|
 | Full DSL reference | [`references/query_language.md`](references/query_language.md) |
 | Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
+| Local repository map helper | [`references/repo_map.md`](references/repo_map.md) |
 | CLI exit codes (1-5) and common errors | [`references/troubleshooting.md`](references/troubleshooting.md) |
 | `glab orbit local` install, update, config, and usage | [`references/local_cli.md`](references/local_cli.md) |
 
