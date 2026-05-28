@@ -713,15 +713,6 @@ async fn index_code(
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
 }
 
-/// Plants a `src/Canary.java` row in `gl_file` whose `_version` predates any
-/// indexing run. A stale-data cleanup pass would tombstone it; a properly
-/// skipped pass leaves it active.
-///
-/// `traversal_path` and `branch` are interpolated as SQL literals: callers
-/// must pass values that do not contain single quotes. The TestContext
-/// client has no parameterized-INSERT API, and adding one for a single
-/// canary-insertion test would be overkill. Hardcoded test values are
-/// fine; do not extend this helper to user-supplied input.
 async fn insert_stale_canary_file(
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,
