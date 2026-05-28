@@ -4,7 +4,7 @@
   "self": {
     "vendor": "com.gitlab",
     "name": "orbit_query",
-    "version": "2-0-2",
+    "version": "2-1-0",
     "format": "jsonschema"
   },
   "type": "object",
