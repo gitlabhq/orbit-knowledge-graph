@@ -270,6 +270,7 @@ yaml_test!(
     csharp_imported_symbol_fallback_matrix,
     "csharp/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(csharp_aliased_using, "csharp/aliased_using.yaml");
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");

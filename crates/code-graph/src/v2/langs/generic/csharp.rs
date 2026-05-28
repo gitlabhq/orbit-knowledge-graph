@@ -290,12 +290,17 @@ fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) 
         return true;
     };
 
+    let name = path.rsplit('.').next().map(|seg| {
+        let seg = seg.rsplit("::").next().unwrap_or(seg);
+        seg.split('<').next().unwrap_or(seg).to_string()
+    });
+
     imports.push(CanonicalImport {
         import_type: "AliasedImport",
         binding_kind: ImportBindingKind::Named,
         mode: ImportMode::Declarative,
         path,
-        name: None,
+        name,
         alias: Some(alias),
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
