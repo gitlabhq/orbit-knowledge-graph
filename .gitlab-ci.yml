@@ -270,6 +270,19 @@ query-dsl-version-check:
     - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
     - bash ./scripts/check-query-dsl-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
+skill-version-bump-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - apk add --no-cache git
+    - git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1 || git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=50
+    - python3 scripts/check-skill-version-bump.py --ci --no-worktree
+
 iglu-schema-check:
   stage: lint
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest

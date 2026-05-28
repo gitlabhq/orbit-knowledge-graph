@@ -28,6 +28,9 @@ pre-commit:
       glob:
         - "docs/source/remote/queries/query-language.md"
         - "skills/orbit/references/query_language.md"
+    - name: skill-version-bump
+      run: bash ./scripts/check-skill-version-bump.sh
+      glob: "skills/**/*"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
