@@ -398,7 +398,21 @@ fn convert_repository_edges(
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
-    let branch_tags = vec!["is_default:true".to_string()];
+    let tag_props = &specs.tag_properties;
+    // Branch is synthetic (not a GraphNode), so build its tags from the
+    // ontology config directly. is_default is always true in code indexing.
+    let branch_tags: Vec<String> = tag_props
+        .get("Branch")
+        .map(|props| {
+            props
+                .iter()
+                .filter_map(|(tag_key, prop_name)| match prop_name.as_str() {
+                    "is_default" => Some(format!("{tag_key}:true")),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
     edge_rows.push(IndexerEdgeRow {
@@ -436,6 +450,7 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
+        tag_props,
     ));
     edge_rows.extend(repository_on_branch_rows(
         graph,
@@ -443,8 +458,9 @@ fn convert_repository_edges(
         env,
         branch_id,
         &branch_tags,
+        tag_props,
     ));
-    edge_rows.extend(graph_edge_rows(graph, ids, env));
+    edge_rows.extend(graph_edge_rows(graph, ids, env, tag_props));
 
     edge_row_batch(edge_rows, &specs.edge)
 }
@@ -455,7 +471,7 @@ fn convert_semantic_edges(
     env: &IndexerEnvelope,
     specs: &ConverterSpecs,
 ) -> Result<RecordBatch, ArrowError> {
-    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env)
+    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &specs.tag_properties)
         .into_iter()
         .filter(|row| row.edge_kind != "CONTAINS")
         .collect();
@@ -463,31 +479,31 @@ fn convert_semantic_edges(
     edge_row_batch(edge_rows, &specs.edge)
 }
 
-/// Build `"key:value"` tag tokens for a node. Returns an empty vec for
-/// node kinds that have no denormalized properties (Directory).
+/// Build `"key:value"` tag tokens for a graph node using the ontology-
+/// driven tag config. Returns an empty vec for node kinds with no
+/// denormalized properties.
 fn node_tags(
     graph: &code_graph::v2::linker::CodeGraph,
     node: petgraph::graph::NodeIndex,
+    tag_properties: &TagProperties,
 ) -> Vec<String> {
-    use code_graph::v2::linker::graph::GraphNode;
-
-    match &graph.graph[node] {
-        GraphNode::File(f) => {
-            vec![
-                format!("extension:{}", f.extension),
-                format!("language:{}", f.language_name()),
-            ]
-        }
-        GraphNode::Definition { id, .. } => {
-            let def = &graph.defs[id.0 as usize];
-            vec![format!("definition_type:{}", def.definition_type)]
-        }
-        GraphNode::Import { id, .. } => {
-            let imp = &graph.imports[id.0 as usize];
-            vec![format!("import_type:{}", imp.import_type)]
-        }
-        GraphNode::Directory(_) => Vec::new(),
-    }
+    let node_kind = match &graph.graph[node] {
+        code_graph::v2::linker::graph::GraphNode::File(_) => "File",
+        code_graph::v2::linker::graph::GraphNode::Definition { .. } => "Definition",
+        code_graph::v2::linker::graph::GraphNode::Import { .. } => "ImportedSymbol",
+        code_graph::v2::linker::graph::GraphNode::Directory(_) => return Vec::new(),
+    };
+    let Some(props) = tag_properties.get(node_kind) else {
+        return Vec::new();
+    };
+    props
+        .iter()
+        .filter_map(|(tag_key, prop_name)| {
+            graph
+                .node_property(node, prop_name)
+                .map(|val| format!("{tag_key}:{val}"))
+        })
+        .collect()
 }
 
 struct IndexerEdgeRow<'a> {
@@ -550,6 +566,7 @@ fn branch_contains_file_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &[String],
+    tag_props: &TagProperties,
 ) -> Vec<IndexerEdgeRow<'a>> {
     graph
         .files()
@@ -562,7 +579,7 @@ fn branch_contains_file_rows<'a>(
             source_node_kind: "Branch",
             target_node_kind: "File",
             source_tags: branch_tags.to_vec(),
-            target_tags: node_tags(graph, idx),
+            target_tags: node_tags(graph, idx, tag_props),
         })
         .collect()
 }
@@ -573,6 +590,7 @@ fn repository_on_branch_rows<'a>(
     env: &'a IndexerEnvelope,
     branch_id: i64,
     branch_tags: &[String],
+    tag_props: &TagProperties,
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
 
@@ -593,7 +611,7 @@ fn repository_on_branch_rows<'a>(
         edge_kind: "ON_BRANCH",
         source_node_kind: "File",
         target_node_kind: "Branch",
-        source_tags: node_tags(graph, idx),
+        source_tags: node_tags(graph, idx, tag_props),
         target_tags: branch_tags.to_vec(),
     }));
 
@@ -604,6 +622,7 @@ fn graph_edge_rows<'a>(
     graph: &'a code_graph::v2::linker::CodeGraph,
     ids: &'a [i64],
     env: &'a IndexerEnvelope,
+    tag_props: &TagProperties,
 ) -> Vec<IndexerEdgeRow<'a>> {
     let mut rows = Vec::new();
     for ei in graph.graph.edge_indices() {
@@ -616,8 +635,8 @@ fn graph_edge_rows<'a>(
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
-            source_tags: node_tags(graph, src),
-            target_tags: node_tags(graph, tgt),
+            source_tags: node_tags(graph, src, tag_props),
+            target_tags: node_tags(graph, tgt, tag_props),
         });
     }
     rows
@@ -652,12 +671,33 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
+/// Per-node-kind list of `(tag_key, property_name)` pairs derived from
+/// the ontology's denormalization declarations. Deduplicated because the
+/// ontology expands one declaration per edge relationship, but the tag
+/// values are the same regardless of which edge the node appears in.
+type TagProperties = std::collections::HashMap<String, Vec<(String, String)>>;
+
+fn build_tag_properties(ontology: &Ontology) -> TagProperties {
+    let mut map: TagProperties = std::collections::HashMap::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for dp in ontology.denormalized_properties() {
+        let key = (dp.node_kind.clone(), dp.property_name.clone());
+        if seen.insert(key) {
+            map.entry(dp.node_kind.clone())
+                .or_default()
+                .push((dp.tag_key.clone(), dp.property_name.clone()));
+        }
+    }
+    map
+}
+
 pub struct ConverterSpecs {
     directory: Vec<ColumnSpec>,
     file: Vec<ColumnSpec>,
     definition: Vec<ColumnSpec>,
     imported_symbol: Vec<ColumnSpec>,
     edge: Vec<ColumnSpec>,
+    tag_properties: TagProperties,
 }
 
 impl ConverterSpecs {
@@ -668,6 +708,7 @@ impl ConverterSpecs {
             definition: entity_specs(ontology, "Definition"),
             imported_symbol: entity_specs(ontology, "ImportedSymbol"),
             edge: edge_specs(ontology),
+            tag_properties: build_tag_properties(ontology),
         }
     }
 }

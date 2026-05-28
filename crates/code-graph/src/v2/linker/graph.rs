@@ -797,6 +797,28 @@ impl CodeGraph {
             .filter_map(|idx| self.graph[idx].as_file().map(|f| (idx, f)))
     }
 
+    /// Look up a named property on a graph node. Used by the indexer to
+    /// populate denormalized edge tags from the ontology config without
+    /// hardcoding property-to-node-type mappings.
+    pub fn node_property(&self, idx: NodeIndex, property: &str) -> Option<String> {
+        match &self.graph[idx] {
+            GraphNode::File(f) => match property {
+                "extension" => Some(f.extension.clone()),
+                "language" => Some(f.language_name().to_string()),
+                _ => None,
+            },
+            GraphNode::Definition { id, .. } => match property {
+                "definition_type" => Some(self.defs[id.0 as usize].definition_type.to_string()),
+                _ => None,
+            },
+            GraphNode::Import { id, .. } => match property {
+                "import_type" => Some(self.imports[id.0 as usize].import_type.to_string()),
+                _ => None,
+            },
+            GraphNode::Directory(_) => None,
+        }
+    }
+
     pub fn definitions(&self) -> impl Iterator<Item = (NodeIndex, &Arc<str>, &GraphDef)> {
         self.graph.node_indices().filter_map(|idx| {
             if let GraphNode::Definition { file_path, id } = &self.graph[idx] {
