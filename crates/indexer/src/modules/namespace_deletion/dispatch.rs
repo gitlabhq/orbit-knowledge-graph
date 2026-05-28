@@ -141,7 +141,7 @@ impl NamespaceDeletionScheduler {
         })?;
 
         let dispatch_id = Uuid::new_v4();
-        let campaign_id = *self.campaign_state.read().unwrap();
+        let campaign_id = self.campaign_state.read().unwrap().clone();
         let mut dispatched = 0u64;
         let mut skipped = 0u64;
 
@@ -150,7 +150,7 @@ impl NamespaceDeletionScheduler {
                 namespace_id: entry.namespace_id,
                 traversal_path: entry.traversal_path.clone(),
                 dispatch_id,
-                campaign_id,
+                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();

@@ -62,7 +62,7 @@ impl ScheduledTask for GlobalDispatcher {
 
 impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
-        let campaign_id = *self.campaign_state.read().unwrap();
+        let campaign_id = self.campaign_state.read().unwrap().clone();
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
             dispatch_id: Uuid::new_v4(),

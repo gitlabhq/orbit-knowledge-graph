@@ -35,7 +35,7 @@ impl fmt::Display for IndexingMode {
 pub trait IndexingObserver: Send {
     fn set_dispatch_id(&mut self, _dispatch_id: Uuid) {}
 
-    fn set_campaign_id(&mut self, _campaign_id: Option<Uuid>) {}
+    fn set_campaign_id(&mut self, _campaign_id: Option<String>) {}
 
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
@@ -79,9 +79,9 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
-    fn set_campaign_id(&mut self, campaign_id: Option<Uuid>) {
+    fn set_campaign_id(&mut self, campaign_id: Option<String>) {
         for o in self.iter_mut() {
-            o.set_campaign_id(campaign_id);
+            o.set_campaign_id(campaign_id.clone());
         }
     }
 
@@ -176,7 +176,7 @@ mod tests {
         fn set_dispatch_id(&mut self, _: Uuid) {
             self.push("set_dispatch_id");
         }
-        fn set_campaign_id(&mut self, _: Option<Uuid>) {
+        fn set_campaign_id(&mut self, _: Option<String>) {
             self.push("set_campaign_id");
         }
         fn set_pipeline_type(&mut self, _: PipelineType) {
@@ -221,7 +221,7 @@ mod tests {
         ]);
 
         obs.set_dispatch_id(Uuid::new_v4());
-        obs.set_campaign_id(Some(Uuid::new_v4()));
+        obs.set_campaign_id(Some("schema-migration-v1".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_traversal_path("42/100/");
         obs.set_entity_type("MergeRequest");

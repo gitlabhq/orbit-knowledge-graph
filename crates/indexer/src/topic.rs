@@ -30,7 +30,7 @@ pub struct GlobalIndexingRequest {
     #[serde(default)]
     pub dispatch_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub campaign_id: Option<Uuid>,
+    pub campaign_id: Option<String>,
 }
 
 impl Event for GlobalIndexingRequest {
@@ -47,7 +47,7 @@ pub struct NamespaceIndexingRequest {
     #[serde(default)]
     pub dispatch_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub campaign_id: Option<Uuid>,
+    pub campaign_id: Option<String>,
 }
 
 impl NamespaceIndexingRequest {
@@ -79,7 +79,7 @@ pub struct CodeIndexingTaskRequest {
     #[serde(default)]
     pub dispatch_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub campaign_id: Option<Uuid>,
+    pub campaign_id: Option<String>,
 }
 
 impl CodeIndexingTaskRequest {
@@ -117,7 +117,7 @@ pub struct NamespaceDeletionRequest {
     #[serde(default)]
     pub dispatch_id: Uuid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub campaign_id: Option<Uuid>,
+    pub campaign_id: Option<String>,
 }
 
 impl NamespaceDeletionRequest {

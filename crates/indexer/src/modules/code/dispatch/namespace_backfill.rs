@@ -135,7 +135,7 @@ impl NamespaceCodeBackfillDispatcher {
     async fn dispatch_cdc_events(&self) -> Result<(), TaskError> {
         let subscription = self.siphon_subscription();
         let dispatch_id = Uuid::new_v4();
-        let campaign_id = *self.campaign_state.read().unwrap();
+        let campaign_id = self.campaign_state.read().unwrap().clone();
         let mut total = DispatchOutcome {
             dispatched: 0,
             skipped: 0,
@@ -169,7 +169,7 @@ impl NamespaceCodeBackfillDispatcher {
             // namespace's entire batch before any other namespace gets a turn.
             all_pending.shuffle(&mut rand::rng());
             let outcome = self
-                .publish_pending(&all_pending, dispatch_id, campaign_id)
+                .publish_pending(&all_pending, dispatch_id, campaign_id.clone())
                 .await?;
             total.dispatched += outcome.dispatched;
             total.skipped += outcome.skipped;
@@ -212,7 +212,7 @@ impl NamespaceCodeBackfillDispatcher {
     async fn dispatch_active_backfill(&self) -> Result<(), TaskError> {
         let version = *SCHEMA_VERSION;
         let dispatch_id = Uuid::new_v4();
-        let campaign_id = *self.campaign_state.read().unwrap();
+        let campaign_id = self.campaign_state.read().unwrap().clone();
 
         // Datalake unreachable is a transient issue, not a task error. Mirror
         // the tolerance the old `read_migrating_version` gate had: log and
@@ -409,7 +409,7 @@ impl NamespaceCodeBackfillDispatcher {
         &self,
         projects: &[PendingProject],
         dispatch_id: Uuid,
-        campaign_id: Option<Uuid>,
+        campaign_id: Option<String>,
     ) -> Result<DispatchOutcome, TaskError> {
         let mut outcome = DispatchOutcome {
             dispatched: 0,
@@ -424,7 +424,7 @@ impl NamespaceCodeBackfillDispatcher {
                 commit_sha: None,
                 traversal_path: project.traversal_path.clone(),
                 dispatch_id,
-                campaign_id,
+                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();

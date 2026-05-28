@@ -24,10 +24,10 @@ use super::metrics::CompletionMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::campaign::CampaignState;
+use crate::schema::campaign::{CampaignState, campaign_id_for_version};
 use crate::schema::version::{
     SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
-    read_all_versions, read_migrating_campaign_id, read_migrating_version, table_prefix,
+    read_all_versions, read_migrating_version, table_prefix,
 };
 
 /// NATS KV key used to serialize migration-completion checks across pods.
@@ -194,11 +194,10 @@ impl MigrationCompletionChecker {
             return Ok(None);
         };
 
-        if self.campaign_state.read().unwrap().is_none()
-            && let Ok(Some(id)) = read_migrating_campaign_id(&self.graph).await
-        {
-            *self.campaign_state.write().unwrap() = Some(id);
-        }
+        // Publish the migration's campaign_id so dispatchers tag their messages
+        // with it. It's derived from the migrating version, so this is an
+        // idempotent recompute rather than a stored-value lookup.
+        *self.campaign_state.write().unwrap() = Some(campaign_id_for_version(migrating_version));
 
         // Surface "is migration stuck?" as a direct gauge. A bounded query
         // failure here shouldn't block completion; log and continue with an

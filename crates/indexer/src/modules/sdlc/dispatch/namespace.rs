@@ -96,7 +96,7 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
-        let campaign_id = *self.campaign_state.read().unwrap();
+        let campaign_id = self.campaign_state.read().unwrap().clone();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -118,7 +118,7 @@ impl NamespaceDispatcher {
                 traversal_path: traversal_path.clone(),
                 watermark,
                 dispatch_id: Uuid::new_v4(),
-                campaign_id,
+                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();

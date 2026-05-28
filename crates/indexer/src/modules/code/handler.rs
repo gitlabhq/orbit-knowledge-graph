@@ -183,7 +183,7 @@ impl CodeIndexingTaskHandler {
             CodeOtelObserver::new(self.metrics.clone()),
         )]);
         observer.set_dispatch_id(request.dispatch_id);
-        observer.set_campaign_id(request.campaign_id);
+        observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
         observer.set_traversal_path(&request.traversal_path);

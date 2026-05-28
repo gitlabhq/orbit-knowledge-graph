@@ -37,7 +37,7 @@ struct IndexingRequest {
     traversal_path: Option<String>,
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
-    campaign_id: Option<Uuid>,
+    campaign_id: Option<String>,
 }
 
 impl EntityHandler {
@@ -104,7 +104,7 @@ impl EntityHandler {
             SdlcOtelObserver::new(self.metrics.clone()),
         )]);
         observer.set_dispatch_id(request.dispatch_id);
-        observer.set_campaign_id(request.campaign_id);
+        observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
         if let Some(namespace_id) = request.namespace_id {
