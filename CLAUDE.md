@@ -122,6 +122,12 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
 
+## MR and issue descriptions
+
+Templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/` follow a fixed convention: the visible sections at the top are for the *important* content a reviewer needs (headline, diagram, key numbers, repro steps). Long-form output — file-by-file walkthroughs, profiler dumps, full benchmark tables, alternatives considered, agent reasoning — belongs inside the `<details><summary>Agent context</summary>` block at the bottom.
+
+When you fill out a template, keep the top sections terse and put extended narrative into the Agent context block. Do not delete that block.
+
 ## Design docs
 
 Design docs live in `docs/design-documents/` and must describe the current repository state, not an aspirational or legacy architecture.
