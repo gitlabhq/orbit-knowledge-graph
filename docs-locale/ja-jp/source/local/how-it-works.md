@@ -8,9 +8,9 @@ title: Orbit Localの仕組み
 
 {{< details >}}
 
-- Tier: Free, Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experiment
+- 階層: Free, Premium, Ultimate
+- 提供形態: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+- ステータス: 実験
 
 {{< /details >}}
 
@@ -21,12 +21,12 @@ title: Orbit Localの仕組み
 {{< /history >}}
 
 > [!note]
-> Orbit Localは実験的な機能です。GAリリース前に、機能および
-> コマンドの形式が変更される場合があります。
+> Orbit Localは実験的な機能です。GAリリース前に、機能およびコマンドの形式が
+> 変更される場合があります。
 
 ## インデックス作成パイプライン {#indexing-pipeline}
 
-`orbit index`を実行すると、Orbit Localは次の処理を行います。
+`orbit index`を実行すると、Orbit Localは以下の処理を行います。
 
 1. `.gitignore`を考慮しながら、リポジトリのディレクトリツリーを走査します。
 1. 各ソースファイルを言語固有のパーサー（rust-analyzer、tree-sitter、または言語に応じたカスタムパーサー）に渡します。
@@ -37,7 +37,7 @@ v2パイプラインはすべての言語パーサーを並列で実行します
 
 ## グラフモデル {#the-graph-model}
 
-Orbit Localはコードのみのグラフを構築します。GitLabへの接続がないため、SDLCデータ（マージリクエスト、パイプライン、ユーザー）にはアクセスできません。
+Orbit Localはコードのみのグラフを構築します。GitLabとの接続がないため、SDLCデータ（マージリクエスト、パイプライン、ユーザー）にはアクセスできません。
 
 ローカルグラフのノード:
 
@@ -46,7 +46,7 @@ Orbit Localはコードのみのグラフを構築します。GitLabへの接続
 - **Definition** - 関数、クラス、モジュール、またはその他の名前付きシンボル
 - **ImportedSymbol** - 別のファイルまたはパッケージからインポートされたシンボル
 
-エッジは、ファイルとその定義、ファイルとそのインポート、および定義とファイル間で参照するシンボルを接続します。
+エッジは、ファイルとその定義、ファイルとそのインポート、そしてファイルをまたいで参照するシンボルと定義を結びつけます。
 
 ## クエリの実行 {#query-execution}
 
@@ -60,14 +60,14 @@ Orbit LocalはグラフをDuckDBデータベースとして公開します。`or
 
 ## ストレージ {#storage}
 
-グラフは`~/.orbit/graph.duckdb`の単一のDuckDBファイルに保存されます。複数のリポジトリが同じデータベースを共有します。各リポジトリは、マニフェストテーブル内のプロジェクトIDとブランチによってスコープが設定されます。
+グラフは`~/.orbit/graph.duckdb`の単一のDuckDBファイルに保存されます。複数のリポジトリが同じデータベースを共有し、各リポジトリはマニフェストテーブル内のプロジェクトIDとブランチによってスコープが設定されます。
 
 ## サポートされている言語 {#supported-languages}
 
-Orbit Remoteでサポートされている11の言語はすべてローカルでもサポートされています:
+Orbit Remoteがサポートする11の言語はすべてローカルでもサポートされています:
 Ruby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++。
 
-完全な言語サポート表については、[Orbitがインデックスするもの](../remote/indexing.md#supported-languages)を参照してください。
+完全な言語サポート表については、[Orbitがインデックスする対象](../remote/indexing.md#supported-languages)を参照してください。
 
 ## 課金 {#billing}
 

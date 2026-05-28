@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit Local - ご自身のマシン上でコードグラフをビルドおよびクエリできます。GitLabインスタンスは不要です。
+description: Orbit Local - ご自身のマシン上でコードグラフを構築・クエリできます。GitLabインスタンスは不要です。
 title: Orbit Local
 ---
 
@@ -16,14 +16,14 @@ title: Orbit Local
 
 {{< history >}}
 
-- [導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) GitLab 19.0にて[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)として導入されました。
+- GitLab 19.0で[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
 
 {{< /history >}}
 
-Orbit Localはお使いのマシン上で完全に動作します。任意のローカルリポジトリのコードグラフをビルドし、Orbit Remoteと同じクエリ言語を使用してクエリできます。GitLabアカウントもネットワーク接続も不要です。
+Orbit Localはお使いのマシン上で完全に動作します。任意のローカルリポジトリのコードグラフを構築し、Orbit Remoteと同じクエリ言語を使用してクエリできます。GitLabアカウントもネットワーク接続も不要です。
 
-- インデックス対象: コードのみ（ファイル、定義、クロスファイル参照を含む）
-- ストレージ: DuckDB（`~/.orbit/graph.duckdb` のローカルファイル）
+- インデックス対象：ファイル、定義、クロスファイル参照を含むコードのみ
+- ストレージ：DuckDB（`~/.orbit/graph.duckdb`のローカルファイル）
 
 [Orbit Localを始める](getting-started.md)
 
@@ -40,8 +40,8 @@ Orbit Localはお使いのマシン上で完全に動作します。任意のロ
 
 | 方法 | 説明 |
 |---|---|
-| [Orbit CLI（`orbit`）](access/cli.md) | `orbit` バイナリを直接実行してインデックス作成とクエリを行う |
-| [GitLab CLI（`glab`）](access/glab.md) | `glab orbit local` を通じてOrbit Localを操作する（予定） |
+| [Orbit CLI（`orbit`）](access/cli.md) | `orbit`バイナリを直接実行してインデックス作成とクエリを行う |
+| [GitLab CLI（`glab`）](access/glab.md) | `glab orbit local`でOrbit Localを操作する（予定） |
 | [MCP](access/mcp.md) | ローカルグラフをClaude Code、Codex、その他のエージェントに公開する |
 
 ## 課金 {#billing}

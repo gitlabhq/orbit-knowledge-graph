@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit クエリ言語を使用して、ナレッジグラフを検索およびトラバースします。
+description: Orbit クエリ言語を使用してナレッジグラフを検索およびトラバースします。
 title: Orbit クエリ言語
 ---
 
@@ -16,18 +16,18 @@ title: Orbit クエリ言語
 
 {{< history >}}
 
-- GitLab 18.10 で `knowledge_graph` という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 18.10 で `knowledge_graph` という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
 > 詳細については、履歴を参照してください。
-> この機能はテスト用に利用可能ですが、本番環境での使用には対応していません。
+> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-フラットな API レスポンスではなくグラフとして GitLab データが必要な場合は、Orbit クエリ言語を使用してください。クエリは JSON オブジェクトです。マッチするエンティティ、辿るリレーションシップ、返すプロパティを指定します。
+データをフラットな API レスポンスではなくグラフとして取得する必要がある場合は、Orbit クエリ言語を使用してください。クエリは JSON オブジェクトです。マッチするエンティティ、辿るリレーションシップ、返すプロパティを指定します。
 
-## クエリの形式 {#query-shape}
+## クエリの構造 {#query-shape}
 
 すべてのクエリには `query_type` と、`node` または `nodes` のいずれかが必要です。
 
@@ -44,15 +44,15 @@ title: Orbit クエリ言語
 }
 ```
 
-1 つのノードセレクターには `node` を使用します。セレクターの配列には `nodes` を使用します。同じクエリで両方を使用することはできません。
+単一のノードセレクターには `node` を使用します。セレクターの配列には `nodes` を使用します。同じクエリで両方を使用することはできません。
 
 ## クエリタイプ {#query-types}
 
 | クエリタイプ | 用途 |
 |------------|-----------|
-| `traversal` | マッチするノードをフェッチするか、ノード間のリレーションシップを辿ります。 |
-| `aggregation` | マッチするグラフ結果をカウント、合計、平均、グループ化、またはソートします。 |
-| `path_finding` | 2 つのノードセレクター間の有界パスを見つけます。 |
+| `traversal` | マッチするノードを取得するか、ノード間のリレーションシップを辿ります。 |
+| `aggregation` | マッチするグラフ結果のカウント、合計、平均、グループ化、またはソートを行います。 |
+| `path_finding` | 2 つのノードセレクター間の有界パスを検索します。 |
 | `neighbors` | 1 つの有界ノードに接続されたノードを返します。 |
 
 単一ノードの `traversal` が検索の形式です。独立した `search` クエリタイプはありません。
@@ -62,7 +62,7 @@ title: Orbit クエリ言語
 | フィールド | 型 | 説明 |
 |-------|------|-------------|
 | `query_type` | `string` | `traversal`、`aggregation`、`path_finding`、または `neighbors` のいずれか。 |
-| `node` | `object` | 1 つのノードセレクター。単一ノードの `traversal` および `neighbors` に必須。 |
+| `node` | `object` | 単一のノードセレクター。単一ノードの `traversal` および `neighbors` に必須。 |
 | `nodes` | `array` | 複数のノードセレクター。マルチノードの `traversal`、`aggregation`、および `path_finding` に必須。最大 5 個。 |
 | `relationships` | `array` | トラバーサルまたは集計のリレーションシップセレクター。最大 5 個。 |
 | `aggregations` | `array` | 集計の定義。`aggregation` に必須。最大 10 個。 |
@@ -70,9 +70,9 @@ title: Orbit クエリ言語
 | `path` | `object` | パス検索の設定。`path_finding` に必須。 |
 | `neighbors` | `object` | 近傍ルックアップの設定。`neighbors` に必須。 |
 | `limit` | `integer` | 返す最大行数。デフォルト 30。最大 1000。 |
-| `cursor` | `object` | 認可された結果に対するオフセットページネーション。 |
-| `order_by` | `object` | ノードプロパティで行をソートします。 |
-| `aggregation_sort` | `object` | 出力カラムで集計行をソートします。 |
+| `cursor` | `object` | 認可済み結果に対するオフセットページネーション。 |
+| `order_by` | `object` | ノードプロパティによる行のソート。 |
+| `aggregation_sort` | `object` | 出力カラムによる集計行のソート。 |
 | `options` | `object` | 表示およびデバッグオプション。 |
 
 ## ノードセレクター {#node-selectors}
@@ -83,9 +83,9 @@ title: Orbit クエリ言語
 |-------|------|-------------|
 | `id` | `string` | ノードのローカルエイリアス。リレーションシップ、集計、パス、および近傍はこのエイリアスを参照します。 |
 | `entity` | `string` | `Project`、`User`、`MergeRequest`、`File`、`Definition` などのオントロジーノードタイプ。 |
-| `columns` | `string` または `array` | 返すプロパティ。すべての非制限プロパティには `"*"` を、名前の配列を使用します。省略した場合、Orbit はエンティティのデフォルトカラムを返します。 |
+| `columns` | `string` または `array` | 返すプロパティ。制限なしのすべてのプロパティには `"*"` を、名前の配列を指定することもできます。省略した場合、Orbit はエンティティのデフォルトカラムを返します。 |
 | `filters` | `object` | プロパティフィルター。 |
-| `node_ids` | `array` | マッチする正確な ID。整数または数字の文字列を受け付けます。最大 500 個。 |
+| `node_ids` | `array` | マッチする正確な ID。整数または数字文字列を受け付けます。最大 500 個。 |
 | `id_range` | `object` | `start` と `end` を持つ包括的な ID 範囲。 |
 | `id_property` | `string` | `node_ids` および `id_range` で使用されるプロパティ。デフォルト `id`。 |
 
@@ -93,7 +93,7 @@ title: Orbit クエリ言語
 
 ## リレーションシップ {#relationships}
 
-リレーションシップはエイリアスでノードセレクターを接続します。
+リレーションシップはエイリアスによってノードセレクターを接続します。
 
 ```json
 {
@@ -106,19 +106,19 @@ title: Orbit クエリ言語
 
 | フィールド | 型 | 説明 |
 |-------|------|-------------|
-| `type` | `string` または `array` | リレーションシップタイプまたはタイプの配列。有界クエリで任意のリレーションシップが必要な場合にのみ `"*"` を使用します。 |
+| `type` | `string` または `array` | リレーションシップタイプ（1 つまたは複数）。任意のリレーションシップが必要で有界クエリがある場合のみ `"*"` を使用します。 |
 | `from` | `string` | 開始ノードセレクターのエイリアス。 |
 | `to` | `string` | 終了ノードセレクターのエイリアス。 |
 | `direction` | `string` | `outgoing`、`incoming`、または `both`。デフォルト `outgoing`。 |
 | `min_hops` | `integer` | 最小ホップ数。デフォルト 1。最大 3。 |
 | `max_hops` | `integer` | 最大ホップ数。デフォルト 1。最大 3。 |
-| `filters` | `object` | リレーションシッププロパティフィルター。最大 5 フィルター。 |
+| `filters` | `object` | リレーションシッププロパティフィルター。最大 5 個のフィルター。 |
 
 たとえば、マージリクエストは `IN_PROJECT` でプロジェクトを指し、ユーザーは `AUTHORED` でマージリクエストを指します。
 
 ## フィルター {#filters}
 
-フィルターは単純な等値比較を使用できます：
+フィルターは単純な等値比較を使用できます。
 
 ```json
 {
@@ -128,7 +128,7 @@ title: Orbit クエリ言語
 }
 ```
 
-または演算子を使用できます：
+または演算子を使用できます。
 
 ```json
 {
@@ -141,14 +141,14 @@ title: Orbit クエリ言語
 
 | 演算子 | 用途 |
 |----------|-----|
-| `eq` | スカラー値と等しい。 |
+| `eq` | スカラー値との等値比較。 |
 | `gt`、`gte`、`lt`、`lte` | 数値、日付、またはタイムスタンプの比較。 |
-| `in` | 値が配列に含まれる。最大 100 個の値。 |
+| `in` | 値が配列内に含まれる。最大 100 個の値。 |
 | `contains` | 文字列が部分文字列を含む。 |
 | `starts_with` | 文字列がプレフィックスで始まる。 |
 | `ends_with` | 文字列がサフィックスで終わる。 |
-| `is_null` | 値が null。`value` は指定しないでください。 |
-| `is_not_null` | 値が null でない。`value` は指定しないでください。 |
+| `is_null` | 値が null。`value` は指定しません。 |
+| `is_not_null` | 値が null でない。`value` は指定しません。 |
 | `token_match` | テキストインデックスが 1 つのトークンを含む。 |
 | `all_tokens` | テキストインデックスがすべてのトークンを含む。 |
 | `any_tokens` | テキストインデックスがいずれかのトークンを含む。 |
@@ -157,23 +157,23 @@ title: Orbit クエリ言語
 
 ## カラムと仮想カラム {#columns-and-virtual-columns}
 
-ほとんどのカラムは ClickHouse のインデックス付きグラフテーブルから取得されます。一部のカラムは仮想です：Orbit はグラフクエリが返された後、別のサービスからそれらをフェッチします。
+ほとんどのカラムは ClickHouse のインデックス付きグラフテーブルから取得されます。一部のカラムは仮想カラムで、グラフクエリが返された後に別のサービスから Orbit が取得します。
 
-仮想カラムは `columns` で明示的にリクエストしてください。`path_finding` および `neighbors` で使用される `dynamic_columns` オプションは、外部サービス呼び出しが必要になる可能性があるため、仮想カラムを除外します。
+仮想カラムは `columns` に明示的に指定してリクエストしてください。`path_finding` および `neighbors` で使用される `dynamic_columns` オプションは、外部サービスへの呼び出しが必要になる可能性があるため、仮想カラムを除外します。
 
 | エンティティ | 仮想カラム | 返す内容 |
 |--------|----------------|-----------------|
 | `MergeRequest` | `diff` | マージリクエストの完全な統合差分。 |
 | `MergeRequestDiff` | `patch` | 1 つのマージリクエスト差分スナップショットの完全なパッチ。 |
 | `MergeRequestDiffFile` | `diff` | ファイルごとの統合差分テキスト。`too_large` が `true` の場合は `null` を返します。 |
-| `File` | `content` | ファイルの raw ソーステキスト。 |
+| `File` | `content` | ファイルの生のソーステキスト。 |
 | `Definition` | `content` | 1 つのインデックス付き定義のソーステキスト。 |
 
 `content` カラムはソースコード用です。マージリクエストの差分テキストには、`MergeRequest.diff`、`MergeRequestDiff.patch`、または `MergeRequestDiffFile.diff` を使用してください。
 
 ## トラバーサルの例 {#traversal-examples}
 
-完全な差分とともに 1 つのマージリクエストをフェッチする：
+完全な差分を含む 1 つのマージリクエストを取得する場合：
 
 ```json
 {
@@ -188,7 +188,7 @@ title: Orbit クエリ言語
 }
 ```
 
-差分スナップショットからファイルごとの差分コンテンツをフェッチする：
+差分スナップショットからファイルごとの差分コンテンツを取得する場合：
 
 ```json
 {
@@ -219,7 +219,11 @@ title: Orbit クエリ言語
 }
 ```
 
-ソースファイルのコンテンツをフェッチする：
+`HAS_DIFF` はマージリクエストがこれまでに持っていたすべての差分スナップショットを返します（`MergeRequestDiff.merge_request_id` FK）。`HAS_LATEST_DIFF` は最新のスナップショットのみを返します（`MergeRequest.latest_merge_request_diff_id` FK）。これは「マージリクエストが現在どのような状態か」を確認するのに便利ですが、過去の質問には適していません。「あるファイルに触れたすべてのマージリクエスト」を調べるには、すべてのスナップショットに対して `HAS_DIFF` をトラバースしてください。過去のカバレッジに関する質問に `HAS_LATEST_DIFF` を使用すると、長期間存在するファイルでは大幅に過少カウントになる可能性があります。以前のリビジョンでファイルに触れたが最終差分では触れていない MR は、`HAS_LATEST_DIFF` では見えません。
+
+`MergeRequestDiffFile.old_path` はファイル検索に推奨されるカラムです。`new_path` はリネームの場合のみ `old_path` と異なります。`old_path` でフィルタリングおよびグループ化することで、MR の履歴全体で同じ行 ID が維持されます。オントロジーフィールドの説明は [`merge_request_diff_file.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml) を参照してください。
+
+ソースファイルのコンテンツを取得する場合：
 
 ```json
 {
@@ -236,7 +240,7 @@ title: Orbit クエリ言語
 }
 ```
 
-プロジェクト内のマージ済みマージリクエストを検索する：
+プロジェクト内のマージ済みマージリクエストを検索する場合：
 
 ```json
 {
@@ -262,7 +266,7 @@ title: Orbit クエリ言語
 }
 ```
 
-1 つのマージリクエストに対して実行されたすべてのパイプラインを検索する。マージリクエストの **Pipelines** タブ、REST `/merge_requests/:iid/pipelines` エンドポイント、および GraphQL `mergeRequest.pipelines` コネクションが返す内容と一致させるために、常に `Pipeline.source = "merge_request_event"` でフィルタリングしてください：
+1 つのマージリクエストに対して実行されたすべてのパイプラインを検索する場合。マージリクエストの**パイプライン**タブ、REST `/merge_requests/:iid/pipelines` エンドポイント、および GraphQL `mergeRequest.pipelines` コネクションが返す内容と一致させるために、常に `Pipeline.source = "merge_request_event"` でフィルタリングしてください。
 
 ```json
 {
@@ -281,11 +285,11 @@ title: Orbit クエリ言語
 }
 ```
 
-`merge_request_id` はマージリクエストの内部数値 `id` であり、プロジェクトスコープの `iid` ではありません。まず `iid` と `project_id` でフィルタリングする `MergeRequest` トラバーサルで調べてから、その `id` を上記のクエリに使用してください。
+`merge_request_id` はマージリクエストの内部数値 `id` であり、プロジェクトスコープの `iid` ではありません。まず `iid` と `project_id` でフィルタリングする `MergeRequest` トラバーサルで検索し、その `id` を上記のクエリに使用してください。
 
-`Pipeline.merge_request_id` と `MergeRequest --TRIGGERED--> Pipeline` エッジはどちらも、MR のコンテキストで起動されたすべての CI パイプライン（トップレベルの MR パイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）に MR をリンクします。`source = "merge_request_event"` フィルターなしでは、親子パイプラインのファンアウトを使用する MR では結果が大幅に過剰カウントされ、MR UI や「この MR のパイプライン」の REST および GraphQL の定義と一致しません。マルチノードクエリで `MergeRequest --TRIGGERED--> Pipeline` をトラバースする場合も同じフィルターを適用してください。
+`Pipeline.merge_request_id` と `MergeRequest --TRIGGERED--> Pipeline` エッジはどちらも、MR のコンテキストで起動されたすべての CI パイプライン（トップレベルの MR パイプラインがトリガーするダウンストリームの子パイプライン（`source = "parent_pipeline"`）を含む）を MR にリンクします。`source = "merge_request_event"` フィルターなしでは、親子パイプラインのファンアウトを使用する MR では結果が大幅に過剰カウントされ、MR UI や「この MR のパイプライン」という REST および GraphQL の定義とも一致しません。マルチノードクエリで `MergeRequest --TRIGGERED--> Pipeline` をトラバースする場合も同じフィルターを適用してください。
 
-`MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` は別のエッジです。マージリクエストのソースブランチの先端に対して実行されている最新の単一パイプラインを指します。パイプラインの履歴ではなく、「現在実行中のもの」に使用してください。
+`MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` は別のエッジです。マージリクエストのソースブランチの先端に対して実行されている最新の単一パイプラインを指します。パイプラインの履歴ではなく、「現在実行中のもの」を確認する場合に使用してください。
 
 ## 集計 {#aggregation}
 
@@ -295,23 +299,23 @@ title: Orbit クエリ言語
 |-------|------|-------------|
 | `function` | `string` | `count`、`sum`、`avg`、`min`、または `max`。 |
 | `target` | `string` | 集計するノードエイリアス。 |
-| `property` | `string` | 集計するプロパティ。`sum`、`avg`、`min`、および `max` に必須。 |
+| `property` | `string` | 集計するプロパティ。`sum`、`avg`、`min`、`max` に必須。 |
 | `alias` | `string` | 出力カラムの名前。 |
 
-集計行をグループ化するにはトップレベルの `group_by` を使用します。クエリ内のすべての集計に適用されます。個々の集計内にグループ化を入れないでください。
+集計行をグループ化するにはトップレベルの `group_by` を使用します。これはクエリ内のすべての集計に適用されます。個々の集計内にグループ化を記述しないでください。
 
-グループキーは以下の形式をサポートします：
+グループキーは次の形式をサポートします。
 
 | グループキー | 形式 | 結果の値 |
 |-----------|-------|--------------|
-| Node | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | 各行のネストされたエンティティオブジェクト。 |
-| Property | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | 各行のスカラーバケット値。 |
+| ノード | `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}` | 各行にネストされたエンティティオブジェクト。 |
+| プロパティ | `{"kind": "property", "node": "<node-id>", "property": "<property>", "alias": "<optional-name>"}` | 各行のスカラーバケット値。 |
 
 `alias` を省略した場合、ノードグループはノード ID を出力キーとして使用します。プロパティグループは、`group_by` リスト内で一意の場合はプロパティ名を使用し、曖昧さを避けるために必要な場合は `<node>_<property>` を使用します。グループまたは集計の出力名が重複している場合は拒否されます。
 
 プロパティグループは、呼び出し元が使用を許可されている、実際の ClickHouse バックエンドのフィルター可能なプロパティを参照する必要があります。仮想フィールドおよびフィルター不可能なフィールドは検証時に拒否されます。
 
-プロジェクトごとのマージ済みマージリクエスト数をカウントする：
+プロジェクトごとのマージ済みマージリクエスト数をカウントする場合：
 
 ```json
 {
@@ -340,7 +344,7 @@ title: Orbit クエリ言語
 }
 ```
 
-重大度別に検出された脆弱性をカウントする：
+重大度別に検出された脆弱性をカウントする場合：
 
 ```json
 {
@@ -423,7 +427,7 @@ title: Orbit クエリ言語
 }
 ```
 
-動的に検出された近傍またはパスノードのすべての非制限 ClickHouse バックエンドカラムが必要な場合は、`options.dynamic_columns` を `"*"` に設定してください。仮想カラムはトラバーサルクエリで明示的なリクエストが引き続き必要です。
+動的に検出された近傍またはパスノードのすべての非制限 ClickHouse バックエンドカラムが必要な場合は、`options.dynamic_columns` を `"*"` に設定してください。仮想カラムはトラバーサルクエリで明示的にリクエストする必要があります。
 
 ## 検証の制限 {#validation-limits}
 
@@ -443,9 +447,9 @@ Orbit は SQL をコンパイルする前に、広範または曖昧なクエリ
 | ノードあたりのフィルター数 | 10 |
 | リレーションシップあたりのフィルター数 | 5 |
 
-トラバーサルおよび集計クエリには、少なくとも 1 つの選択的なノードが必要です：`node_ids`、フィルター、またはスパンが 100,000 以下の `id_range`。
+トラバーサルおよび集計クエリには、少なくとも 1 つの選択的なノード（`node_ids`、フィルター、またはスパンが 100,000 以下の `id_range`）が必要です。
 
-単一ノードのトラバーサルも選択性が必要です。広範なエンティティを検査するには、フィルターを追加するか、ID を指定するか、狭い `id_range` を使用してください。
+単一ノードのトラバーサルにも選択性が必要です。広範なエンティティを検査するには、フィルターを追加するか、ID を指定するか、または狭い `id_range` を使用してください。
 
 ## オプション {#options}
 

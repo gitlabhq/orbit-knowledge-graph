@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: ブラスト半径分析、オンボーディング、依存マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストで使用できます。
+description: ブラスト半径分析、オンボーディング、依存関係マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストでご利用いただけます。
 title: Cookbook
 ---
 
@@ -10,26 +10,26 @@ title: Cookbook
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: 実験
+- Status: Experiment
 
 {{< /details >}}
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- [導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) GitLab 18.10で`knowledge_graph`という名前の[機能フラグ付き](https://docs.gitlab.com/administration/feature_flags/)で導入されました。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴を参照してください。
-> この機能はテスト用に利用可能ですが、本番環境での使用には対応していません。
+> 詳細については、履歴をご参照ください。
+> この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-最も一般的なOrbitのユースケース向けのすぐに使えるクエリです。すべての例はREST API形式を使用しています。MCPを介して実行するには、JSONボディを`query_graph`に渡してください。
+最も一般的なOrbitのユースケース向けにすぐに使えるクエリです。すべての例はREST API形式を使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
 
 ## ブラスト半径分析 {#blast-radius-analysis}
 
-回答：「これを変更すると何が壊れますか？」
+回答：「これを変更すると何が壊れるか？」
 
 ### 特定のモジュールをインポートしているすべてのファイルを検索する {#find-all-files-that-import-a-specific-module}
 
@@ -107,11 +107,11 @@ title: Cookbook
 }
 ```
 
-## 依存マッピング {#dependency-mapping}
+## 依存関係マッピング {#dependency-mapping}
 
-回答：「私たちのサービスはどのように接続されていますか？」
+回答：「サービス同士はどのように接続されているか？」
 
-### インポートされた定義をマップする {#map-imported-definitions}
+### インポートされた定義をマッピングする {#map-imported-definitions}
 
 ```json
 {
@@ -141,7 +141,7 @@ title: Cookbook
 
 ## パイプラインの健全性 {#pipeline-health}
 
-回答：「CI/CDの問題はどこにありますか？」
+回答：「CI/CDの問題はどこにあるか？」
 
 ### 失敗したパイプラインが最も多いプロジェクトを検索する {#find-projects-with-the-most-failed-pipelines}
 
@@ -181,9 +181,9 @@ title: Cookbook
 
 ## 脆弱性トレーシング {#vulnerability-tracing}
 
-回答：「セキュリティリスクはどこにあり、どのようにして発生しましたか？」
+回答：「セキュリティリスクはどこにあり、どのように発生したか？」
 
-### グループ内のすべての重大および高の脆弱性を検索する {#find-all-critical-and-high-vulnerabilities-in-a-group}
+### グループ内のすべてのクリティカルおよび高重大度の脆弱性を検索する {#find-all-critical-and-high-vulnerabilities-in-a-group}
 
 ```json
 {
