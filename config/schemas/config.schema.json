@@ -1388,6 +1388,16 @@
           "type": "boolean",
           "default": false
         },
+        "max_ack_pending": {
+          "description": "Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.\nWhen absent, the NATS server default applies (currently 1000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "default": null,
+          "minimum": 0
+        },
         "max_attempts": {
           "description": "Maximum total attempts (including the first delivery) before giving up.\n\n`max_attempts: 1` means the message is processed once with no retries.\n`max_attempts: 5` means 1 initial attempt + 4 retries.\n\nWhen absent, failures are acked immediately (retries are opt-in).",
           "type": [

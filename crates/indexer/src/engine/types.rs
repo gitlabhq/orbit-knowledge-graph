@@ -33,6 +33,7 @@ pub struct Subscription {
     pub concurrency_group: Option<Arc<str>>,
     pub max_attempts: Option<u32>,
     pub retry_interval_secs: Option<u64>,
+    pub max_ack_pending: Option<u32>,
 }
 
 impl PartialEq for Subscription {
@@ -60,6 +61,7 @@ impl Subscription {
             concurrency_group: None,
             max_attempts: None,
             retry_interval_secs: None,
+            max_ack_pending: None,
         }
     }
 
@@ -79,6 +81,7 @@ impl Subscription {
         }
         self.max_attempts = config.max_attempts;
         self.retry_interval_secs = config.retry_interval_secs;
+        self.max_ack_pending = config.max_ack_pending;
         if config.dead_letter_on_exhaustion {
             self.dead_letter_on_exhaustion = true;
         }
