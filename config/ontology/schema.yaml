@@ -28,6 +28,7 @@ settings:
         primary_key: [traversal_path, relationship_kind, source_id]
         settings:
           auto_statistics_types: "'minmax, uniq, countmin'"
+          allow_part_offset_column_in_projections: "1"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
@@ -38,12 +39,10 @@ settings:
         indexes:
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          # Reverse traversals (target_id lookup) need a reorder projection
-          # because target_id is position 4 in the sort key and resets with
-          # each source_id. Forward traversals use the 3-column PK directly.
-          - type: reorder
-            name: by_target
-            order_by: [traversal_path, relationship_kind, target_id, source_id, target_kind, source_kind]
+          # Lightweight projection for reverse traversals: stores only
+          # _part_offset + sort key, not full rows. Intersects with the
+          # base PK on traversal_path so the gather stays namespace-local.
+          - {type: lightweight, name: by_target, order_by: [traversal_path, target_id, relationship_kind]}
           - type: aggregate
             name: agg_counts
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
