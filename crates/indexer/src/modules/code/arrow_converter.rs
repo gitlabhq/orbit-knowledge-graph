@@ -399,21 +399,8 @@ fn convert_repository_edges(
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
     let tag_cache = graph.build_node_tags(&specs.tag_properties);
-    // Branch is synthetic (not a GraphNode), so build its tags from the
-    // ontology config directly. is_default is always true in code indexing.
-    let branch_tags: Vec<String> = specs
-        .tag_properties
-        .get("Branch")
-        .map(|props| {
-            props
-                .iter()
-                .filter_map(|(tag_key, prop_name)| match prop_name.as_str() {
-                    "is_default" => Some(format!("{tag_key}:true")),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // TODO: derive from ontology when Branch becomes a real GraphNode
+    let branch_tags = vec!["is_default:true".to_string()];
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
     edge_rows.push(IndexerEdgeRow {
