@@ -165,11 +165,13 @@ impl CodeIndexingTaskHandler {
             self.metrics.record_outcome("skipped_checkpoint");
             return Ok(());
         }
+        let had_prior_checkpoint = existing_checkpoint.is_some();
 
         info!(
             task_id = request.task_id,
             project_id = request.project_id,
             branch = %branch,
+            had_prior_checkpoint,
             "starting code indexing"
         );
 
@@ -179,14 +181,21 @@ impl CodeIndexingTaskHandler {
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
         observer.set_traversal_path(&request.traversal_path);
-        observer.set_indexing_mode(if existing_checkpoint.is_some() {
+        observer.set_indexing_mode(if had_prior_checkpoint {
             IndexingMode::Incremental
         } else {
             IndexingMode::Full
         });
 
         let result = self
-            .index_with_lock(context, request, &branch, started_at, &mut observer)
+            .index_with_lock(
+                context,
+                request,
+                &branch,
+                had_prior_checkpoint,
+                started_at,
+                &mut observer,
+            )
             .await;
 
         let outcome = match &result {
@@ -220,6 +229,7 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
         branch: &str,
+        had_prior_checkpoint: bool,
         started_at: DateTime<Utc>,
         observer: &mut dyn IndexingObserver,
     ) -> Result<Option<IndexOutcome>, HandlerError> {
@@ -258,6 +268,7 @@ impl CodeIndexingTaskHandler {
                     traversal_path: request.traversal_path.clone(),
                     task_id: request.task_id,
                     commit_sha: request.commit_sha.clone(),
+                    had_prior_checkpoint,
                 },
                 observer,
             )
