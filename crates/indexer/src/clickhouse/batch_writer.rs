@@ -24,6 +24,7 @@ use crate::metrics::EngineMetrics;
 pub(crate) struct ClickHouseBatchWriter {
     client: ArrowClickHouseClient,
     table: String,
+    insert_sql: String,
     metrics: Arc<EngineMetrics>,
 }
 
@@ -33,9 +34,11 @@ impl ClickHouseBatchWriter {
         table: String,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
+        let insert_sql = client.build_insert_sql(&table);
         Self {
             client,
             table,
+            insert_sql,
             metrics,
         }
     }
@@ -52,7 +55,7 @@ impl BatchWriter for ClickHouseBatchWriter {
 
         if let Err(error) = self
             .client
-            .insert_arrow_streaming(&self.table, batches)
+            .insert_arrow_streaming_with_sql(&self.table, &self.insert_sql, batches)
             .await
         {
             self.metrics.record_write_error(&self.table);
