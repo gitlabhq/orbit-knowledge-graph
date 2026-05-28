@@ -541,46 +541,24 @@ mod tests {
     }
 
     #[test]
-    fn code_edge_has_relationship_kind_reorder_projections() {
+    fn code_edge_has_no_reorder_projections() {
         let tables = generate_graph_tables(&ontology());
         let code_edge = tables
             .iter()
             .find(|table| table.name == "gl_code_edge")
             .expect("gl_code_edge table should be generated");
 
-        let has_projection = |name: &str, expected: &[&str]| {
-            code_edge.projections.iter().any(|projection| {
-                matches!(
-                    projection,
-                    ProjectionDef::Reorder { name: projection_name, order_by }
-                        if projection_name == name
-                            && order_by.iter().map(String::as_str).eq(expected.iter().copied())
-                )
-            })
-        };
+        let reorder_count = code_edge
+            .projections
+            .iter()
+            .filter(|p| matches!(p, ProjectionDef::Reorder { .. }))
+            .count();
 
-        assert!(has_projection(
-            "by_rel_source_kind",
-            &[
-                "relationship_kind",
-                "source_kind",
-                "source_id",
-                "target_id",
-                "traversal_path",
-                "target_kind",
-            ],
-        ));
-        assert!(has_projection(
-            "by_rel_target_kind",
-            &[
-                "relationship_kind",
-                "target_kind",
-                "target_id",
-                "source_id",
-                "traversal_path",
-                "source_kind",
-            ],
-        ));
+        assert_eq!(
+            reorder_count, 0,
+            "gl_code_edge should have no reorder projections (forward traversals \
+             use the 3-column PK, reverse use bloom_filter on target_id)"
+        );
     }
 
     #[test]

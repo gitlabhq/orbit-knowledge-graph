@@ -135,8 +135,11 @@ storage:
   indexes:
     - {name: idx_latest, column: latest, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: lightweight, name: by_pipeline_id, order_by: [pipeline_id]}
     - {type: lightweight, name: by_build_id, order_by: [build_id]}
