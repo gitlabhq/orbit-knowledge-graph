@@ -281,7 +281,7 @@ impl NatsBroker {
     ) -> Result<NatsSubscription, NatsError> {
         let stream = self.inner.get_stream(&subscription.stream).await?;
         let consumer = self
-            .get_or_create_consumer(&stream, &subscription.subject)
+            .get_or_create_consumer(&stream, &subscription.subject, subscription.max_ack_pending)
             .await?;
 
         let consumer_type = match &self.config.consumer_name {
@@ -377,6 +377,8 @@ impl NatsBroker {
             ack_wait: self.config.ack_wait(),
             max_deliver: -1,
             durable_name: Some(durable_name.clone()),
+            // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
+            max_ack_pending: max_ack_pending_to_i64(subscription.max_ack_pending),
             ..Default::default()
         };
 
@@ -408,6 +410,7 @@ impl NatsBroker {
         &self,
         stream: &async_nats::jetstream::stream::Stream,
         subject: &str,
+        max_ack_pending: Option<u32>,
     ) -> Result<PullConsumer, NatsError> {
         let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
 
@@ -422,6 +425,8 @@ impl NatsBroker {
             ack_wait: self.config.ack_wait(),
             max_deliver,
             durable_name: durable_name.clone(),
+            // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
+            max_ack_pending: max_ack_pending_to_i64(max_ack_pending),
             ..Default::default()
         };
 
@@ -436,6 +441,10 @@ impl NatsBroker {
                 .map_err(map_subscribe_error),
         }
     }
+}
+
+fn max_ack_pending_to_i64(value: Option<u32>) -> i64 {
+    value.map(i64::from).unwrap_or(0)
 }
 
 fn escape_subject_for_durable(subject: &str) -> String {
@@ -458,7 +467,7 @@ fn is_per_subject_limit_error(error: &PublishError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::escape_subject_for_durable;
+    use super::{escape_subject_for_durable, max_ack_pending_to_i64};
 
     #[test]
     fn escapes_each_forbidden_character_distinctly() {
@@ -469,6 +478,15 @@ mod tests {
             escape_subject_for_durable("sdlc.entity.indexing.requested.>"),
             "sdlc-entity-indexing-requested-deep",
         );
+    }
+
+    #[test]
+    fn max_ack_pending_none_maps_to_server_default_sentinel() {
+        assert_eq!(max_ack_pending_to_i64(None), 0);
+        assert_eq!(max_ack_pending_to_i64(Some(0)), 0);
+        assert_eq!(max_ack_pending_to_i64(Some(1)), 1);
+        assert_eq!(max_ack_pending_to_i64(Some(2048)), 2048);
+        assert_eq!(max_ack_pending_to_i64(Some(u32::MAX)), u32::MAX as i64);
     }
 
     #[test]

@@ -43,6 +43,11 @@ pub struct SubscriptionConfig {
     /// Route exhausted retries to the dead letter queue.
     #[serde(default)]
     pub dead_letter_on_exhaustion: bool,
+
+    /// Per-consumer cap on simultaneously-delivered-but-not-yet-acked messages.
+    /// When absent, the NATS server default applies (currently 1000).
+    #[serde(default)]
+    pub max_ack_pending: Option<u32>,
 }
 
 impl SubscriptionConfig {
