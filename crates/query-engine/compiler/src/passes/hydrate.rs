@@ -12,7 +12,8 @@ use crate::types::SecurityContext;
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum HydrationPlan {
     /// No hydration needed (e.g., Aggregation).
     None,
