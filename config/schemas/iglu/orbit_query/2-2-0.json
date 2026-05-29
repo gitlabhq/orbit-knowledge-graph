@@ -210,6 +210,26 @@
       "description": "Peak memory usage reported by ClickHouse.",
       "type": ["integer", "null"],
       "minimum": 0
+    },
+    "graph_schema_version": {
+      "description": "Graph DDL schema version (config/SCHEMA_VERSION).",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "query_dsl_version": {
+      "description": "Query DSL semver (config/QUERY_DSL_VERSION).",
+      "type": ["string", "null"],
+      "maxLength": 16
+    },
+    "raw_output_format_version": {
+      "description": "RAW response format semver (config/RAW_OUTPUT_FORMAT_VERSION).",
+      "type": ["string", "null"],
+      "maxLength": 16
+    },
+    "goon_output_format_version": {
+      "description": "GOON response format semver (config/GOON_OUTPUT_FORMAT_VERSION).",
+      "type": ["string", "null"],
+      "maxLength": 16
     }
   }
 }
