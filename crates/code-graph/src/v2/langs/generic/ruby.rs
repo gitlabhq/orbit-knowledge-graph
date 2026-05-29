@@ -462,6 +462,17 @@ fn strip_leading_scope(name: &str) -> String {
 }
 
 /// Extract super types: superclass + include/extend calls in the class body.
+fn collect_include_args(call: &N<'_>, types: &mut Vec<String>) {
+    if let Some(args) = call.field("arguments") {
+        for arg in args.children() {
+            let kind = arg.kind();
+            if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
+                types.push(strip_leading_scope(&arg.text()));
+            }
+        }
+    }
+}
+
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
@@ -491,16 +502,27 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
                 .field("method")
                 .map(|m| m.text().to_string())
                 .unwrap_or_default();
-            if method_name != "include" && method_name != "extend" && method_name != "prepend" {
-                continue;
-            }
-            if let Some(args) = child.field("arguments") {
-                for arg in args.children() {
-                    let kind = arg.kind();
-                    if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
-                        types.push(strip_leading_scope(&arg.text()));
+            match method_name.as_str() {
+                "include" | "extend" | "prepend" => collect_include_args(&child, &mut types),
+                "included" | "prepended" => {
+                    if let Some(block) = child.field("block")
+                        && let Some(block_body) = block.field("body")
+                    {
+                        for inner in block_body.children() {
+                            if inner.kind().as_ref() != "call" {
+                                continue;
+                            }
+                            let m = inner
+                                .field("method")
+                                .map(|m| m.text().to_string())
+                                .unwrap_or_default();
+                            if matches!(m.as_str(), "include" | "extend" | "prepend") {
+                                collect_include_args(&inner, &mut types);
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
         }
     }
@@ -966,6 +988,26 @@ mod tests {
         assert!(
             meta.super_types.contains(&"Gitlab::Allowable".to_string()),
             "module include should be captured as a super type: {:?}",
+            meta.super_types
+        );
+    }
+
+    #[test]
+    fn concern_included_block_includes_become_super_types() {
+        let result = parse(
+            "module RequestAwareEntity\n  extend ActiveSupport::Concern\n  \
+             included do\n    include Gitlab::Allowable\n  end\nend\n",
+        )
+        .unwrap();
+        let m = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "RequestAwareEntity")
+            .unwrap();
+        let meta = m.metadata.as_ref().expect("RequestAwareEntity metadata");
+        assert!(
+            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "include inside `included do` should be captured: {:?}",
             meta.super_types
         );
     }
