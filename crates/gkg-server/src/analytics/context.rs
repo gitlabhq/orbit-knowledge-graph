@@ -89,12 +89,32 @@ pub(crate) fn build_query(
         query_type: info.and_then(|i| i.query_type.parse().ok()),
         node_count: info.map(|i| i.node_count as u64),
         relationship_count: info.map(|i| i.relationship_count as u64),
-        entity_types: info.map(|i| i.entity_types.iter().filter_map(|s| s.parse().ok()).collect()),
-        relationship_types: info.map(|i| i.relationship_types.iter().filter_map(|s| s.parse().ok()).collect()),
+        entity_types: info.map(|i| {
+            i.entity_types
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect()
+        }),
+        relationship_types: info.map(|i| {
+            i.relationship_types
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect()
+        }),
         filter_count: info.map(|i| i.filter_count as u64),
-        filter_fields: info.map(|i| i.filter_fields.iter().filter_map(|s| s.parse().ok()).collect()),
+        filter_fields: info.map(|i| {
+            i.filter_fields
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect()
+        }),
         filter_ops: info.map(|i| i.filter_ops.iter().filter_map(|s| s.parse().ok()).collect()),
-        agg_functions: info.map(|i| i.agg_functions.iter().filter_map(|s| s.parse().ok()).collect()),
+        agg_functions: info.map(|i| {
+            i.agg_functions
+                .iter()
+                .filter_map(|s| s.parse().ok())
+                .collect()
+        }),
         is_search: info.map(|i| i.is_search),
         has_cursor: info.map(|i| i.has_cursor),
         has_order_by: info.map(|i| i.has_order_by),
@@ -129,8 +149,10 @@ pub(crate) fn build_query(
 
 const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
 const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
-const RAW_OUTPUT_FORMAT_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
-const GOON_OUTPUT_FORMAT_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
+const RAW_OUTPUT_FORMAT_VERSION: &str =
+    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
+const GOON_OUTPUT_FORMAT_VERSION: &str =
+    include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
 
 /// Parse an optional `Claims` string into one of the orbit_common bounded
 /// newtypes. The bounds are 255 chars for instance/host fields; if the
@@ -227,7 +249,16 @@ mod tests {
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool, None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(
+            claims,
+            tool,
+            None,
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -238,7 +269,16 @@ mod tests {
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(
+            claims,
+            "query_graph",
+            None,
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -286,7 +326,16 @@ mod tests {
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
-        let query = build_query(&claims, "query_graph", Some("claude-code"), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(
+            &claims,
+            "query_graph",
+            Some("claude-code"),
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -306,7 +355,16 @@ mod tests {
     #[test]
     fn build_query_drops_oversized_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65)), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(
+            &claims,
+            "query_graph",
+            Some(&"x".repeat(65)),
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         assert!(query.data().get("coding_agent").is_none());
     }
 
@@ -386,14 +444,32 @@ mod tests {
         #[test]
         fn query_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-        let query = build_query(&claims, "query_graph", Some("claude-code"), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                Some("claude-code"),
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
         fn query_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let query = build_query(&claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                None,
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
@@ -405,7 +481,16 @@ mod tests {
         fn code_intelligence_validates_against_iglu_schema() {
             let mut claims = claims_with_paths(vec!["1/22/"]);
             claims.source_type = crate::auth::SourceType::CodeIntelligence;
-            let query = build_query(&claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                None,
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_eq!(query.data()["source_type"], "code_intelligence");
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
@@ -419,17 +504,33 @@ mod tests {
     fn query_info_fields_merged_into_context() {
         let claims = claims_with_paths(vec!["1/22/"]);
         let info = QueryInfo {
-            query_type: "traversal", node_count: 2, relationship_count: 1,
+            query_type: "traversal",
+            node_count: 2,
+            relationship_count: 1,
             entity_types: vec!["MergeRequest".into(), "User".into()],
             relationship_types: vec!["AUTHORED".into()],
-            filter_count: 1, filter_fields: vec!["state".into()], filter_ops: vec!["eq".into()],
-            is_search: false, has_cursor: false, has_order_by: false,
-            limit: 10, max_hops: 1, agg_functions: vec![], group_by_count: 0,
-            hydration_plan: "static", dynamic_columns: "default",
-            path_max_depth: None, has_variable_hops: false, has_virtual_columns: false,
+            filter_count: 1,
+            filter_fields: vec!["state".into()],
+            filter_ops: vec!["eq".into()],
+            is_search: false,
+            has_cursor: false,
+            has_order_by: false,
+            limit: 10,
+            max_hops: 1,
+            agg_functions: vec![],
+            group_by_count: 0,
+            hydration_plan: "static",
+            dynamic_columns: "default",
+            path_max_depth: None,
+            has_variable_hops: false,
+            has_virtual_columns: false,
         };
-        let metrics = ExecMetrics { query_info: Some(info), ..Default::default() };
-        let query = build_query(&claims, "query_graph", None, &metrics, 0, 0, Duration::ZERO).unwrap();
+        let metrics = ExecMetrics {
+            query_info: Some(info),
+            ..Default::default()
+        };
+        let query =
+            build_query(&claims, "query_graph", None, &metrics, 0, 0, Duration::ZERO).unwrap();
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");

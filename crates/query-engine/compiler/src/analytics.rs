@@ -128,11 +128,21 @@ impl ExecMetrics {
         d.as_millis().min(u64::MAX as u128) as u64
     }
 
-    pub fn set_query_info(&mut self, info: QueryInfo) { self.query_info = Some(info); }
-    pub fn compiled(&mut self, elapsed: Duration) { self.compile_ms = Some(Self::ms(elapsed)); }
-    pub fn executed(&mut self, elapsed: Duration) { self.execute_ms = Some(Self::ms(elapsed)); }
-    pub fn authorized(&mut self, elapsed: Duration) { self.authorization_ms = Some(Self::ms(elapsed)); }
-    pub fn hydrated(&mut self, elapsed: Duration) { self.hydration_ms = Some(Self::ms(elapsed)); }
+    pub fn set_query_info(&mut self, info: QueryInfo) {
+        self.query_info = Some(info);
+    }
+    pub fn compiled(&mut self, elapsed: Duration) {
+        self.compile_ms = Some(Self::ms(elapsed));
+    }
+    pub fn executed(&mut self, elapsed: Duration) {
+        self.execute_ms = Some(Self::ms(elapsed));
+    }
+    pub fn authorized(&mut self, elapsed: Duration) {
+        self.authorization_ms = Some(Self::ms(elapsed));
+    }
+    pub fn hydrated(&mut self, elapsed: Duration) {
+        self.hydration_ms = Some(Self::ms(elapsed));
+    }
 
     pub fn query_executed(&mut self, read_rows: u64, read_bytes: u64, memory: i64) {
         self.ch_read_rows += read_rows;
@@ -157,16 +167,22 @@ mod tests {
     use crate::input::*;
 
     fn node(entity: &str) -> InputNode {
-        InputNode { entity: Some(entity.into()), ..Default::default() }
+        InputNode {
+            entity: Some(entity.into()),
+            ..Default::default()
+        }
     }
 
     fn rel(types: &[&str], min: u32, max: u32) -> InputRelationship {
         InputRelationship {
             types: types.iter().map(|s| s.to_string()).collect(),
-            from: "a".into(), to: "b".into(),
-            min_hops: min, max_hops: max,
+            from: "a".into(),
+            to: "b".into(),
+            min_hops: min,
+            max_hops: max,
             direction: Direction::Outgoing,
-            filters: Default::default(), fk_column: None,
+            filters: Default::default(),
+            fk_column: None,
         }
     }
 
@@ -193,9 +209,14 @@ mod tests {
                 node("User"),
                 InputNode {
                     entity: Some("MergeRequest".into()),
-                    filters: [("state".into(), vec![InputFilter {
-                        op: Some(FilterOp::Eq), ..Default::default()
-                    }])].into(),
+                    filters: [(
+                        "state".into(),
+                        vec![InputFilter {
+                            op: Some(FilterOp::Eq),
+                            ..Default::default()
+                        }],
+                    )]
+                    .into(),
                     ..Default::default()
                 },
             ],
@@ -218,10 +239,15 @@ mod tests {
             nodes: vec![node("Project")],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count, target: Some("p".into()),
-                    property: None, alias: None,
+                    function: AggFunction::Count,
+                    target: Some("p".into()),
+                    property: None,
+                    alias: None,
                 }],
-                group_by: vec![InputGroupByKey::Node { node: "p".into(), alias: None }],
+                group_by: vec![InputGroupByKey::Node {
+                    node: "p".into(),
+                    alias: None,
+                }],
                 sort: None,
             },
             ..Default::default()
@@ -239,9 +265,13 @@ mod tests {
             query_type: QueryType::PathFinding,
             nodes: vec![node("User"), node("Project")],
             path: Some(InputPath {
-                path_type: PathType::Shortest, from: "s".into(), to: "e".into(),
-                max_depth: 3, rel_types: vec!["MEMBER_OF".into()],
-                forward_first_hop_rel_types: vec![], backward_first_hop_rel_types: vec![],
+                path_type: PathType::Shortest,
+                from: "s".into(),
+                to: "e".into(),
+                max_depth: 3,
+                rel_types: vec!["MEMBER_OF".into()],
+                forward_first_hop_rel_types: vec![],
+                backward_first_hop_rel_types: vec![],
             }),
             ..Default::default()
         };

@@ -130,8 +130,14 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
 /// Remove required properties that carry a `default` so typify generates
 /// `#[serde(default)]` on those fields, enabling `derive(Default)` on the struct.
 fn promote_defaults_on_required(schema: &mut Value) {
-    let Some(obj) = schema.as_object_mut() else { return };
-    let props = obj.get("properties").and_then(Value::as_object).cloned().unwrap_or_default();
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let props = obj
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
     if let Some(Value::Array(req)) = obj.get_mut("required") {
         req.retain(|r| {
             r.as_str()

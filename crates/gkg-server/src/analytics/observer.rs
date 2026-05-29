@@ -38,8 +38,12 @@ impl AnalyticsObserver {
         schema_version: String,
     ) -> Self {
         Self {
-            tracker, config, claims,
-            tool_name: tool_name.into(), coding_agent, schema_version,
+            tracker,
+            config,
+            claims,
+            tool_name: tool_name.into(),
+            coding_agent,
+            schema_version,
             errored: Cell::new(false),
             start: Instant::now(),
             metrics: ExecMetrics::default(),
@@ -49,13 +53,27 @@ impl AnalyticsObserver {
 
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
-    fn set_query_info(&mut self, info: QueryInfo) { self.metrics.set_query_info(info); }
-    fn compiled(&mut self, elapsed: Duration) { self.metrics.compiled(elapsed); }
-    fn executed(&mut self, elapsed: Duration, _: usize) { self.metrics.executed(elapsed); }
-    fn authorized(&mut self, elapsed: Duration) { self.metrics.authorized(elapsed); }
-    fn hydrated(&mut self, elapsed: Duration) { self.metrics.hydrated(elapsed); }
-    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) { self.metrics.query_executed(r, b, m); }
-    fn record_error(&self, _: &PipelineError) { self.errored.set(true); }
+    fn set_query_info(&mut self, info: QueryInfo) {
+        self.metrics.set_query_info(info);
+    }
+    fn compiled(&mut self, elapsed: Duration) {
+        self.metrics.compiled(elapsed);
+    }
+    fn executed(&mut self, elapsed: Duration, _: usize) {
+        self.metrics.executed(elapsed);
+    }
+    fn authorized(&mut self, elapsed: Duration) {
+        self.metrics.authorized(elapsed);
+    }
+    fn hydrated(&mut self, elapsed: Duration) {
+        self.metrics.hydrated(elapsed);
+    }
+    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) {
+        self.metrics.query_executed(r, b, m);
+    }
+    fn record_error(&self, _: &PipelineError) {
+        self.errored.set(true);
+    }
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
         if self.errored.get() {
@@ -77,7 +95,9 @@ impl PipelineObserver for AnalyticsObserver {
             &self.tool_name,
             self.coding_agent.as_deref(),
             &self.metrics,
-            row_count, redacted_count, self.start.elapsed(),
+            row_count,
+            redacted_count,
+            self.start.elapsed(),
         ) {
             Ok(q) => q,
             Err(e) => {
@@ -162,13 +182,26 @@ mod tests {
             "33".to_string(),
         );
         obs.set_query_info(QueryInfo {
-            query_type: "traversal", node_count: 1, relationship_count: 0,
-            entity_types: vec!["User".into()], relationship_types: vec![],
-            filter_count: 0, filter_fields: vec![], filter_ops: vec![],
-            is_search: true, has_cursor: false, has_order_by: false,
-            limit: 10, max_hops: 0, agg_functions: vec![], group_by_count: 0,
-            hydration_plan: "none", dynamic_columns: "default",
-            path_max_depth: None, has_variable_hops: false, has_virtual_columns: false,
+            query_type: "traversal",
+            node_count: 1,
+            relationship_count: 0,
+            entity_types: vec!["User".into()],
+            relationship_types: vec![],
+            filter_count: 0,
+            filter_fields: vec![],
+            filter_ops: vec![],
+            is_search: true,
+            has_cursor: false,
+            has_order_by: false,
+            limit: 10,
+            max_hops: 0,
+            agg_functions: vec![],
+            group_by_count: 0,
+            hydration_plan: "none",
+            dynamic_columns: "default",
+            path_max_depth: None,
+            has_variable_hops: false,
+            has_virtual_columns: false,
         });
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);

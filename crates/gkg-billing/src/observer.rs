@@ -41,7 +41,8 @@ pub struct BillingObserver {
 impl BillingObserver {
     pub fn new(tracker: Option<Arc<dyn BillingTracker>>, inputs: BillingInputs) -> Self {
         Self {
-            tracker, inputs,
+            tracker,
+            inputs,
             query_type: "unknown",
             metrics: ExecMetrics::default(),
             errored: Cell::new(false),
@@ -132,14 +133,26 @@ impl BillingObserver {
 }
 
 impl PipelineObserver for BillingObserver {
-    fn set_query_type(&mut self, query_type: &'static str) { self.query_type = query_type; }
-    fn set_query_info(&mut self, info: QueryInfo) { self.metrics.set_query_info(info); }
-    fn compiled(&mut self, elapsed: Duration) { self.metrics.compiled(elapsed); }
-    fn executed(&mut self, elapsed: Duration, _: usize) { self.metrics.executed(elapsed); }
+    fn set_query_type(&mut self, query_type: &'static str) {
+        self.query_type = query_type;
+    }
+    fn set_query_info(&mut self, info: QueryInfo) {
+        self.metrics.set_query_info(info);
+    }
+    fn compiled(&mut self, elapsed: Duration) {
+        self.metrics.compiled(elapsed);
+    }
+    fn executed(&mut self, elapsed: Duration, _: usize) {
+        self.metrics.executed(elapsed);
+    }
     fn authorized(&mut self, _: Duration) {}
     fn hydrated(&mut self, _: Duration) {}
-    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) { self.metrics.query_executed(r, b, m); }
-    fn record_error(&self, _: &PipelineError) { self.errored.set(true); }
+    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) {
+        self.metrics.query_executed(r, b, m);
+    }
+    fn record_error(&self, _: &PipelineError) {
+        self.errored.set(true);
+    }
 
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
         if self.errored.get() {
