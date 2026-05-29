@@ -27,10 +27,6 @@ type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>
 
 const MAX_RETRIES: u32 = 3;
 
-/// Per-run resource stats for a pipeline execution, collected for indexing
-/// cost attribution. Read stats come from the datalake's `X-ClickHouse-Summary`;
-/// write stats are the rows and in-memory size of the batches sent to the graph
-/// (the `clickhouse` crate does not expose an insert summary).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PipelineStats {
     pub read_rows: u64,
@@ -41,8 +37,6 @@ pub(in crate::modules::sdlc) struct PipelineStats {
 }
 
 impl PipelineStats {
-    /// Folds another run's stats into this one. Used to total partitioned
-    /// initial loads, where each partition runs its own plan.
     pub(in crate::modules::sdlc) fn merge(&mut self, other: PipelineStats) {
         self.read_rows += other.read_rows;
         self.read_bytes += other.read_bytes;
@@ -64,7 +58,6 @@ impl From<PipelineStats> for crate::observer::ResourceStats {
     }
 }
 
-/// Rows and bytes handed to the graph destination by a single `transform` call.
 #[derive(Debug, Clone, Copy, Default)]
 struct WriteCounts {
     rows: u64,

@@ -50,9 +50,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
-    /// Like [`query_batches`](Self::query_batches), but also returns the
-    /// datalake's `read_rows`/`read_bytes` for the query. The default delegates
-    /// to `query_batches` with empty stats so test doubles need no changes.
     async fn query_batches_with_summary(
         &self,
         sql: &str,
@@ -79,9 +76,6 @@ impl Datalake {
         }
     }
 
-    /// Builds a query with the request params bound. Block-size handling is left
-    /// to each caller, since the streamed and summary fetch paths apply it
-    /// differently.
     fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
         let mut query = self.client.query(sql);
         if let Value::Object(map) = params {
@@ -159,9 +153,6 @@ impl DatalakeQuery for Datalake {
                 let read_rows = summary.read_rows();
                 let read_bytes = summary.read_bytes();
                 if read_rows.is_none() || read_bytes.is_none() {
-                    // The header is present but a field is missing — possible
-                    // without wait_end_of_query=1. Surface it without the log
-                    // noise a warn would cause on normal incomplete summaries.
                     debug!(
                         ?read_rows,
                         ?read_bytes,
