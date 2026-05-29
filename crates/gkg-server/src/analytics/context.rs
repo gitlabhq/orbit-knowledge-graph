@@ -171,7 +171,13 @@ fn apply_metrics(
         q.has_virtual_columns = Some(virtual_cols);
     }
 
-    q.hydration_plan = metrics.hydration_label().parse().ok();
+    q.hydration_plan = match metrics.hydration.as_ref() {
+        Some(query_engine::compiler::HydrationPlan::Static(_)) => "static",
+        Some(query_engine::compiler::HydrationPlan::Dynamic(_)) => "dynamic",
+        _ => "none",
+    }
+    .parse()
+    .ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed));
     q.compile_ms = metrics.compile_ms;
     q.execute_ms = metrics.execute_ms;

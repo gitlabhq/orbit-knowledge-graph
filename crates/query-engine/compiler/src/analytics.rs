@@ -40,11 +40,4 @@ impl ExecMetrics {
         }
     }
 
-    pub fn hydration_label(&self) -> &'static str {
-        match self.hydration.as_ref() {
-            Some(HydrationPlan::Static(_)) => "static",
-            Some(HydrationPlan::Dynamic(_)) => "dynamic",
-            _ => "none",
-        }
-    }
 }
