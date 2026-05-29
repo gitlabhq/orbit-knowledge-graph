@@ -277,15 +277,22 @@ pub(super) fn push_edge_predicates(
     // Push node-level filters down to the edge scan when the edge table
     // carries those columns (e.g. project_id, branch on gl_code_edge).
     // This lets ClickHouse use the primary key prefix for scoping.
+    // Deduplicate by property name so we don't emit the same predicate
+    // twice when both nodes share the filter (common case: both are
+    // code entities in the same project).
     if let Some(edge_cols) = table_columns.get(&hop.edge_table) {
         let reserved: HashSet<&str> = ontology::constants::EDGE_RESERVED_COLUMNS
             .iter()
             .copied()
             .collect();
+        let mut seen_props: HashSet<&str> = HashSet::new();
         for node_alias in [&hop.from_node, &hop.to_node] {
             if let Some(np) = nodes.get(node_alias) {
                 for (prop, filter) in &np.filters {
-                    if edge_cols.contains(prop) && !reserved.contains(prop.as_str()) {
+                    if edge_cols.contains(prop)
+                        && !reserved.contains(prop.as_str())
+                        && seen_props.insert(prop.as_str())
+                    {
                         where_parts.push(filter_to_expr(alias, prop, filter));
                     }
                 }
