@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
-use crate::clickhouse::ArrowClickHouseClient;
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
 use thiserror::Error;
+use tracing::debug;
 
 #[derive(Debug, Error)]
 pub(crate) enum DatalakeError {
@@ -77,6 +78,19 @@ impl Datalake {
             default_max_block_size,
         }
     }
+
+    /// Builds a query with the request params bound. Block-size handling is left
+    /// to each caller, since the streamed and summary fetch paths apply it
+    /// differently.
+    fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
+        let mut query = self.client.query(sql);
+        if let Value::Object(map) = params {
+            for (key, value) in map {
+                query = query.param(&key, value);
+            }
+        }
+        query
+    }
 }
 
 #[async_trait]
@@ -87,13 +101,7 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-        let mut query = self.client.query(sql);
-
-        if let Value::Object(map) = params {
-            for (key, value) in map {
-                query = query.param(&key, value);
-            }
-        }
+        let query = self.build_query(sql, params);
 
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let stream = query
@@ -131,16 +139,10 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<(Vec<RecordBatch>, ReadStats), DatalakeError> {
-        let mut query = self.client.query(sql);
-
-        if let Value::Object(map) = params {
-            for (key, value) in map {
-                query = query.param(&key, value);
-            }
-        }
-
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
-        query = query.with_setting("max_block_size", block_size.to_string());
+        let query = self
+            .build_query(sql, params)
+            .with_setting("max_block_size", block_size.to_string());
 
         let (batches, summary) = query
             .fetch_arrow_with_summary()
@@ -153,9 +155,23 @@ impl DatalakeQuery for Datalake {
             .collect();
 
         let read_stats = summary
-            .map(|summary| ReadStats {
-                read_rows: summary.read_rows().unwrap_or(0),
-                read_bytes: summary.read_bytes().unwrap_or(0),
+            .map(|summary| {
+                let read_rows = summary.read_rows();
+                let read_bytes = summary.read_bytes();
+                if read_rows.is_none() || read_bytes.is_none() {
+                    // The header is present but a field is missing — possible
+                    // without wait_end_of_query=1. Surface it without the log
+                    // noise a warn would cause on normal incomplete summaries.
+                    debug!(
+                        ?read_rows,
+                        ?read_bytes,
+                        "datalake summary missing read_rows/read_bytes; defaulting to 0"
+                    );
+                }
+                ReadStats {
+                    read_rows: read_rows.unwrap_or(0),
+                    read_bytes: read_bytes.unwrap_or(0),
+                }
             })
             .unwrap_or_default();
 
