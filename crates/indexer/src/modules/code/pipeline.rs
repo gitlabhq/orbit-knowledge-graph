@@ -382,14 +382,17 @@ impl CodeIndexingPipeline {
         );
 
         let flush_start = Instant::now();
-        if let Err(e) = buffered_sink.flush().await {
-            return Err(HandlerError::Permanent {
-                message: format!(
-                    "fatal code indexing pipeline error during flush for project {project_id}: {e}"
-                ),
-                action: crate::handler::PermanentAction::DeadLetter,
-            });
-        }
+        let write_totals = match buffered_sink.flush().await {
+            Ok(totals) => totals,
+            Err(e) => {
+                return Err(HandlerError::Permanent {
+                    message: format!(
+                        "fatal code indexing pipeline error during flush for project {project_id}: {e}"
+                    ),
+                    action: crate::handler::PermanentAction::DeadLetter,
+                });
+            }
+        };
         let graph_write_duration = flush_start.elapsed();
         info!(
             duration_ms = graph_write_duration.as_millis() as u64,
@@ -425,6 +428,16 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("definition", result.stats.definitions_count as u64);
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
+
+        // The code pipeline reads source from git, not the datalake; the
+        // read side maps to files/bytes discovered from the repository.
+        observer.record_resource_stats(crate::observer::ResourceStats {
+            read_rows: result.stats.files_discovered as u64,
+            read_bytes: result.stats.bytes_discovered,
+            written_rows: write_totals.rows,
+            written_bytes: write_totals.bytes,
+            duration_ms: indexing_start.elapsed().as_millis() as u64,
+        });
 
         for skipped in &result.skipped {
             self.metrics

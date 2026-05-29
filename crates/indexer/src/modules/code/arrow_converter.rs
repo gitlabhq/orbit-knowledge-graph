@@ -825,15 +825,22 @@ impl BufferedClickHouseSink {
 
     /// Flush all buffered tables to ClickHouse in parallel. Each table
     /// gets a single `insert_arrow_streaming` call with all its batches,
-    /// and all tables are written concurrently.
-    pub async fn flush(&self) -> Result<(), code_graph::v2::SinkError> {
+    /// and all tables are written concurrently. Returns the total rows and
+    /// in-memory bytes written across all tables.
+    pub async fn flush(&self) -> Result<WriteTotals, code_graph::v2::SinkError> {
         let buffers = std::mem::take(&mut *self.buffers.write());
         let mut handles = Vec::new();
+        let mut totals = WriteTotals::default();
 
         for (table, batches) in buffers {
             if batches.is_empty() {
                 continue;
             }
+            totals.rows += batches.iter().map(|b| b.num_rows() as u64).sum::<u64>();
+            totals.bytes += batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum::<u64>();
             let dest = self.destination.clone();
             handles.push(tokio::spawn(async move {
                 let writer = dest
@@ -852,8 +859,14 @@ impl BufferedClickHouseSink {
         for result in results {
             result.map_err(|e| code_graph::v2::SinkError(format!("flush join: {e}")))??;
         }
-        Ok(())
+        Ok(totals)
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WriteTotals {
+    pub rows: u64,
+    pub bytes: u64,
 }
 
 impl code_graph::v2::BatchSink for BufferedClickHouseSink {
@@ -877,6 +890,26 @@ impl code_graph::v2::BatchSink for BufferedClickHouseSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn flush_returns_written_totals() {
+        use crate::testkit::MockDestination;
+        use arrow::array::Int64Array;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use code_graph::v2::BatchSink;
+
+        let sink = BufferedClickHouseSink::new(Arc::new(MockDestination::new()));
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
+
+        sink.write_batch("gl_file", &batch).unwrap();
+        sink.write_batch("gl_definition", &batch).unwrap();
+
+        let totals = sink.flush().await.expect("flush should succeed");
+        assert_eq!(totals.rows, 6, "two 3-row batches");
+        assert!(totals.bytes > 0, "in-memory bytes should be non-zero");
+    }
 
     #[test]
     fn compute_branch_id_is_always_non_negative() {
