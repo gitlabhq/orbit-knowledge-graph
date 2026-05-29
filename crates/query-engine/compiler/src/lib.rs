@@ -58,7 +58,7 @@ pub use input::{
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 
-pub use analytics::{ExecMetrics, QueryInfo};
+pub use analytics::ExecMetrics;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,

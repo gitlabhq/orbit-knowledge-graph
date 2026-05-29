@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::StructuredEvent;
-use query_engine::compiler::{ExecMetrics, QueryInfo};
+use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
@@ -53,8 +53,8 @@ impl AnalyticsObserver {
 
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
-    fn set_query_info(&mut self, info: QueryInfo) {
-        self.metrics.set_query_info(info);
+    fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
+        self.metrics.set_compiled(ctx);
     }
     fn compiled(&mut self, elapsed: Duration) {
         self.metrics.compiled(elapsed);
@@ -181,27 +181,23 @@ mod tests {
             None,
             "33".to_string(),
         );
-        obs.set_query_info(QueryInfo {
-            query_type: "traversal",
-            node_count: 1,
-            relationship_count: 0,
-            entity_types: vec!["User".into()],
-            relationship_types: vec![],
-            filter_count: 0,
-            filter_fields: vec![],
-            filter_ops: vec![],
-            is_search: true,
-            has_cursor: false,
-            has_order_by: false,
-            limit: 10,
-            max_hops: 0,
-            agg_functions: vec![],
-            group_by_count: 0,
-            hydration_plan: "none",
-            dynamic_columns: "default",
-            path_max_depth: None,
-            has_variable_hops: false,
-            has_virtual_columns: false,
+        obs.set_compiled(&CompiledQueryContext {
+            query_type: query_engine::compiler::input::QueryType::Traversal,
+            base: query_engine::compiler::passes::codegen::ParameterizedQuery {
+                sql: String::new(),
+                params: Default::default(),
+                result_context: query_engine::compiler::passes::enforce::ResultContext::new(),
+                query_config: Default::default(),
+                dialect: query_engine::compiler::passes::codegen::SqlDialect::ClickHouse,
+            },
+            hydration: query_engine::compiler::HydrationPlan::None,
+            input: query_engine::compiler::Input {
+                nodes: vec![query_engine::compiler::InputNode {
+                    entity: Some("User".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
         });
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);

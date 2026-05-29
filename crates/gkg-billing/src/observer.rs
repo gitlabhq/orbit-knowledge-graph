@@ -5,7 +5,7 @@ use std::time::Duration;
 use gkg_observability::billing::events as spec;
 use labkit_events::BillingEvent;
 use opentelemetry::KeyValue;
-use query_engine::compiler::{ExecMetrics, QueryInfo};
+use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
@@ -136,8 +136,8 @@ impl PipelineObserver for BillingObserver {
     fn set_query_type(&mut self, query_type: &'static str) {
         self.query_type = query_type;
     }
-    fn set_query_info(&mut self, info: QueryInfo) {
-        self.metrics.set_query_info(info);
+    fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
+        self.metrics.set_compiled(ctx);
     }
     fn compiled(&mut self, elapsed: Duration) {
         self.metrics.compiled(elapsed);

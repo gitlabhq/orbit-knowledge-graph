@@ -30,7 +30,7 @@ impl PipelineStage for CompilationStage {
 
         let query_type: &str = compiled.query_type.into();
         obs.set_query_type(query_type);
-        obs.set_query_info(compiler::QueryInfo::from(&compiled));
+        obs.set_compiled(&compiled);
         obs.compiled(t.elapsed());
 
         ctx.compiled = Some(Arc::new(compiled));

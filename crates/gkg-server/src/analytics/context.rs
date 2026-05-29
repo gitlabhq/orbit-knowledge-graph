@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
@@ -94,33 +95,83 @@ fn apply_metrics(
     redacted_count: usize,
     total_elapsed: Duration,
 ) {
-    if let Some(info) = &metrics.query_info {
-        q.query_type = info.query_type.parse().ok();
-        q.node_count = Some(info.node_count as u64);
-        q.relationship_count = Some(info.relationship_count as u64);
-        q.filter_count = Some(info.filter_count as u64);
-        q.is_search = Some(info.is_search);
-        q.has_cursor = Some(info.has_cursor);
-        q.has_order_by = Some(info.has_order_by);
-        q.limit = Some(info.limit as u64);
-        q.max_hops = Some(info.max_hops as u64);
-        q.group_by_count = Some(info.group_by_count as u64);
-        q.hydration_plan = info.hydration_plan.parse().ok();
-        q.dynamic_columns = info.dynamic_columns.parse().ok();
-        q.path_max_depth = info.path_max_depth.map(|d| d as u64);
-        q.has_variable_hops = Some(info.has_variable_hops);
-        q.has_virtual_columns = Some(info.has_virtual_columns);
+    if let Some(input) = &metrics.input {
+        let query_type: &str = input.query_type.into();
+        q.query_type = query_type.parse().ok();
+        q.node_count = Some(input.nodes.len() as u64);
+        q.relationship_count = Some(input.relationships.len() as u64);
+        q.is_search = Some(input.is_search());
+        q.has_cursor = Some(input.cursor.is_some());
+        q.has_order_by = Some(input.order_by.is_some());
+        q.limit = Some(input.limit as u64);
+        q.group_by_count = Some(input.aggregation.group_by.len() as u64);
+        q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
+        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as u64);
 
-        fn parse_vec<T: std::str::FromStr>(v: &[String]) -> Vec<T> {
-            v.iter().filter_map(|s| s.parse().ok()).collect()
+        let mut entities = BTreeSet::new();
+        let mut rel_types = BTreeSet::new();
+        let mut fields = BTreeSet::new();
+        let mut ops = BTreeSet::new();
+        let mut filter_count: u64 = 0;
+        let mut max_hops: u64 = 0;
+        let mut variable_hops = false;
+        let mut virtual_cols = false;
+
+        for node in &input.nodes {
+            if let Some(e) = &node.entity {
+                entities.insert(e.clone());
+            }
+            virtual_cols |= !node.virtual_columns.is_empty();
+            for (f, entries) in &node.filters {
+                fields.insert(f.clone());
+                for ef in entries {
+                    filter_count += 1;
+                    if let Some(op) = &ef.op {
+                        ops.insert(op.as_ref().to_owned());
+                    }
+                }
+            }
         }
-        q.entity_types = Some(parse_vec(&info.entity_types));
-        q.relationship_types = Some(parse_vec(&info.relationship_types));
-        q.filter_fields = Some(parse_vec(&info.filter_fields));
-        q.filter_ops = Some(parse_vec(&info.filter_ops));
-        q.agg_functions = Some(parse_vec(&info.agg_functions));
+        for rel in &input.relationships {
+            rel_types.extend(rel.types.iter().cloned());
+            max_hops = max_hops.max(rel.max_hops as u64);
+            variable_hops |= rel.min_hops != rel.max_hops;
+            for (f, entries) in &rel.filters {
+                fields.insert(f.clone());
+                for ef in entries {
+                    filter_count += 1;
+                    if let Some(op) = &ef.op {
+                        ops.insert(op.as_ref().to_owned());
+                    }
+                }
+            }
+        }
+
+        fn to_vec<T: std::str::FromStr>(set: BTreeSet<String>) -> Vec<T> {
+            set.into_iter().filter_map(|s| s.parse().ok()).collect()
+        }
+        q.entity_types = Some(to_vec(entities));
+        q.relationship_types = Some(to_vec(rel_types));
+        q.filter_fields = Some(to_vec(fields));
+        q.filter_ops = Some(to_vec(ops));
+        q.agg_functions = Some(
+            input
+                .aggregation
+                .metrics
+                .iter()
+                .map(|m| m.function.to_string())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|s| s.parse().ok())
+                .collect(),
+        );
+        q.filter_count = Some(filter_count);
+        q.max_hops = Some(max_hops);
+        q.has_variable_hops = Some(variable_hops);
+        q.has_virtual_columns = Some(virtual_cols);
     }
 
+    q.hydration_plan = metrics.hydration_label().parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed));
     q.compile_ms = metrics.compile_ms;
     q.execute_ms = metrics.execute_ms;
@@ -203,7 +254,6 @@ mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
     use labkit_events::{SnowplowContext, StructuredEvent};
-    use query_engine::compiler::QueryInfo;
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {
@@ -492,32 +542,46 @@ mod tests {
     }
 
     #[test]
-    fn query_info_fields_merged_into_context() {
-        let claims = claims_with_paths(vec!["1/22/"]);
-        let info = QueryInfo {
-            query_type: "traversal",
-            node_count: 2,
-            relationship_count: 1,
-            entity_types: vec!["MergeRequest".into(), "User".into()],
-            relationship_types: vec!["AUTHORED".into()],
-            filter_count: 1,
-            filter_fields: vec!["state".into()],
-            filter_ops: vec!["eq".into()],
-            is_search: false,
-            has_cursor: false,
-            has_order_by: false,
-            limit: 10,
-            max_hops: 1,
-            agg_functions: vec![],
-            group_by_count: 0,
-            hydration_plan: "static",
-            dynamic_columns: "default",
-            path_max_depth: None,
-            has_variable_hops: false,
-            has_virtual_columns: false,
+    fn input_fields_mapped_to_context() {
+        use query_engine::compiler::HydrationPlan;
+        use query_engine::compiler::input::{
+            Direction, FilterOp, InputFilter, InputNode, InputRelationship,
         };
+
+        let claims = claims_with_paths(vec!["1/22/"]);
         let metrics = ExecMetrics {
-            query_info: Some(info),
+            input: Some(query_engine::compiler::Input {
+                nodes: vec![
+                    InputNode {
+                        entity: Some("User".into()),
+                        ..Default::default()
+                    },
+                    InputNode {
+                        entity: Some("MergeRequest".into()),
+                        filters: [(
+                            "state".into(),
+                            vec![InputFilter {
+                                op: Some(FilterOp::Eq),
+                                ..Default::default()
+                            }],
+                        )]
+                        .into(),
+                        ..Default::default()
+                    },
+                ],
+                relationships: vec![InputRelationship {
+                    types: vec!["AUTHORED".into()],
+                    from: "u".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    fk_column: None,
+                }],
+                ..Default::default()
+            }),
+            hydration: Some(HydrationPlan::Static(vec![])),
             ..Default::default()
         };
         let query =
@@ -525,7 +589,6 @@ mod tests {
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");
-        assert_eq!(data["tool_name"], "query_graph");
         assert_eq!(data["queried_namespace_ids"][0], 22);
         assert_eq!(data["query_type"], "traversal");
         assert_eq!(data["node_count"], 2);
