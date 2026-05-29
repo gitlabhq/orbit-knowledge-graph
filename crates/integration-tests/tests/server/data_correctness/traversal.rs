@@ -639,3 +639,78 @@ pub(super) async fn traversal_code_graph_calls_with_node_ids(ctx: &TestContext) 
     resp.assert_node_ids("Definition", &[12000, 12001]);
     resp.assert_edge_set("CALLS", &[(12000, 12001)]);
 }
+
+/// Filtering Definition by project_id should scope both the node scan
+/// and the CALLS edge scan (auto-injected via push_edge_predicates).
+/// Project 1000 has compile→helper→run_query; project 1001 should not appear.
+pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name"]},
+                {"id": "callee", "entity": "Definition", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Project 1000: compile(12000)→helper(12001), helper(12001)→run_query(12002)
+    // The cross-project edge helper(12001)→run_query(12102) should NOT appear
+    // because the edge's project_id=1001 doesn't match the filter.
+    resp.assert_referential_integrity();
+    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
+}
+
+/// Filtering by project_id on the OTHER side of the relationship also
+/// scopes the edge scan. Callee filtered to project 1001 should only
+/// return edges where the target is in that project.
+pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edges(
+    ctx: &TestContext,
+) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
+                {"id": "callee", "entity": "Definition", "filters": {"project_id": 1001}, "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Only the cross-project edge helper(12001)→run_query(12102) has target in project 1001
+    resp.assert_referential_integrity();
+    resp.assert_edge_set("CALLS", &[(12001, 12102)]);
+}
+
+/// Explicit relationship-level filter on project_id should also work
+/// (existing mechanism, not auto-injected).
+pub(super) async fn traversal_code_graph_edge_level_project_filter(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name"]},
+                {"id": "callee", "entity": "Definition", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee", "filters": {"project_id": 1000}}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Explicit edge filter: only edges with project_id=1000
+    resp.assert_referential_integrity();
+    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
+}

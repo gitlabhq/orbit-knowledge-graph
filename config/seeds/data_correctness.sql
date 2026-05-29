@@ -205,10 +205,10 @@ INSERT INTO gl_definition (
     (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
     (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13);
 
-INSERT INTO gl_code_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-    ('1/100/1000/', 12000, 'Definition', 'CALLS', 12001, 'Definition'),
-    ('1/100/1000/', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
-    ('1/101/1001/', 12001, 'Definition', 'CALLS', 12102, 'Definition');
+INSERT INTO gl_code_edge (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/1000/', 1000, 'main', 12000, 'Definition', 'CALLS', 12001, 'Definition'),
+    ('1/100/1000/', 1000, 'main', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
+    ('1/101/1001/', 1001, 'main', 12001, 'Definition', 'CALLS', 12102, 'Definition');
 
 INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, project_id, author_id, namespace_id, milestone_id, closed_by_id, traversal_path) VALUES
     (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, 1000, 1, 100, 6000, NULL, '1/100/'),
