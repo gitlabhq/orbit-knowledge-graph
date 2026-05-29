@@ -174,21 +174,30 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .map(|col| col.name.clone())
         .collect();
 
-    let mut specs: Vec<ColumnSpec> = ontology
-        .edge_columns()
-        .iter()
-        .map(|c| ColumnSpec {
-            name: c.name.clone(),
-            col_type: match c.data_type {
-                OntDataType::Int => ColumnType::Int,
-                OntDataType::Bool => ColumnType::Bool,
-                OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
-                _ => ColumnType::Str,
-            },
-            nullable: false,
-        })
-        .collect();
+    // Build the union of logical columns across ALL edge tables so the
+    // batch can hold columns from tables with extra fields (gl_code_edge
+    // has project_id + branch that gl_edge does not).
+    let mut seen_cols = std::collections::HashSet::new();
+    let mut specs: Vec<ColumnSpec> = Vec::new();
+    for table_name in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table_name) {
+            for c in &config.columns {
+                if seen_cols.insert(c.name.clone()) {
+                    specs.push(ColumnSpec {
+                        name: c.name.clone(),
+                        col_type: match c.data_type {
+                            OntDataType::Int => ColumnType::Int,
+                            OntDataType::Bool => ColumnType::Bool,
+                            OntDataType::DateTime => ColumnType::TimestampMicros,
+                            _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
+                            _ => ColumnType::Str,
+                        },
+                        nullable: false,
+                    });
+                }
+            }
+        }
+    }
 
     let mut seen = std::collections::HashSet::new();
     for table_name in ontology.edge_tables() {
