@@ -93,7 +93,7 @@ mod tests {
     fn feature_qualified_name_is_generated_from_source_type() {
         let inputs = inputs_with(Some("SaaS"), None, None, Some(1));
         let req = CdotRequest::from_inputs(&inputs).unwrap();
-        assert_eq!(req.key.feature_qualified_name, "orbit-mcp");
+        assert_eq!(req.key.feature_qualified_name, "orbit_mcp");
     }
 
     #[test]
@@ -131,6 +131,6 @@ mod tests {
         assert_eq!(get("instance_id"), Some("inst-1"));
         assert_eq!(get("unique_instance_id"), Some("uid-1"));
         assert_eq!(get("event_type"), Some(constants::EVENT_TYPE));
-        assert_eq!(get("feature_qualified_name"), Some("orbit-mcp"));
+        assert_eq!(get("feature_qualified_name"), Some("orbit_mcp"));
     }
 }
