@@ -43,7 +43,9 @@ impl DslLanguage for RubyDsl {
             scope("class", "Class")
                 .def_kind(DefKind::Class)
                 .metadata(metadata().super_types(ruby_super_types)),
-            scope("module", "Module").def_kind(DefKind::Class),
+            scope("module", "Module")
+                .def_kind(DefKind::Class)
+                .metadata(metadata().super_types(ruby_super_types)),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
             // class << self: transparent scope, methods inside are
@@ -949,6 +951,22 @@ mod tests {
             allowable_import.path, "Gitlab",
             "import path should drop the leading ::, got {:?}",
             allowable_import.path
+        );
+    }
+
+    #[test]
+    fn module_includes_become_super_types() {
+        let result = parse("module ProjectsHelper\n  include Gitlab::Allowable\nend\n").unwrap();
+        let m = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "ProjectsHelper")
+            .unwrap();
+        let meta = m.metadata.as_ref().expect("ProjectsHelper metadata");
+        assert!(
+            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "module include should be captured as a super type: {:?}",
+            meta.super_types
         );
     }
 }
