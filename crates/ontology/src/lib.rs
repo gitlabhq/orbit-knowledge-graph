@@ -302,6 +302,14 @@ impl Ontology {
         None
     }
 
+    /// Check if a specific edge table has a given column and return its type.
+    pub fn get_edge_table_column_type(&self, table: &str, name: &str) -> Option<DataType> {
+        self.edge_table_configs
+            .get(table)
+            .and_then(|config| config.columns.iter().find(|c| c.name == name))
+            .map(|c| c.data_type)
+    }
+
     /// Add fields to an existing node.
     ///
     /// # Errors
