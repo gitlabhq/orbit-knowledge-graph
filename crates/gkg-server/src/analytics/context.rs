@@ -193,6 +193,7 @@ fn apply_metrics(
         } else {
             Some(to_vec(columns))
         };
+        q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
     }
 
     let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
@@ -212,6 +213,35 @@ fn apply_metrics(
     q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
     q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok();
     q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+}
+
+/// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
+///
+/// Walks relationships in order, resolving `from`/`to` to entity types.
+/// Returns `None` for search queries (no relationships).
+fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
+    if input.relationships.is_empty() {
+        return None;
+    }
+    let entity_of = |id: &str| -> &str {
+        input
+            .nodes
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| n.entity.as_deref())
+            .unwrap_or("?")
+    };
+    let mut parts = Vec::new();
+    for rel in &input.relationships {
+        let types = rel.types.join("|");
+        parts.push(format!(
+            "{}-[{}]->{}",
+            entity_of(&rel.from),
+            types,
+            entity_of(&rel.to),
+        ));
+    }
+    Some(parts.join(", "))
 }
 
 const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));

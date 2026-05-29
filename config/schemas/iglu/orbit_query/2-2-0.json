@@ -171,6 +171,11 @@
       "type": ["string", "null"],
       "maxLength": 16
     },
+    "traversal_shape": {
+      "description": "Topology fingerprint: entity types and relationship types per hop, e.g. User-[AUTHORED]->MergeRequest.",
+      "type": ["string", "null"],
+      "maxLength": 512
+    },
     "duration_ms": {
       "description": "Total wall-clock time for the pipeline execution.",
       "type": ["integer", "null"],
