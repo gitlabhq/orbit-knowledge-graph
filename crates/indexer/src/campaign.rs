@@ -38,14 +38,6 @@ impl CampaignState {
     pub fn clear(&self) {
         *self.current.write().expect("campaign state lock poisoned") = None;
     }
-
-    /// Opens the campaign for a migrating version, or clears it in steady state.
-    pub fn seed_from_migrating(&self, migrating_version: Option<u32>) {
-        match migrating_version {
-            Some(version) => self.set(campaign_id_for_version(version)),
-            None => self.clear(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -76,21 +68,6 @@ mod tests {
         let state = CampaignState::new();
         state.set("migration-v48".to_string());
         state.clear();
-        assert_eq!(state.current(), None);
-    }
-
-    #[test]
-    fn seed_from_migrating_some_opens_campaign() {
-        let state = CampaignState::new();
-        state.seed_from_migrating(Some(48));
-        assert_eq!(state.current(), Some("migration-v48".to_string()));
-    }
-
-    #[test]
-    fn seed_from_migrating_none_clears_campaign() {
-        let state = CampaignState::new();
-        state.set("migration-v48".to_string());
-        state.seed_from_migrating(None);
         assert_eq!(state.current(), None);
     }
 }

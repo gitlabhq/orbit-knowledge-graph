@@ -173,9 +173,9 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         .await
         .unwrap();
 
-    // Seed the campaign from the migrating version, as run_dispatcher does at boot.
+    // Open the campaign for the migrating version, as the orchestrator does.
     let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
-    campaign.seed_from_migrating(Some(1));
+    campaign.set(indexer::campaign::campaign_id_for_version(1));
 
     let task: Box<dyn ScheduledTask> = Box::new(NamespaceCodeBackfillDispatcher::new(
         services.nats.clone(),
