@@ -1,11 +1,13 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse_client::FromArrowColumn;
 use indexer::locking::LockService;
 use indexer::metrics::MigrationMetrics;
 use indexer::schema::migration;
 use indexer::schema::version::{
-    SCHEMA_VERSION, ensure_version_table, read_active_version, table_prefix, write_schema_version,
+    SCHEMA_VERSION, SchemaWaitError, ensure_version_table, read_active_version, table_prefix,
+    wait_until_ready, write_migrating_version, write_schema_version,
 };
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
@@ -232,4 +234,79 @@ async fn read_active_version_returns_some_after_write() {
     write_schema_version(&client, 1).await.unwrap();
     let version = read_active_version(&client).await.unwrap();
     assert_eq!(version, Some(1));
+}
+
+#[tokio::test]
+async fn wait_until_ready_returns_when_version_active() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    wait_until_ready(
+        &client,
+        *SCHEMA_VERSION,
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn wait_until_ready_returns_when_version_migrating() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_migrating_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    wait_until_ready(
+        &client,
+        *SCHEMA_VERSION,
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn wait_until_ready_times_out_when_version_absent() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+
+    let result = wait_until_ready(
+        &client,
+        *SCHEMA_VERSION,
+        Duration::from_secs(1),
+        Duration::from_millis(100),
+    )
+    .await;
+
+    assert!(matches!(result, Err(SchemaWaitError::Timeout { .. })));
+}
+
+#[tokio::test]
+async fn wait_until_ready_fails_fast_when_outdated() {
+    let ctx = TestContext::new(&[]).await;
+    let client = ctx.create_client();
+    ensure_version_table(&client).await.unwrap();
+    write_schema_version(&client, *SCHEMA_VERSION + 1)
+        .await
+        .unwrap();
+
+    let result = wait_until_ready(
+        &client,
+        *SCHEMA_VERSION,
+        Duration::from_secs(30),
+        Duration::from_millis(100),
+    )
+    .await;
+
+    assert!(matches!(result, Err(SchemaWaitError::Outdated { .. })));
 }

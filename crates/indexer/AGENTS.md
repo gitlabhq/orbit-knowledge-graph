@@ -37,10 +37,14 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Schema migration
 
-Before the NATS engine starts, `schema_migration::run_if_needed()` compares the embedded
-`SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a NATS KV
-distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
-creates new-prefix ClickHouse tables, and marks the new version as `migrating`. All write paths
+The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
+the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
+NATS KV distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
+creates new-prefix ClickHouse tables, and marks the new version as `migrating`.
+
+Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
+which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
+non-zero (→ restart) if the budget is exhausted or the binary is outdated. All write paths
 (checkpoints, namespace deletion, ontology-driven tables) use
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
@@ -55,8 +59,8 @@ comparing checkpoint entries against enabled namespaces), promotes the `migratin
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: runs the migration orchestrator,
-connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
+The `run()` function in `lib.rs` wires everything together: waits for the schema version to be
+ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 

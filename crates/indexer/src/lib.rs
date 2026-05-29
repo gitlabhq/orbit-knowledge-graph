@@ -54,6 +54,7 @@ pub mod metrics {
 }
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
@@ -103,17 +104,50 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    let migration_metrics = schema::metrics::MigrationMetrics::new();
-    let nats_services: Arc<dyn nats::NatsServices> =
-        Arc::new(nats::NatsServicesImpl::new(broker.clone()));
-    let lock_service: Arc<dyn locking::LockService> =
-        Arc::new(locking::NatsLockService::new(nats_services.clone()));
     let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
         nats_client::KvServicesImpl::new(broker.client().clone()),
     )));
-    info!("running schema migration check");
-    schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
-        .await?;
+
+    let gitlab_client = config
+        .gitlab
+        .as_ref()
+        .map(|cfg| GitlabClient::new(cfg.clone()))
+        .transpose()
+        .map_err(HandlerInitError::new)?
+        .map(Arc::new);
+
+    // Start the health server before waiting for schema readiness so that the
+    // Kubernetes liveness probe is answered during the (potentially long) schema
+    // wait phase. Readiness stays `503` until the gate clears (`serving`).
+    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let health_state = HealthState {
+        nats_client: broker.nats_client().clone(),
+        graph_client: config.graph.build_client(),
+        datalake_client: config.datalake.build_client(),
+        gitlab_client,
+        serving: serving.clone(),
+    };
+    let health_shutdown = shutdown.clone();
+    let health_bind_address = config.health_bind_address;
+    let health_task = tokio::spawn(async move {
+        tokio::select! {
+            result = run_health_server(health_bind_address, health_state) => result,
+            _ = health_shutdown.cancelled() => Ok(()),
+        }
+    });
+
+    let schema_version = *schema::version::SCHEMA_VERSION;
+    info!(
+        schema_version,
+        "waiting for dispatcher to prepare schema version before processing"
+    );
+    schema::version::wait_until_ready(
+        &graph_client,
+        schema_version,
+        Duration::from_secs(config.schema.indexer_schema_wait_timeout_secs),
+        Duration::from_secs(config.schema.version_poll_interval_secs),
+    )
+    .await?;
 
     let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
@@ -154,21 +188,6 @@ pub async fn run(
         "registered handlers"
     );
 
-    let gitlab_client = config
-        .gitlab
-        .as_ref()
-        .map(|cfg| GitlabClient::new(cfg.clone()))
-        .transpose()
-        .map_err(HandlerInitError::new)?
-        .map(Arc::new);
-
-    let health_state = HealthState {
-        nats_client: broker.nats_client().clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client,
-    };
-
     let engine = Arc::new(
         EngineBuilder::new(broker, registry, destination, indexing_status)
             .metrics(metrics)
@@ -182,13 +201,21 @@ pub async fn run(
         engine_handle.stop();
     });
 
+    serving.store(true, std::sync::atomic::Ordering::Relaxed);
     info!("indexer started");
+    let health_abort = health_task.abort_handle();
     let result = tokio::select! {
-        result = engine.run(&config.engine) => result.map_err(IndexerError::from),
-        result = run_health_server(config.health_bind_address, health_state) => {
-            let error = result.err().unwrap_or_else(|| std::io::Error::other(
-                "health server exited unexpectedly",
-            ));
+        result = engine.run(&config.engine) => {
+            health_abort.abort();
+            result.map_err(IndexerError::from)
+        }
+        result = health_task => {
+            let error = result
+                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                .err()
+                .unwrap_or_else(|| std::io::Error::other(
+                    "health server exited unexpectedly",
+                ));
             Err(IndexerError::Health(error))
         }
     };
@@ -211,6 +238,31 @@ pub async fn run_dispatcher(
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
+    // Start the health server before migration so that the Kubernetes liveness
+    // probe is answered during the (potentially long) DDL phase. Readiness stays
+    // `503` until migration completes (`serving`).
+    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let health_state = HealthState {
+        nats_client: services.nats_client.clone(),
+        graph_client: config.graph.build_client(),
+        datalake_client: config.datalake.build_client(),
+        gitlab_client: None,
+        serving: serving.clone(),
+    };
+    let health_shutdown = shutdown.clone();
+    let health_bind_address = config.health_bind_address;
+    let health_task = tokio::spawn(async move {
+        tokio::select! {
+            result = run_health_server(health_bind_address, health_state) => result,
+            _ = health_shutdown.cancelled() => Ok(()),
+        }
+    });
+
+    let migration_metrics = schema::metrics::MigrationMetrics::new();
+    info!("running schema migration check");
+    schema::migration::run_if_needed(&graph, &lock_service, ontology, &migration_metrics).await?;
+    serving.store(true, std::sync::atomic::Ordering::Relaxed);
+
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());
     let deletion_store: Arc<dyn NamespaceDeletionStore> =
@@ -220,13 +272,6 @@ pub async fn run_dispatcher(
             ontology,
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
-
-    let health_state = HealthState {
-        nats_client: services.nats_client.clone(),
-        graph_client: config.graph.build_client(),
-        datalake_client: config.datalake.build_client(),
-        gitlab_client: None,
-    };
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
@@ -276,15 +321,20 @@ pub async fn run_dispatcher(
         )),
     ];
 
+    let health_abort = health_task.abort_handle();
     tokio::select! {
         result = scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
+            health_abort.abort();
             result.map_err(DispatcherError::from)
         }
-        result = run_health_server(config.health_bind_address, health_state) => {
+        result = health_task => {
             shutdown.cancel();
-            let error = result.err().unwrap_or_else(|| std::io::Error::other(
-                "dispatcher health server exited unexpectedly",
-            ));
+            let error = result
+                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                .err()
+                .unwrap_or_else(|| std::io::Error::other(
+                    "dispatcher health server exited unexpectedly",
+                ));
             Err(DispatcherError::Health(error))
         }
     }
