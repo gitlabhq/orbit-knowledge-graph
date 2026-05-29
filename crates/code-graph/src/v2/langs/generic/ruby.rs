@@ -555,7 +555,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                 if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
                     continue;
                 }
-                push_named_import(imports, import_type, arg.text().to_string());
+                push_named_import(imports, import_type, strip_leading_scope(&arg.text()));
             }
             true
         }
@@ -938,6 +938,17 @@ mod tests {
             gmeta.super_types.contains(&"Gitlab::Allowable".to_string()),
             "qualified include should be stripped of leading ::: {:?}",
             gmeta.super_types
+        );
+
+        let allowable_import = result
+            .imports
+            .iter()
+            .find(|i| i.name.as_deref() == Some("Allowable"))
+            .expect("include ::Gitlab::Allowable should be recorded as an import");
+        assert_eq!(
+            allowable_import.path, "Gitlab",
+            "import path should drop the leading ::, got {:?}",
+            allowable_import.path
         );
     }
 }
