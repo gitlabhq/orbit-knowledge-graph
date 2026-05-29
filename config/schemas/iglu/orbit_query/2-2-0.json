@@ -1,0 +1,214 @@
+{
+  "$schema": "http://iglucentral.com/schemas/com.snowplowanalytics.self-desc/schema/jsonschema/1-0-0#",
+  "description": "Context for GKG query-path events (gkg_query_executed, gkg_schema_introspected).",
+  "self": {
+    "vendor": "com.gitlab",
+    "name": "orbit_query",
+    "version": "2-2-0",
+    "format": "jsonschema"
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_type"],
+  "properties": {
+    "source_type": {
+      "description": "Source type of the request, matching the value emitted in the GKG JWT source_type claim by Rails.",
+      "type": "string",
+      "enum": ["frontend", "dws", "mcp", "core", "rest", "code_intelligence"]
+    },
+    "tool_name": {
+      "description": "Name of the Orbit tool invoked (e.g. query_graph, get_graph_schema).",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "coding_agent": {
+      "description": "Identifier of the coding agent that initiated the request.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "queried_namespace_ids": {
+      "description": "Namespace IDs associated with the query.",
+      "type": ["array", "null"],
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2147483647
+      }
+    },
+    "root_namespace_id": {
+      "description": "Top-level group namespace ID.",
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "global_user_id": {
+      "description": "Globally unique identity of the calling user.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "user_type": {
+      "description": "Distinguishes human users from automated callers.",
+      "type": ["string", "null"],
+      "maxLength": 255
+    },
+    "plan": {
+      "description": "Name of the plan, such as free, premium or ultimate.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "session_id": {
+      "description": "Correlates multiple Orbit tool calls within a single DAP session.",
+      "type": ["string", "null"],
+      "maxLength": 64
+    },
+    "is_gitlab_team_member": {
+      "description": "Separates internal dogfooding from real external adoption.",
+      "type": ["boolean", "null"]
+    },
+    "query_type": {
+      "description": "DSL query type: traversal, aggregation, path_finding, neighbors.",
+      "type": ["string", "null"],
+      "maxLength": 32
+    },
+    "node_count": {
+      "description": "Number of node clauses in the query.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "relationship_count": {
+      "description": "Number of relationship clauses in the query.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "entity_types": {
+      "description": "Distinct entity types referenced by node clauses.",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 64 }
+    },
+    "relationship_types": {
+      "description": "Distinct relationship types referenced.",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 64 }
+    },
+    "filter_count": {
+      "description": "Total number of filter predicates.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "filter_fields": {
+      "description": "Distinct field names used in filters.",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 64 }
+    },
+    "filter_ops": {
+      "description": "Distinct filter operators used (eq, gt, contains, etc.).",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 32 }
+    },
+    "is_search": {
+      "description": "True when the query is a single-node search (no relationships).",
+      "type": ["boolean", "null"]
+    },
+    "has_cursor": {
+      "description": "Whether the query uses cursor-based pagination.",
+      "type": ["boolean", "null"]
+    },
+    "has_order_by": {
+      "description": "Whether the query specifies an explicit ordering.",
+      "type": ["boolean", "null"]
+    },
+    "limit": {
+      "description": "Row limit requested by the query.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "max_hops": {
+      "description": "Maximum hop count across all relationship clauses.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "agg_functions": {
+      "description": "Distinct aggregation functions used (count, sum, avg, etc.).",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 16 }
+    },
+    "group_by_count": {
+      "description": "Number of group-by keys in an aggregation query.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "hydration_plan": {
+      "description": "Hydration strategy: none, static, or dynamic.",
+      "type": ["string", "null"],
+      "maxLength": 16
+    },
+    "dynamic_columns": {
+      "description": "Dynamic column mode: all or default.",
+      "type": ["string", "null"],
+      "maxLength": 16
+    },
+    "path_max_depth": {
+      "description": "Maximum depth for path-finding queries.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "has_variable_hops": {
+      "description": "Whether any relationship uses variable-length hops.",
+      "type": ["boolean", "null"]
+    },
+    "has_virtual_columns": {
+      "description": "Whether any node references virtual columns.",
+      "type": ["boolean", "null"]
+    },
+    "duration_ms": {
+      "description": "Total wall-clock time for the pipeline execution.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "compile_ms": {
+      "description": "Time spent compiling the query to SQL.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "execute_ms": {
+      "description": "Time spent executing the query against ClickHouse.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "authorization_ms": {
+      "description": "Time spent on authorization (redaction service).",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "hydration_ms": {
+      "description": "Time spent on hydration queries.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "row_count": {
+      "description": "Number of rows returned to the caller.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "redacted_count": {
+      "description": "Number of rows removed by authorization.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "ch_read_rows": {
+      "description": "Total rows read from ClickHouse across all queries.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "ch_read_bytes": {
+      "description": "Total bytes read from ClickHouse across all queries.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "ch_memory_usage": {
+      "description": "Peak memory usage reported by ClickHouse.",
+      "type": ["integer", "null"],
+      "minimum": 0
+    }
+  }
+}

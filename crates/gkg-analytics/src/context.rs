@@ -46,20 +46,11 @@ impl SnowplowContext for OrbitCommonContext {
 #[derive(Debug, Clone)]
 pub struct OrbitQueryContext {
     pub data: orbit_query::OrbitQuery,
-    extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl OrbitQueryContext {
     pub fn new(data: orbit_query::OrbitQuery) -> Self {
-        Self {
-            data,
-            extra: serde_json::Map::new(),
-        }
-    }
-
-    pub fn with_extra(mut self, extra: serde_json::Map<String, serde_json::Value>) -> Self {
-        self.extra = extra;
-        self
+        Self { data }
     }
 }
 
@@ -69,14 +60,7 @@ impl SnowplowContext for OrbitQueryContext {
     }
 
     fn data(&self) -> serde_json::Value {
-        let mut val =
-            serde_json::to_value(&self.data).expect("generated OrbitQuery is always serializable");
-        if !self.extra.is_empty() {
-            if let serde_json::Value::Object(ref mut map) = val {
-                map.extend(self.extra.clone());
-            }
-        }
-        val
+        serde_json::to_value(&self.data).expect("generated OrbitQuery is always serializable")
     }
 }
 

@@ -3,8 +3,7 @@ use std::time::Duration;
 use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use gkg_server_config::{AnalyticsConfig, DeploymentKind};
 use labkit_events::Error as LabkitError;
-use query_engine::compiler::{ExecMetrics, QueryInfo};
-use serde::Serialize;
+use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
 
@@ -48,16 +47,6 @@ pub(crate) fn build_common(
     }))
 }
 
-/// Finish-time wrapper that flattens `ExecMetrics` and adds row/duration fields.
-#[derive(Serialize)]
-struct FinishMetrics<'a> {
-    #[serde(flatten)]
-    base: &'a ExecMetrics,
-    duration_ms: u64,
-    row_count: u64,
-    redacted_count: u64,
-}
-
 pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
@@ -68,8 +57,9 @@ pub(crate) fn build_query(
     total_elapsed: Duration,
 ) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
+    let info = metrics.query_info.as_ref();
 
-    let ctx = OrbitQueryContext::new(orbit_query::OrbitQuery {
+    Ok(OrbitQueryContext::new(orbit_query::OrbitQuery {
         source_type: source_type(claims.source_type),
         tool_name: Some(
             tool_name
@@ -94,27 +84,41 @@ pub(crate) fn build_query(
         user_type: None,
         plan: None,
         is_gitlab_team_member: claims.is_gitlab_team_member,
-    });
 
-    let mut extra = serde_json::Map::new();
-    merge_into(&mut extra, metrics.query_info.as_ref());
-    let finish = FinishMetrics {
-        base: metrics,
-        duration_ms: ExecMetrics::ms(total_elapsed),
-        row_count: row_count as u64,
-        redacted_count: redacted_count as u64,
-    };
-    merge_into(&mut extra, Some(&finish));
+        // QueryInfo dimensions
+        query_type: info.and_then(|i| i.query_type.parse().ok()),
+        node_count: info.map(|i| i.node_count as u64),
+        relationship_count: info.map(|i| i.relationship_count as u64),
+        entity_types: info.map(|i| i.entity_types.iter().filter_map(|s| s.parse().ok()).collect()),
+        relationship_types: info.map(|i| i.relationship_types.iter().filter_map(|s| s.parse().ok()).collect()),
+        filter_count: info.map(|i| i.filter_count as u64),
+        filter_fields: info.map(|i| i.filter_fields.iter().filter_map(|s| s.parse().ok()).collect()),
+        filter_ops: info.map(|i| i.filter_ops.iter().filter_map(|s| s.parse().ok()).collect()),
+        agg_functions: info.map(|i| i.agg_functions.iter().filter_map(|s| s.parse().ok()).collect()),
+        is_search: info.map(|i| i.is_search),
+        has_cursor: info.map(|i| i.has_cursor),
+        has_order_by: info.map(|i| i.has_order_by),
+        limit: info.map(|i| i.limit as u64),
+        max_hops: info.map(|i| i.max_hops as u64),
+        group_by_count: info.map(|i| i.group_by_count as u64),
+        hydration_plan: info.and_then(|i| i.hydration_plan.parse().ok()),
+        dynamic_columns: info.and_then(|i| i.dynamic_columns.parse().ok()),
+        path_max_depth: info.and_then(|i| i.path_max_depth.map(|d| d as u64)),
+        has_variable_hops: info.map(|i| i.has_variable_hops),
+        has_virtual_columns: info.map(|i| i.has_virtual_columns),
 
-    Ok(ctx.with_extra(extra))
-}
-
-fn merge_into<T: Serialize>(target: &mut serde_json::Map<String, serde_json::Value>, source: Option<&T>) {
-    if let Some(src) = source
-        && let Ok(serde_json::Value::Object(map)) = serde_json::to_value(src)
-    {
-        target.extend(map);
-    }
+        // ExecMetrics
+        duration_ms: Some(ExecMetrics::ms(total_elapsed)),
+        compile_ms: metrics.compile_ms,
+        execute_ms: metrics.execute_ms,
+        authorization_ms: metrics.authorization_ms,
+        hydration_ms: metrics.hydration_ms,
+        row_count: Some(row_count as u64),
+        redacted_count: Some(redacted_count as u64),
+        ch_read_rows: Some(metrics.ch_read_rows),
+        ch_read_bytes: Some(metrics.ch_read_bytes),
+        ch_memory_usage: Some(metrics.ch_memory_usage),
+    }))
 }
 
 /// Parse an optional `Claims` string into one of the orbit_common bounded
@@ -174,7 +178,8 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
-    use labkit_events::{SnowplowContext, StructuredEvent};
+    use labkit_events::StructuredEvent;
+    use query_engine::compiler::QueryInfo;
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
         Claims {
@@ -209,13 +214,9 @@ mod tests {
         }
     }
 
-    fn default_metrics() -> ExecMetrics {
-        ExecMetrics::default()
-    }
-
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool, None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(claims, tool, None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -226,7 +227,18 @@ mod tests {
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
+        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
+            .context(common)
+            .context(query)
+            .build()
+            .unwrap();
+        event.contexts()[0].data.clone()
+    }
+
+    fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
+        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
+        let query = build_query(claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -274,7 +286,7 @@ mod tests {
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
-        let query = build_query(&claims, "query_graph", Some("claude-code"), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code"), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -294,7 +306,7 @@ mod tests {
     #[test]
     fn build_query_drops_oversized_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65)), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65)), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
         assert!(query.data().get("coding_agent").is_none());
     }
 
@@ -374,14 +386,14 @@ mod tests {
         #[test]
         fn query_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-        let query = build_query(&claims, "query_graph", Some("claude-code"), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code"), &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
         fn query_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let query = build_query(&claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+            let query = build_query(&claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
@@ -393,7 +405,7 @@ mod tests {
         fn code_intelligence_validates_against_iglu_schema() {
             let mut claims = claims_with_paths(vec!["1/22/"]);
             claims.source_type = crate::auth::SourceType::CodeIntelligence;
-            let query = build_query(&claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
+            let query = build_query(&claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
             assert_eq!(query.data()["source_type"], "code_intelligence");
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
