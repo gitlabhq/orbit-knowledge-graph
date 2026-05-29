@@ -455,6 +455,10 @@ fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
     None
 }
 
+fn strip_leading_scope(name: &str) -> String {
+    name.strip_prefix("::").unwrap_or(name).to_string()
+}
+
 /// Extract super types: superclass + include/extend calls in the class body.
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
@@ -469,7 +473,7 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
             k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
         })
     {
-        let name = type_node.text().to_string();
+        let name = strip_leading_scope(&type_node.text());
         if !name.is_empty() {
             types.push(name);
         }
@@ -492,7 +496,7 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
                 for arg in args.children() {
                     let kind = arg.kind();
                     if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
-                        types.push(arg.text().to_string());
+                        types.push(strip_leading_scope(&arg.text()));
                     }
                 }
             }
@@ -891,6 +895,49 @@ mod tests {
         assert_eq!(
             ruby_constant_to_require_path("ExternalClient").as_deref(),
             Some("external_client")
+        );
+    }
+
+    #[test]
+    fn leading_scope_stripped_from_super_types() {
+        let result = parse(
+            "class AbuseReportPolicy < ::BasePolicy\nend\n\
+             class GroupPolicy < BasePolicy\n  include ::Gitlab::Allowable\nend\n",
+        )
+        .unwrap();
+
+        let abuse = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "AbuseReportPolicy")
+            .unwrap();
+        let meta = abuse.metadata.as_ref().expect("AbuseReportPolicy metadata");
+        assert!(
+            meta.super_types.contains(&"BasePolicy".to_string()),
+            "leading :: should be stripped: {:?}",
+            meta.super_types
+        );
+        assert!(
+            !meta.super_types.iter().any(|s| s.starts_with("::")),
+            "no super_type should retain a leading ::: {:?}",
+            meta.super_types
+        );
+
+        let group = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "GroupPolicy")
+            .unwrap();
+        let gmeta = group.metadata.as_ref().expect("GroupPolicy metadata");
+        assert!(
+            gmeta.super_types.contains(&"BasePolicy".to_string()),
+            "unqualified superclass still works: {:?}",
+            gmeta.super_types
+        );
+        assert!(
+            gmeta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "qualified include should be stripped of leading ::: {:?}",
+            gmeta.super_types
         );
     }
 }
