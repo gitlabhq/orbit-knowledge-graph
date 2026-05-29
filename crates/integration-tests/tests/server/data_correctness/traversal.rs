@@ -660,9 +660,20 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     .await;
 
     // Project 1000: compile(12000)→helper(12001), helper(12001)→run_query(12002)
-    // The cross-project edge helper(12001)→run_query(12102) should NOT appear
+    // The cross-project edge helper(12001)→run_query(12102) must NOT appear
     // because the edge's project_id=1001 doesn't match the filter.
+    resp.assert_node_count(3);
     resp.assert_referential_integrity();
+    resp.assert_node_ids("Definition", &[12000, 12001, 12002]);
+    resp.assert_node("Definition", 12000, |n| {
+        n.prop_str("name") == Some("compile")
+    });
+    resp.assert_node("Definition", 12001, |n| {
+        n.prop_str("name") == Some("helper")
+    });
+    resp.assert_node("Definition", 12002, |n| {
+        n.prop_str("name") == Some("run_query")
+    });
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
 }
 
@@ -687,8 +698,13 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     )
     .await;
 
-    // Only the cross-project edge helper(12001)→run_query(12102) has target in project 1001
+    // Only the cross-project edge helper(12001)→run_query(12102) survives
+    resp.assert_node_count(2);
     resp.assert_referential_integrity();
+    resp.assert_node_ids("Definition", &[12001, 12102]);
+    resp.assert_node("Definition", 12102, |n| {
+        n.prop_str("name") == Some("run_query")
+    });
     resp.assert_edge_set("CALLS", &[(12001, 12102)]);
 }
 
@@ -711,6 +727,30 @@ pub(super) async fn traversal_code_graph_edge_level_project_filter(ctx: &TestCon
     .await;
 
     // Explicit edge filter: only edges with project_id=1000
+    resp.assert_node_count(3);
     resp.assert_referential_integrity();
+    resp.assert_node_ids("Definition", &[12000, 12001, 12002]);
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002)]);
+}
+
+/// Filtering by a non-existent project_id should return zero results.
+pub(super) async fn traversal_code_graph_project_id_filter_no_match_returns_empty(
+    ctx: &TestContext,
+) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "filters": {"project_id": 99999}, "columns": ["name"]},
+                {"id": "callee", "entity": "Definition", "columns": ["name"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(0);
 }
