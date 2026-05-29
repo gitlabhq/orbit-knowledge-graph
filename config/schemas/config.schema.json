@@ -67,6 +67,7 @@
           "code-indexing-task": {
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
+              "fetch_concurrency": 6,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -366,6 +367,13 @@
           "default": 180000,
           "minimum": 0
         },
+        "fetch_concurrency": {
+          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 6.",
+          "type": "integer",
+          "format": "uint",
+          "default": 6,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -407,6 +415,7 @@
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
             "cross_file_resolve_timeout_ms": 180000,
+            "fetch_concurrency": 6,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -497,6 +506,7 @@
             "code-indexing-task": {
               "pipeline": {
                 "cross_file_resolve_timeout_ms": 180000,
+                "fetch_concurrency": 6,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -687,6 +697,7 @@
           "default": {
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
+              "fetch_concurrency": 6,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,

@@ -177,6 +177,7 @@ pub struct MockHandler {
     on_handle: Option<Arc<dyn Fn() + Send + Sync>>,
     invocations: Arc<AtomicUsize>,
     received: Arc<Mutex<Vec<Envelope>>>,
+    requires_worker_pool: bool,
 }
 
 impl MockHandler {
@@ -190,7 +191,13 @@ impl MockHandler {
             on_handle: None,
             invocations: Arc::new(AtomicUsize::new(0)),
             received: Arc::new(Mutex::new(Vec::new())),
+            requires_worker_pool: true,
         }
+    }
+
+    pub fn with_requires_worker_pool(mut self, value: bool) -> Self {
+        self.requires_worker_pool = value;
+        self
     }
 
     pub fn with_name(mut self, name: &str) -> Self {
@@ -227,6 +234,10 @@ impl Handler for MockHandler {
 
     fn subscription(&self) -> Subscription {
         self.subscription.clone()
+    }
+
+    fn requires_worker_pool(&self) -> bool {
+        self.requires_worker_pool
     }
 
     async fn handle(

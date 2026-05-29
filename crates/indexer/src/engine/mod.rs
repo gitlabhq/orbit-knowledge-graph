@@ -960,4 +960,45 @@ mod tests {
             "expected at least one concurrent execution"
         );
     }
+
+    /// A handler that returns `requires_worker_pool() = false` must run even
+    /// when every worker pool permit is already held by other work.
+    #[tokio::test]
+    async fn handler_bypassing_worker_pool_runs_when_pool_exhausted() {
+        let runtime = test_runtime(&EngineConfiguration {
+            max_concurrent_workers: 1,
+            ..Default::default()
+        });
+
+        // Exhaust the single worker pool permit.
+        let _blocker = runtime
+            .worker_pool
+            .acquire_handler_slot(None)
+            .await
+            .expect("should acquire the only permit");
+
+        let handler = MockHandler::new("stream", "subject").with_requires_worker_pool(false);
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+        let envelope = TestEnvelopeFactory::simple("payload");
+
+        // Must complete despite the pool being fully consumed.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_handlers(
+                &handlers,
+                &test_context(),
+                &envelope,
+                &runtime,
+                &subscription,
+            ),
+        )
+        .await
+        .expect("handler should not block on worker pool");
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Success),
+            "expected Success, got {outcome:?}"
+        );
+    }
 }
