@@ -412,26 +412,14 @@ mod tests {
     fn query_info_fields_merged_into_context() {
         let claims = claims_with_paths(vec!["1/22/"]);
         let info = QueryInfo {
-            query_type: "traversal",
-            node_count: 2,
-            relationship_count: 1,
+            query_type: "traversal", node_count: 2, relationship_count: 1,
             entity_types: vec!["MergeRequest".into(), "User".into()],
             relationship_types: vec!["AUTHORED".into()],
-            filter_count: 1,
-            filter_fields: vec!["state".into()],
-            filter_ops: vec!["eq".into()],
-            is_search: false,
-            has_cursor: false,
-            has_order_by: false,
-            limit: 10,
-            max_hops: 1,
-            agg_functions: vec![],
-            group_by_count: 0,
-            hydration_plan: "static",
-            dynamic_columns: "default",
-            path_max_depth: None,
-            has_variable_hops: false,
-            has_virtual_columns: false,
+            filter_count: 1, filter_fields: vec!["state".into()], filter_ops: vec!["eq".into()],
+            is_search: false, has_cursor: false, has_order_by: false,
+            limit: 10, max_hops: 1, agg_functions: vec![], group_by_count: 0,
+            hydration_plan: "static", dynamic_columns: "default",
+            path_max_depth: None, has_variable_hops: false, has_virtual_columns: false,
         };
         let query = build_query(&claims, "query_graph", None, Some(&info), None).unwrap();
         let data = query.data();

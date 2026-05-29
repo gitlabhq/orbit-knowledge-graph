@@ -202,25 +202,15 @@ mod tests {
             None,
             "33".to_string(),
         );
-        obs.set_query_info(QueryInfo::from(&compiler::CompiledQueryContext {
-            query_type: compiler::input::QueryType::Traversal,
-            base: compiler::passes::codegen::ParameterizedQuery {
-                sql: String::new(),
-                params: Default::default(),
-                result_context: compiler::passes::enforce::ResultContext::new(),
-                query_config: Default::default(),
-                dialect: compiler::passes::codegen::SqlDialect::ClickHouse,
-            },
-            hydration: compiler::HydrationPlan::None,
-            input: compiler::Input {
-                query_type: compiler::input::QueryType::Traversal,
-                nodes: vec![compiler::InputNode {
-                    entity: Some("User".into()),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
-        }));
+        obs.set_query_info(QueryInfo {
+            query_type: "traversal", node_count: 1, relationship_count: 0,
+            entity_types: vec!["User".into()], relationship_types: vec![],
+            filter_count: 0, filter_fields: vec![], filter_ops: vec![],
+            is_search: true, has_cursor: false, has_order_by: false,
+            limit: 10, max_hops: 0, agg_functions: vec![], group_by_count: 0,
+            hydration_plan: "none", dynamic_columns: "default",
+            path_max_depth: None, has_variable_hops: false, has_virtual_columns: false,
+        });
         obs.compiled(Duration::from_millis(5));
         obs.executed(Duration::from_millis(50), 2);
         obs.authorized(Duration::from_millis(10));

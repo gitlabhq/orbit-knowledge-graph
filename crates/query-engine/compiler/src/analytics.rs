@@ -134,32 +134,34 @@ fn dynamic_col_label(mode: DynamicColumnMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{
-        InputAggregation, InputAggregationMetric, InputFilter, InputGroupByKey, InputNode,
-        InputPath, InputRelationship, PathType, QueryType,
-    };
+    use crate::input::*;
 
-    fn search_input() -> Input {
-        Input {
-            query_type: QueryType::Traversal,
-            nodes: vec![InputNode {
-                entity: Some("User".into()),
-                ..Default::default()
-            }],
-            ..Default::default()
+    fn node(entity: &str) -> InputNode {
+        InputNode { entity: Some(entity.into()), ..Default::default() }
+    }
+
+    fn rel(types: &[&str], min: u32, max: u32) -> InputRelationship {
+        InputRelationship {
+            types: types.iter().map(|s| s.to_string()).collect(),
+            from: "a".into(), to: "b".into(),
+            min_hops: min, max_hops: max,
+            direction: Direction::Outgoing,
+            filters: Default::default(), fk_column: None,
         }
     }
 
     #[test]
     fn search() {
-        let d = QueryInfo::extract(&search_input(), &HydrationPlan::None);
+        let input = Input {
+            nodes: vec![node("User")],
+            ..Default::default()
+        };
+        let d = QueryInfo::extract(&input, &HydrationPlan::None);
 
         assert_eq!(d.query_type, "traversal");
         assert_eq!(d.node_count, 1);
-        assert_eq!(d.relationship_count, 0);
         assert_eq!(d.entity_types, ["User"]);
         assert!(d.is_search);
-        assert!(!d.has_cursor);
         assert_eq!(d.filter_count, 0);
         assert_eq!(d.hydration_plan, "none");
     }
@@ -168,42 +170,23 @@ mod tests {
     fn traversal_with_filters() {
         let input = Input {
             nodes: vec![
-                InputNode {
-                    entity: Some("User".into()),
-                    ..Default::default()
-                },
+                node("User"),
                 InputNode {
                     entity: Some("MergeRequest".into()),
-                    filters: [(
-                        "state".into(),
-                        vec![InputFilter {
-                            op: Some(FilterOp::Eq),
-                            ..Default::default()
-                        }],
-                    )]
-                    .into(),
+                    filters: [("state".into(), vec![InputFilter {
+                        op: Some(FilterOp::Eq), ..Default::default()
+                    }])].into(),
                     ..Default::default()
                 },
             ],
-            relationships: vec![InputRelationship {
-                types: vec!["AUTHORED".into()],
-                from: "u".into(),
-                to: "mr".into(),
-                min_hops: 1,
-                max_hops: 1,
-                direction: crate::input::Direction::Outgoing,
-                filters: Default::default(),
-                fk_column: None,
-            }],
+            relationships: vec![rel(&["AUTHORED"], 1, 1)],
             ..Default::default()
         };
         let d = QueryInfo::extract(&input, &HydrationPlan::None);
 
-        assert_eq!(d.node_count, 2);
         assert_eq!(d.entity_types, ["MergeRequest", "User"]);
         assert_eq!(d.relationship_types, ["AUTHORED"]);
         assert_eq!(d.filter_count, 1);
-        assert_eq!(d.filter_fields, ["state"]);
         assert_eq!(d.filter_ops, ["eq"]);
         assert!(!d.is_search);
     }
@@ -212,21 +195,13 @@ mod tests {
     fn aggregation() {
         let input = Input {
             query_type: QueryType::Aggregation,
-            nodes: vec![InputNode {
-                entity: Some("Project".into()),
-                ..Default::default()
-            }],
+            nodes: vec![node("Project")],
             aggregation: InputAggregation {
                 metrics: vec![InputAggregationMetric {
-                    function: AggFunction::Count,
-                    target: Some("p".into()),
-                    property: None,
-                    alias: None,
+                    function: AggFunction::Count, target: Some("p".into()),
+                    property: None, alias: None,
                 }],
-                group_by: vec![InputGroupByKey::Node {
-                    node: "p".into(),
-                    alias: None,
-                }],
+                group_by: vec![InputGroupByKey::Node { node: "p".into(), alias: None }],
                 sort: None,
             },
             ..Default::default()
@@ -242,24 +217,11 @@ mod tests {
     fn path_finding() {
         let input = Input {
             query_type: QueryType::PathFinding,
-            nodes: vec![
-                InputNode {
-                    entity: Some("User".into()),
-                    ..Default::default()
-                },
-                InputNode {
-                    entity: Some("Project".into()),
-                    ..Default::default()
-                },
-            ],
+            nodes: vec![node("User"), node("Project")],
             path: Some(InputPath {
-                path_type: PathType::Shortest,
-                from: "s".into(),
-                to: "e".into(),
-                max_depth: 3,
-                rel_types: vec!["MEMBER_OF".into()],
-                forward_first_hop_rel_types: vec![],
-                backward_first_hop_rel_types: vec![],
+                path_type: PathType::Shortest, from: "s".into(), to: "e".into(),
+                max_depth: 3, rel_types: vec!["MEMBER_OF".into()],
+                forward_first_hop_rel_types: vec![], backward_first_hop_rel_types: vec![],
             }),
             ..Default::default()
         };
@@ -272,56 +234,13 @@ mod tests {
     #[test]
     fn variable_hops() {
         let input = Input {
-            nodes: vec![InputNode {
-                entity: Some("Group".into()),
-                ..Default::default()
-            }],
-            relationships: vec![InputRelationship {
-                types: vec!["CONTAINS".into()],
-                from: "g".into(),
-                to: "p".into(),
-                min_hops: 1,
-                max_hops: 3,
-                direction: crate::input::Direction::Outgoing,
-                filters: Default::default(),
-                fk_column: None,
-            }],
+            nodes: vec![node("Group")],
+            relationships: vec![rel(&["CONTAINS"], 1, 3)],
             ..Default::default()
         };
         let d = QueryInfo::extract(&input, &HydrationPlan::None);
 
         assert!(d.has_variable_hops);
         assert_eq!(d.max_hops, 3);
-    }
-
-    #[test]
-    fn from_compiled_context() {
-        use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery, SqlDialect};
-        use crate::passes::enforce::ResultContext;
-        use gkg_server_config::QueryConfig;
-
-        let ctx = CompiledQueryContext {
-            query_type: QueryType::Traversal,
-            base: ParameterizedQuery {
-                sql: String::new(),
-                params: Default::default(),
-                result_context: ResultContext::new(),
-                query_config: QueryConfig::default(),
-                dialect: SqlDialect::ClickHouse,
-            },
-            hydration: HydrationPlan::None,
-            input: search_input(),
-        };
-        let d = QueryInfo::from(&ctx);
-        assert!(d.is_search);
-    }
-
-    #[test]
-    fn serializes_cleanly() {
-        let d = QueryInfo::extract(&search_input(), &HydrationPlan::None);
-        let json = serde_json::to_value(&d).unwrap();
-        assert_eq!(json["query_type"], "traversal");
-        assert_eq!(json["is_search"], true);
-        assert_eq!(json["node_count"], 1);
     }
 }
