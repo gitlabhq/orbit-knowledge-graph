@@ -83,6 +83,42 @@ pub async fn partitioned_initial_load_indexes_all_rows_and_consolidates(ctx: &Te
     );
 }
 
+pub async fn incomplete_partition_checkpoint_does_not_advance_watermark_on_resume(
+    ctx: &TestContext,
+) {
+    for id in 1..=12 {
+        create_user(ctx, id).await;
+    }
+
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User.p2of4', '2024-01-20 12:00:00.000000', '[\"6\"]')",
+        t("checkpoint")
+    ))
+    .await;
+
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("partitioned handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        indexed,
+        vec![1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
+        "re-partition opens from the epoch: id 6 is skipped by the partition cursor, \
+         but 7-8 (sharing the in-progress watermark) must still index"
+    );
+}
+
 pub async fn second_run_after_consolidation_skips_partitioning(ctx: &TestContext) {
     for id in 1..=8 {
         create_user(ctx, id).await;

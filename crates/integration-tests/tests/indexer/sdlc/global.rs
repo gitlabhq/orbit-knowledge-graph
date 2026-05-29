@@ -3,7 +3,7 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_node_count, global_envelope, global_handler, handler_context,
+    TestContext, assert_node_count, create_user, global_envelope, global_handler, handler_context,
 };
 
 pub async fn processes_and_transforms_users(ctx: &TestContext) {
@@ -153,5 +153,42 @@ pub async fn resumes_from_saved_cursor_skipping_processed_users(ctx: &TestContex
         processed,
         vec![3, 4],
         "saved cursor at id=2 must skip users 1-2 and process 3-4"
+    );
+}
+
+pub async fn incomplete_checkpoint_does_not_advance_watermark_on_resume(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User', '2024-01-20 12:00:00.000000', '[\"2\"]')",
+        t("checkpoint")
+    ))
+    .await;
+
+    for id in 1..=4 {
+        create_user(ctx, id).await;
+    }
+
+    global_handler(ctx)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let processed: Vec<i64> = result
+        .iter()
+        .filter_map(|batch| ArrowUtils::get_column_by_name::<Int64Array>(batch, "id"))
+        .flat_map(|ids| (0..ids.len()).map(|i| ids.value(i)).collect::<Vec<_>>())
+        .collect();
+    assert_eq!(
+        processed,
+        vec![3, 4],
+        "an incomplete checkpoint must not advance last_watermark: users 3-4 \
+         (replicated_at equal to the in-progress watermark, past the cursor) must still index"
     );
 }

@@ -113,9 +113,12 @@ impl EntityHandler {
             .load(&checkpoint_key)
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
+        // Only a completed checkpoint may advance the watermark; an in-progress one
+        // stores a never-reached target that would skip unprocessed rows below it.
         let last_watermark = parent_checkpoint
             .as_ref()
-            .map(|c| c.watermark)
+            .filter(|checkpoint| checkpoint.cursor_values.is_none())
+            .map(|checkpoint| checkpoint.watermark)
             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
 
         observer.set_indexing_mode(if parent_checkpoint.is_none() {
