@@ -1,0 +1,327 @@
+//! Non-PII query dimensions for analytics and billing.
+//!
+//! [`QueryInfo`] captures the structural properties of a compiled query
+//! -- types, counts, operators, flags -- without any customer data (no IDs, no
+//! filter values, no traversal paths).
+
+use std::collections::BTreeSet;
+
+use serde::Serialize;
+
+use crate::input::{DynamicColumnMode, Input};
+use crate::passes::codegen::CompiledQueryContext;
+use crate::passes::hydrate::HydrationPlan;
+
+/// Structural dimensions of a compiled query, free of customer-specific data.
+///
+/// Every field is a bounded enum label, a count, or a boolean. Extracted from
+/// [`CompiledQueryContext`] after compilation and forwarded to analytics and
+/// billing observers via the pipeline observer chain.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryInfo {
+    pub query_type: &'static str,
+    pub node_count: u32,
+    pub relationship_count: u32,
+    pub entity_types: Vec<String>,
+    pub relationship_types: Vec<String>,
+    pub filter_count: u32,
+    pub filter_fields: Vec<String>,
+    pub filter_ops: Vec<String>,
+    pub is_search: bool,
+    pub has_cursor: bool,
+    pub has_order_by: bool,
+    pub limit: u32,
+    pub max_hops: u32,
+    pub agg_functions: Vec<String>,
+    pub group_by_count: u32,
+    pub hydration_plan: &'static str,
+    pub dynamic_columns: &'static str,
+    pub path_max_depth: Option<u32>,
+    pub has_variable_hops: bool,
+    pub has_virtual_columns: bool,
+}
+
+impl From<&CompiledQueryContext> for QueryInfo {
+    fn from(ctx: &CompiledQueryContext) -> Self {
+        Self::extract(&ctx.input, &ctx.hydration)
+    }
+}
+
+impl QueryInfo {
+    fn extract(input: &Input, hydration: &HydrationPlan) -> Self {
+        let mut entity_types = BTreeSet::new();
+        let mut rel_types = BTreeSet::new();
+        let mut filter_fields = BTreeSet::new();
+        let mut filter_ops = BTreeSet::new();
+        let mut filter_count: u32 = 0;
+        let mut has_virtual_columns = false;
+        let mut max_hops: u32 = 0;
+        let mut has_variable_hops = false;
+
+        let mut collect_filters =
+            |filters: &std::collections::HashMap<String, Vec<crate::input::InputFilter>>| {
+                for (field, entries) in filters {
+                    filter_fields.insert(field.clone());
+                    for f in entries {
+                        filter_count += 1;
+                        if let Some(op) = &f.op {
+                            filter_ops.insert(op.as_ref().to_owned());
+                        }
+                    }
+                }
+            };
+
+        for node in &input.nodes {
+            if let Some(entity) = &node.entity {
+                entity_types.insert(entity.clone());
+            }
+            has_virtual_columns |= !node.virtual_columns.is_empty();
+            collect_filters(&node.filters);
+        }
+
+        for rel in &input.relationships {
+            rel_types.extend(rel.types.iter().cloned());
+            max_hops = max_hops.max(rel.max_hops);
+            has_variable_hops |= rel.min_hops != rel.max_hops;
+            collect_filters(&rel.filters);
+        }
+
+        let mut agg_fns = BTreeSet::new();
+        for m in &input.aggregation.metrics {
+            agg_fns.insert(m.function.to_string());
+        }
+
+        Self {
+            query_type: input.query_type.into(),
+            node_count: input.nodes.len() as u32,
+            relationship_count: input.relationships.len() as u32,
+            entity_types: entity_types.into_iter().collect(),
+            relationship_types: rel_types.into_iter().collect(),
+            filter_count,
+            filter_fields: filter_fields.into_iter().collect(),
+            filter_ops: filter_ops.into_iter().collect(),
+            is_search: input.is_search(),
+            has_cursor: input.cursor.is_some(),
+            has_order_by: input.order_by.is_some(),
+            limit: input.limit,
+            max_hops,
+            agg_functions: agg_fns.into_iter().collect(),
+            group_by_count: input.aggregation.group_by.len() as u32,
+            hydration_plan: hydration_label(hydration),
+            dynamic_columns: dynamic_col_label(input.options.dynamic_columns),
+            path_max_depth: input.path.as_ref().map(|p| p.max_depth),
+            has_variable_hops,
+            has_virtual_columns,
+        }
+    }
+}
+
+fn hydration_label(h: &HydrationPlan) -> &'static str {
+    match h {
+        HydrationPlan::None => "none",
+        HydrationPlan::Static(_) => "static",
+        HydrationPlan::Dynamic(_) => "dynamic",
+    }
+}
+
+fn dynamic_col_label(mode: DynamicColumnMode) -> &'static str {
+    match mode {
+        DynamicColumnMode::All => "all",
+        DynamicColumnMode::Default => "default",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::input::{
+        InputAggregation, InputAggregationMetric, InputFilter, InputGroupByKey, InputNode,
+        InputPath, InputRelationship, PathType, QueryType,
+    };
+
+    fn search_input() -> Input {
+        Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                entity: Some("User".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn search() {
+        let d = QueryInfo::extract(&search_input(), &HydrationPlan::None);
+
+        assert_eq!(d.query_type, "traversal");
+        assert_eq!(d.node_count, 1);
+        assert_eq!(d.relationship_count, 0);
+        assert_eq!(d.entity_types, ["User"]);
+        assert!(d.is_search);
+        assert!(!d.has_cursor);
+        assert_eq!(d.filter_count, 0);
+        assert_eq!(d.hydration_plan, "none");
+    }
+
+    #[test]
+    fn traversal_with_filters() {
+        let input = Input {
+            nodes: vec![
+                InputNode {
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    entity: Some("MergeRequest".into()),
+                    filters: [(
+                        "state".into(),
+                        vec![InputFilter {
+                            op: Some(FilterOp::Eq),
+                            ..Default::default()
+                        }],
+                    )]
+                    .into(),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["AUTHORED".into()],
+                from: "u".into(),
+                to: "mr".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: crate::input::Direction::Outgoing,
+                filters: Default::default(),
+                fk_column: None,
+            }],
+            ..Default::default()
+        };
+        let d = QueryInfo::extract(&input, &HydrationPlan::None);
+
+        assert_eq!(d.node_count, 2);
+        assert_eq!(d.entity_types, ["MergeRequest", "User"]);
+        assert_eq!(d.relationship_types, ["AUTHORED"]);
+        assert_eq!(d.filter_count, 1);
+        assert_eq!(d.filter_fields, ["state"]);
+        assert_eq!(d.filter_ops, ["eq"]);
+        assert!(!d.is_search);
+    }
+
+    #[test]
+    fn aggregation() {
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![InputNode {
+                entity: Some("Project".into()),
+                ..Default::default()
+            }],
+            aggregation: InputAggregation {
+                metrics: vec![InputAggregationMetric {
+                    function: AggFunction::Count,
+                    target: Some("p".into()),
+                    property: None,
+                    alias: None,
+                }],
+                group_by: vec![InputGroupByKey::Node {
+                    node: "p".into(),
+                    alias: None,
+                }],
+                sort: None,
+            },
+            ..Default::default()
+        };
+        let d = QueryInfo::extract(&input, &HydrationPlan::None);
+
+        assert_eq!(d.query_type, "aggregation");
+        assert_eq!(d.agg_functions, ["count"]);
+        assert_eq!(d.group_by_count, 1);
+    }
+
+    #[test]
+    fn path_finding() {
+        let input = Input {
+            query_type: QueryType::PathFinding,
+            nodes: vec![
+                InputNode {
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    entity: Some("Project".into()),
+                    ..Default::default()
+                },
+            ],
+            path: Some(InputPath {
+                path_type: PathType::Shortest,
+                from: "s".into(),
+                to: "e".into(),
+                max_depth: 3,
+                rel_types: vec!["MEMBER_OF".into()],
+                forward_first_hop_rel_types: vec![],
+                backward_first_hop_rel_types: vec![],
+            }),
+            ..Default::default()
+        };
+        let d = QueryInfo::extract(&input, &HydrationPlan::Dynamic(vec![]));
+
+        assert_eq!(d.path_max_depth, Some(3));
+        assert_eq!(d.hydration_plan, "dynamic");
+    }
+
+    #[test]
+    fn variable_hops() {
+        let input = Input {
+            nodes: vec![InputNode {
+                entity: Some("Group".into()),
+                ..Default::default()
+            }],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "g".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 3,
+                direction: crate::input::Direction::Outgoing,
+                filters: Default::default(),
+                fk_column: None,
+            }],
+            ..Default::default()
+        };
+        let d = QueryInfo::extract(&input, &HydrationPlan::None);
+
+        assert!(d.has_variable_hops);
+        assert_eq!(d.max_hops, 3);
+    }
+
+    #[test]
+    fn from_compiled_context() {
+        use crate::passes::codegen::{CompiledQueryContext, ParameterizedQuery, SqlDialect};
+        use crate::passes::enforce::ResultContext;
+        use gkg_server_config::QueryConfig;
+
+        let ctx = CompiledQueryContext {
+            query_type: QueryType::Traversal,
+            base: ParameterizedQuery {
+                sql: String::new(),
+                params: Default::default(),
+                result_context: ResultContext::new(),
+                query_config: QueryConfig::default(),
+                dialect: SqlDialect::ClickHouse,
+            },
+            hydration: HydrationPlan::None,
+            input: search_input(),
+        };
+        let d = QueryInfo::from(&ctx);
+        assert!(d.is_search);
+    }
+
+    #[test]
+    fn serializes_cleanly() {
+        let d = QueryInfo::extract(&search_input(), &HydrationPlan::None);
+        let json = serde_json::to_value(&d).unwrap();
+        assert_eq!(json["query_type"], "traversal");
+        assert_eq!(json["is_search"], true);
+        assert_eq!(json["node_count"], 1);
+    }
+}
