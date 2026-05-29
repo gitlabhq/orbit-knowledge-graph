@@ -46,18 +46,6 @@ impl PipelineStats {
     }
 }
 
-impl From<PipelineStats> for crate::observer::ResourceStats {
-    fn from(stats: PipelineStats) -> Self {
-        Self {
-            read_rows: stats.read_rows,
-            read_bytes: stats.read_bytes,
-            written_rows: stats.written_rows,
-            written_bytes: stats.written_bytes,
-            duration_ms: stats.duration_ms,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 struct WriteCounts {
     rows: u64,
@@ -238,11 +226,12 @@ impl Pipeline {
             duration_ms: elapsed.as_millis() as u64,
         };
 
-        context
-            .observer
-            .lock()
-            .unwrap()
-            .record_resource_stats(stats.into());
+        {
+            let mut observer = context.observer.lock().unwrap();
+            observer.record_datalake_read(stats.read_rows, stats.read_bytes);
+            observer.record_graph_write(stats.written_rows, stats.written_bytes);
+            observer.record_duration(stats.duration_ms);
+        }
 
         if total_rows > 0 {
             info!(
