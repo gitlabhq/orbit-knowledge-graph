@@ -57,9 +57,8 @@ pub(crate) fn build_query(
     total_elapsed: Duration,
 ) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
-    let info = metrics.query_info.as_ref();
 
-    Ok(OrbitQueryContext::new(orbit_query::OrbitQuery {
+    let mut q = orbit_query::OrbitQuery {
         source_type: source_type(claims.source_type),
         tool_name: Some(
             tool_name
@@ -81,70 +80,62 @@ pub(crate) fn build_query(
             .map(str::parse::<orbit_query::OrbitQuerySessionId>)
             .transpose()
             .map_err(validation("session_id"))?,
-        user_type: None,
-        plan: None,
         is_gitlab_team_member: claims.is_gitlab_team_member,
+        ..Default::default()
+    };
+    apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
+    Ok(OrbitQueryContext::new(q))
+}
 
-        // QueryInfo dimensions
-        query_type: info.and_then(|i| i.query_type.parse().ok()),
-        node_count: info.map(|i| i.node_count as u64),
-        relationship_count: info.map(|i| i.relationship_count as u64),
-        entity_types: info.map(|i| {
-            i.entity_types
-                .iter()
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        }),
-        relationship_types: info.map(|i| {
-            i.relationship_types
-                .iter()
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        }),
-        filter_count: info.map(|i| i.filter_count as u64),
-        filter_fields: info.map(|i| {
-            i.filter_fields
-                .iter()
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        }),
-        filter_ops: info.map(|i| i.filter_ops.iter().filter_map(|s| s.parse().ok()).collect()),
-        agg_functions: info.map(|i| {
-            i.agg_functions
-                .iter()
-                .filter_map(|s| s.parse().ok())
-                .collect()
-        }),
-        is_search: info.map(|i| i.is_search),
-        has_cursor: info.map(|i| i.has_cursor),
-        has_order_by: info.map(|i| i.has_order_by),
-        limit: info.map(|i| i.limit as u64),
-        max_hops: info.map(|i| i.max_hops as u64),
-        group_by_count: info.map(|i| i.group_by_count as u64),
-        hydration_plan: info.and_then(|i| i.hydration_plan.parse().ok()),
-        dynamic_columns: info.and_then(|i| i.dynamic_columns.parse().ok()),
-        path_max_depth: info.and_then(|i| i.path_max_depth.map(|d| d as u64)),
-        has_variable_hops: info.map(|i| i.has_variable_hops),
-        has_virtual_columns: info.map(|i| i.has_virtual_columns),
+fn apply_metrics(
+    q: &mut orbit_query::OrbitQuery,
+    metrics: &ExecMetrics,
+    row_count: usize,
+    redacted_count: usize,
+    total_elapsed: Duration,
+) {
+    if let Some(info) = &metrics.query_info {
+        q.query_type = info.query_type.parse().ok();
+        q.node_count = Some(info.node_count as u64);
+        q.relationship_count = Some(info.relationship_count as u64);
+        q.filter_count = Some(info.filter_count as u64);
+        q.is_search = Some(info.is_search);
+        q.has_cursor = Some(info.has_cursor);
+        q.has_order_by = Some(info.has_order_by);
+        q.limit = Some(info.limit as u64);
+        q.max_hops = Some(info.max_hops as u64);
+        q.group_by_count = Some(info.group_by_count as u64);
+        q.hydration_plan = info.hydration_plan.parse().ok();
+        q.dynamic_columns = info.dynamic_columns.parse().ok();
+        q.path_max_depth = info.path_max_depth.map(|d| d as u64);
+        q.has_variable_hops = Some(info.has_variable_hops);
+        q.has_virtual_columns = Some(info.has_virtual_columns);
 
-        // ExecMetrics
-        duration_ms: Some(ExecMetrics::ms(total_elapsed)),
-        compile_ms: metrics.compile_ms,
-        execute_ms: metrics.execute_ms,
-        authorization_ms: metrics.authorization_ms,
-        hydration_ms: metrics.hydration_ms,
-        row_count: Some(row_count as u64),
-        redacted_count: Some(redacted_count as u64),
-        ch_read_rows: Some(metrics.ch_read_rows),
-        ch_read_bytes: Some(metrics.ch_read_bytes),
-        ch_memory_usage: Some(metrics.ch_memory_usage),
+        fn parse_vec<T: std::str::FromStr>(v: &[String]) -> Vec<T> {
+            v.iter().filter_map(|s| s.parse().ok()).collect()
+        }
+        q.entity_types = Some(parse_vec(&info.entity_types));
+        q.relationship_types = Some(parse_vec(&info.relationship_types));
+        q.filter_fields = Some(parse_vec(&info.filter_fields));
+        q.filter_ops = Some(parse_vec(&info.filter_ops));
+        q.agg_functions = Some(parse_vec(&info.agg_functions));
+    }
 
-        // System versions (compile-time constants)
-        graph_schema_version: GRAPH_SCHEMA_VERSION.trim().parse().ok(),
-        query_dsl_version: QUERY_DSL_VERSION.trim().parse().ok(),
-        raw_output_format_version: RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok(),
-        goon_output_format_version: GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok(),
-    }))
+    q.duration_ms = Some(ExecMetrics::ms(total_elapsed));
+    q.compile_ms = metrics.compile_ms;
+    q.execute_ms = metrics.execute_ms;
+    q.authorization_ms = metrics.authorization_ms;
+    q.hydration_ms = metrics.hydration_ms;
+    q.row_count = Some(row_count as u64);
+    q.redacted_count = Some(redacted_count as u64);
+    q.ch_read_rows = Some(metrics.ch_read_rows);
+    q.ch_read_bytes = Some(metrics.ch_read_bytes);
+    q.ch_memory_usage = Some(metrics.ch_memory_usage);
+
+    q.graph_schema_version = GRAPH_SCHEMA_VERSION.trim().parse().ok();
+    q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
+    q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+    q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok();
 }
 
 const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
