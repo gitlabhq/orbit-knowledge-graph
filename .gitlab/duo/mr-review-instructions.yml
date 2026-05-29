@@ -81,3 +81,64 @@ instructions:
       - Error types and codes (no sensitive stack trace context)
 
       Only comment on clear issues. Give specific fixes.
+
+  - name: SOX Billing Boundary — gkg-server imports
+    fileFilters:
+      - "crates/gkg-server/**/*.rs"
+      - "!crates/gkg-server/src/billing_adapter.rs"
+    instructions: |
+      The SOX billing scope (ADR 013 — docs/design-documents/decisions/013_billing_sox_scope.md)
+      requires that interaction between gkg-server and gkg-billing flows through
+      a single conversion point: crates/gkg-server/src/billing_adapter.rs. Any
+      new billing touch point added anywhere else in gkg-server expands the
+      SOX-audited surface and must be reviewed by someone with SOX domain
+      knowledge.
+
+      Raise a CRITICAL comment if the diff in any file matched by these filters:
+
+      1. Introduces a `use gkg_billing` or `gkg_billing::` reference. The only
+         file in gkg-server permitted to import gkg-billing is billing_adapter.rs.
+      2. Adds a `pub use gkg_billing::...` re-export, or otherwise leaks
+         gkg-billing types into the public API of gkg-server. Re-exports widen
+         the SOX scope silently — anything importing gkg-server then gains
+         access.
+      3. Constructs, instantiates, or directly invokes any item that originates
+         in the `gkg_billing` crate.
+      4. Wires a new call site that hands billing-relevant data to anything
+         outside billing_adapter.rs. Billing-relevant data is any value used to
+         identify who or what entity is being billed, or how much is being
+         billed. Examples include (but are not limited to):
+           - User-identifying values: user IDs, usernames, JWT claims, realm.
+           - Entity/scope-identifying values: organization ID, root namespace
+             ID, namespace path, group ID, project ID, customer ID.
+           - Quantity values: quota, usage counts, billable units, seat counts,
+             consumption metrics, queries run, indexing completed.
+         If unsure whether a value is billing-relevant, treat it as one and
+         flag the change.
+
+      Explain why: the MR may be expanding the SOX-audited surface. Recommend
+      either moving the change into billing_adapter.rs or getting an explicit
+      review from anyone on the team with SOX domain knowledge.
+
+  - name: SOX Billing Boundary — direct event emission
+    fileFilters:
+      - "crates/**/*.rs"
+    instructions: |
+      Billing events are emitted only through the BillingTracker / BillingObserver
+      abstractions defined in gkg-billing, which wrap labkit-events'
+      `BillingEvent` and `Tracker::track_billing_event`. Nothing else in the
+      codebase should be constructing billing events or calling the billing
+      emission API directly. New emission paths outside that contract expand
+      the SOX-audited surface.
+
+      Raise a CRITICAL comment if the diff:
+
+      1. References `labkit_events::BillingEvent` or calls
+         `Tracker::track_billing_event` from any file outside `crates/gkg-billing/`.
+      2. Adds a new type, trait, or function whose name or doc-comment suggests
+         its purpose is to emit billing or usage telemetry.
+
+      Recommend the author route emission through BillingTracker / BillingObserver,
+      or get an explicit review from someone on the team with SOX domain
+      knowledge.
+
