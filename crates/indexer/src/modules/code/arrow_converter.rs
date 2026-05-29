@@ -174,21 +174,30 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
         .map(|col| col.name.clone())
         .collect();
 
-    let mut specs: Vec<ColumnSpec> = ontology
-        .edge_columns()
-        .iter()
-        .map(|c| ColumnSpec {
-            name: c.name.clone(),
-            col_type: match c.data_type {
-                OntDataType::Int => ColumnType::Int,
-                OntDataType::Bool => ColumnType::Bool,
-                OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
-                _ => ColumnType::Str,
-            },
-            nullable: false,
-        })
-        .collect();
+    // Build the union of logical columns across ALL edge tables so the
+    // batch can hold columns from tables with extra fields (gl_code_edge
+    // has project_id + branch that gl_edge does not).
+    let mut seen_cols = std::collections::HashSet::new();
+    let mut specs: Vec<ColumnSpec> = Vec::new();
+    for table_name in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table_name) {
+            for c in &config.columns {
+                if seen_cols.insert(c.name.clone()) {
+                    specs.push(ColumnSpec {
+                        name: c.name.clone(),
+                        col_type: match c.data_type {
+                            OntDataType::Int => ColumnType::Int,
+                            OntDataType::Bool => ColumnType::Bool,
+                            OntDataType::DateTime => ColumnType::TimestampMicros,
+                            _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
+                            _ => ColumnType::Str,
+                        },
+                        nullable: false,
+                    });
+                }
+            }
+        }
+    }
 
     let mut seen = std::collections::HashSet::new();
     for table_name in ontology.edge_tables() {
@@ -483,6 +492,8 @@ impl AsRecordBatch for IndexerEdgeRow<'_> {
     fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
         b.col("traversal_path")?
             .push_str(&self.env.traversal_path)?;
+        b.col("project_id")?.push_int(self.env.project_id)?;
+        b.col("branch")?.push_str(&self.env.branch)?;
         b.col("source_id")?.push_int(self.source_id)?;
         b.col("source_kind")?.push_str(self.source_node_kind)?;
         b.col("relationship_kind")?.push_str(self.edge_kind)?;
@@ -750,24 +761,45 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 table_rows.entry(table).or_default().push(i as u32);
             }
 
+            // Columns that only exist on gl_code_edge. Sub-batches going
+            // to other edge tables (gl_edge) must have them stripped.
+            let code_only_cols: &[&str] = &["project_id", "branch"];
+
             if table_rows.len() == 1 {
                 let table = *table_rows.keys().next().unwrap();
                 if table == self.table_names.default_edge_table() {
-                    result.push((table.to_string(), data.edges));
+                    let batch = drop_columns(&data.edges, code_only_cols);
+                    result.push((table.to_string(), batch));
                     return Ok(result);
                 }
             }
 
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
-                let batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
+                let mut batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
                     .map_err(|e| code_graph::v2::SinkError(format!("edge routing: {e}")))?;
+                if !table.contains("code_edge") {
+                    batch = drop_columns(&batch, code_only_cols);
+                }
                 result.push((table.to_string(), batch));
             }
         }
 
         Ok(result)
     }
+}
+
+/// Remove named columns from a RecordBatch (for routing edge sub-batches
+/// to tables that don't have gl_code_edge-specific columns).
+fn drop_columns(batch: &RecordBatch, drop: &[&str]) -> RecordBatch {
+    let schema = batch.schema();
+    let mut indices: Vec<usize> = Vec::new();
+    for (i, field) in schema.fields().iter().enumerate() {
+        if !drop.contains(&field.name().as_str()) {
+            indices.push(i);
+        }
+    }
+    batch.project(&indices).expect("column projection")
 }
 
 /// `BatchSink` for ClickHouse that buffers all batches per table in memory

@@ -88,10 +88,34 @@ impl ClickHouseStaleDataCleaner {
     }
 
     fn build_edge_delete_query(edge_table: &str, node_tables: &[&str]) -> String {
-        // Build a UNION ALL of source_ids from all code node tables for this
-        // project+branch. This scopes the edge scan to only edges whose source
-        // belongs to the project being indexed, instead of scanning the entire
-        // namespace.
+        // gl_code_edge has project_id + branch columns, so we can
+        // filter directly without a subquery join.
+        if edge_table.contains("code_edge") {
+            return format!(
+                r#"
+                INSERT INTO {edge_table}
+                    (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted)
+                SELECT
+                    traversal_path,
+                    project_id,
+                    branch,
+                    source_id,
+                    source_kind,
+                    relationship_kind,
+                    target_id,
+                    target_kind,
+                    true AS _deleted
+                FROM {edge_table} FINAL
+                WHERE traversal_path = {{traversal_path:String}}
+                  AND project_id = {{project_id:Int64}}
+                  AND branch = {{branch:String}}
+                  AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
+                "#,
+            );
+        }
+
+        // Other edge tables (gl_edge) lack project_id/branch, so scope
+        // via a source_id subquery from the node tables.
         let source_id_subqueries = node_tables
             .iter()
             .map(|t| {

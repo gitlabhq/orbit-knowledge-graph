@@ -250,15 +250,26 @@ pub fn denorm_tag_expr(
 }
 
 /// Build a TableRef for an edge scan: single table or UNION ALL across tables.
+///
+/// When multiple tables are involved, each UNION arm projects only the
+/// columns common to all edge tables (the 6 reserved edge columns) so
+/// that tables with extra columns (e.g. gl_code_edge's project_id/branch)
+/// don't cause a ClickHouse "UNION different number of columns" error.
 pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     if tables.len() == 1 {
         TableRef::scan(&tables[0], alias)
     } else {
+        let inner_alias = format!("_{alias}");
+        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|col| SelectExpr::col(&inner_alias, *col))
+            .collect();
+        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
         let arms: Vec<Query> = tables
             .iter()
             .map(|table| Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, format!("_{alias}")),
+                select: common_cols.clone(),
+                from: TableRef::scan(table, &inner_alias),
                 ..Default::default()
             })
             .collect();
