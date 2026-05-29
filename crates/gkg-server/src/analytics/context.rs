@@ -120,31 +120,17 @@ pub(crate) fn build_query(
         ch_memory_usage: Some(metrics.ch_memory_usage),
 
         // System versions (compile-time constants)
-        graph_schema_version: Some(GRAPH_SCHEMA_VERSION),
-        query_dsl_version: QUERY_DSL_VERSION.parse().ok(),
-        raw_output_format_version: RAW_OUTPUT_FORMAT_VERSION.parse().ok(),
-        goon_output_format_version: GOON_OUTPUT_FORMAT_VERSION.parse().ok(),
+        graph_schema_version: GRAPH_SCHEMA_VERSION.trim().parse().ok(),
+        query_dsl_version: QUERY_DSL_VERSION.trim().parse().ok(),
+        raw_output_format_version: RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok(),
+        goon_output_format_version: GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok(),
     }))
 }
 
-const GRAPH_SCHEMA_VERSION: u64 = {
-    let bytes = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).as_bytes();
-    let mut n: u64 = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] >= b'0' && bytes[i] <= b'9' {
-            n = n * 10 + (bytes[i] - b'0') as u64;
-        }
-        i += 1;
-    }
-    n
-};
-const QUERY_DSL_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
-const RAW_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
-const GOON_OUTPUT_FORMAT_VERSION: &str =
-    include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
+const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
+const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
+const RAW_OUTPUT_FORMAT_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
+const GOON_OUTPUT_FORMAT_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
 
 /// Parse an optional `Claims` string into one of the orbit_common bounded
 /// newtypes. The bounds are 255 chars for instance/host fields; if the

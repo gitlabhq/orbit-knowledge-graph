@@ -213,8 +213,8 @@
     },
     "graph_schema_version": {
       "description": "Graph DDL schema version (config/SCHEMA_VERSION).",
-      "type": ["integer", "null"],
-      "minimum": 0
+      "type": ["string", "null"],
+      "maxLength": 16
     },
     "query_dsl_version": {
       "description": "Query DSL semver (config/QUERY_DSL_VERSION).",
