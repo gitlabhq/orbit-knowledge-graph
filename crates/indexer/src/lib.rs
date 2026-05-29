@@ -259,8 +259,6 @@ pub async fn run_dispatcher(
         }
     });
 
-    // Migrations only fire here at boot, so the orchestrator opens the campaign
-    // when it marks a version migrating; the completion checker clears it.
     let campaign = Arc::new(campaign::CampaignState::new());
 
     let migration_metrics = schema::metrics::MigrationMetrics::new();

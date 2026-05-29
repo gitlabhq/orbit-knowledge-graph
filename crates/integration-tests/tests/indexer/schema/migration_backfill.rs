@@ -209,8 +209,6 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         "migration backfill requests should use task_id=0"
     );
 
-    // Every dispatch during the migration carries the campaign id derived from
-    // the migrating version.
     assert!(
         requests
             .iter()
