@@ -37,14 +37,10 @@ pub trait IndexingObserver: Send {
 
     fn set_campaign_id(&mut self, _campaign_id: Option<String>) {}
 
-    /// Rows and bytes read from the datalake (SDLC extract). Code indexing
-    /// reads from git, not the datalake, so it does not report this.
     fn record_datalake_read(&mut self, _rows: u64, _bytes: u64) {}
 
-    /// Rows and in-memory bytes written to the graph (both pipelines).
     fn record_graph_write(&mut self, _rows: u64, _bytes: u64) {}
 
-    /// Wall-clock duration of the indexing run.
     fn record_duration(&mut self, _duration_ms: u64) {}
 
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
