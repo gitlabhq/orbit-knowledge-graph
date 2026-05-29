@@ -192,10 +192,13 @@ impl Engine {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
         });
-        let max_inflight = configuration.max_concurrent_workers;
+        let global_max_inflight = configuration.max_concurrent_workers;
         let tasks: Vec<_> = subscriptions
             .into_iter()
-            .map(|subscription| self.listen(subscription, runtime.clone(), max_inflight))
+            .map(|subscription| {
+                let max_inflight = subscription.max_inflight.unwrap_or(global_max_inflight);
+                self.listen(subscription, runtime.clone(), max_inflight)
+            })
             .collect();
         futures::future::try_join_all(tasks).await?;
 
@@ -420,16 +423,23 @@ async fn run_handlers(
         let concurrency_group = concurrency_group.clone();
 
         tasks.spawn(async move {
-            let Some(_permit) = runtime
-                .worker_pool
-                .acquire_handler_slot(concurrency_group.as_deref())
-                .await
-            else {
-                warn!(
-                    handler = handler.name(),
-                    "worker pool semaphore closed, skipping handler"
-                );
-                return HandlerTaskOutcome::RetryRequested;
+            let _permit = if handler.requires_worker_pool() {
+                match runtime
+                    .worker_pool
+                    .acquire_handler_slot(concurrency_group.as_deref())
+                    .await
+                {
+                    Some(permit) => Some(permit),
+                    None => {
+                        warn!(
+                            handler = handler.name(),
+                            "worker pool semaphore closed, skipping handler"
+                        );
+                        return HandlerTaskOutcome::RetryRequested;
+                    }
+                }
+            } else {
+                None
             };
 
             let handler_start = Instant::now();

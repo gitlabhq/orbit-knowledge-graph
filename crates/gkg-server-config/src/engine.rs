@@ -177,6 +177,10 @@ impl Default for EntityHandlerConfig {
     }
 }
 
+fn default_fetch_concurrency() -> usize {
+    6
+}
+
 fn default_code_indexing_max_file_size_bytes() -> u64 {
     5_000_000
 }
@@ -213,6 +217,11 @@ pub struct CodeIndexingPipelineConfig {
     /// (import edges, call edges). 0 = no timeout.
     #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
     pub cross_file_resolve_timeout_ms: u64,
+    /// Maximum concurrent Gitaly repository fetch operations. Controls how
+    /// many repositories can be downloaded simultaneously in the pipelined
+    /// code indexer. 0 = no limit. Defaults to 6.
+    #[serde(default = "default_fetch_concurrency")]
+    pub fetch_concurrency: usize,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -224,6 +233,7 @@ impl Default for CodeIndexingPipelineConfig {
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
+            fetch_concurrency: default_fetch_concurrency(),
         }
     }
 }

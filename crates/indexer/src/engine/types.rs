@@ -34,6 +34,7 @@ pub struct Subscription {
     pub max_attempts: Option<u32>,
     pub retry_interval_secs: Option<u64>,
     pub max_ack_pending: Option<u32>,
+    pub max_inflight: Option<usize>,
 }
 
 impl PartialEq for Subscription {
@@ -62,6 +63,7 @@ impl Subscription {
             max_attempts: None,
             retry_interval_secs: None,
             max_ack_pending: None,
+            max_inflight: None,
         }
     }
 
@@ -85,6 +87,11 @@ impl Subscription {
         if config.dead_letter_on_exhaustion {
             self.dead_letter_on_exhaustion = true;
         }
+        self
+    }
+
+    pub fn with_max_inflight(mut self, max_inflight: usize) -> Self {
+        self.max_inflight = Some(max_inflight);
         self
     }
 
