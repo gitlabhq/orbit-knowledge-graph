@@ -1,24 +1,12 @@
+use std::time::Duration;
+
 use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use gkg_server_config::{AnalyticsConfig, DeploymentKind};
 use labkit_events::Error as LabkitError;
-use query_engine::compiler::QueryInfo;
+use query_engine::compiler::{ExecMetrics, QueryInfo};
 use serde::Serialize;
 
 use crate::auth::{Claims, SourceType};
-
-#[derive(Debug, Clone, Default, Serialize)]
-pub(crate) struct QueryExecMetrics {
-    pub duration_ms: Option<u64>,
-    pub compile_ms: Option<u64>,
-    pub execute_ms: Option<u64>,
-    pub authorization_ms: Option<u64>,
-    pub hydration_ms: Option<u64>,
-    pub row_count: Option<u64>,
-    pub redacted_count: Option<u64>,
-    pub ch_read_rows: Option<u64>,
-    pub ch_read_bytes: Option<u64>,
-    pub ch_memory_usage: Option<u64>,
-}
 
 /// Map any `Display`-able conversion error to [`LabkitError::Validation`]
 /// tagged with the schema field that produced it. Used by the typify-generated
@@ -60,12 +48,24 @@ pub(crate) fn build_common(
     }))
 }
 
+/// Finish-time wrapper that flattens `ExecMetrics` and adds row/duration fields.
+#[derive(Serialize)]
+struct FinishMetrics<'a> {
+    #[serde(flatten)]
+    base: &'a ExecMetrics,
+    duration_ms: u64,
+    row_count: u64,
+    redacted_count: u64,
+}
+
 pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
     coding_agent: Option<&str>,
-    query_info: Option<&QueryInfo>,
-    exec_metrics: Option<&QueryExecMetrics>,
+    metrics: &ExecMetrics,
+    row_count: usize,
+    redacted_count: usize,
+    total_elapsed: Duration,
 ) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
 
@@ -97,14 +97,16 @@ pub(crate) fn build_query(
     });
 
     let mut extra = serde_json::Map::new();
-    merge_into(&mut extra, query_info);
-    merge_into(&mut extra, exec_metrics);
+    merge_into(&mut extra, metrics.query_info.as_ref());
+    let finish = FinishMetrics {
+        base: metrics,
+        duration_ms: ExecMetrics::ms(total_elapsed),
+        row_count: row_count as u64,
+        redacted_count: redacted_count as u64,
+    };
+    merge_into(&mut extra, Some(&finish));
 
-    Ok(if extra.is_empty() {
-        ctx
-    } else {
-        ctx.with_extra(extra)
-    })
+    Ok(ctx.with_extra(extra))
 }
 
 fn merge_into<T: Serialize>(target: &mut serde_json::Map<String, serde_json::Value>, source: Option<&T>) {
@@ -207,9 +209,13 @@ mod tests {
         }
     }
 
+    fn default_metrics() -> ExecMetrics {
+        ExecMetrics::default()
+    }
+
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool, None, None, None).unwrap();
+        let query = build_query(claims, tool, None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -220,7 +226,7 @@ mod tests {
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None, None, None).unwrap();
+        let query = build_query(claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -268,7 +274,7 @@ mod tests {
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
-            let query = build_query(&claims, "query_graph", Some("claude-code"), None, None).unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code"), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -288,7 +294,7 @@ mod tests {
     #[test]
     fn build_query_drops_oversized_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65)), None, None).unwrap();
+        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65)), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
         assert!(query.data().get("coding_agent").is_none());
     }
 
@@ -368,14 +374,14 @@ mod tests {
         #[test]
         fn query_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-        let query = build_query(&claims, "query_graph", Some("claude-code"), None, None).unwrap();
+        let query = build_query(&claims, "query_graph", Some("claude-code"), &default_metrics(), 0, 0, Duration::ZERO).unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
         fn query_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let query = build_query(&claims, "query_graph", None, None, None).unwrap();
+            let query = build_query(&claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
@@ -387,7 +393,7 @@ mod tests {
         fn code_intelligence_validates_against_iglu_schema() {
             let mut claims = claims_with_paths(vec!["1/22/"]);
             claims.source_type = crate::auth::SourceType::CodeIntelligence;
-            let query = build_query(&claims, "query_graph", None, None, None).unwrap();
+            let query = build_query(&claims, "query_graph", None, &default_metrics(), 0, 0, Duration::ZERO).unwrap();
             assert_eq!(query.data()["source_type"], "code_intelligence");
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
@@ -410,7 +416,8 @@ mod tests {
             hydration_plan: "static", dynamic_columns: "default",
             path_max_depth: None, has_variable_hops: false, has_virtual_columns: false,
         };
-        let query = build_query(&claims, "query_graph", None, Some(&info), None).unwrap();
+        let metrics = ExecMetrics { query_info: Some(info), ..Default::default() };
+        let query = build_query(&claims, "query_graph", None, &metrics, 0, 0, Duration::ZERO).unwrap();
         let data = query.data();
 
         assert_eq!(data["source_type"], "mcp");

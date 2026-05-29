@@ -5,13 +5,9 @@ use std::time::Duration;
 use gkg_observability::billing::events as spec;
 use labkit_events::BillingEvent;
 use opentelemetry::KeyValue;
-use query_engine::compiler::QueryInfo;
+use query_engine::compiler::{ExecMetrics, QueryInfo};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
-use serde::Serialize;
-
-fn is_zero(v: &u64) -> bool {
-    *v == 0
-}
+use serde_json::json;
 
 use crate::constants::{
     CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, feature_qualified_name, normalize_realm,
@@ -34,42 +30,20 @@ fn correlation_id_string() -> String {
         .unwrap_or_default()
 }
 
-#[derive(Default, Serialize)]
-struct BillingMeta<'a> {
-    query_type: &'a str,
-    feature_qualified_name: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    query_info: Option<&'a QueryInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compile_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    execute_ms: Option<u64>,
-    #[serde(skip_serializing_if = "is_zero")]
-    ch_read_rows: u64,
-    #[serde(skip_serializing_if = "is_zero")]
-    ch_read_bytes: u64,
-    #[serde(skip_serializing_if = "is_zero")]
-    ch_memory_usage: u64,
-}
-
 pub struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
     inputs: BillingInputs,
-    meta: BillingMeta<'static>,
-    query_info: Option<QueryInfo>,
+    query_type: &'static str,
+    metrics: ExecMetrics,
     errored: Cell<bool>,
 }
 
 impl BillingObserver {
     pub fn new(tracker: Option<Arc<dyn BillingTracker>>, inputs: BillingInputs) -> Self {
         Self {
-            tracker,
-            inputs,
-            meta: BillingMeta {
-                query_type: "unknown",
-                ..Default::default()
-            },
-            query_info: None,
+            tracker, inputs,
+            query_type: "unknown",
+            metrics: ExecMetrics::default(),
             errored: Cell::new(false),
         }
     }
@@ -130,19 +104,16 @@ impl BillingObserver {
             builder = builder.deployment_type(dt.as_str());
         }
 
-        let meta = BillingMeta {
-            query_type: self.meta.query_type,
-            feature_qualified_name: &feature_qualified_name(&self.inputs.source_type),
-            query_info: self.query_info.as_ref(),
-            compile_ms: self.meta.compile_ms,
-            execute_ms: self.meta.execute_ms,
-            ch_read_rows: self.meta.ch_read_rows,
-            ch_read_bytes: self.meta.ch_read_bytes,
-            ch_memory_usage: self.meta.ch_memory_usage,
-        };
-        builder = builder.metadata(
-            serde_json::to_value(&meta).expect("BillingMeta is always serializable"),
-        );
+        let mut metadata = json!({
+            "query_type": self.query_type,
+            "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
+        });
+        if let (serde_json::Value::Object(map), Ok(serde_json::Value::Object(m))) =
+            (&mut metadata, serde_json::to_value(&self.metrics))
+        {
+            map.extend(m);
+        }
+        builder = builder.metadata(metadata);
 
         match builder.build() {
             Ok(event) => Some(event),
@@ -160,42 +131,15 @@ impl BillingObserver {
     }
 }
 
-fn ms(d: Duration) -> u64 {
-    d.as_millis().min(u64::MAX as u128) as u64
-}
-
 impl PipelineObserver for BillingObserver {
-    fn set_query_type(&mut self, query_type: &'static str) {
-        self.meta.query_type = query_type;
-    }
-
-    fn set_query_info(&mut self, info: QueryInfo) {
-        self.query_info = Some(info);
-    }
-
-    fn compiled(&mut self, elapsed: Duration) {
-        self.meta.compile_ms = Some(ms(elapsed));
-    }
-
-    fn executed(&mut self, elapsed: Duration, _batch_count: usize) {
-        self.meta.execute_ms = Some(ms(elapsed));
-    }
-
-    fn authorized(&mut self, _elapsed: Duration) {}
-
-    fn hydrated(&mut self, _elapsed: Duration) {}
-
-    fn query_executed(&mut self, _label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
-        self.meta.ch_read_rows += read_rows;
-        self.meta.ch_read_bytes += read_bytes;
-        if memory > 0 {
-            self.meta.ch_memory_usage = self.meta.ch_memory_usage.max(memory as u64);
-        }
-    }
-
-    fn record_error(&self, _error: &PipelineError) {
-        self.errored.set(true);
-    }
+    fn set_query_type(&mut self, query_type: &'static str) { self.query_type = query_type; }
+    fn set_query_info(&mut self, info: QueryInfo) { self.metrics.set_query_info(info); }
+    fn compiled(&mut self, elapsed: Duration) { self.metrics.compiled(elapsed); }
+    fn executed(&mut self, elapsed: Duration, _: usize) { self.metrics.executed(elapsed); }
+    fn authorized(&mut self, _: Duration) {}
+    fn hydrated(&mut self, _: Duration) {}
+    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) { self.metrics.query_executed(r, b, m); }
+    fn record_error(&self, _: &PipelineError) { self.errored.set(true); }
 
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
         if self.errored.get() {
@@ -205,7 +149,7 @@ impl PipelineObserver for BillingObserver {
             && let Some(event) = self.build_event()
         {
             let _span =
-                tracing::info_span!("billing.track", query_type = self.meta.query_type).entered();
+                tracing::info_span!("billing.track", query_type = self.query_type).entered();
             tracker.track(event);
             METRICS.emitted.add(1, &[]);
         }

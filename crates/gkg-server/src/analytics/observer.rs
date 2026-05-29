@@ -4,14 +4,14 @@ use std::time::{Duration, Instant};
 
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::StructuredEvent;
-use query_engine::compiler::QueryInfo;
+use query_engine::compiler::{ExecMetrics, QueryInfo};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
 
 use gkg_analytics::AnalyticsTracker;
 
-use super::context::{QueryExecMetrics, build_common, build_query};
+use super::context::{build_common, build_query};
 
 const GKG_CATEGORY: &str = "gkg";
 const ACTION_QUERY_EXECUTED: &str = "gkg_query_executed";
@@ -24,9 +24,8 @@ pub(crate) struct AnalyticsObserver {
     coding_agent: Option<String>,
     schema_version: String,
     errored: Cell<bool>,
-    query_info: Option<QueryInfo>,
     start: Instant,
-    exec_metrics: QueryExecMetrics,
+    metrics: ExecMetrics,
 }
 
 impl AnalyticsObserver {
@@ -39,59 +38,24 @@ impl AnalyticsObserver {
         schema_version: String,
     ) -> Self {
         Self {
-            tracker,
-            config,
-            claims,
-            tool_name: tool_name.into(),
-            coding_agent,
-            schema_version,
+            tracker, config, claims,
+            tool_name: tool_name.into(), coding_agent, schema_version,
             errored: Cell::new(false),
-            query_info: None,
             start: Instant::now(),
-            exec_metrics: QueryExecMetrics::default(),
+            metrics: ExecMetrics::default(),
         }
     }
-}
-
-fn ms(d: Duration) -> u64 {
-    d.as_millis().min(u64::MAX as u128) as u64
 }
 
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
-
-    fn set_query_info(&mut self, info: QueryInfo) {
-        self.query_info = Some(info);
-    }
-
-    fn compiled(&mut self, elapsed: Duration) {
-        self.exec_metrics.compile_ms = Some(ms(elapsed));
-    }
-
-    fn executed(&mut self, elapsed: Duration, _batch_count: usize) {
-        self.exec_metrics.execute_ms = Some(ms(elapsed));
-    }
-
-    fn authorized(&mut self, elapsed: Duration) {
-        self.exec_metrics.authorization_ms = Some(ms(elapsed));
-    }
-
-    fn hydrated(&mut self, elapsed: Duration) {
-        self.exec_metrics.hydration_ms = Some(ms(elapsed));
-    }
-
-    fn query_executed(&mut self, _label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
-        *self.exec_metrics.ch_read_rows.get_or_insert(0) += read_rows;
-        *self.exec_metrics.ch_read_bytes.get_or_insert(0) += read_bytes;
-        if memory > 0 {
-            let mem = &mut self.exec_metrics.ch_memory_usage;
-            *mem = Some(mem.unwrap_or(0).max(memory as u64));
-        }
-    }
-
-    fn record_error(&self, _error: &PipelineError) {
-        self.errored.set(true);
-    }
+    fn set_query_info(&mut self, info: QueryInfo) { self.metrics.set_query_info(info); }
+    fn compiled(&mut self, elapsed: Duration) { self.metrics.compiled(elapsed); }
+    fn executed(&mut self, elapsed: Duration, _: usize) { self.metrics.executed(elapsed); }
+    fn authorized(&mut self, elapsed: Duration) { self.metrics.authorized(elapsed); }
+    fn hydrated(&mut self, elapsed: Duration) { self.metrics.hydrated(elapsed); }
+    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) { self.metrics.query_executed(r, b, m); }
+    fn record_error(&self, _: &PipelineError) { self.errored.set(true); }
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
         if self.errored.get() {
@@ -100,11 +64,6 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
-
-        let mut metrics = self.exec_metrics.clone();
-        metrics.duration_ms = Some(ms(self.start.elapsed()));
-        metrics.row_count = Some(row_count as u64);
-        metrics.redacted_count = Some(redacted_count as u64);
 
         let common = match build_common(&self.config, &self.claims, &self.schema_version) {
             Ok(c) => c,
@@ -117,8 +76,8 @@ impl PipelineObserver for AnalyticsObserver {
             &self.claims,
             &self.tool_name,
             self.coding_agent.as_deref(),
-            self.query_info.as_ref(),
-            Some(&metrics),
+            &self.metrics,
+            row_count, redacted_count, self.start.elapsed(),
         ) {
             Ok(q) => q,
             Err(e) => {
