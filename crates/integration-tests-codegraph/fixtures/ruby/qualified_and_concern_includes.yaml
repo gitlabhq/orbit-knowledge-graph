@@ -1,0 +1,105 @@
+name: "Ruby qualified superclasses, module includes, and ActiveSupport::Concern included blocks"
+
+fixtures:
+  - path: app/policies/base_policy.rb
+    content: |
+      class BasePolicy
+      end
+
+  - path: lib/gitlab/allowable.rb
+    content: |
+      module Gitlab
+        module Allowable
+          def can?(user, action, subject)
+          end
+        end
+      end
+
+  # Direct child written with a leading `::` scope operator.
+  - path: app/policies/abuse_report_policy.rb
+    content: |
+      class AbuseReportPolicy < ::BasePolicy
+      end
+
+  # Namespaced intermediate parent, plus a grandchild that reaches the root
+  # through it.
+  - path: app/policies/namespaces/shared_policy.rb
+    content: |
+      module Namespaces
+        class SharedPolicy < ::BasePolicy
+        end
+      end
+
+  - path: app/policies/group_policy.rb
+    content: |
+      class GroupPolicy < Namespaces::SharedPolicy
+      end
+
+  # A module (not a class) that includes another module.
+  - path: app/helpers/projects_helper.rb
+    content: |
+      module ProjectsHelper
+        include Gitlab::Allowable
+      end
+
+  # ActiveSupport::Concern: the include lives inside an `included do` block.
+  - path: app/serializers/request_aware_entity.rb
+    content: |
+      module RequestAwareEntity
+        extend ActiveSupport::Concern
+
+        included do
+          include Gitlab::Allowable
+        end
+      end
+
+tests:
+  - name: "qualified superclass `< ::BasePolicy` links via Extends"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'AbuseReportPolicy'
+        AND parent.fqn = 'BasePolicy'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "namespaced superclass `< Namespaces::SharedPolicy` links via Extends"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'GroupPolicy'
+        AND parent.fqn = 'Namespaces::SharedPolicy'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "namespaced intermediate `< ::BasePolicy` links so the chain reaches the root"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'Namespaces::SharedPolicy'
+        AND parent.fqn = 'BasePolicy'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "module include links via Extends (ProjectsHelper -> Gitlab::Allowable)"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'ProjectsHelper'
+        AND parent.fqn = 'Gitlab::Allowable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "ActiveSupport::Concern `included do; include X` links via Extends"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'RequestAwareEntity'
+        AND parent.fqn = 'Gitlab::Allowable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }

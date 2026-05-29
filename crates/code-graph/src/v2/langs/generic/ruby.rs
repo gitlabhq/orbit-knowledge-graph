@@ -43,7 +43,9 @@ impl DslLanguage for RubyDsl {
             scope("class", "Class")
                 .def_kind(DefKind::Class)
                 .metadata(metadata().super_types(ruby_super_types)),
-            scope("module", "Module").def_kind(DefKind::Class),
+            scope("module", "Module")
+                .def_kind(DefKind::Class)
+                .metadata(metadata().super_types(ruby_super_types)),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
             // class << self: transparent scope, methods inside are
@@ -455,7 +457,22 @@ fn ruby_rewrite_send(node: &N<'_>, name: &str) -> Option<String> {
     None
 }
 
+fn strip_leading_scope(name: &str) -> String {
+    name.strip_prefix("::").unwrap_or(name).to_string()
+}
+
 /// Extract super types: superclass + include/extend calls in the class body.
+fn collect_include_args(call: &N<'_>, types: &mut Vec<String>) {
+    if let Some(args) = call.field("arguments") {
+        for arg in args.children() {
+            let kind = arg.kind();
+            if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
+                types.push(strip_leading_scope(&arg.text()));
+            }
+        }
+    }
+}
+
 fn ruby_super_types(node: &N<'_>) -> Vec<String> {
     let mut types = Vec::new();
 
@@ -469,7 +486,7 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
             k.as_ref() == "constant" || k.as_ref() == "scope_resolution"
         })
     {
-        let name = type_node.text().to_string();
+        let name = strip_leading_scope(&type_node.text());
         if !name.is_empty() {
             types.push(name);
         }
@@ -485,16 +502,27 @@ fn ruby_super_types(node: &N<'_>) -> Vec<String> {
                 .field("method")
                 .map(|m| m.text().to_string())
                 .unwrap_or_default();
-            if method_name != "include" && method_name != "extend" && method_name != "prepend" {
-                continue;
-            }
-            if let Some(args) = child.field("arguments") {
-                for arg in args.children() {
-                    let kind = arg.kind();
-                    if kind.as_ref() == "constant" || kind.as_ref() == "scope_resolution" {
-                        types.push(arg.text().to_string());
+            match method_name.as_str() {
+                "include" | "extend" | "prepend" => collect_include_args(&child, &mut types),
+                "included" | "prepended" => {
+                    if let Some(block) = child.field("block")
+                        && let Some(block_body) = block.field("body")
+                    {
+                        for inner in block_body.children() {
+                            if inner.kind().as_ref() != "call" {
+                                continue;
+                            }
+                            let m = inner
+                                .field("method")
+                                .map(|m| m.text().to_string())
+                                .unwrap_or_default();
+                            if matches!(m.as_str(), "include" | "extend" | "prepend") {
+                                collect_include_args(&inner, &mut types);
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
         }
     }
@@ -551,7 +579,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
                 if !matches!(arg.kind().as_ref(), "constant" | "scope_resolution") {
                     continue;
                 }
-                push_named_import(imports, import_type, arg.text().to_string());
+                push_named_import(imports, import_type, strip_leading_scope(&arg.text()));
             }
             true
         }
@@ -891,6 +919,96 @@ mod tests {
         assert_eq!(
             ruby_constant_to_require_path("ExternalClient").as_deref(),
             Some("external_client")
+        );
+    }
+
+    #[test]
+    fn leading_scope_stripped_from_super_types() {
+        let result = parse(
+            "class AbuseReportPolicy < ::BasePolicy\nend\n\
+             class GroupPolicy < BasePolicy\n  include ::Gitlab::Allowable\nend\n",
+        )
+        .unwrap();
+
+        let abuse = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "AbuseReportPolicy")
+            .unwrap();
+        let meta = abuse.metadata.as_ref().expect("AbuseReportPolicy metadata");
+        assert!(
+            meta.super_types.contains(&"BasePolicy".to_string()),
+            "leading :: should be stripped: {:?}",
+            meta.super_types
+        );
+        assert!(
+            !meta.super_types.iter().any(|s| s.starts_with("::")),
+            "no super_type should retain a leading ::: {:?}",
+            meta.super_types
+        );
+
+        let group = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "GroupPolicy")
+            .unwrap();
+        let gmeta = group.metadata.as_ref().expect("GroupPolicy metadata");
+        assert!(
+            gmeta.super_types.contains(&"BasePolicy".to_string()),
+            "unqualified superclass still works: {:?}",
+            gmeta.super_types
+        );
+        assert!(
+            gmeta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "qualified include should be stripped of leading ::: {:?}",
+            gmeta.super_types
+        );
+
+        let allowable_import = result
+            .imports
+            .iter()
+            .find(|i| i.name.as_deref() == Some("Allowable"))
+            .expect("include ::Gitlab::Allowable should be recorded as an import");
+        assert_eq!(
+            allowable_import.path, "Gitlab",
+            "import path should drop the leading ::, got {:?}",
+            allowable_import.path
+        );
+    }
+
+    #[test]
+    fn module_includes_become_super_types() {
+        let result = parse("module ProjectsHelper\n  include Gitlab::Allowable\nend\n").unwrap();
+        let m = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "ProjectsHelper")
+            .unwrap();
+        let meta = m.metadata.as_ref().expect("ProjectsHelper metadata");
+        assert!(
+            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "module include should be captured as a super type: {:?}",
+            meta.super_types
+        );
+    }
+
+    #[test]
+    fn concern_included_block_includes_become_super_types() {
+        let result = parse(
+            "module RequestAwareEntity\n  extend ActiveSupport::Concern\n  \
+             included do\n    include Gitlab::Allowable\n  end\nend\n",
+        )
+        .unwrap();
+        let m = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "RequestAwareEntity")
+            .unwrap();
+        let meta = m.metadata.as_ref().expect("RequestAwareEntity metadata");
+        assert!(
+            meta.super_types.contains(&"Gitlab::Allowable".to_string()),
+            "include inside `included do` should be captured: {:?}",
+            meta.super_types
         );
     }
 }
