@@ -52,6 +52,18 @@ impl PipelineStats {
     }
 }
 
+impl From<PipelineStats> for crate::observer::ResourceStats {
+    fn from(stats: PipelineStats) -> Self {
+        Self {
+            read_rows: stats.read_rows,
+            read_bytes: stats.read_bytes,
+            written_rows: stats.written_rows,
+            written_bytes: stats.written_bytes,
+            duration_ms: stats.duration_ms,
+        }
+    }
+}
+
 /// Rows and bytes handed to the graph destination by a single `transform` call.
 #[derive(Debug, Clone, Copy, Default)]
 struct WriteCounts {
@@ -232,6 +244,12 @@ impl Pipeline {
             written_bytes,
             duration_ms: elapsed.as_millis() as u64,
         };
+
+        context
+            .observer
+            .lock()
+            .unwrap()
+            .record_resource_stats(stats.into());
 
         if total_rows > 0 {
             info!(
