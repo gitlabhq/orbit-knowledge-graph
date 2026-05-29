@@ -4,6 +4,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use axum::Router;
@@ -151,6 +152,7 @@ async fn readiness_probe_gitlab_scenarios() {
             graph_client: infra.ch_client.clone(),
             datalake_client: infra.ch_client.clone(),
             gitlab_client: None,
+            serving: Arc::new(AtomicBool::new(true)),
         };
         let router = create_health_router(state);
         let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -169,6 +171,7 @@ async fn readiness_probe_gitlab_scenarios() {
             graph_client: infra.ch_client.clone(),
             datalake_client: infra.ch_client.clone(),
             gitlab_client: Some(Arc::new(build_gitlab_client(&format!("http://{addr}")))),
+            serving: Arc::new(AtomicBool::new(true)),
         };
         let router = create_health_router(state);
         let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -186,6 +189,7 @@ async fn readiness_probe_gitlab_scenarios() {
             graph_client: infra.ch_client.clone(),
             datalake_client: infra.ch_client.clone(),
             gitlab_client: Some(Arc::new(build_gitlab_client(&format!("http://{addr}")))),
+            serving: Arc::new(AtomicBool::new(true)),
         };
         let router = create_health_router(state);
         let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -202,6 +206,7 @@ async fn readiness_probe_gitlab_scenarios() {
             graph_client: infra.ch_client.clone(),
             datalake_client: infra.ch_client.clone(),
             gitlab_client: Some(Arc::new(build_gitlab_client("http://127.0.0.1:1"))),
+            serving: Arc::new(AtomicBool::new(true)),
         };
         let router = create_health_router(state);
         let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
@@ -210,4 +215,23 @@ async fn readiness_probe_gitlab_scenarios() {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(components.contains(&"gitlab".to_string()));
     }
+}
+
+#[tokio::test]
+async fn readiness_probe_is_unavailable_until_serving() {
+    let infra = start_infra().await;
+
+    let state = HealthState {
+        nats_client: infra.nats_client.clone(),
+        graph_client: infra.ch_client.clone(),
+        datalake_client: infra.ch_client.clone(),
+        gitlab_client: None,
+        serving: Arc::new(AtomicBool::new(false)),
+    };
+    let router = create_health_router(state);
+    let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(json["status"], "starting");
+    assert!(unhealthy_components(&json).contains(&"schema_gate".to_string()));
 }

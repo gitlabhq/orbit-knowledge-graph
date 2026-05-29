@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
@@ -18,6 +19,7 @@ pub struct HealthState {
     pub graph_client: ArrowClickHouseClient,
     pub datalake_client: ArrowClickHouseClient,
     pub gitlab_client: Option<Arc<GitlabClient>>,
+    pub serving: Arc<AtomicBool>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +52,17 @@ async fn live() -> Json<HealthResponse> {
 }
 
 async fn ready(State(state): State<HealthState>) -> impl IntoResponse {
+    if !state.serving.load(Ordering::Relaxed) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(HealthResponse {
+                status: "starting",
+                version: version(),
+                unhealthy_components: vec!["schema_gate"],
+            }),
+        );
+    }
+
     let nats_healthy =
         state.nats_client.connection_state() == async_nats::connection::State::Connected;
 

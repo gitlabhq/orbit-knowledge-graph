@@ -116,14 +116,16 @@ pub async fn run(
         .map_err(HandlerInitError::new)?
         .map(Arc::new);
 
-    // Start the health server before waiting for schema readiness so that
-    // Kubernetes liveness and readiness probes are answered during the
-    // (potentially long) schema wait phase.
+    // Start the health server before waiting for schema readiness so that the
+    // Kubernetes liveness probe is answered during the (potentially long) schema
+    // wait phase. Readiness stays `503` until the gate clears (`serving`).
+    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_state = HealthState {
         nats_client: broker.nats_client().clone(),
         graph_client: config.graph.build_client(),
         datalake_client: config.datalake.build_client(),
         gitlab_client,
+        serving: serving.clone(),
     };
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
@@ -199,6 +201,7 @@ pub async fn run(
         engine_handle.stop();
     });
 
+    serving.store(true, std::sync::atomic::Ordering::Relaxed);
     info!("indexer started");
     let health_abort = health_task.abort_handle();
     let result = tokio::select! {
@@ -235,13 +238,16 @@ pub async fn run_dispatcher(
     let metrics = ScheduledTaskMetrics::new();
     let lock_service = services.lock_service.clone();
 
-    // Start the health server before migration so that Kubernetes liveness and
-    // readiness probes are answered during the (potentially long) DDL phase.
+    // Start the health server before migration so that the Kubernetes liveness
+    // probe is answered during the (potentially long) DDL phase. Readiness stays
+    // `503` until migration completes (`serving`).
+    let serving = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let health_state = HealthState {
         nats_client: services.nats_client.clone(),
         graph_client: config.graph.build_client(),
         datalake_client: config.datalake.build_client(),
         gitlab_client: None,
+        serving: serving.clone(),
     };
     let health_shutdown = shutdown.clone();
     let health_bind_address = config.health_bind_address;
@@ -255,6 +261,7 @@ pub async fn run_dispatcher(
     let migration_metrics = schema::metrics::MigrationMetrics::new();
     info!("running schema migration check");
     schema::migration::run_if_needed(&graph, &lock_service, ontology, &migration_metrics).await?;
+    serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let deletion_graph = Arc::new(config.graph.build_client());
     let deletion_datalake = Arc::new(config.datalake.build_client());
