@@ -5,10 +5,13 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::input::Input;
-use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::hydrate::HydrationPlan;
 
 /// Accumulated pipeline execution metrics. Embedded by observer impls.
+///
+/// Fields are `pub` -- observers write directly, no setters needed.
+/// `query_executed` is the one exception: it accumulates across multiple
+/// ClickHouse round-trips.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ExecMetrics {
     #[serde(skip)]
@@ -27,24 +30,6 @@ pub struct ExecMetrics {
 impl ExecMetrics {
     pub fn ms(d: Duration) -> u64 {
         d.as_millis().min(u64::MAX as u128) as u64
-    }
-
-    pub fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.input = Some(ctx.input.clone());
-        self.hydration = Some(ctx.hydration.clone());
-    }
-
-    pub fn compiled(&mut self, elapsed: Duration) {
-        self.compile_ms = Some(Self::ms(elapsed));
-    }
-    pub fn executed(&mut self, elapsed: Duration) {
-        self.execute_ms = Some(Self::ms(elapsed));
-    }
-    pub fn authorized(&mut self, elapsed: Duration) {
-        self.authorization_ms = Some(Self::ms(elapsed));
-    }
-    pub fn hydrated(&mut self, elapsed: Duration) {
-        self.hydration_ms = Some(Self::ms(elapsed));
     }
 
     pub fn query_executed(&mut self, read_rows: u64, read_bytes: u64, memory: i64) {

@@ -54,19 +54,20 @@ impl AnalyticsObserver {
 impl PipelineObserver for AnalyticsObserver {
     fn set_query_type(&mut self, _query_type: &'static str) {}
     fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
-        self.metrics.set_compiled(ctx);
+        self.metrics.input = Some(ctx.input.clone());
+        self.metrics.hydration = Some(ctx.hydration.clone());
     }
     fn compiled(&mut self, elapsed: Duration) {
-        self.metrics.compiled(elapsed);
+        self.metrics.compile_ms = Some(ExecMetrics::ms(elapsed));
     }
     fn executed(&mut self, elapsed: Duration, _: usize) {
-        self.metrics.executed(elapsed);
+        self.metrics.execute_ms = Some(ExecMetrics::ms(elapsed));
     }
     fn authorized(&mut self, elapsed: Duration) {
-        self.metrics.authorized(elapsed);
+        self.metrics.authorization_ms = Some(ExecMetrics::ms(elapsed));
     }
     fn hydrated(&mut self, elapsed: Duration) {
-        self.metrics.hydrated(elapsed);
+        self.metrics.hydration_ms = Some(ExecMetrics::ms(elapsed));
     }
     fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) {
         self.metrics.query_executed(r, b, m);
