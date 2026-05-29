@@ -15,7 +15,7 @@
       "description": "Source type of the request, matching the value emitted in the GKG JWT source_type claim by Rails.",
       "type": "string",
       "enum": ["frontend", "dws", "mcp", "core", "rest", "code_intelligence"],
-      "default": "mcp"
+      "default": "rest"
     },
     "tool_name": {
       "description": "Name of the Orbit tool invoked (e.g. query_graph, get_graph_schema).",
