@@ -10,7 +10,7 @@ pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::{QueryError, Result};
 use crate::input::*;
@@ -32,6 +32,10 @@ pub struct Plan {
     pub cursor: Option<InputCursor>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denorm_columns: HashMap<(String, String, String), (String, String)>,
+    /// Per-table column sets from the ontology. Used by the lowerer to
+    /// push node-level filters (e.g. project_id, branch) down to edge
+    /// scans when the edge table has those columns.
+    pub table_columns: HashMap<String, HashSet<String>>,
     pub body: PlanBody,
 }
 

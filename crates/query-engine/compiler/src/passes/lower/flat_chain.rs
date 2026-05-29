@@ -66,6 +66,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &plan.nodes,
                 start_col,
                 end_col,
+                &plan.table_columns,
             );
         }
 
@@ -141,6 +142,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                     &plan.nodes,
                                     start_col,
                                     end_col,
+                                    &plan.table_columns,
                                 );
                                 Expr::conjoin(nw)
                             },

@@ -254,6 +254,7 @@ pub(super) fn push_edge_predicates(
     nodes: &HashMap<String, NodePlan>,
     start_col: &str,
     end_col: &str,
+    table_columns: &HashMap<String, HashSet<String>>,
 ) {
     if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
         where_parts.push(f);
@@ -272,6 +273,25 @@ pub(super) fn push_edge_predicates(
         }
     }
     where_parts.push(deleted_false(alias));
+
+    // Push node-level filters down to the edge scan when the edge table
+    // carries those columns (e.g. project_id, branch on gl_code_edge).
+    // This lets ClickHouse use the primary key prefix for scoping.
+    if let Some(edge_cols) = table_columns.get(&hop.edge_table) {
+        let reserved: HashSet<&str> = ontology::constants::EDGE_RESERVED_COLUMNS
+            .iter()
+            .copied()
+            .collect();
+        for node_alias in [&hop.from_node, &hop.to_node] {
+            if let Some(np) = nodes.get(node_alias) {
+                for (prop, filter) in &np.filters {
+                    if edge_cols.contains(prop) && !reserved.contains(prop.as_str()) {
+                        where_parts.push(filter_to_expr(alias, prop, filter));
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Emit denorm tag filters computed from `plan.denorm_columns`.

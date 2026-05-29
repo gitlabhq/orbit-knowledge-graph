@@ -204,6 +204,7 @@ pub fn plan(input: &mut Input) -> Plan {
         cursor: input.cursor,
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
+        table_columns: input.compiler.table_columns.clone(),
         body,
     }
 }
