@@ -361,16 +361,17 @@ local resources = [
 ];
 
 // 8. Schema migration ----------------------------------------------------
-// Coverage relies on dispatcher-emitted gauges, currently dark in prod
-// (issue #524). The phase counter is emitted from indexer-mode startup
-// and populates today.
+// Schema migration is orchestrated by the dispatcher (DispatchIndexing
+// mode), so every series here is filtered to the gkg-dispatcher container,
+// not the indexer.
+local MIG_SEL = o.GKG_DSP_SEL;
 local migration = [
   o.row('Schema migration'),
   o.timeseries(
     'Migration: indexed / eligible coverage',
-    'Per-scope coverage of the migrating schema version. SDLC reaching 100% triggers promotion. Code coverage is informational. Currently dark in prod, see #524.',
+    'Per-scope coverage of the migrating schema version. SDLC reaching 100% triggers promotion. Code coverage is informational.',
     [o.target(
-      '(sum by (scope) (gkg_schema_indexed_units{%s})) / (sum by (scope) (gkg_schema_eligible_units{%s}) > 0)' % [SEL, SEL],
+      '(sum by (scope) (gkg_schema_indexed_units{%s})) / (sum by (scope) (gkg_schema_eligible_units{%s}) > 0)' % [MIG_SEL, MIG_SEL],
       '{{scope}}',
       DS,
     )],
@@ -378,11 +379,14 @@ local migration = [
   ),
   o.timeseries(
     'Migration: migrating-version age',
-    'Wall-clock seconds since the current migrating version was marked. Flat zero when no migration is active. Currently dark in prod, see #524.',
-    [o.target('gkg_schema_migrating_age_seconds{%s}' % [SEL], 'age', DS)],
+    'Wall-clock seconds since the current migrating version was marked. Flat zero when no migration is active.',
+    [o.target('gkg_schema_migrating_age_seconds{%s}' % [MIG_SEL], 'age', DS)],
     's', 12, 8,
   ),
-] + o.counterPanels(o.metric('gkg_schema_migration_phase_total'), DS, SEL);
+]
++ o.counterPanels(o.metric('gkg_schema_migration_phase_total'), DS, MIG_SEL)
++ o.counterPanels(o.metric('gkg_schema_migration_completed_total'), DS, MIG_SEL)
++ o.counterPanels(o.metric('gkg_schema_cleanup_total'), DS, MIG_SEL);
 
 // 9. Reference (collapsed by default) ------------------------------------
 // Scheduler metrics used by the data deletion panels below.

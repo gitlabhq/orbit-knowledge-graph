@@ -4582,7 +4582,7 @@
          },
          "id": 87,
          "panels": [ ],
-         "title": "Schema migration (indexer)",
+         "title": "Schema migration (dispatcher)",
          "type": "row"
       },
       {
@@ -4628,7 +4628,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (version_band, result) (rate(gkg_schema_cleanup_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (version_band, result) (rate(gkg_schema_cleanup_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{version_band}} / {{result}}",
                "refId": "A"
             }
@@ -4679,7 +4679,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (scope, version_band) (gkg_schema_eligible_units{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "expr": "sum by (scope, version_band) (gkg_schema_eligible_units{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
                "legendFormat": "{{scope}} / {{version_band}}",
                "refId": "A"
             }
@@ -4730,7 +4730,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (scope, version_band) (gkg_schema_indexed_units{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "expr": "sum by (scope, version_band) (gkg_schema_indexed_units{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
                "legendFormat": "{{scope}} / {{version_band}}",
                "refId": "A"
             }
@@ -4781,7 +4781,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
                "legendFormat": "{{instance}}",
                "refId": "A"
             }
@@ -4832,7 +4832,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{instance}}",
                "refId": "A"
             }
@@ -4883,7 +4883,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (phase, result) (rate(gkg_schema_migration_phase_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (phase, result) (rate(gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{phase}} / {{result}}",
                "refId": "A"
             }
@@ -7018,6 +7018,292 @@
          },
          "id": 135,
          "panels": [ ],
+         "title": "Billing quota (webserver)",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Requests that bypassed the quota gate because their source_type is not in the metered set (mcp/rest), labelled by source_type.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 374
+         },
+         "id": 136,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (source_type) (rate(gkg_billing_quota_bypassed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{source_type}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_quota_bypassed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Current number of entries in the per-pod quota decision cache. Approaches the QUOTA_MAX_CACHE_ENTRIES ceiling under sustained load from many distinct namespaces.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 374
+         },
+         "id": 137,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(gkg_billing_quota_cache_entries{container=\"gkg-webserver\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_quota_cache_entries",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 374
+         },
+         "id": 138,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{outcome}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{outcome}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_billing_quota_cdot_duration_seconds_bucket{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{outcome}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_billing_quota_cdot_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Latency of upstream CustomersDot HEAD requests for quota resolution. Recorded once per actual HTTP call; concurrent cache-miss coalescing means this count is lower than the decisions{cache=miss} counter under load.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 382
+         },
+         "id": 139,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_billing_quota_cdot_duration_seconds_count{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_quota_cdot_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 382
+         },
+         "id": 140,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (decision, cache, source_type) (rate(gkg_billing_quota_decisions_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{decision}} / {{cache}} / {{source_type}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_billing_quota_decisions_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 390
+         },
+         "id": 141,
+         "panels": [ ],
          "title": "Circuit breaker (CH / NATS / GitLab clients)",
          "type": "row"
       },
@@ -7042,9 +7328,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 374
+            "y": 391
          },
-         "id": 136,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -7093,9 +7379,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 374
+            "y": 391
          },
-         "id": 137,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -7144,9 +7430,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 374
+            "y": 391
          },
-         "id": 138,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [
@@ -7180,9 +7466,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 382
+            "y": 399
          },
-         "id": 139,
+         "id": 145,
          "panels": [ ],
          "title": "Siphon producers",
          "type": "row"
@@ -7208,9 +7494,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 383
+            "y": 400
          },
-         "id": 140,
+         "id": 146,
          "options": {
             "legend": {
                "calcs": [
@@ -7244,9 +7530,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 391
+            "y": 408
          },
-         "id": 141,
+         "id": 147,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -7272,9 +7558,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 392
+            "y": 409
          },
-         "id": 142,
+         "id": 148,
          "options": {
             "legend": {
                "calcs": [
@@ -7308,9 +7594,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 400
+            "y": 417
          },
-         "id": 143,
+         "id": 149,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -7336,9 +7622,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 401
+            "y": 418
          },
-         "id": 144,
+         "id": 150,
          "options": {
             "legend": {
                "calcs": [
@@ -7387,9 +7673,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 401
+            "y": 418
          },
-         "id": 145,
+         "id": 151,
          "options": {
             "legend": {
                "calcs": [
@@ -7438,9 +7724,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 401
+            "y": 418
          },
-         "id": 146,
+         "id": 152,
          "options": {
             "legend": {
                "calcs": [
@@ -7489,9 +7775,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 409
+            "y": 426
          },
-         "id": 147,
+         "id": 153,
          "options": {
             "legend": {
                "calcs": [
@@ -7540,9 +7826,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 409
+            "y": 426
          },
-         "id": 148,
+         "id": 154,
          "options": {
             "legend": {
                "calcs": [
@@ -7591,9 +7877,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 409
+            "y": 426
          },
-         "id": 149,
+         "id": 155,
          "options": {
             "legend": {
                "calcs": [
@@ -7642,9 +7928,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 417
+            "y": 434
          },
-         "id": 150,
+         "id": 156,
          "options": {
             "legend": {
                "calcs": [
@@ -7693,9 +7979,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 417
+            "y": 434
          },
-         "id": 151,
+         "id": 157,
          "options": {
             "legend": {
                "calcs": [
@@ -7744,9 +8030,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 417
+            "y": 434
          },
-         "id": 152,
+         "id": 158,
          "options": {
             "legend": {
                "calcs": [
@@ -7795,9 +8081,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 425
+            "y": 442
          },
-         "id": 153,
+         "id": 159,
          "options": {
             "legend": {
                "calcs": [
@@ -7831,9 +8117,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 433
+            "y": 450
          },
-         "id": 154,
+         "id": 160,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -7859,9 +8145,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 434
+            "y": 451
          },
-         "id": 155,
+         "id": 161,
          "options": {
             "legend": {
                "calcs": [
@@ -7928,9 +8214,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 434
+            "y": 451
          },
-         "id": 156,
+         "id": 162,
          "options": {
             "legend": {
                "calcs": [
@@ -7979,9 +8265,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 434
+            "y": 451
          },
-         "id": 157,
+         "id": 163,
          "options": {
             "legend": {
                "calcs": [
@@ -8030,9 +8316,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 442
+            "y": 459
          },
-         "id": 158,
+         "id": 164,
          "options": {
             "legend": {
                "calcs": [
@@ -8099,9 +8385,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 442
+            "y": 459
          },
-         "id": 159,
+         "id": 165,
          "options": {
             "legend": {
                "calcs": [
@@ -8150,9 +8436,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 442
+            "y": 459
          },
-         "id": 160,
+         "id": 166,
          "options": {
             "legend": {
                "calcs": [
@@ -8219,9 +8505,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 450
+            "y": 467
          },
-         "id": 161,
+         "id": 167,
          "options": {
             "legend": {
                "calcs": [
@@ -8270,9 +8556,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 450
+            "y": 467
          },
-         "id": 162,
+         "id": 168,
          "options": {
             "legend": {
                "calcs": [
@@ -8339,9 +8625,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 450
+            "y": 467
          },
-         "id": 163,
+         "id": 169,
          "options": {
             "legend": {
                "calcs": [
@@ -8390,9 +8676,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 458
+            "y": 475
          },
-         "id": 164,
+         "id": 170,
          "options": {
             "legend": {
                "calcs": [
@@ -8459,9 +8745,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 458
+            "y": 475
          },
-         "id": 165,
+         "id": 171,
          "options": {
             "legend": {
                "calcs": [
@@ -8510,9 +8796,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 458
+            "y": 475
          },
-         "id": 166,
+         "id": 172,
          "options": {
             "legend": {
                "calcs": [
@@ -8579,9 +8865,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 466
+            "y": 483
          },
-         "id": 167,
+         "id": 173,
          "options": {
             "legend": {
                "calcs": [
@@ -8615,9 +8901,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 474
+            "y": 491
          },
-         "id": 168,
+         "id": 174,
          "panels": [ ],
          "title": "Rails KG traversal compaction",
          "type": "row"
@@ -8643,9 +8929,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 475
+            "y": 492
          },
-         "id": 169,
+         "id": 175,
          "options": {
             "legend": {
                "calcs": [
@@ -8712,9 +8998,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 475
+            "y": 492
          },
-         "id": 170,
+         "id": 176,
          "options": {
             "legend": {
                "calcs": [
@@ -8763,9 +9049,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 475
+            "y": 492
          },
-         "id": 171,
+         "id": 177,
          "options": {
             "legend": {
                "calcs": [
@@ -8832,9 +9118,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 483
+            "y": 500
          },
-         "id": 172,
+         "id": 178,
          "options": {
             "legend": {
                "calcs": [
@@ -8883,9 +9169,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 483
+            "y": 500
          },
-         "id": 173,
+         "id": 179,
          "options": {
             "legend": {
                "calcs": [
@@ -8934,9 +9220,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 483
+            "y": 500
          },
-         "id": 174,
+         "id": 180,
          "options": {
             "legend": {
                "calcs": [
