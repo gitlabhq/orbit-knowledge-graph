@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 
 /// Controls which columns are fetched for dynamically-discovered entities
 /// during hydration (PathFinding, Neighbors).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, strum::IntoStaticStr)]
+#[strum(serialize_all = "lowercase")]
 pub enum DynamicColumnMode {
     /// Fetch all columns from the ontology for each entity type.
     #[serde(rename = "*")]

@@ -6,28 +6,17 @@ use serde::Serialize;
 
 use crate::auth::{Claims, SourceType};
 
-/// Runtime execution metrics accumulated from pipeline observer callbacks.
 #[derive(Debug, Clone, Default, Serialize)]
 pub(crate) struct QueryExecMetrics {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub compile_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub execute_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub authorization_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub hydration_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub row_count: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub redacted_count: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ch_read_rows: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ch_read_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ch_memory_usage: Option<u64>,
 }
 

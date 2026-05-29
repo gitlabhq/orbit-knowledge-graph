@@ -1,22 +1,14 @@
 //! Non-PII query dimensions for analytics and billing.
-//!
-//! [`QueryInfo`] captures the structural properties of a compiled query
-//! -- types, counts, operators, flags -- without any customer data (no IDs, no
-//! filter values, no traversal paths).
 
 use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::input::{DynamicColumnMode, Input};
+use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::hydrate::HydrationPlan;
 
 /// Structural dimensions of a compiled query, free of customer-specific data.
-///
-/// Every field is a bounded enum label, a count, or a boolean. Extracted from
-/// [`CompiledQueryContext`] after compilation and forwarded to analytics and
-/// billing observers via the pipeline observer chain.
 #[derive(Debug, Clone, Serialize)]
 pub struct QueryInfo {
     pub query_type: &'static str,
@@ -108,7 +100,7 @@ impl QueryInfo {
             agg_functions: agg_fns.into_iter().collect(),
             group_by_count: input.aggregation.group_by.len() as u32,
             hydration_plan: hydration_label(hydration),
-            dynamic_columns: dynamic_col_label(input.options.dynamic_columns),
+            dynamic_columns: input.options.dynamic_columns.into(),
             path_max_depth: input.path.as_ref().map(|p| p.max_depth),
             has_variable_hops,
             has_virtual_columns,
@@ -121,13 +113,6 @@ fn hydration_label(h: &HydrationPlan) -> &'static str {
         HydrationPlan::None => "none",
         HydrationPlan::Static(_) => "static",
         HydrationPlan::Dynamic(_) => "dynamic",
-    }
-}
-
-fn dynamic_col_label(mode: DynamicColumnMode) -> &'static str {
-    match mode {
-        DynamicColumnMode::All => "all",
-        DynamicColumnMode::Default => "default",
     }
 }
 

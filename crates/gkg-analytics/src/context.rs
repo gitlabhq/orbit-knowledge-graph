@@ -57,7 +57,6 @@ impl OrbitQueryContext {
         }
     }
 
-    /// Attach additional fields that will be merged into `data()` output.
     pub fn with_extra(mut self, extra: serde_json::Map<String, serde_json::Value>) -> Self {
         self.extra = extra;
         self
