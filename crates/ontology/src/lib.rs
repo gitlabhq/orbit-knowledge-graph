@@ -291,10 +291,15 @@ impl Ontology {
     /// Look up the `DataType` of an edge table column by name.
     #[must_use]
     pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
-        self.edge_columns()
-            .iter()
-            .find(|c| c.name == name)
-            .map(|c| c.data_type)
+        // Search across all edge tables, not just the default, so
+        // table-specific columns (e.g. project_id on gl_code_edge) are
+        // recognized by the validation pass.
+        for config in self.edge_table_configs.values() {
+            if let Some(col) = config.columns.iter().find(|c| c.name == name) {
+                return Some(col.data_type);
+            }
+        }
+        None
     }
 
     /// Add fields to an existing node.
