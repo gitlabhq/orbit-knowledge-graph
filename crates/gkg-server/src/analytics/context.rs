@@ -178,7 +178,7 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 mod tests {
     use super::*;
     use crate::auth::TraversalPathClaim;
-    use labkit_events::StructuredEvent;
+    use labkit_events::{SnowplowContext, StructuredEvent};
     use query_engine::compiler::QueryInfo;
 
     fn claims_with_paths(paths: Vec<&str>) -> Claims {
@@ -223,17 +223,6 @@ mod tests {
             .build()
             .unwrap();
         event.contexts()[1].data.clone()
-    }
-
-    fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
-        let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None, &ExecMetrics::default(), 0, 0, Duration::ZERO).unwrap();
-        let event = StructuredEvent::builder("gkg", "gkg_query_executed")
-            .context(common)
-            .context(query)
-            .build()
-            .unwrap();
-        event.contexts()[0].data.clone()
     }
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {

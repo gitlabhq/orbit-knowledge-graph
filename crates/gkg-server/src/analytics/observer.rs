@@ -209,7 +209,8 @@ mod tests {
         obs.query_executed("hydration:static", 300, 6000, 2_000_000);
         obs.finish(10, 0);
 
-        let data = &tracker.drain()[0].contexts()[1].data;
+        let events = tracker.drain();
+        let data = &events[0].contexts()[1].data;
         assert_eq!(data["ch_read_rows"], 800);
         assert_eq!(data["ch_read_bytes"], 16000);
         // Peak memory -- max, not sum.
