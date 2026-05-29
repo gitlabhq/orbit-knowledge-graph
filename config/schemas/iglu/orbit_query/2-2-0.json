@@ -161,6 +161,16 @@
       "description": "Whether any node references virtual columns.",
       "type": ["boolean", "null"]
     },
+    "requested_columns": {
+      "description": "Distinct column names explicitly requested across all nodes.",
+      "type": ["array", "null"],
+      "items": { "type": "string", "maxLength": 64 }
+    },
+    "column_selection_mode": {
+      "description": "How columns were selected: all, list, or default (none specified).",
+      "type": ["string", "null"],
+      "maxLength": 16
+    },
     "duration_ms": {
       "description": "Total wall-clock time for the pipeline execution.",
       "type": ["integer", "null"],

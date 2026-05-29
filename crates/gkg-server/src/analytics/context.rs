@@ -117,11 +117,21 @@ fn apply_metrics(
         let mut variable_hops = false;
         let mut virtual_cols = false;
 
+        let mut columns = BTreeSet::new();
+        let mut has_star = false;
+
         for node in &input.nodes {
             if let Some(e) = &node.entity {
                 entities.insert(e.clone());
             }
             virtual_cols |= !node.virtual_columns.is_empty();
+            match &node.columns {
+                Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
+                Some(query_engine::compiler::ColumnSelection::List(cols)) => {
+                    columns.extend(cols.iter().cloned());
+                }
+                None => {}
+            }
             for (f, entries) in &node.filters {
                 fields.insert(f.clone());
                 for ef in entries {
@@ -169,12 +179,23 @@ fn apply_metrics(
         q.max_hops = Some(max_hops);
         q.has_variable_hops = Some(variable_hops);
         q.has_virtual_columns = Some(virtual_cols);
+        q.column_selection_mode = if has_star {
+            "all"
+        } else if !columns.is_empty() {
+            "list"
+        } else {
+            "default"
+        }
+        .parse()
+        .ok();
+        q.requested_columns = if columns.is_empty() {
+            None
+        } else {
+            Some(to_vec(columns))
+        };
     }
 
-    let label: &str = metrics
-        .hydration
-        .as_ref()
-        .map_or("none", |h| h.into());
+    let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
     q.hydration_plan = label.parse().ok();
     q.duration_ms = Some(ExecMetrics::ms(total_elapsed));
     q.compile_ms = metrics.compile_ms;

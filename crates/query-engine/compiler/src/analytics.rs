@@ -39,5 +39,4 @@ impl ExecMetrics {
             self.ch_memory_usage = self.ch_memory_usage.max(memory as u64);
         }
     }
-
 }
