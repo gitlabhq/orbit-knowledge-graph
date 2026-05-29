@@ -429,15 +429,8 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
-        // The code pipeline reads source from git, not the datalake; the
-        // read side maps to files/bytes discovered from the repository.
-        observer.record_resource_stats(crate::observer::ResourceStats {
-            read_rows: result.stats.files_discovered as u64,
-            read_bytes: result.stats.bytes_discovered,
-            written_rows: write_totals.rows,
-            written_bytes: write_totals.bytes,
-            duration_ms: indexing_start.elapsed().as_millis() as u64,
-        });
+        observer.record_graph_write(write_totals.rows, write_totals.bytes);
+        observer.record_duration(indexing_start.elapsed().as_millis() as u64);
 
         for skipped in &result.skipped {
             self.metrics
