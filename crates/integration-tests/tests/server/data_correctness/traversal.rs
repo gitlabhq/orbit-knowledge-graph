@@ -662,6 +662,9 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     // Project 1000: compile(12000)→helper(12001), helper(12001)→run_query(12002)
     // The cross-project edge helper(12001)→run_query(12102) must NOT appear
     // because the edge's project_id=1001 doesn't match the filter.
+    resp.assert_filter("Definition", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1000)
+    });
     resp.assert_node_count(3);
     resp.assert_referential_integrity();
     resp.assert_node_ids("Definition", &[12000, 12001, 12002]);
@@ -699,6 +702,9 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     .await;
 
     // Only the cross-project edge helper(12001)→run_query(12102) survives
+    resp.assert_filter("Definition", "project_id", |n| {
+        n.prop_i64("project_id") == Some(1001)
+    });
     resp.assert_node_count(2);
     resp.assert_referential_integrity();
     resp.assert_node_ids("Definition", &[12001, 12102]);
@@ -752,5 +758,7 @@ pub(super) async fn traversal_code_graph_project_id_filter_no_match_returns_empt
     )
     .await;
 
+    resp.assert_filter("Definition", "project_id", |_| true);
+    resp.assert_edge_set("CALLS", &[]);
     resp.assert_node_count(0);
 }
