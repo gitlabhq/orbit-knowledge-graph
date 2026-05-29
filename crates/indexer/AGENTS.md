@@ -40,7 +40,9 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
 the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
 NATS KV distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
-creates new-prefix ClickHouse tables, and marks the new version as `migrating`.
+creates new-prefix ClickHouse tables, and marks the new version as `migrating`. Marking
+`migrating` also opens a re-index **campaign** (`campaign::CampaignState`, in-memory) that
+dispatchers stamp onto every request as `campaign_id` until completion clears it.
 
 Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
 which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
@@ -55,7 +57,8 @@ table-set.
 mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
 comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
 `active`, retires the old active version, and drops tables for retired versions outside the
-`max_retained_versions` retention window.
+`max_retained_versions` retention window. On promotion it also clears the re-index campaign, so
+subsequent steady-state dispatches carry `campaign_id = null`.
 
 ### Entry point
 

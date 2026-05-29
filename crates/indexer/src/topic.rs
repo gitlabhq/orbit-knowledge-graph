@@ -29,6 +29,9 @@ pub struct GlobalIndexingRequest {
     pub watermark: DateTime<Utc>,
     #[serde(default)]
     pub dispatch_id: Uuid,
+    /// Re-index campaign id (see [`crate::campaign`]); `None` in steady state.
+    #[serde(default)]
+    pub campaign_id: Option<String>,
 }
 
 impl Event for GlobalIndexingRequest {
@@ -44,6 +47,9 @@ pub struct NamespaceIndexingRequest {
     pub watermark: DateTime<Utc>,
     #[serde(default)]
     pub dispatch_id: Uuid,
+    /// Re-index campaign id (see [`crate::campaign`]); `None` in steady state.
+    #[serde(default)]
+    pub campaign_id: Option<String>,
 }
 
 impl NamespaceIndexingRequest {
@@ -74,6 +80,9 @@ pub struct CodeIndexingTaskRequest {
     pub traversal_path: String,
     #[serde(default)]
     pub dispatch_id: Uuid,
+    /// Re-index campaign id (see [`crate::campaign`]); `None` in steady state.
+    #[serde(default)]
+    pub campaign_id: Option<String>,
 }
 
 impl CodeIndexingTaskRequest {

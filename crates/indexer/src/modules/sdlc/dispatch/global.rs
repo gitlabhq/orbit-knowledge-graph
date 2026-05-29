@@ -6,6 +6,7 @@ use chrono::Utc;
 use tracing::info;
 use uuid::Uuid;
 
+use crate::campaign::CampaignState;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
@@ -17,6 +18,7 @@ pub struct GlobalDispatcher {
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
     config: GlobalDispatcherConfig,
+    campaign: Arc<CampaignState>,
 }
 
 impl GlobalDispatcher {
@@ -24,11 +26,13 @@ impl GlobalDispatcher {
         nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: GlobalDispatcherConfig,
+        campaign: Arc<CampaignState>,
     ) -> Self {
         Self {
             nats,
             metrics,
             config,
+            campaign,
         }
     }
 }
@@ -61,6 +65,7 @@ impl GlobalDispatcher {
         let envelope = Envelope::new(&GlobalIndexingRequest {
             watermark: Utc::now(),
             dispatch_id: Uuid::new_v4(),
+            campaign_id: self.campaign.current(),
         })
         .map_err(|error| {
             self.metrics.record_error(self.name(), "publish");

@@ -28,12 +28,16 @@ fn lock() -> Arc<dyn LockService> {
     Arc::new(MockLockService::new())
 }
 
+fn campaign() -> indexer::campaign::CampaignState {
+    indexer::campaign::CampaignState::new()
+}
+
 #[tokio::test]
 async fn fresh_install_creates_tables_and_records_version() {
     let (ctx, ontology, metrics) = setup().await;
     let client = ctx.create_client();
 
-    migration::run_if_needed(&client, &lock(), &ontology, &metrics)
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
@@ -68,7 +72,7 @@ async fn matching_version_is_noop() {
         .await
         .unwrap();
 
-    migration::run_if_needed(&client, &lock(), &ontology, &metrics)
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
@@ -84,7 +88,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     let client = ctx.create_client();
     write_schema_version(&client, 99).await.unwrap();
 
-    migration::run_if_needed(&client, &lock(), &ontology, &metrics)
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
@@ -135,7 +139,7 @@ async fn created_tables_have_correct_columns() {
     let client = ctx.create_client();
     write_schema_version(&client, 99).await.unwrap();
 
-    migration::run_if_needed(&client, &lock(), &ontology, &metrics)
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
@@ -166,13 +170,13 @@ async fn idempotent_rerun_succeeds() {
 
     let lock_svc: Arc<dyn LockService> = Arc::new(MockLockService::new());
 
-    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics)
+    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
     // Lock is released after success, so second run can acquire it.
     // It will re-run CREATE TABLE IF NOT EXISTS (idempotent).
-    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics)
+    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics, &campaign())
         .await
         .unwrap();
 }
@@ -186,7 +190,7 @@ async fn lock_released_after_migration() {
     let mock = Arc::new(MockLockService::new());
     let lock_svc: Arc<dyn LockService> = mock.clone();
 
-    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics)
+    migration::run_if_needed(&client, &lock_svc, &ontology, &metrics, &campaign())
         .await
         .unwrap();
 
@@ -206,12 +210,43 @@ async fn held_lock_causes_timeout() {
     // Migration polls every 5s × 60 iterations. Use paused time to skip the wait.
     tokio::time::pause();
 
-    let result = migration::run_if_needed(&client, &lock_svc, &ontology, &metrics).await;
+    let result =
+        migration::run_if_needed(&client, &lock_svc, &ontology, &metrics, &campaign()).await;
 
     assert!(result.is_err());
     assert!(
         result.unwrap_err().to_string().contains("lock held"),
         "error should mention lock timeout"
+    );
+}
+
+#[tokio::test]
+async fn mismatch_opens_campaign_steady_state_does_not() {
+    let (ctx, ontology, metrics) = setup().await;
+    let client = ctx.create_client();
+    write_schema_version(&client, 99).await.unwrap();
+
+    let migrating_campaign = campaign();
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &migrating_campaign)
+        .await
+        .unwrap();
+    assert_eq!(
+        migrating_campaign.current(),
+        Some(format!("migration-v{}", *SCHEMA_VERSION)),
+        "a mismatch migration should open the campaign for the target version"
+    );
+
+    let matching_campaign = campaign();
+    write_schema_version(&client, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+    migration::run_if_needed(&client, &lock(), &ontology, &metrics, &matching_campaign)
+        .await
+        .unwrap();
+    assert_eq!(
+        matching_campaign.current(),
+        None,
+        "steady state should not open a campaign"
     );
 }
 

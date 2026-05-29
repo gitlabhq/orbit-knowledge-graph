@@ -26,6 +26,7 @@
 //! - [`modules::sdlc`] - SDLC entities (users, projects, MRs, CI, etc.)
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
+pub mod campaign;
 pub mod checkpoint;
 pub mod clickhouse;
 pub mod config;
@@ -258,9 +259,20 @@ pub async fn run_dispatcher(
         }
     });
 
+    // Migrations only fire here at boot, so the orchestrator opens the campaign
+    // when it marks a version migrating; the completion checker clears it.
+    let campaign = Arc::new(campaign::CampaignState::new());
+
     let migration_metrics = schema::metrics::MigrationMetrics::new();
     info!("running schema migration check");
-    schema::migration::run_if_needed(&graph, &lock_service, ontology, &migration_metrics).await?;
+    schema::migration::run_if_needed(
+        &graph,
+        &lock_service,
+        ontology,
+        &migration_metrics,
+        &campaign,
+    )
+    .await?;
     serving.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let deletion_graph = Arc::new(config.graph.build_client());
@@ -278,17 +290,20 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
+            campaign.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats.clone(),
             datalake,
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
+            campaign.clone(),
         )),
         Box::new(SiphonCodeIndexingTaskDispatcher::new(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.code_indexing_task.clone(),
+            campaign.clone(),
         )),
         Box::new(NamespaceCodeBackfillDispatcher::new(
             services.nats.clone(),
@@ -296,6 +311,7 @@ pub async fn run_dispatcher(
             config.datalake.build_client(),
             metrics.clone(),
             config.schedule.tasks.namespace_code_backfill.clone(),
+            campaign.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,
@@ -318,6 +334,7 @@ pub async fn run_dispatcher(
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
             metrics,
+            campaign.clone(),
         )),
     ];
 
