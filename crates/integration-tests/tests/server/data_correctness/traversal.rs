@@ -662,8 +662,10 @@ pub(super) async fn traversal_code_graph_project_id_filter_scopes_edges(ctx: &Te
     // Project 1000: compile(12000)→helper(12001), helper(12001)→run_query(12002)
     // The cross-project edge helper(12001)→run_query(12102) must NOT appear
     // because the edge's project_id=1001 doesn't match the filter.
-    resp.assert_filter("Definition", "project_id", |n| {
-        n.prop_i64("project_id") == Some(1000)
+    // Correctness is proven by assert_node_ids (exact set, 12102 absent)
+    // and assert_edge_set (cross-project edge excluded).
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
     });
     resp.assert_node_count(3);
     resp.assert_referential_integrity();
@@ -701,9 +703,11 @@ pub(super) async fn traversal_code_graph_project_id_filter_on_target_scopes_edge
     )
     .await;
 
-    // Only the cross-project edge helper(12001)→run_query(12102) survives
-    resp.assert_filter("Definition", "project_id", |n| {
-        n.prop_i64("project_id") == Some(1001)
+    // Only the cross-project edge helper(12001)→run_query(12102) survives.
+    // Can't assert_filter because both caller (project 1000) and callee
+    // (project 1001) are Definition nodes -- skip and prove via exact IDs.
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
     });
     resp.assert_node_count(2);
     resp.assert_referential_integrity();
@@ -758,7 +762,11 @@ pub(super) async fn traversal_code_graph_project_id_filter_no_match_returns_empt
     )
     .await;
 
-    resp.assert_filter("Definition", "project_id", |_| true);
+    // No nodes match project 99999, so we can't assert filter properties
+    // on individual nodes. Skip the filter requirement and verify emptiness.
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
+    });
     resp.assert_edge_set("CALLS", &[]);
     resp.assert_node_count(0);
 }
