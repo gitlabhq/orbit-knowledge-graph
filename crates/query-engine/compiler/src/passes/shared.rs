@@ -260,10 +260,11 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
         TableRef::scan(&tables[0], alias)
     } else {
         let inner_alias = format!("_{alias}");
-        let common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
+        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
             .iter()
             .map(|col| SelectExpr::col(&inner_alias, *col))
             .collect();
+        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
         let arms: Vec<Query> = tables
             .iter()
             .map(|table| Query {
