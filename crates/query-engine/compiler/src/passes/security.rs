@@ -104,114 +104,16 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
         0 => Expr::Literal(Value::Bool(false)),
         1 => starts_with_expr(alias, paths[0]),
         _ => {
-            let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
+            let collapsed =
+                gkg_utils::traversal_path::PathTrie::from_paths(paths).to_minimal_prefixes();
             if collapsed.len() == 1 {
                 return starts_with_expr(alias, &collapsed[0]);
             }
-            let lcp = lowest_common_prefix(&collapsed);
+            let lcp = gkg_utils::traversal_path::lowest_common_prefix(&collapsed);
             let lcp_filter = starts_with_expr(alias, &lcp);
             let collapsed_refs: Vec<&str> = collapsed.iter().map(String::as_str).collect();
             Expr::and(lcp_filter, path_array_filter(alias, &collapsed_refs))
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PathTrie — segment-level trie for collapsing traversal paths
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// A trie keyed on path segments (`"1"`, `"100"`, …). Each node tracks
-/// whether it was explicitly inserted (i.e., the user has access to that
-/// exact namespace prefix). Inserting `"1/100/"` marks the `1 → 100` node
-/// as terminal.
-#[derive(Default)]
-struct PathTrie {
-    children: std::collections::BTreeMap<String, PathTrie>,
-    terminal: bool,
-}
-
-impl PathTrie {
-    fn from_paths(paths: &[&str]) -> Self {
-        let mut root = Self::default();
-        for path in paths {
-            root.insert(path);
-        }
-        root
-    }
-
-    fn insert(&mut self, path: &str) {
-        let segments: Vec<&str> = path
-            .trim_end_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .collect();
-        // Empty paths are impossible: SecurityContext::validate_traversal_path
-        // enforces ^(\d+/)+$. Guard here to prevent the root node from being
-        // marked terminal, which would emit "" and match everything.
-        debug_assert!(
-            !segments.is_empty(),
-            "PathTrie::insert called with empty path"
-        );
-        if segments.is_empty() {
-            return;
-        }
-        let mut node = self;
-        for seg in segments {
-            node = node.children.entry(seg.to_string()).or_default();
-        }
-        node.terminal = true;
-    }
-
-    /// Walk the trie and emit the minimal set of prefixes. A terminal
-    /// node emits its path and prunes all descendants (subsumption).
-    /// A non-terminal node with exactly one child merges into that
-    /// child (prefix compression).
-    fn to_minimal_prefixes(&self) -> Vec<String> {
-        let mut result = Vec::new();
-        self.collect(&mut String::new(), &mut result);
-        result
-    }
-
-    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
-        if self.terminal {
-            // This node is authorized — emit the prefix, skip children.
-            let mut p = prefix.clone();
-            if !p.is_empty() {
-                p.push('/');
-            }
-            out.push(p);
-            return;
-        }
-
-        for (seg, child) in &self.children {
-            let restore_len = prefix.len();
-            if !prefix.is_empty() {
-                prefix.push('/');
-            }
-            prefix.push_str(seg);
-            child.collect(prefix, out);
-            prefix.truncate(restore_len);
-        }
-    }
-}
-
-/// Find the lowest common path prefix across a set of paths.
-fn lowest_common_prefix(paths: &[String]) -> String {
-    if paths.is_empty() {
-        return String::new();
-    }
-    let segments: Vec<Vec<&str>> = paths
-        .iter()
-        .map(|p| p.trim_end_matches('/').split('/').collect())
-        .collect();
-    let first = &segments[0];
-    let common_len = (0..first.len())
-        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
-        .count();
-    if common_len == 0 {
-        String::new()
-    } else {
-        format!("{}/", first[..common_len].join("/"))
     }
 }
 
@@ -329,6 +231,7 @@ mod tests {
     use super::*;
     use crate::TraversalPath;
     use crate::ast::{JoinType, Op, SelectExpr};
+    use gkg_utils::traversal_path::{PathTrie, lowest_common_prefix};
     use ontology::constants::EDGE_TABLE;
     use serde_json::Value;
 
@@ -579,13 +482,10 @@ mod tests {
 
     #[test]
     fn lowest_common_prefix_finds_shared_path() {
-        assert_eq!(
-            lowest_common_prefix(&["1/2/4/".into(), "1/2/5/".into()]),
-            "1/2/"
-        );
-        assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
-        assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
-        assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
+        assert_eq!(lowest_common_prefix(&["1/2/4/", "1/2/5/"]), "1/2/");
+        assert_eq!(lowest_common_prefix(&["1/2/", "1/3/"]), "1/");
+        assert_eq!(lowest_common_prefix(&["1/", "2/"]), "");
+        assert_eq!(lowest_common_prefix(&["42/"]), "42/");
     }
 
     #[test]

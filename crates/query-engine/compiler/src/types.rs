@@ -1,13 +1,7 @@
 //! Shared types used across the compiler and downstream crates.
 
 use crate::error::{QueryError, Result};
-use regex::Regex;
 use serde::Deserialize;
-use std::sync::LazyLock;
-
-/// Matches paths like "1/", "1/2/", "123/456/789/"
-static TRAVERSAL_PATH_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
 
 /// Default role assumed for a traversal path when the JWT does not supply an
 /// explicit per-path role. Matches the historical behavior where Rails only
@@ -176,22 +170,6 @@ impl SecurityContext {
     }
 
     pub(crate) fn validate_traversal_path(path: &str) -> Result<()> {
-        if !TRAVERSAL_PATH_REGEX.is_match(path) {
-            return Err(QueryError::Security(format!(
-                "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
-            )));
-        }
-
-        let segments: Vec<&str> = path.trim_end_matches('/').split('/').collect();
-
-        for segment in &segments {
-            segment.parse::<i64>().map_err(|_| {
-                QueryError::Security(format!(
-                    "traversal_path segment '{segment}' exceeds i64 range"
-                ))
-            })?;
-        }
-
-        Ok(())
+        gkg_utils::traversal_path::validate(path).map_err(|e| QueryError::Security(e.to_string()))
     }
 }

@@ -680,11 +680,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
         .map(|tp| tp.path.as_str())
         .collect();
 
-    let is_authorized = authorized_paths
-        .iter()
-        .any(|allowed| requested_path.starts_with(allowed));
-
-    if !is_authorized {
+    if !gkg_utils::traversal_path::is_within_scope(requested_path, &authorized_paths) {
         return Err(Status::permission_denied(
             "traversal_path is not within any authorized scope",
         ));
