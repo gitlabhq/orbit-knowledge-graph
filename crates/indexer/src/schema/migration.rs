@@ -25,6 +25,7 @@ use tracing::{info, warn};
 
 use super::metrics::MigrationMetrics;
 
+use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
 use crate::schema::version::{
@@ -75,6 +76,7 @@ pub async fn run_if_needed(
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
+    campaign: &CampaignState,
 ) -> Result<(), MigrationError> {
     let active = read_active_version(graph).await?;
 
@@ -103,7 +105,15 @@ pub async fn run_if_needed(
                 target_version = *SCHEMA_VERSION,
                 "schema version mismatch detected — starting migration"
             );
-            run_migration(graph, lock_service, ontology, metrics, active_version).await
+            run_migration(
+                graph,
+                lock_service,
+                ontology,
+                metrics,
+                campaign,
+                active_version,
+            )
+            .await
         }
     }
 }
@@ -113,6 +123,7 @@ async fn run_migration(
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
+    campaign: &CampaignState,
     active_version: u32,
 ) -> Result<(), MigrationError> {
     // Phase 1: acquire distributed lock.
@@ -157,6 +168,10 @@ async fn run_migration(
         return Err(e.into());
     }
     metrics.record("mark_migrating", "success");
+
+    // Open the re-index campaign for this migration. The completion checker
+    // clears it on promotion.
+    campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
 
     // Phase 5: release lock.
     let _ = lock_service.release(MIGRATION_LOCK_KEY).await;

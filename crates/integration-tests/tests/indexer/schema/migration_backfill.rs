@@ -31,6 +31,8 @@ use common::TestContext as ClickHouseContext;
 struct CodeIndexingRequest {
     task_id: i64,
     project_id: i64,
+    #[serde(default)]
+    campaign_id: Option<String>,
 }
 
 struct TestContext {
@@ -171,6 +173,10 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         .await
         .unwrap();
 
+    // Open the campaign for the migrating version, as the orchestrator does.
+    let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
+    campaign.set(indexer::campaign::campaign_id_for_version(1));
+
     let task: Box<dyn ScheduledTask> = Box::new(NamespaceCodeBackfillDispatcher::new(
         services.nats.clone(),
         context.clickhouse.create_client(),
@@ -180,6 +186,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
+        campaign,
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)
@@ -200,6 +207,13 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     assert!(
         requests.iter().all(|r| r.task_id == 0),
         "migration backfill requests should use task_id=0"
+    );
+
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.campaign_id.as_deref() == Some("migration-v1")),
+        "migration backfill requests should carry the campaign id"
     );
 }
 
@@ -251,6 +265,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
             schedule: ScheduleConfiguration::default(),
             ..Default::default()
         },
+        std::sync::Arc::new(indexer::campaign::CampaignState::new()),
     ));
 
     indexer::scheduler::run_once(&[task], &*services.lock_service)

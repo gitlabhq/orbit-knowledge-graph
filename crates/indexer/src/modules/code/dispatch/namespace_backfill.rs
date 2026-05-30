@@ -8,6 +8,7 @@ use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::modules::code::config::subjects;
 use crate::modules::code::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
@@ -55,6 +56,7 @@ pub struct NamespaceCodeBackfillDispatcher {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceCodeBackfillDispatcherConfig,
+    campaign: Arc<CampaignState>,
 }
 
 impl NamespaceCodeBackfillDispatcher {
@@ -64,6 +66,7 @@ impl NamespaceCodeBackfillDispatcher {
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceCodeBackfillDispatcherConfig,
+        campaign: Arc<CampaignState>,
     ) -> Self {
         Self {
             nats,
@@ -71,6 +74,7 @@ impl NamespaceCodeBackfillDispatcher {
             datalake,
             metrics,
             config,
+            campaign,
         }
     }
 
@@ -404,6 +408,7 @@ impl NamespaceCodeBackfillDispatcher {
             dispatched: 0,
             skipped: 0,
         };
+        let campaign_id = self.campaign.current();
 
         for project in projects {
             let request = CodeIndexingTaskRequest {
@@ -413,6 +418,7 @@ impl NamespaceCodeBackfillDispatcher {
                 commit_sha: None,
                 traversal_path: project.traversal_path.clone(),
                 dispatch_id,
+                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();
@@ -510,6 +516,7 @@ mod tests {
             datalake,
             test_metrics(),
             NamespaceCodeBackfillDispatcherConfig::default(),
+            Arc::new(CampaignState::new()),
         )
     }
 

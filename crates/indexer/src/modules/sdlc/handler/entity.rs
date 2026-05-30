@@ -37,6 +37,7 @@ struct IndexingRequest {
     traversal_path: Option<String>,
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
+    campaign_id: Option<String>,
 }
 
 impl EntityHandler {
@@ -76,6 +77,7 @@ impl EntityHandler {
                     traversal_path: None,
                     namespace_id: None,
                     dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
             EtlScope::Namespaced => {
@@ -87,6 +89,7 @@ impl EntityHandler {
                     traversal_path: Some(payload.traversal_path),
                     namespace_id: Some(payload.namespace),
                     dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
         }
@@ -101,6 +104,7 @@ impl EntityHandler {
             SdlcOtelObserver::new(self.metrics.clone()),
         )]);
         observer.set_dispatch_id(request.dispatch_id);
+        observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
         if let Some(namespace_id) = request.namespace_id {
@@ -317,11 +321,13 @@ impl Handler for EntityHandler {
                 entity = %self.plan.name,
                 namespace_id = id,
                 dispatch_id = %request.dispatch_id,
+                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
             None => info_span!(
                 "entity_indexing",
                 entity = %self.plan.name,
                 dispatch_id = %request.dispatch_id,
+                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
         };
         let traversal_path = request.traversal_path.clone();
