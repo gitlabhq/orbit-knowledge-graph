@@ -17,7 +17,7 @@ use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::DatalakeQuery;
+use super::datalake::{DatalakeQuery, ReadStats};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
@@ -26,6 +26,31 @@ use gkg_server_config::DatalakeRetryConfig;
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
 
 const MAX_RETRIES: u32 = 3;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(in crate::modules::sdlc) struct PipelineStats {
+    pub read_rows: u64,
+    pub read_bytes: u64,
+    pub written_rows: u64,
+    pub written_bytes: u64,
+    pub duration_ms: u64,
+}
+
+impl PipelineStats {
+    pub(in crate::modules::sdlc) fn merge(&mut self, other: PipelineStats) {
+        self.read_rows += other.read_rows;
+        self.read_bytes += other.read_bytes;
+        self.written_rows += other.written_rows;
+        self.written_bytes += other.written_bytes;
+        self.duration_ms = self.duration_ms.max(other.duration_ms);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WriteCounts {
+    rows: u64,
+    bytes: u64,
+}
 
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub destination: Arc<dyn Destination>,
@@ -62,7 +87,7 @@ impl Pipeline {
         base_query: PreparedQuery,
         position_key: &str,
         target_watermark: DateTime<Utc>,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
         let mut cursor = Cursor::from_checkpoint(&checkpoint);
@@ -74,10 +99,14 @@ impl Pipeline {
         let params = base_query.params();
 
         let mut total_rows: u64 = 0;
+        let mut read_rows: u64 = 0;
+        let mut read_bytes: u64 = 0;
+        let mut written_rows: u64 = 0;
+        let mut written_bytes: u64 = 0;
         let session = SessionContext::new();
 
         let extract_start = Instant::now();
-        let mut batches = self
+        let (mut batches, read_stats) = self
             .extract_batch(
                 &plan.name,
                 &base_query
@@ -90,6 +119,8 @@ impl Pipeline {
                 params.clone(),
             )
             .await?;
+        read_rows += read_stats.read_rows;
+        read_bytes += read_stats.read_bytes;
         let mut extract_elapsed = extract_start.elapsed();
 
         loop {
@@ -118,7 +149,7 @@ impl Pipeline {
             cursor = cursor.advance(batches.last().unwrap(), &plan.sort_key)?;
             let has_more = rows_in_batch >= plan.batch_size;
 
-            let write_futures = self
+            let (write_futures, write_counts) = self
                 .transform(
                     &session,
                     &plan.name,
@@ -127,6 +158,8 @@ impl Pipeline {
                     context.destination.as_ref(),
                 )
                 .await?;
+            written_rows += write_counts.rows;
+            written_bytes += write_counts.bytes;
 
             if has_more {
                 let next_sql = base_query
@@ -141,7 +174,9 @@ impl Pipeline {
                     self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
                 );
                 write_result?;
-                let (next_batches, next_elapsed) = extract_result?;
+                let (next_batches, next_read_stats, next_elapsed) = extract_result?;
+                read_rows += next_read_stats.read_rows;
+                read_bytes += next_read_stats.read_bytes;
 
                 self.save_batch_progress(
                     position_key,
@@ -183,20 +218,39 @@ impl Pipeline {
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
         self.metrics.record_watermark_lag(&target_watermark);
 
+        let stats = PipelineStats {
+            read_rows,
+            read_bytes,
+            written_rows,
+            written_bytes,
+            duration_ms: elapsed.as_millis() as u64,
+        };
+
+        {
+            let mut observer = context.observer.lock().unwrap();
+            observer.record_datalake_read(stats.read_rows, stats.read_bytes);
+            observer.record_graph_write(stats.written_rows, stats.written_bytes);
+            observer.record_duration(stats.duration_ms);
+        }
+
         if total_rows > 0 {
             info!(
                 total_rows,
-                duration_ms = elapsed.as_millis() as u64,
+                duration_ms = stats.duration_ms,
+                read_rows = stats.read_rows,
+                read_bytes = stats.read_bytes,
+                written_rows = stats.written_rows,
+                written_bytes = stats.written_bytes,
                 "pipeline completed"
             );
         } else {
             debug!(
-                duration_ms = elapsed.as_millis() as u64,
+                duration_ms = stats.duration_ms,
                 "pipeline completed with no data"
             );
         }
 
-        Ok(())
+        Ok(stats)
     }
 
     async fn extract_batch(
@@ -204,7 +258,7 @@ impl Pipeline {
         pipeline_name: &str,
         sql: &str,
         params: Value,
-    ) -> Result<Vec<RecordBatch>, HandlerError> {
+    ) -> Result<(Vec<RecordBatch>, ReadStats), HandlerError> {
         let mut last_error = None;
         // First attempt uses the datalake's default `max_block_size`.
         // Subsequent attempts seed and then halve a per-call override so a
@@ -221,10 +275,10 @@ impl Pipeline {
             let query_start = Instant::now();
             match self
                 .datalake
-                .query_batches(sql, params.clone(), current_block_size)
+                .query_batches_with_summary(sql, params.clone(), current_block_size)
                 .await
             {
-                Ok(batches) => {
+                Ok((batches, read_stats)) => {
                     let bytes: u64 = batches
                         .iter()
                         .map(|b| b.get_array_memory_size() as u64)
@@ -234,7 +288,7 @@ impl Pipeline {
                         query_start.elapsed().as_secs_f64(),
                         bytes,
                     );
-                    return Ok(batches);
+                    return Ok((batches, read_stats));
                 }
                 Err(err) => {
                     warn!(
@@ -269,10 +323,10 @@ impl Pipeline {
         pipeline_name: &str,
         sql: &str,
         params: Value,
-    ) -> Result<(Vec<RecordBatch>, Duration), HandlerError> {
+    ) -> Result<(Vec<RecordBatch>, ReadStats, Duration), HandlerError> {
         let start = Instant::now();
-        let batches = self.extract_batch(pipeline_name, sql, params).await?;
-        Ok((batches, start.elapsed()))
+        let (batches, read_stats) = self.extract_batch(pipeline_name, sql, params).await?;
+        Ok((batches, read_stats, start.elapsed()))
     }
 
     async fn transform(
@@ -282,7 +336,7 @@ impl Pipeline {
         batches: Vec<RecordBatch>,
         transforms: &[Transformation],
         destination: &dyn Destination,
-    ) -> Result<WriteFutures, HandlerError> {
+    ) -> Result<(WriteFutures, WriteCounts), HandlerError> {
         let schema = batches[0].schema();
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
@@ -302,6 +356,7 @@ impl Pipeline {
 
         let mut total_transform_duration = Duration::ZERO;
         let mut write_futures: WriteFutures = FuturesUnordered::new();
+        let mut write_counts = WriteCounts::default();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -329,6 +384,12 @@ impl Pipeline {
             if row_count == 0 {
                 continue;
             }
+
+            write_counts.rows += row_count as u64;
+            write_counts.bytes += result_batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum::<u64>();
 
             let destination_table = transform.destination_table.clone();
             let writer = destination
@@ -372,7 +433,7 @@ impl Pipeline {
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
 
-        Ok(write_futures)
+        Ok((write_futures, write_counts))
     }
 
     async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
@@ -912,5 +973,93 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    /// Returns one page of rows plus a fixed `ReadStats` on the first extract,
+    /// then nothing — so a single-page run exercises the stats accumulation.
+    struct StatsDatalake {
+        rows: usize,
+        read_stats: ReadStats,
+        calls: Mutex<u32>,
+    }
+
+    #[async_trait]
+    impl DatalakeQuery for StatsDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Ok(vec![])
+        }
+
+        async fn query_batches_with_summary(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<(Vec<RecordBatch>, ReadStats), DatalakeError> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            if *calls == 1 {
+                Ok((vec![test_batch(self.rows)], self.read_stats))
+            } else {
+                Ok((vec![], ReadStats::default()))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn run_plan_reports_resource_stats() {
+        let datalake = Arc::new(StatsDatalake {
+            rows: 5,
+            read_stats: ReadStats {
+                read_rows: 5,
+                read_bytes: 4096,
+            },
+            calls: Mutex::new(0),
+        });
+        let pipeline = Pipeline::new(
+            datalake,
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            Default::default(),
+        );
+        let plan = simple_plan("Test");
+
+        let stats = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
+            )
+            .await
+            .expect("run should succeed");
+
+        assert_eq!(
+            stats.read_rows, 5,
+            "read rows come from the datalake summary"
+        );
+        assert_eq!(stats.read_bytes, 4096, "read bytes come from the summary");
+        assert_eq!(
+            stats.written_rows, 5,
+            "transform emits the 5 extracted rows to the graph"
+        );
+        assert!(
+            stats.written_bytes > 0,
+            "written bytes reflect the transformed batch size"
+        );
     }
 }

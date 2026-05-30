@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use tokio::task::JoinSet;
-use tracing::{Instrument, info, info_span};
+use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use crate::checkpoint::{CheckpointStore, namespace_position_key};
@@ -13,7 +13,7 @@ use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats};
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
@@ -191,32 +191,45 @@ impl EntityHandler {
                 )
                 .await;
 
-            if partition_result.is_ok() {
-                let partition_checkpoints = self
-                    .checkpoint_store
-                    .load_by_prefix(&format!(
-                        "{checkpoint_key}{}",
-                        PartitionAssignment::CHECKPOINT_PREFIX
-                    ))
-                    .await
-                    .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                let consolidated_watermark = partition_checkpoints
-                    .iter()
-                    .map(|(_, cp)| cp.watermark)
-                    .min()
-                    .unwrap_or(request.watermark);
+            match partition_result {
+                Ok(stats) => {
+                    let partition_checkpoints = self
+                        .checkpoint_store
+                        .load_by_prefix(&format!(
+                            "{checkpoint_key}{}",
+                            PartitionAssignment::CHECKPOINT_PREFIX
+                        ))
+                        .await
+                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                    let consolidated_watermark = partition_checkpoints
+                        .iter()
+                        .map(|(_, cp)| cp.watermark)
+                        .min()
+                        .unwrap_or(request.watermark);
 
-                self.checkpoint_store
-                    .consolidate(&checkpoint_key, &consolidated_watermark)
-                    .await
-                    .map_err(|err| HandlerError::Processing(err.to_string()))
-            } else {
-                partition_result
+                    self.checkpoint_store
+                        .consolidate(&checkpoint_key, &consolidated_watermark)
+                        .await
+                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                    Ok(stats)
+                }
+                Err(e) => Err(e),
             }
         };
 
         match &result {
-            Ok(()) => observer.lock().unwrap().finish(),
+            Ok(stats) => {
+                debug!(
+                    entity = %self.plan.name,
+                    read_rows = stats.read_rows,
+                    read_bytes = stats.read_bytes,
+                    written_rows = stats.written_rows,
+                    written_bytes = stats.written_bytes,
+                    duration_ms = stats.duration_ms,
+                    "indexing resource stats"
+                );
+                observer.lock().unwrap().finish()
+            }
             Err(e) => {
                 let mut obs = observer.lock().unwrap();
                 obs.record_error(&e.to_string());
@@ -224,7 +237,7 @@ impl EntityHandler {
             }
         }
 
-        result
+        result.map(|_| ())
     }
 
     async fn run_partitions(
@@ -237,8 +250,8 @@ impl EntityHandler {
         target_watermark: DateTime<Utc>,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
-    ) -> Result<(), HandlerError> {
-        let mut set: JoinSet<Result<(), HandlerError>> = JoinSet::new();
+    ) -> Result<PipelineStats, HandlerError> {
+        let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
             let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
 
@@ -276,16 +289,17 @@ impl EntityHandler {
         }
 
         let mut errors = Vec::new();
+        let mut total = PipelineStats::default();
         while let Some(result) = set.join_next().await {
             match result {
-                Ok(Ok(())) => {}
+                Ok(Ok(stats)) => total.merge(stats),
                 Ok(Err(err)) => errors.push(err.to_string()),
                 Err(join_err) => errors.push(format!("partition task panicked: {join_err}")),
             }
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(total)
         } else {
             Err(HandlerError::Processing(format!(
                 "partition failures: {}",

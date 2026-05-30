@@ -37,6 +37,12 @@ pub trait IndexingObserver: Send {
 
     fn set_campaign_id(&mut self, _campaign_id: Option<String>) {}
 
+    fn record_datalake_read(&mut self, _rows: u64, _bytes: u64) {}
+
+    fn record_graph_write(&mut self, _rows: u64, _bytes: u64) {}
+
+    fn record_duration(&mut self, _duration_ms: u64) {}
+
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
     fn set_traversal_path(&mut self, traversal_path: &str) {
@@ -73,6 +79,24 @@ impl IndexingObserver for NoOpObserver {}
 pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn IndexingObserver>;
 
 impl IndexingObserver for MultiObserver {
+    fn record_datalake_read(&mut self, rows: u64, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_datalake_read(rows, bytes);
+        }
+    }
+
+    fn record_graph_write(&mut self, rows: u64, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_graph_write(rows, bytes);
+        }
+    }
+
+    fn record_duration(&mut self, duration_ms: u64) {
+        for o in self.iter_mut() {
+            o.record_duration(duration_ms);
+        }
+    }
+
     fn set_dispatch_id(&mut self, dispatch_id: Uuid) {
         for o in self.iter_mut() {
             o.set_dispatch_id(dispatch_id);
@@ -179,6 +203,15 @@ mod tests {
         fn set_campaign_id(&mut self, _: Option<String>) {
             self.push("set_campaign_id");
         }
+        fn record_datalake_read(&mut self, _: u64, _: u64) {
+            self.push("record_datalake_read");
+        }
+        fn record_graph_write(&mut self, _: u64, _: u64) {
+            self.push("record_graph_write");
+        }
+        fn record_duration(&mut self, _: u64) {
+            self.push("record_duration");
+        }
         fn set_pipeline_type(&mut self, _: PipelineType) {
             self.push("set_pipeline_type");
         }
@@ -227,6 +260,9 @@ mod tests {
         obs.set_entity_type("MergeRequest");
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);
+        obs.record_datalake_read(1000, 50_000);
+        obs.record_graph_write(1000, 40_000);
+        obs.record_duration(12);
         obs.finish();
 
         let expected = vec![
@@ -237,6 +273,9 @@ mod tests {
             "set_entity_type",
             "set_indexing_mode",
             "extracted",
+            "record_datalake_read",
+            "record_graph_write",
+            "record_duration",
             "finish",
         ];
         assert_eq!(*log_a.lock().unwrap(), expected);
