@@ -69,6 +69,10 @@ impl Handler for CodeIndexingTaskHandler {
         self.subscription.clone()
     }
 
+    fn requires_worker_pool(&self) -> bool {
+        false
+    }
+
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError> {
         let request: CodeIndexingTaskRequest =
             serde_json::from_slice(&message.payload).map_err(|e| {

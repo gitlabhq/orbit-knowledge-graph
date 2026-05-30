@@ -88,6 +88,7 @@ engine:
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000
         cross_file_resolve_timeout_ms: 180000
+        fetch_concurrency: 6
 
 schedule:
   tasks:

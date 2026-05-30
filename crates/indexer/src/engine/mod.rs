@@ -192,10 +192,13 @@ impl Engine {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
             metrics: self.metrics.clone(),
         });
-        let max_inflight = configuration.max_concurrent_workers;
+        let global_max_inflight = configuration.max_concurrent_workers;
         let tasks: Vec<_> = subscriptions
             .into_iter()
-            .map(|subscription| self.listen(subscription, runtime.clone(), max_inflight))
+            .map(|subscription| {
+                let max_inflight = subscription.max_inflight.unwrap_or(global_max_inflight);
+                self.listen(subscription, runtime.clone(), max_inflight)
+            })
             .collect();
         futures::future::try_join_all(tasks).await?;
 
@@ -420,16 +423,23 @@ async fn run_handlers(
         let concurrency_group = concurrency_group.clone();
 
         tasks.spawn(async move {
-            let Some(_permit) = runtime
-                .worker_pool
-                .acquire_handler_slot(concurrency_group.as_deref())
-                .await
-            else {
-                warn!(
-                    handler = handler.name(),
-                    "worker pool semaphore closed, skipping handler"
-                );
-                return HandlerTaskOutcome::RetryRequested;
+            let _permit = if handler.requires_worker_pool() {
+                match runtime
+                    .worker_pool
+                    .acquire_handler_slot(concurrency_group.as_deref())
+                    .await
+                {
+                    Some(permit) => Some(permit),
+                    None => {
+                        warn!(
+                            handler = handler.name(),
+                            "worker pool semaphore closed, skipping handler"
+                        );
+                        return HandlerTaskOutcome::RetryRequested;
+                    }
+                }
+            } else {
+                None
             };
 
             let handler_start = Instant::now();
@@ -948,6 +958,47 @@ mod tests {
         assert!(
             observed_peak > 0,
             "expected at least one concurrent execution"
+        );
+    }
+
+    /// A handler that returns `requires_worker_pool() = false` must run even
+    /// when every worker pool permit is already held by other work.
+    #[tokio::test]
+    async fn handler_bypassing_worker_pool_runs_when_pool_exhausted() {
+        let runtime = test_runtime(&EngineConfiguration {
+            max_concurrent_workers: 1,
+            ..Default::default()
+        });
+
+        // Exhaust the single worker pool permit.
+        let _blocker = runtime
+            .worker_pool
+            .acquire_handler_slot(None)
+            .await
+            .expect("should acquire the only permit");
+
+        let handler = MockHandler::new("stream", "subject").with_requires_worker_pool(false);
+        let handlers: Vec<Arc<dyn Handler>> = vec![Arc::new(handler)];
+        let subscription = Subscription::new("stream", "subject");
+        let envelope = TestEnvelopeFactory::simple("payload");
+
+        // Must complete despite the pool being fully consumed.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_handlers(
+                &handlers,
+                &test_context(),
+                &envelope,
+                &runtime,
+                &subscription,
+            ),
+        )
+        .await
+        .expect("handler should not block on worker pool");
+
+        assert!(
+            matches!(outcome, HandlersOutcome::Success),
+            "expected Success, got {outcome:?}"
         );
     }
 }

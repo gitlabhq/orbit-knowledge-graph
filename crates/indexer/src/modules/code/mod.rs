@@ -99,6 +99,9 @@ pub fn register_handlers(
     if let Some(topic_config) = config.engine.topics.get(CODE_INDEXING_TASK_TOPIC) {
         subscription = subscription.with_config(topic_config);
     }
+    if let Some(max_inflight) = pipeline.max_inflight() {
+        subscription = subscription.with_max_inflight(max_inflight);
+    }
 
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
         Arc::clone(&pipeline),

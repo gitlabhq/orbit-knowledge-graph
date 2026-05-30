@@ -40,6 +40,12 @@ pub enum IndexOutcome {
     EmptyRepository,
 }
 
+/// Number of indexing slots derived from the concurrency group limit.
+/// Used both for the semaphore and for the `max_inflight` calculation.
+pub fn indexing_slot_count(concurrency_limit: usize) -> usize {
+    concurrency_limit / 2
+}
+
 pub struct CodeIndexingPipeline {
     resolver: RepositoryResolver,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -48,6 +54,9 @@ pub struct CodeIndexingPipeline {
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
     pipeline_config: CodeIndexingPipelineConfig,
+    fetch_concurrency: usize,
+    indexing_slot_count: usize,
+    fetch_slots: Option<Arc<Semaphore>>,
     indexing_slots: Option<Arc<Semaphore>>,
 }
 
@@ -63,7 +72,10 @@ impl CodeIndexingPipeline {
         pipeline_config: CodeIndexingPipelineConfig,
         concurrency_limit: usize,
     ) -> Self {
-        let indexing_slots = sem(concurrency_limit / 2);
+        let fc = pipeline_config.fetch_concurrency;
+        let ic = indexing_slot_count(concurrency_limit);
+        let fetch_slots = sem(fc);
+        let indexing_slots = sem(ic);
         Self {
             resolver,
             checkpoint_store,
@@ -72,8 +84,20 @@ impl CodeIndexingPipeline {
             table_names,
             ontology,
             pipeline_config,
+            fetch_concurrency: fc,
+            indexing_slot_count: ic,
+            fetch_slots,
             indexing_slots,
         }
+    }
+
+    /// Derived inflight cap for the engine listen loop. Returns `None` when
+    /// either limit is unbounded (0), meaning the global default should apply.
+    pub fn max_inflight(&self) -> Option<usize> {
+        if self.fetch_concurrency == 0 || self.indexing_slot_count == 0 {
+            return None;
+        }
+        Some(self.fetch_concurrency + self.indexing_slot_count)
     }
 
     pub async fn index_project(
@@ -110,6 +134,11 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
         observer: &mut dyn IndexingObserver,
     ) -> Result<IndexOutcome, HandlerError> {
+        // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
+        // Gitaly with concurrent downloads while still pre-fetching ahead
+        // of the processing phase.
+        let _fetch_slot = acquire(&self.fetch_slots, "fetch").await?;
+
         let fetch_start = Instant::now();
         let repository = match self
             .resolver
@@ -165,6 +194,12 @@ impl CodeIndexingPipeline {
             "repository extraction completed"
         );
 
+        // Release fetch slot before waiting for the indexing slot. This is
+        // the pipelining point: freeing the fetch slot lets another handler
+        // start its Gitaly download while we wait for an indexing slot.
+        drop(_fetch_slot);
+
+        // Phase 2: Process — bounded by indexing_slots (CPU-heavy analysis).
         let _indexing_slot = acquire(&self.indexing_slots, "indexing").await?;
 
         context.progress.notify_in_progress().await;
