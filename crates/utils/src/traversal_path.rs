@@ -81,9 +81,12 @@ pub fn validate(path: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-/// Returns `true` when `path` passes [`validate`].
+/// Returns `true` when `path` passes [`validate`] and has at least two
+/// segments (org + namespace). This is the check the indexer uses for
+/// dispatchable and deletable paths -- stricter than `validate` which
+/// accepts single-segment org-root paths like `"1/"`.
 pub fn is_valid(path: &str) -> bool {
-    validate(path).is_ok()
+    validate(path).is_ok() && segments(path).count() >= 2
 }
 
 /// Errors from [`validate`].
@@ -121,6 +124,10 @@ impl std::error::Error for ValidationError {}
 /// Used by the gRPC server to check that a requested traversal path is
 /// within the caller's JWT-granted scopes.
 pub fn is_within_scope(path: &str, allowed_paths: &[&str]) -> bool {
+    debug_assert!(
+        allowed_paths.iter().all(|p| p.ends_with('/')),
+        "is_within_scope: all allowed_paths must end with '/' to prevent prefix confusion"
+    );
     allowed_paths
         .iter()
         .any(|allowed| path.starts_with(allowed))
@@ -175,7 +182,7 @@ impl PathTrie {
         root
     }
 
-    pub fn insert(&mut self, path: &str) {
+    pub(crate) fn insert(&mut self, path: &str) {
         let segs: Vec<&str> = segments(path).collect();
         debug_assert!(!segs.is_empty(), "PathTrie::insert called with empty path");
         if segs.is_empty() {
@@ -389,8 +396,9 @@ mod tests {
     }
 
     #[test]
-    fn is_valid_delegates_to_validate() {
+    fn is_valid_requires_two_segments() {
         assert!(is_valid("1/100/"));
+        assert!(!is_valid("100/")); // single segment rejected
         assert!(!is_valid("bad"));
     }
 
