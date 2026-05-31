@@ -4209,9 +4209,9 @@ checksum = "9bda8e21c04aca2ae33ffc2fd8c23134f3cac46db123ba97bd9d3f3b8a4a85e1"
 
 [[package]]
 name = "duckdb"
-version = "1.10503.0"
+version = "1.10503.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b7f81a3dcbd677458ff30b1047b02951282f1e189260db07e60e0890b3b64bc"
+checksum = "0cb42b21e3be42ef14acda15ce8dc99c125ce5376b87c8016a432cf14ae65de1"
 dependencies = [
  "arrow 58.3.0",
  "cast",
@@ -7345,9 +7345,9 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libduckdb-sys"
-version = "1.10503.0"
+version = "1.10503.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3a3cc4e8aa9cc1943ab2a5154e47564ba6e7598001cc148d2bb5fc63f078b58"
+checksum = "c9a4389c243e7afa0fbc8d8471031335ddc8a2dac4534f3290c9c2ba3edabab5"
 dependencies = [
  "cc",
  "flate2",
@@ -7974,7 +7974,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 2.0.2",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
