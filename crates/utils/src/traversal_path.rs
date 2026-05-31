@@ -3,6 +3,13 @@
 //! routing.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
+
+/// Matches paths like `"1/"`, `"1/2/"`, `"123/456/789/"`.
+static TRAVERSAL_PATH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\d+/)+$").expect("valid regex"));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing helpers
@@ -64,22 +71,12 @@ pub fn leaf_id(path: &str) -> Option<i64> {
 /// and the indexer's namespace deletion handler. Subsumes the old
 /// two-segment-only `is_valid` check.
 pub fn validate(path: &str) -> Result<(), ValidationError> {
-    let Some(inner) = path.strip_suffix('/') else {
-        return Err(ValidationError::Format(path.to_string()));
-    };
-    if inner.is_empty() {
+    if !TRAVERSAL_PATH_RE.is_match(path) {
         return Err(ValidationError::Format(path.to_string()));
     }
-    for segment in inner.split('/') {
-        if segment.is_empty() {
-            return Err(ValidationError::Format(path.to_string()));
-        }
-        if !segment.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(ValidationError::Format(path.to_string()));
-        }
-        segment
-            .parse::<i64>()
-            .map_err(|_| ValidationError::Overflow(segment.to_string()))?;
+    for seg in segments(path) {
+        seg.parse::<i64>()
+            .map_err(|_| ValidationError::Overflow(seg.to_string()))?;
     }
     Ok(())
 }

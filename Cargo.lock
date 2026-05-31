@@ -5204,6 +5204,7 @@ dependencies = [
  "arrow 58.3.0",
  "chrono",
  "enum-as-inner",
+ "regex",
  "rustc-hash 2.1.2",
  "serde_json",
  "strum 0.28.0",
