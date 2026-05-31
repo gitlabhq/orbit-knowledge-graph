@@ -43,7 +43,6 @@ else
 fi
 
 echo "Security audit: $batch_size commits to process (of $total total${YEAR:+ in $YEAR})"
-echo "Output: $OUTDIR"
 echo ""
 
 # ── Process each commit ──────────────────────────────────────────
@@ -58,12 +57,12 @@ while IFS= read -r commit; do
   # Skip if already processed
   if [ -f "$OUTDIR/${commit}.json" ]; then
     skipped=$((skipped + 1))
-    echo "[$processed/$batch_size] $commit — skipped (already done)"
+    echo "[$processed/$batch_size] ${commit:0:7} — skipped (already done)"
     continue
   fi
 
   msg=$(git -C "$REPO" log -1 --format='%s' "$commit" 2>/dev/null | head -c 80)
-  echo -n "[$processed/$batch_size] $commit — $msg ... "
+  echo -n "[$processed/$batch_size] ${commit:0:7} — $msg ... "
 
   if outfile=$("$ANALYZE" "$REPO" "$ORBIT" "$commit" "$OUTDIR" 2>/dev/null); then
     blast=$(python3 -c "import json; d=json.load(open('$outfile')); print(f\"blast={d['blast_radius']['caller_edges']} callers from {d['blast_radius']['caller_files']} files\")" 2>/dev/null || echo "ok")
@@ -115,4 +114,3 @@ print(f'Manifest: {len(results)} successful, {len(errors)} failed')
 
 echo ""
 echo "Done. Processed=$processed, Failed=$failed, Skipped=$skipped"
-echo "Manifest: $OUTDIR/manifest.json"

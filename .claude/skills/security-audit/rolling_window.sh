@@ -51,7 +51,7 @@ echo -e "$SNAPSHOTS" | while IFS='|' read -r label commit; do
   [ -z "$commit" ] && continue
   i=$((i + 1))
   
-  echo -n "[$i/$total] $label ($commit) ... "
+  echo -n "[$i/$total] $label (${commit:0:7}) ... "
 
   # Clean slate
   rm -f "$GRAPH_DB"
@@ -149,5 +149,4 @@ print(json.dumps(row))
 done
 
 echo ""
-echo "Done. Metrics: $METRICS_FILE"
-echo "Run: python3 aggregate_rolling.py $OUTDIR"
+echo "Done. $total snapshots indexed."

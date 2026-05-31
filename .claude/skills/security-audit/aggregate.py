@@ -255,7 +255,7 @@ def to_markdown(report):
     """Convert aggregate report to markdown."""
     lines = []
     s = report['summary']
-    lines.append(f"# GitLab Monolith Security Audit")
+    lines.append(f"# Security Posture Audit")
     lines.append(f"")
     lines.append(f"**Commits analyzed:** {s['total_commits_analyzed']}")
     lines.append(f"**Date range:** {s['date_range']['earliest'][:10]} to {s['date_range']['latest'][:10]}")
