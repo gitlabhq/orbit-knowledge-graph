@@ -13,12 +13,14 @@
 
 AUDIT_GRAPH_DB="${AUDIT_GRAPH_DB:-$HOME/.orbit/graph.duckdb}"
 
-"$@" 2>&1 | sed \
-  -e "s|${AUDIT_ORBIT:-__NOOP__}|<orbit>|g" \
-  -e "s|${AUDIT_GRAPH_DB}|<graph.db>|g" \
-  -e "s|${AUDIT_OUTPUT:-__NOOP__}|<output>|g" \
-  -e "s|${AUDIT_REPO:-__NOOP__}|<repo>|g" \
-  -e "s|${HOME}|~|g" \
-  -e 's|/tmp/[^ ]*|<tmpdir>|g' \
-  -e 's|/var/folders/[^ ]*|<tmpdir>|g' \
-  -e 's/\([0-9a-f]\{7\}\)[0-9a-f]\{33\}/\1/g'
+"$@" 2>&1 | perl -pe '
+  BEGIN { $| = 1 }
+  s|\Q'"${AUDIT_ORBIT:-__NOOP__}"'\E|<orbit>|g;
+  s|\Q'"${AUDIT_GRAPH_DB}"'\E|<graph.db>|g;
+  s|\Q'"${AUDIT_OUTPUT:-__NOOP__}"'\E|<output>|g;
+  s|\Q'"${AUDIT_REPO:-__NOOP__}"'\E|<repo>|g;
+  s|\Q'"${HOME}"'\E|~|g;
+  s|/tmp/[^ ]*|<tmpdir>|g;
+  s|/var/folders/[^ ]*|<tmpdir>|g;
+  s/([0-9a-f]{7})[0-9a-f]{33}/$1/g;
+'

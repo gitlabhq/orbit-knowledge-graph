@@ -121,9 +121,12 @@ placeholders. **Route every shell command through it.**
 
 ### Setup (once per session)
 
+The orbit binary is always at `target/release/orbit` in the GKG repo
+root. Do not search for it.
+
 ```bash
 export AUDIT_REPO="/actual/path/to/repo"
-export AUDIT_ORBIT="/actual/path/to/orbit"
+export AUDIT_ORBIT="$(git rev-parse --show-toplevel)/target/release/orbit"
 export AUDIT_OUTPUT="/actual/scratch/dir"
 EXEC=".claude/skills/security-audit/exec.sh"
 ```

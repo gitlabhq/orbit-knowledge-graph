@@ -51,7 +51,7 @@ echo -e "$SNAPSHOTS" | while IFS='|' read -r label commit; do
   [ -z "$commit" ] && continue
   i=$((i + 1))
   
-  echo -n "[$i/$total] $label (${commit:0:7}) ... "
+  echo "[$i/$total] $label (${commit:0:7}) ..."
 
   # Clean slate
   rm -f "$GRAPH_DB"
@@ -134,7 +134,7 @@ echo -e "$SNAPSHOTS" | while IFS='|' read -r label commit; do
   # Clean up worktree
   git -C "$REPO" worktree remove --force "$WORKTREE_DIR" 2>/dev/null || true
 
-  # Write metrics line
+  # Write metrics line and print summary
   echo "$metrics" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -143,9 +143,12 @@ row['snapshot'] = '$label'
 row['commit'] = '$commit'
 row['index_time'] = $index_time
 print(json.dumps(row))
+defs = row.get('ruby_defs', 0)
+calls = row.get('total_calls', 0)
+ctrl = row.get('controller_methods', 0)
+gql = row.get('graphql_classes', 0)
+sys.stderr.write(f'  ${index_time}s | defs={defs} calls={calls} ctrl={ctrl} gql={gql}\n')
 " >> "$METRICS_FILE"
-
-  echo "${index_time}s"
 done
 
 echo ""
