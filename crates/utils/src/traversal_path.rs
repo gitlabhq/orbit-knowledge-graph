@@ -124,12 +124,9 @@ impl std::error::Error for ValidationError {}
 /// Used by the gRPC server to check that a requested traversal path is
 /// within the caller's JWT-granted scopes.
 pub fn is_within_scope(path: &str, allowed_paths: &[&str]) -> bool {
-    debug_assert!(
-        allowed_paths.iter().all(|p| p.ends_with('/')),
-        "is_within_scope: all allowed_paths must end with '/' to prevent prefix confusion"
-    );
     allowed_paths
         .iter()
+        .filter(|p| p.ends_with('/'))
         .any(|allowed| path.starts_with(allowed))
 }
 
