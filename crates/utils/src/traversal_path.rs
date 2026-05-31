@@ -157,6 +157,48 @@ pub fn lowest_common_prefix(paths: &[impl AsRef<str>]) -> String {
 // Path collapsing
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Segment-level trie node for collapsing traversal paths. Not public —
+/// callers use [`minimal_prefixes`] instead.
+#[derive(Default)]
+struct TrieNode {
+    children: BTreeMap<String, TrieNode>,
+    terminal: bool,
+}
+
+impl TrieNode {
+    fn insert(&mut self, path: &str) {
+        let segs: Vec<&str> = segments(path).collect();
+        if segs.is_empty() {
+            return;
+        }
+        let mut node = self;
+        for seg in segs {
+            node = node.children.entry(seg.to_string()).or_default();
+        }
+        node.terminal = true;
+    }
+
+    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
+        if self.terminal {
+            let mut p = prefix.clone();
+            if !p.is_empty() {
+                p.push('/');
+            }
+            out.push(p);
+            return;
+        }
+        for (seg, child) in &self.children {
+            let restore_len = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            child.collect(prefix, out);
+            prefix.truncate(restore_len);
+        }
+    }
+}
+
 /// Collapse a set of traversal paths into the minimal set of prefixes.
 ///
 /// A parent path subsumes its children: `["1/100/", "1/100/200/"]` collapses
@@ -165,47 +207,7 @@ pub fn lowest_common_prefix(paths: &[impl AsRef<str>]) -> String {
 /// Used by the query compiler's security pass to produce the smallest set
 /// of SQL `startsWith` predicates.
 pub fn minimal_prefixes(paths: &[&str]) -> Vec<String> {
-    #[derive(Default)]
-    struct Node {
-        children: BTreeMap<String, Node>,
-        terminal: bool,
-    }
-
-    impl Node {
-        fn insert(&mut self, path: &str) {
-            let segs: Vec<&str> = segments(path).collect();
-            if segs.is_empty() {
-                return;
-            }
-            let mut node = self;
-            for seg in segs {
-                node = node.children.entry(seg.to_string()).or_default();
-            }
-            node.terminal = true;
-        }
-
-        fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
-            if self.terminal {
-                let mut p = prefix.clone();
-                if !p.is_empty() {
-                    p.push('/');
-                }
-                out.push(p);
-                return;
-            }
-            for (seg, child) in &self.children {
-                let restore_len = prefix.len();
-                if !prefix.is_empty() {
-                    prefix.push('/');
-                }
-                prefix.push_str(seg);
-                child.collect(prefix, out);
-                prefix.truncate(restore_len);
-            }
-        }
-    }
-
-    let mut root = Node::default();
+    let mut root = TrieNode::default();
     for path in paths {
         root.insert(path);
     }
