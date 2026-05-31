@@ -64,98 +64,21 @@ for each quarterly commit:
   git worktree remove --force /tmp/snap-$quarter
 ```
 
-## Remote query templates
+## Key Orbit query patterns
 
 **Run `glab orbit remote query` from the target repo directory** (it
 uses the git remote to determine the project). Use `--format raw` and
-pipe to python/jq.
+pipe to python/jq. Validate queries against `config/schemas/graph_query.schema.json`.
 
-### Fetch security-branch MRs (paginated)
-
-Single-node traversal. Use `order_by` + `limit 1000`. Paginate by
-adding a `merged_at` filter with `{"op": "lt", "value": "<last_date>"}`.
-
-```json
-{
-  "query": {
-    "query_type": "traversal",
-    "node": {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "columns": ["id", "iid", "title", "state", "merged_at",
-                   "source_branch", "added_lines", "removed_lines"],
-      "filters": {
-        "state": {"op": "eq", "value": "merged"},
-        "source_branch": {"op": "starts_with", "value": "security-"}
-      }
-    },
-    "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
-    "limit": 1000
-  }
-}
-```
-
-### Fetch single MR diff
-
-```json
-{
-  "query": {
-    "query_type": "traversal",
-    "node": {
-      "id": "mr",
-      "entity": "MergeRequest",
-      "columns": ["id", "title", "diff", "source_branch"],
-      "node_ids": ["<mr_id>"]
-    },
-    "limit": 1
-  }
-}
-```
-
-### Count MRs (aggregation)
-
-```json
-{
-  "query": {
-    "query_type": "aggregation",
-    "nodes": [
-      {
-        "id": "mr",
-        "entity": "MergeRequest",
-        "filters": {
-          "state": {"op": "eq", "value": "merged"},
-          "source_branch": {"op": "starts_with", "value": "security-"}
-        }
-      }
-    ],
-    "aggregations": [
-      {"function": "count", "target": "mr", "alias": "total"}
-    ]
-  }
-}
-```
-
-### DSL field reference
-
-| Field | Use | Notes |
-|---|---|---|
-| `node` (singular) | Single-entity traversal | No relationships needed |
-| `nodes` (array, min 2) + `relationships` | Multi-entity traversal | `type`/`from`/`to` on each relationship |
-| `entity` | Node type name | Not `node_type` |
-| `columns` | Properties to return | Not `select` |
-| `filters` | Object: `{prop: value}` or `{prop: {"op": "...", "value": "..."}}` | Not an array |
-| `order_by` | `{"node": "id", "property": "...", "direction": "DESC"}` | Required for pagination |
-| `limit` | Max 1000 | No `cursor`; paginate via date filters |
-| `aggregations[].target` | Node id to aggregate | Not `node` |
-
-### Notes
-
+Fetch security MRs:
+- MR → HAS_LABEL → Label (filter title="security")
+- Or filter `source_branch` starting with `security-`
 - `diff` column has full unified diff; fetch per-MR (batch causes content_resolution_error)
 - `HAS_LATEST_DIFF` only populated for ~2024+ MRs
+- Paginate with `order_by` + `limit 1000` + date filter on next page
 - Git history (`security-*` branch merges) supplements for pre-2024 data
 
-## Local query patterns
-
+Fetch callers of security-relevant code (local):
 - Definition → CALLS → Definition, filter target by file_path
 - Definition → EXTENDS → Definition for inheritance/mixin chains
 - Use `project_id` filter to query a specific quarterly snapshot
