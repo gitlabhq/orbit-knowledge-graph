@@ -126,9 +126,6 @@ $EXEC duckdb ~/.orbit/graph.duckdb -json -c "SELECT ..."
 $EXEC bash rolling_window.sh "$AUDIT_REPO" "$AUDIT_ORBIT" "$AUDIT_OUTPUT"
 ```
 
-Output will show `<repo>`, `<orbit>`, `<output>`, `<graph.db>`, `<tmpdir>`,
-`~` instead of real paths, and 7-char commit hashes instead of 40-char.
-
 ### What it replaces
 
 | Pattern | Placeholder |
@@ -140,6 +137,95 @@ Output will show `<repo>`, `<orbit>`, `<output>`, `<graph.db>`, `<tmpdir>`,
 | `/tmp/...`, `/var/folders/...` | `<tmpdir>` |
 | `$HOME` | `~` |
 | 40-char hex hashes | first 7 chars |
+
+### Presentation guidance
+
+Beyond path sanitization, present tool output as a clean analysis log.
+Nothing is suppressed — everything is shown, but transformed.
+
+**Schema and API responses** — summarize structure, don't dump raw JSON:
+
+```
+# not this
+$ glab orbit remote schema Label 2>&1
+{"schema_version":"0.1","domains":[{"name":"ci",...400 lines...
+
+# this
+$ $EXEC glab orbit remote schema MergeRequest
+  → 22 properties (id, iid, title, state, merged_at, diff, ...)
+$ $EXEC glab orbit remote schema Label
+  → 9 properties (id, title, description, color, ...)
+  → relevant edges: MR →HAS_LABEL→ Label, MR →HAS_LATEST_DIFF→ Diff →HAS_FILE→ DiffFile
+```
+
+**Query payloads** — describe what the query does, not the raw JSON:
+
+```
+# not this
+$ cat > <tmpdir>/fetch.json << 'EOF'
+{ "query": { "query_type": "traversal", "nodes": [ { "id": "mr", ... 40 lines ... } ] } }
+EOF
+$EXEC glab orbit remote query --format raw <tmpdir>/fetch.json 2>&1 | python3 -c "..."
+
+# this
+$ $EXEC glab orbit remote query --format raw <query>
+  # traversal: MergeRequest[state=merged, source_branch ^= "security-"] → limit 1000
+  → 1,000 MRs returned (2024-11 → 2026-05)
+```
+
+**SQL and Python** — pseudocode or short description, result inline:
+
+```
+# not this
+$ duckdb <graph.db> -json -c "
+  SELECT (SELECT COUNT(DISTINCT s.fqn) FROM gl_definition s
+    JOIN gl_edge e ON ... WHERE ... ) as authz_unguarded, ..."
+
+# this
+$ $EXEC duckdb <graph.db> -c <authz_unguarded_query>
+  # controller methods calling services without inline auth check
+  → 2020-Q1: 171/173 (99%), 2025-Q4: 236/239 (99%)
+```
+
+```
+# not this
+$ python3 << 'PYEOF'
+import json, re
+VULN_PATTERNS = [ (r'(?i)(authori[sz]ation|...)', 'authz', '...'), ... ]
+for mr in mrs: ...
+PYEOF
+
+# this
+$ python3 classify_mrs.py   # title + branch + diff → vuln_type
+  → authz: 879, authn: 569, dos: 522, xss: 404, ...
+```
+
+**Git operations** — short hashes, placeholder paths:
+
+```
+# not this
+HEAD is now at 6b3d82ef9ff9e2fb9b064b864a1229f1d8b38c67 Merge branch '38096-create-resource-weight...'
+
+# this (exec.sh handles this automatically)
+$ $EXEC git worktree add <tmpdir> 6b3d82e
+$ $EXEC <orbit> index <tmpdir>
+  → 58,292 defs, 85,790 calls (2.3s)
+```
+
+**Errors and retries** — show what happened, paths are auto-sanitized:
+
+```
+# not this
+ERROR
+  Orbit API error (HTTP 400): schema violation: Additional properties are not allowed
+  ('select', 'where', 'traverse', 'page_size', 'offset' were unexpected) at ; ...
+
+# this
+$ $EXEC glab orbit remote query <query>   # first attempt, schema mismatch
+  → 400: query envelope rejected (wrong top-level keys)
+  retrying with corrected DSL format...
+  → 1,000 MRs returned
+```
 
 ### Report body
 
