@@ -64,16 +64,98 @@ for each quarterly commit:
   git worktree remove --force /tmp/snap-$quarter
 ```
 
-## Key Orbit query patterns
+## Remote query templates
 
-Fetch security MRs with diff files (paginate with offset/page_size):
-- MR → HAS_LABEL → Label (filter title="security")
-- MR → HAS_LATEST_DIFF → MergeRequestDiff → HAS_FILE → MergeRequestDiffFile
-- `old_path` is populated on MergeRequestDiffFile; `new_path` is not
-- `diff` column on MR has full unified diff but must be fetched per-MR (batch causes content_resolution_error)
+**Run `glab orbit remote query` from the target repo directory** (it
+uses the git remote to determine the project). Use `--format raw` and
+pipe to python/jq.
+
+### Fetch security-branch MRs (paginated)
+
+Single-node traversal. Use `order_by` + `limit 1000`. Paginate by
+adding a `merged_at` filter with `{"op": "lt", "value": "<last_date>"}`.
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "columns": ["id", "iid", "title", "state", "merged_at",
+                   "source_branch", "added_lines", "removed_lines"],
+      "filters": {
+        "state": {"op": "eq", "value": "merged"},
+        "source_branch": {"op": "starts_with", "value": "security-"}
+      }
+    },
+    "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+    "limit": 1000
+  }
+}
+```
+
+### Fetch single MR diff
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "columns": ["id", "title", "diff", "source_branch"],
+      "node_ids": ["<mr_id>"]
+    },
+    "limit": 1
+  }
+}
+```
+
+### Count MRs (aggregation)
+
+```json
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": {"op": "eq", "value": "merged"},
+          "source_branch": {"op": "starts_with", "value": "security-"}
+        }
+      }
+    ],
+    "aggregations": [
+      {"function": "count", "target": "mr", "alias": "total"}
+    ]
+  }
+}
+```
+
+### DSL field reference
+
+| Field | Use | Notes |
+|---|---|---|
+| `node` (singular) | Single-entity traversal | No relationships needed |
+| `nodes` (array, min 2) + `relationships` | Multi-entity traversal | `type`/`from`/`to` on each relationship |
+| `entity` | Node type name | Not `node_type` |
+| `columns` | Properties to return | Not `select` |
+| `filters` | Object: `{prop: value}` or `{prop: {"op": "...", "value": "..."}}` | Not an array |
+| `order_by` | `{"node": "id", "property": "...", "direction": "DESC"}` | Required for pagination |
+| `limit` | Max 1000 | No `cursor`; paginate via date filters |
+| `aggregations[].target` | Node id to aggregate | Not `node` |
+
+### Notes
+
+- `diff` column has full unified diff; fetch per-MR (batch causes content_resolution_error)
 - `HAS_LATEST_DIFF` only populated for ~2024+ MRs
+- Git history (`security-*` branch merges) supplements for pre-2024 data
 
-Fetch callers of security-relevant code (local):
+## Local query patterns
+
 - Definition → CALLS → Definition, filter target by file_path
 - Definition → EXTENDS → Definition for inheritance/mixin chains
 - Use `project_id` filter to query a specific quarterly snapshot
@@ -234,6 +316,10 @@ from the analysis. Don't anonymize findings, only tooling output.
 
 ## Operational notes
 
+- **Shell is zsh, not bash.** Unquoted `$var` does NOT word-split in
+  zsh. Use `bash -c '...'` or the bundled `.sh` scripts (which have
+  bash shebangs) for loops with word splitting. Never write `for x in
+  $list` in inline zsh commands.
 - Large monorepos: 24 quarterly snapshots take ~4-15 min to index
 - Diff fetch: ~2 min for 100 MRs (sequential, one request per MR)
 - `security` label covers vuln fixes AND hardening — classify by diff content
