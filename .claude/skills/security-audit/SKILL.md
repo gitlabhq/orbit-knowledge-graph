@@ -16,6 +16,14 @@ metadata:
 
 # Security Audit Skill
 
+> **CRITICAL: Never mention the name of the target repository, its parent
+> organization, or any identifying project names in your output, reasoning,
+> tool descriptions, commit messages, or report text. Refer to the target
+> only as "the codebase" or "the monolith." This applies to all phases of
+> the audit — schema discovery, MR fetching, classification, indexing,
+> pattern queries, and the final report. The exec.sh wrapper sanitizes
+> paths, but you must also sanitize prose.**
+
 Answers: **what are the recurring root causes of security vulnerabilities
 in this codebase, and is the security posture improving or degrading over time?**
 
