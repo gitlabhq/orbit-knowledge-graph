@@ -100,146 +100,51 @@ emerges from the data as meaningful (recurrence rates, fix velocity
 trends, surface-to-enforcement ratios, coupling changes, coverage gaps,
 migration completion percentages, etc).
 
-## Presentation rules
+## Output sanitization
 
-The audit output is a deliverable. Sanitize all tool output so it reads
-as a clean analysis log, not a shell transcript. Nothing is suppressed —
-everything is shown, but transformed.
+`exec.sh` is a shell wrapper that pipes all stdout/stderr through sed,
+replacing local paths, temp dirs, and long commit hashes with
+placeholders. **Route every shell command through it.**
 
-### Path anonymization
+### Setup (once per session)
 
-Replace absolute filesystem paths with role placeholders. Apply
-dynamically based on whatever the actual values are, not hardcoded
-strings.
+```bash
+export AUDIT_REPO="/actual/path/to/repo"
+export AUDIT_ORBIT="/actual/path/to/orbit"
+export AUDIT_OUTPUT="/actual/scratch/dir"
+EXEC=".claude/skills/security-audit/exec.sh"
+```
 
-| Actual value | Placeholder |
+### Usage
+
+Prefix every command with `$EXEC`:
+
+```bash
+$EXEC git -C "$AUDIT_REPO" log --oneline -5
+$EXEC "$AUDIT_ORBIT" index "$AUDIT_REPO"
+$EXEC duckdb ~/.orbit/graph.duckdb -json -c "SELECT ..."
+$EXEC bash rolling_window.sh "$AUDIT_REPO" "$AUDIT_ORBIT" "$AUDIT_OUTPUT"
+```
+
+Output will show `<repo>`, `<orbit>`, `<output>`, `<graph.db>`, `<tmpdir>`,
+`~` instead of real paths, and 7-char commit hashes instead of 40-char.
+
+### What it replaces
+
+| Pattern | Placeholder |
 |---|---|
-| Repository checkout path | `<repo>` |
-| Orbit binary path | `<orbit>` |
-| Output/scratch directory | `<output>` |
-| Graph database path | `<graph.db>` |
-| Temp/worktree directories | `<tmpdir>` |
-| Home directory prefix | omit or `~` |
-
-Example:
-```
-# not this
-$ /Users/jane/code/gkg/target/release/orbit index /Users/jane/gitlab/gdk/gitlab
-# this
-$ <orbit> index <repo>
-```
-
-### Command output
-
-Show the command being run, but replace path arguments and inline
-payloads with placeholders or pseudocode descriptions.
-
-```
-# not this
-$ cat > /var/folders/8q/.../fetch.json << 'EOF'
-{ "query": { "query_type": "traversal", "nodes": [ { "id": "mr", ... 40 lines ... } ] } }
-EOF
-glab orbit remote query --format raw /var/folders/8q/.../fetch.json 2>&1 | python3 -c "..."
-
-# this
-$ glab orbit remote query --format raw <query>
-  # traversal: MergeRequest[state=merged, source_branch ^= "security-"] → limit 1000
-  → 1,000 MRs returned (2024-11 → 2026-05)
-```
-
-### Query and code blocks
-
-Show SQL, Python, and JSON as pseudocode or as a short description of
-what the query/script computes. Include the result inline.
-
-```
-# not this
-$ duckdb ~/.orbit/graph.duckdb -json -c "
-  SELECT (SELECT COUNT(DISTINCT s.fqn) FROM gl_definition s
-    JOIN gl_edge e ON e.source_id = s.id AND e.source_kind = 'Definition'
-    JOIN gl_definition t ON ...
-    WHERE s.file_path LIKE 'app/controllers/%' ... ) as authz_unguarded,
-  ..."
-
-# this
-$ duckdb <graph.db> -c <authz_unguarded_query>
-  # controller methods calling services without inline auth check
-  → 2020-Q1: 171/173 (99%), 2025-Q4: 236/239 (99%)
-```
-
-```
-# not this
-$ python3 << 'PYEOF'
-import json, re
-from collections import Counter, defaultdict
-outdir = '/var/folders/8q/...'
-VULN_PATTERNS = [
-    (r'(?i)(authori[sz]ation|access.control|...)', 'authz', '...'),
-    ...
-]
-for mr in mrs: ...
-PYEOF
-
-# this
-$ python3 classify_mrs.py   # title + branch + diff → vuln_type
-  → authz: 879, authn: 569, dos: 522, xss: 404, ...
-```
-
-### Schema and API responses
-
-Summarize structure rather than dumping raw JSON. Show entity names,
-property counts, and relevant edges.
-
-```
-# not this
-$ glab orbit remote schema Label 2>&1
-{"schema_version":"0.1","domains":[{"name":"ci",...400 lines...
-
-# this
-$ glab orbit remote schema MergeRequest
-  → 22 properties (id, iid, title, state, merged_at, diff, ...)
-$ glab orbit remote schema Label
-  → 9 properties (id, title, description, color, ...)
-  → relevant edges: MR →HAS_LABEL→ Label, MR →HAS_LATEST_DIFF→ Diff →HAS_FILE→ DiffFile
-```
-
-### Git operations
-
-Show the operation with short commit hashes. Replace worktree paths and
-commit messages with placeholders or truncate.
-
-```
-# not this
-HEAD is now at 6b3d82ef9ff9e2fb9b064b864a1229f1d8b38c67 Merge branch '38096-create-resource-weight...'
-
-# this
-$ git worktree add <tmpdir> 6b3d82e   # 2020-Q1 snapshot
-$ <orbit> index <tmpdir>
-  → 58,292 defs, 85,790 calls (2.3s)
-```
-
-### Errors and retries
-
-Show that a retry happened and why, but anonymize paths and payloads.
-
-```
-# not this
-ERROR
-  Orbit API error (HTTP 400): schema violation: Additional properties are not allowed
-  ('select', 'where', 'traverse', 'page_size', 'offset' were unexpected) at ; ...
-
-# this
-$ glab orbit remote query <query>   # first attempt, schema mismatch
-  → 400: query envelope rejected (wrong top-level keys)
-  retrying with corrected DSL format...
-  → 1,000 MRs returned
-```
+| `$AUDIT_REPO` | `<repo>` |
+| `$AUDIT_ORBIT` | `<orbit>` |
+| `$AUDIT_OUTPUT` | `<output>` |
+| `~/.orbit/graph.duckdb` | `<graph.db>` |
+| `/tmp/...`, `/var/folders/...` | `<tmpdir>` |
+| `$HOME` | `~` |
+| 40-char hex hashes | first 7 chars |
 
 ### Report body
 
-The final report names the target repo and uses concrete numbers,
-file paths, and class names — those are the analysis, not
-implementation details. Don't anonymize findings, only tooling.
+The final report uses concrete numbers, file paths, and class names
+from the analysis. Don't anonymize findings, only tooling output.
 
 ## Operational notes
 
