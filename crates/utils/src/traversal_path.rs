@@ -154,72 +154,64 @@ pub fn lowest_common_prefix(paths: &[impl AsRef<str>]) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PathTrie — segment-level trie for collapsing traversal paths
+// Path collapsing
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A trie keyed on path segments (`"1"`, `"100"`, …). Each node tracks
-/// whether it was explicitly inserted (i.e. the user has access to that
-/// exact namespace prefix). Inserting `"1/100/"` marks the `1 → 100` node
-/// as terminal.
+/// Collapse a set of traversal paths into the minimal set of prefixes.
 ///
-/// Used by the query compiler's security pass to collapse large sets of
-/// authorized paths into the minimal set of SQL `startsWith` predicates.
-#[derive(Default)]
-pub struct PathTrie {
-    children: BTreeMap<String, PathTrie>,
-    terminal: bool,
-}
-
-impl PathTrie {
-    pub fn from_paths(paths: &[&str]) -> Self {
-        let mut root = Self::default();
-        for path in paths {
-            root.insert(path);
-        }
-        root
+/// A parent path subsumes its children: `["1/100/", "1/100/200/"]` collapses
+/// to `["1/100/"]`. Siblings are kept: `["1/100/", "1/200/"]` stays as-is.
+///
+/// Used by the query compiler's security pass to produce the smallest set
+/// of SQL `startsWith` predicates.
+pub fn minimal_prefixes(paths: &[&str]) -> Vec<String> {
+    #[derive(Default)]
+    struct Node {
+        children: BTreeMap<String, Node>,
+        terminal: bool,
     }
 
-    pub(crate) fn insert(&mut self, path: &str) {
-        let segs: Vec<&str> = segments(path).collect();
-        debug_assert!(!segs.is_empty(), "PathTrie::insert called with empty path");
-        if segs.is_empty() {
-            return;
-        }
-        let mut node = self;
-        for seg in segs {
-            node = node.children.entry(seg.to_string()).or_default();
-        }
-        node.terminal = true;
-    }
-
-    /// Walk the trie and emit the minimal set of prefixes. A terminal
-    /// node emits its path and prunes all descendants (subsumption).
-    pub fn to_minimal_prefixes(&self) -> Vec<String> {
-        let mut result = Vec::new();
-        self.collect(&mut String::new(), &mut result);
-        result
-    }
-
-    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
-        if self.terminal {
-            let mut p = prefix.clone();
-            if !p.is_empty() {
-                p.push('/');
+    impl Node {
+        fn insert(&mut self, path: &str) {
+            let segs: Vec<&str> = segments(path).collect();
+            if segs.is_empty() {
+                return;
             }
-            out.push(p);
-            return;
+            let mut node = self;
+            for seg in segs {
+                node = node.children.entry(seg.to_string()).or_default();
+            }
+            node.terminal = true;
         }
 
-        for (seg, child) in &self.children {
-            let restore_len = prefix.len();
-            if !prefix.is_empty() {
-                prefix.push('/');
+        fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
+            if self.terminal {
+                let mut p = prefix.clone();
+                if !p.is_empty() {
+                    p.push('/');
+                }
+                out.push(p);
+                return;
             }
-            prefix.push_str(seg);
-            child.collect(prefix, out);
-            prefix.truncate(restore_len);
+            for (seg, child) in &self.children {
+                let restore_len = prefix.len();
+                if !prefix.is_empty() {
+                    prefix.push('/');
+                }
+                prefix.push_str(seg);
+                child.collect(prefix, out);
+                prefix.truncate(restore_len);
+            }
         }
     }
+
+    let mut root = Node::default();
+    for path in paths {
+        root.insert(path);
+    }
+    let mut result = Vec::new();
+    root.collect(&mut String::new(), &mut result);
+    result
 }
 
 #[cfg(test)]
@@ -457,38 +449,38 @@ mod tests {
         assert_eq!(lowest_common_prefix(&["1/100/"]), "1/100/");
     }
 
-    // ── PathTrie ────────────────────────────────────────────────────────
+    // ── minimal_prefixes ──────────────────────────────────────────────
 
     #[test]
-    fn trie_single_path() {
-        let trie = PathTrie::from_paths(&["1/100/"]);
-        assert_eq!(trie.to_minimal_prefixes(), vec!["1/100/"]);
+    fn min_single_path() {
+        assert_eq!(minimal_prefixes(&["1/100/"]), vec!["1/100/"]);
     }
 
     #[test]
-    fn trie_subsumes_children() {
-        let trie = PathTrie::from_paths(&["1/100/", "1/100/1000/"]);
-        assert_eq!(trie.to_minimal_prefixes(), vec!["1/100/"]);
+    fn min_subsumes_children() {
+        assert_eq!(minimal_prefixes(&["1/100/", "1/100/1000/"]), vec!["1/100/"]);
     }
 
     #[test]
-    fn trie_sibling_paths() {
-        let trie = PathTrie::from_paths(&["1/100/", "1/200/"]);
-        assert_eq!(trie.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+    fn min_sibling_paths() {
+        assert_eq!(
+            minimal_prefixes(&["1/100/", "1/200/"]),
+            vec!["1/100/", "1/200/"]
+        );
     }
 
     #[test]
-    fn trie_compresses_single_child() {
-        let trie = PathTrie::from_paths(&["1/100/1000/"]);
-        assert_eq!(trie.to_minimal_prefixes(), vec!["1/100/1000/"]);
+    fn min_deep_path() {
+        assert_eq!(minimal_prefixes(&["1/100/1000/"]), vec!["1/100/1000/"]);
     }
 
     #[test]
-    fn trie_org_root_subsumes_all() {
-        let trie = PathTrie::from_paths(&["1/", "1/100/", "1/200/"]);
-        // "1/" is terminal → prunes 100 and 200
-        // Note: "1/" alone is not a valid traversal path per validate(),
-        // but PathTrie doesn't enforce that — it's a structural tool.
-        assert_eq!(trie.to_minimal_prefixes(), vec!["1/"]);
+    fn min_org_root_subsumes_all() {
+        assert_eq!(minimal_prefixes(&["1/", "1/100/", "1/200/"]), vec!["1/"]);
+    }
+
+    #[test]
+    fn min_empty_path_ignored() {
+        assert!(minimal_prefixes(&[""]).is_empty());
     }
 }

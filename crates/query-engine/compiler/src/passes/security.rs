@@ -104,8 +104,7 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
         0 => Expr::Literal(Value::Bool(false)),
         1 => starts_with_expr(alias, paths[0]),
         _ => {
-            let collapsed =
-                gkg_utils::traversal_path::PathTrie::from_paths(paths).to_minimal_prefixes();
+            let collapsed = gkg_utils::traversal_path::minimal_prefixes(paths);
             if collapsed.len() == 1 {
                 return starts_with_expr(alias, &collapsed[0]);
             }
@@ -231,7 +230,7 @@ mod tests {
     use super::*;
     use crate::TraversalPath;
     use crate::ast::{JoinType, Op, SelectExpr};
-    use gkg_utils::traversal_path::{PathTrie, lowest_common_prefix};
+    use gkg_utils::traversal_path::{lowest_common_prefix, minimal_prefixes};
     use ontology::constants::EDGE_TABLE;
     use serde_json::Value;
 
@@ -490,48 +489,48 @@ mod tests {
 
     #[test]
     fn path_trie_subsumes_children() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/200/", "1/100/201/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+        let t = minimal_prefixes(&["1/100/", "1/100/200/", "1/100/201/"]);
+        assert_eq!(t, vec!["1/100/"]);
     }
 
     #[test]
     fn path_trie_keeps_siblings() {
-        let t = PathTrie::from_paths(&["1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+        let t = minimal_prefixes(&["1/100/", "1/200/"]);
+        assert_eq!(t, vec!["1/100/", "1/200/"]);
     }
 
     #[test]
     fn path_trie_siblings_under_shared_parent() {
         // Three children under 1/100/ — trie keeps all three since
         // the parent 1/100/ is not itself authorized.
-        let t = PathTrie::from_paths(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
-        let result = t.to_minimal_prefixes();
+        let t = minimal_prefixes(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
+        let result = t;
         assert_eq!(result.len(), 4);
         assert!(result.contains(&"1/200/300/".to_string()));
     }
 
     #[test]
     fn path_trie_single_path() {
-        let t = PathTrie::from_paths(&["1/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+        let t = minimal_prefixes(&["1/100/"]);
+        assert_eq!(t, vec!["1/100/"]);
     }
 
     #[test]
     fn path_trie_deduplicates() {
-        let t = PathTrie::from_paths(&["1/100/", "1/100/", "1/200/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+        let t = minimal_prefixes(&["1/100/", "1/100/", "1/200/"]);
+        assert_eq!(t, vec!["1/100/", "1/200/"]);
     }
 
     #[test]
     fn path_trie_deep_subsumption() {
-        let t = PathTrie::from_paths(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/"]);
+        let t = minimal_prefixes(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
+        assert_eq!(t, vec!["1/"]);
     }
 
     #[test]
     fn path_trie_mixed_orgs() {
-        let t = PathTrie::from_paths(&["1/100/", "2/100/"]);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "2/100/"]);
+        let t = minimal_prefixes(&["1/100/", "2/100/"]);
+        assert_eq!(t, vec!["1/100/", "2/100/"]);
     }
 
     #[test]
@@ -543,8 +542,8 @@ mod tests {
         let mut paths: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
         paths.extend((200..208).map(|i| format!("1/{i}/")));
         let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
-        let t = PathTrie::from_paths(&refs);
-        let result = t.to_minimal_prefixes();
+        let t = minimal_prefixes(&refs);
+        let result = t;
         // No subsumption possible — all are leaf groups
         assert_eq!(result.len(), 38);
     }
@@ -557,16 +556,14 @@ mod tests {
         let children: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
         let refs: Vec<&str> = children.iter().map(|s| s.as_str()).collect();
         paths.extend(refs);
-        let t = PathTrie::from_paths(&paths);
-        assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
+        let t = minimal_prefixes(&paths);
+        assert_eq!(t, vec!["1/10/"]);
     }
 
     #[test]
-    #[should_panic(expected = "empty path")]
-    fn path_trie_empty_path_panics_in_debug() {
-        // Empty paths are impossible (SecurityContext validates ^(\d+/)+$).
-        // The debug_assert catches misuse during development.
-        PathTrie::from_paths(&[""]);
+    fn minimal_prefixes_ignores_empty_paths() {
+        assert!(minimal_prefixes(&[""]).is_empty());
+        assert_eq!(minimal_prefixes(&["", "1/100/"]), vec!["1/100/"]);
     }
 
     #[test]
@@ -596,7 +593,7 @@ mod tests {
         assert_eq!(eligible.len(), 4);
 
         // Trie collapses 1/100/ + 1/100/200/ → 1/100/
-        let collapsed = PathTrie::from_paths(&eligible).to_minimal_prefixes();
+        let collapsed = minimal_prefixes(&eligible);
         assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
 
         // build_path_filter produces the correct SQL shape
