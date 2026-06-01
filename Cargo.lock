@@ -5066,7 +5066,7 @@ dependencies = [
  "futures",
  "gkg-server-config",
  "jsonwebtoken 10.4.0",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
@@ -5102,7 +5102,7 @@ dependencies = [
  "opentelemetry",
  "query-engine",
  "rand 0.10.1",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustls",
  "serde_json",
  "tokio",
@@ -5163,7 +5163,7 @@ dependencies = [
  "prost 0.14.3",
  "prost-build 0.14.3",
  "query-engine",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustls",
  "semver",
  "serde",
@@ -5993,7 +5993,7 @@ dependencies = [
  "prost 0.14.3",
  "query-engine",
  "rand 0.10.1",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
@@ -6151,7 +6151,7 @@ dependencies = [
  "prost 0.14.3",
  "query-engine",
  "rcgen",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
@@ -6474,7 +6474,7 @@ dependencies = [
  "referencing",
  "regex",
  "regex-syntax",
- "reqwest 0.13.3",
+ "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
@@ -11067,9 +11067,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
