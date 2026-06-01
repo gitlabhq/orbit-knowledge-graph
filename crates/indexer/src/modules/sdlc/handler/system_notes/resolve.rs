@@ -38,9 +38,20 @@ pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
 /// Parameters:
 ///   `{paths:Array(String)}` — full_paths to look up.
 ///
-/// Returns `(source_type, source_id, path, traversal_path)`. The
-/// `_siphon_deleted = false` filter prevents resolving against a tombstoned
-/// project route.
+/// Returns `(source_type, source_id, path, traversal_path)`.
+///
+/// `siphon_routes` is a `ReplacingMergeTree` whose sort key *includes*
+/// `traversal_path`. The traversal-path reconciler re-inserts a row with the
+/// reconciled `traversal_path` rather than updating in place, so a route's
+/// stale (`0/`) row and reconciled (`1/22/94/`) row have **different sort
+/// keys** and never collapse under `FINAL`. Deduplicating by the stable PG
+/// primary key (`id`) with `argMax(..., _siphon_replicated_at)` is therefore
+/// both correct and cheaper than `FINAL`; it mirrors the SDLC entity ETL
+/// (`plan/input.rs`). Without it a cross-project reference can resolve to a
+/// stale `0/` route and the edge lands in the wrong namespace partition.
+/// `_siphon_deleted` is taken from the latest version and filtered after the
+/// aggregation so a live route isn't dropped by an older tombstone (or kept
+/// by a stale live row).
 ///
 /// The lookup is **not** scoped to the source note's `traversal_path`:
 /// cross-project references point at projects in other namespaces, and
@@ -52,10 +63,20 @@ SELECT \
     source_id, \
     path, \
     traversal_path \
-FROM siphon_routes \
-WHERE _siphon_deleted = false \
-  AND path IN {paths:Array(String)} \
-  AND source_type IN ('Project', 'Namespace')";
+FROM ( \
+    SELECT \
+        id, \
+        source_type, \
+        source_id, \
+        path, \
+        argMax(traversal_path, _siphon_replicated_at) AS traversal_path, \
+        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+    FROM siphon_routes \
+    WHERE path IN {paths:Array(String)} \
+      AND source_type IN ('Project', 'Namespace') \
+    GROUP BY id, source_type, source_id, path \
+) \
+WHERE _siphon_deleted = false";
 
 /// SQL template for the reverse routes lookup: project `source_id` → path.
 ///
@@ -63,6 +84,9 @@ WHERE _siphon_deleted = false \
 /// project path for unqualified GFM references on that row. Keyed on
 /// `source_id` (the project id) rather than `path`, so it complements
 /// [`ROUTES_SQL`] (which is keyed on `path`).
+///
+/// Deduplicated by PG primary key the same way as [`ROUTES_SQL`] — see that
+/// constant for why `FINAL` is insufficient here.
 ///
 /// Parameters:
 ///   `{source_ids:Array(Int64)}` — project ids to resolve.
@@ -72,10 +96,18 @@ pub const PROJECT_PATHS_SQL: &str = "\
 SELECT \
     source_id, \
     path \
-FROM siphon_routes \
-WHERE _siphon_deleted = false \
-  AND source_type = 'Project' \
-  AND source_id IN {source_ids:Array(Int64)}";
+FROM ( \
+    SELECT \
+        id, \
+        source_id, \
+        path, \
+        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+    FROM siphon_routes \
+    WHERE source_type = 'Project' \
+      AND source_id IN {source_ids:Array(Int64)} \
+    GROUP BY id, source_id, path \
+) \
+WHERE _siphon_deleted = false";
 
 /// SQL template for the merge-request entity batch lookup.
 ///
@@ -91,28 +123,49 @@ WHERE _siphon_deleted = false \
 /// Not scoped to the source note's `traversal_path` (cross-project targets
 /// live in other namespaces); `(target_project_id, iid)` is globally unique.
 ///
+/// `merge_requests` is a `ReplacingMergeTree`, so it is deduplicated by PG
+/// primary key (`id`) with `argMax(..., _siphon_replicated_at)` — same
+/// rationale as [`ROUTES_SQL`]: avoid returning a stale row version (and
+/// avoid `FINAL`'s full-merge cost on a large table).
+///
 /// Returns `(id, target_project_id, iid)`.
 pub const MERGE_REQUESTS_SQL: &str = "\
 SELECT \
     id, \
     target_project_id, \
     iid \
-FROM merge_requests \
-WHERE _siphon_deleted = false \
-  AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)})";
+FROM ( \
+    SELECT \
+        id, \
+        target_project_id, \
+        iid, \
+        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+    FROM merge_requests \
+    WHERE (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
+    GROUP BY id, target_project_id, iid \
+) \
+WHERE _siphon_deleted = false";
 
 /// SQL template for the work-item entity batch lookup.
 ///
 /// Parameters identical to [`MERGE_REQUESTS_SQL`] but keyed on `project_id`.
-/// Returns `(id, project_id, iid)`.
+/// Deduplicated by PG primary key the same way. Returns `(id, project_id, iid)`.
 pub const WORK_ITEMS_SQL: &str = "\
 SELECT \
     id, \
     project_id, \
     iid \
-FROM work_items \
-WHERE _siphon_deleted = false \
-  AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)})";
+FROM ( \
+    SELECT \
+        id, \
+        project_id, \
+        iid, \
+        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+    FROM work_items \
+    WHERE (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
+    GROUP BY id, project_id, iid \
+) \
+WHERE _siphon_deleted = false";
 
 /// A row from the `siphon_routes` lookup, keyed by `path`.
 ///
@@ -345,6 +398,38 @@ mod tests {
         assert!(!MERGE_REQUESTS_SQL.contains("startsWith(traversal_path"));
         assert!(!WORK_ITEMS_SQL.contains("startsWith(traversal_path"));
         assert!(!PROJECT_PATHS_SQL.contains("startsWith(traversal_path"));
+    }
+
+    #[test]
+    fn resolver_sql_dedups_replacing_merge_tree_by_pg_pkey() {
+        // These read ReplacingMergeTree siphon tables whose stale and
+        // reconciled rows can coexist (and, for routes, never collapse under
+        // FINAL because traversal_path is in the sort key). Each must
+        // deduplicate by the PG primary key with argMax, picking the latest
+        // replicated version, and filter `_siphon_deleted` after the
+        // aggregation. Regression guard for the cross-project `0/` bug.
+        for sql in [
+            ROUTES_SQL,
+            PROJECT_PATHS_SQL,
+            MERGE_REQUESTS_SQL,
+            WORK_ITEMS_SQL,
+        ] {
+            assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
+            assert!(
+                sql.contains("argMax(_siphon_deleted, _siphon_replicated_at)"),
+                "missing latest-version _siphon_deleted in: {sql}"
+            );
+            assert!(
+                sql.trim_end().ends_with("WHERE _siphon_deleted = false"),
+                "deleted filter must run after the argMax aggregation in: {sql}"
+            );
+        }
+        // Routes' volatile reconcile column must take the latest version so
+        // a stale `0/` row can't win over the reconciled traversal_path.
+        assert!(
+            ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
+            "routes must take the latest traversal_path"
+        );
     }
 
     #[test]

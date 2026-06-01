@@ -345,6 +345,13 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
   The natural partition column is `siphon_system_note_metadata.note_id` (high cardinality, primary key).
   Listed here so a future contributor does not re-derive that we already considered it.
 
+## Coverage and known limitations (E2E-validated)
+
+A full real-Siphon E2E (`GDK Postgres → Siphon CDC → ClickHouse → handler → gl_edge`, not testcontainers) confirmed the `MENTIONS` and lifecycle paths materialize end-to-end and the `Commit`-noteable negative path drops. Two non-bug coverage limitations surfaced and are recorded here so they are not later mistaken for regressions:
+
+- **Lifecycle edges (`CLOSED` / `MERGED` / `REOPENED`) cover imported/legacy namespaces, not native GDK lifecycle.** Modern issue/MR close/reopen/merge writes through `resource_state_events` + the `work_item_status` action, **not** the legacy `closed`/`reopened`/`merged` system-note actions in `HANDLED_LIFECYCLE_ACTIONS`. Those actions only land in `system_note_metadata` for projects imported via the GitHub/Bitbucket importers (which still write them) or for legacy data; the E2E confirmed the edges materialize when those rows exist. In production these supplemental lifecycle edges appear only for imported/legacy namespaces. The headline `MENTIONS` path (and net-new `REOPENED` where it fires) is unaffected; resource-state-event lifecycle coverage is tracked under #482.
+- **Group-relative GFM cross-references are not resolved.** Rails writes a cross-reference as a *group-relative* path (`proj-b#2`, dropping a shared top-level ancestor) when source and target share an ancestor, but `siphon_routes.path` stores full paths, so the resolver's literal-token lookup misses the same-group relative form. Full-path references (`group/proj-b#2`) and same-project shorthand (`#2`, `!5`) resolve correctly. This is an acceptable first-cut gap rather than a v1 blocker: it under-counts a subset of same-group cross-project mentions but never produces a wrong edge. Closing it needs the resolver to reconstruct candidate full paths from the source note's namespace ancestry (or a group-relative route lookup); deferred to a follow-up.
+
 ## Key risks
 
 1. **`system_note_metadata` Siphon replication slip.** Longest lead-time item. The Siphon-side MR is filed in parallel with this ADR; if it slips past the implementation MR review, the handler ships in Mode B and flips to Mode A when replication lands. The mode switch is a single config change with no schema impact.

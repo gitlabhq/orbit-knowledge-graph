@@ -847,3 +847,118 @@ pub async fn exact_page_cap_boundary_completes(ctx: &TestContext) {
         "exact-cap window must complete (cursor cleared), not re-scan forever"
     );
 }
+
+/// Insert a `siphon_routes` row with explicit `id` and replication time, so
+/// a test can stage a stale + reconciled pair for the same PG route.
+#[allow(clippy::too_many_arguments)]
+async fn insert_route_version(
+    ctx: &TestContext,
+    id: i64,
+    source_id: i64,
+    source_type: &str,
+    path: &str,
+    namespace_id: i64,
+    traversal_path: &str,
+    replicated_at: &str,
+) {
+    ctx.execute(&format!(
+        "INSERT INTO siphon_routes \
+         (id, source_id, source_type, path, namespace_id, traversal_path, created_at, updated_at, _siphon_replicated_at) \
+         VALUES ({id}, {source_id}, '{source_type}', '{path}', {namespace_id}, '{traversal_path}', \
+                 '2023-01-01', '2024-01-15', '{replicated_at}')"
+    ))
+    .await;
+}
+
+/// Regression for the cross-project `0/` bug: `siphon_routes` is a
+/// ReplacingMergeTree whose sort key includes `traversal_path`, so the
+/// traversal-path reconciler's stale (`0/`) and reconciled (`1/22/94/`) rows
+/// for the same project coexist and never collapse under `FINAL`. The
+/// resolver must deduplicate by PG primary key + `argMax(_siphon_replicated_at)`
+/// and pick the reconciled row, so a cross-project MENTIONS lands in the
+/// target's namespace partition rather than `0/`.
+pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &TestContext) {
+    // Source project (where the note lives) and its route.
+    create_route(
+        ctx,
+        1,
+        200,
+        "Project",
+        "src-group/src-proj",
+        100,
+        "1/100/200/",
+    )
+    .await;
+
+    // Target project route, present as BOTH a stale 0/ row and a later
+    // reconciled 1/22/94/ row for the same PG id (id = 2). Insert the stale
+    // row second by wall-clock-of-insertion to make ordering adversarial:
+    // the reconciled row carries the larger _siphon_replicated_at, so only
+    // argMax (not row order, not FINAL) resolves it correctly.
+    insert_route_version(
+        ctx,
+        2,
+        400,
+        "Project",
+        "toolbox/proj-a",
+        94,
+        "1/22/94/",
+        "2024-01-20 12:05:00",
+    )
+    .await;
+    insert_route_version(
+        ctx,
+        2,
+        400,
+        "Project",
+        "toolbox/proj-a",
+        94,
+        "0/",
+        "2024-01-20 12:00:00",
+    )
+    .await;
+
+    // The cross-project target work item lives in the reconciled namespace.
+    seed_work_item(ctx, 30, 7, 400, 94, "1/22/94/").await;
+
+    // A note in the source project cross-references the target by full path.
+    seed_system_note(
+        ctx,
+        1,
+        "mentioned in toolbox/proj-a#7",
+        "cross_reference",
+        "MergeRequest",
+        1000,
+        1,
+        200,
+        "1/100/200/",
+        "2024-01-15 09:00:00",
+    )
+    .await;
+
+    system_notes_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .expect("system-notes handler should succeed");
+
+    let mentions = ctx
+        .query(&format!(
+            "SELECT target_id, traversal_path FROM {} FINAL WHERE relationship_kind = 'MENTIONS'",
+            t("gl_edge")
+        ))
+        .await;
+    assert_eq!(
+        edge_count(&mentions),
+        1,
+        "cross-project reference resolves to one edge"
+    );
+    let tid = ArrowUtils::get_column_by_name::<Int64Array>(&mentions[0], "target_id").unwrap();
+    let tp = ArrowUtils::get_column_by_name::<StringArray>(&mentions[0], "traversal_path").unwrap();
+    assert_eq!(tid.value(0), 30);
+    assert_eq!(
+        tp.value(0),
+        "1/22/94/",
+        "edge must land in the reconciled namespace partition, not the stale 0/ route"
+    );
+}

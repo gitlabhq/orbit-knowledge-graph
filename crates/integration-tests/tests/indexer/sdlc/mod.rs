@@ -95,6 +95,7 @@ async fn namespace_indexing() {
         system_notes::drops_unknown_action_and_unsupported_noteable_type,
         system_notes::page_cap_persists_cursor_and_resumes,
         system_notes::exact_page_cap_boundary_completes,
+        system_notes::cross_project_mentions_uses_reconciled_route_not_stale_zero,
         work_items::processes_work_items_with_edges,
         work_items::processes_work_item_single_value_edges,
         work_items::processes_standalone_assigned_edges,
