@@ -104,9 +104,7 @@ instructions:
          gkg-billing types into the public API of gkg-server. Re-exports widen
          the SOX scope silently — anything importing gkg-server then gains
          access.
-      3. Constructs, instantiates, or directly invokes any item that originates
-         in the `gkg_billing` crate.
-      4. Wires a new call site that hands billing-relevant data to anything
+      3. Wires a new call site that hands billing-relevant data to anything
          outside billing_adapter.rs. Billing-relevant data is any field this
          MR adds that ends up populating `BillingInputs` (see
          `crates/gkg-billing/src/inputs.rs` for the current set of fields).

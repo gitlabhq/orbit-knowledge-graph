@@ -58,15 +58,7 @@ in `gkg-server`. A re-export silently widens the SOX scope through the
 public API of `gkg-server` — every crate that depends on `gkg-server`
 would gain access without being on the explicit allowlist.
 
-### R3. Items from `gkg-billing` are only constructed in `billing_adapter.rs`
-
-Do not construct, instantiate, or directly invoke any item that originates
-in the `gkg_billing` crate from a file other than `billing_adapter.rs`.
-The other wiring sites listed above hold `Arc<dyn BillingTracker>` or
-similar trait objects handed to them at startup; they do not construct
-billing types themselves.
-
-### R4. Billing-relevant data only flows through `billing_adapter.rs`
+### R3. Billing-relevant data only flows through `billing_adapter.rs`
 
 Do not wire a new call site that hands billing-relevant data to anything
 outside `billing_adapter.rs`. Billing-relevant data is any field this
@@ -76,7 +68,7 @@ struct as the authoritative list and let it evolve there. If you are
 unsure whether a value is billing-relevant, treat it as one and route
 the change accordingly.
 
-### R5. Billing emission goes through `BillingTracker` / `BillingObserver`
+### R4. Billing emission goes through `BillingTracker` / `BillingObserver`
 
 Do not reference `labkit_events::BillingEvent` or call
 `Tracker::track_billing_event` from any file outside `crates/gkg-billing/`.
@@ -84,7 +76,7 @@ Billing-event emission is encapsulated by `BillingTracker` and
 `BillingObserver`; direct use of the underlying labkit-events API
 bypasses the audited path.
 
-### R6. No new billing/usage telemetry types outside `gkg-billing`
+### R5. No new billing/usage telemetry types outside `gkg-billing`
 
 Do not add a new type, trait, or function whose name or doc-comment
 suggests its purpose is to emit billing or usage telemetry. New
@@ -116,4 +108,12 @@ the task. The right answer is almost always one of:
   falls under the existing hard gate from the start.
 - Surface the concern and ask for explicit approval from someone on the
   SOX-billing CODEOWNERS group.
+
+## Maintaining these rules
+
+When you change the rules in this document, also update the corresponding
+inline rules in `.gitlab/duo/mr-review-instructions.yml`. GitLab Duo cannot
+follow file references from its custom review instructions, so the YAML
+file carries its own copy of the rules and must be kept in sync with this
+document.
 
