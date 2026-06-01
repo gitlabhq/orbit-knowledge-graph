@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 import { NODE_TABLES, EDGE_TABLE, buildGraph, buildStyles } from '../src/graph.mjs';
+import { layoutGraph } from './layout.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../..');
@@ -32,12 +33,19 @@ function parseArgs(argv) {
     ontology: join(repoRoot, 'config/ontology'),
     out: join(__dirname, '../public/data'),
     cap: 1500,
+    layout: true,
+    'layout-ticks': 300,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const key = argv[i].replace(/^--/, '');
     const val = argv[i + 1];
-    if (key === 'cap') {
-      args.cap = Number(val);
+    if (key === 'cap' || key === 'layout-ticks') {
+      args[key] = Number(val);
+      i += 1;
+    } else if (key === 'no-layout') {
+      args.layout = false;
+    } else if (key === 'layout') {
+      args.layout = val !== 'false';
       i += 1;
     } else if (key in args) {
       args[key] = val;
@@ -116,6 +124,18 @@ function main() {
 
   const graph = buildGraph(nodeRows, edgeRows, args.cap);
   const styles = buildStyles(loadNodeYaml(args.ontology));
+
+  if (args.layout) {
+    const t0 = Date.now();
+    layoutGraph(graph.nodes, graph.links, { ticks: args['layout-ticks'] });
+    graph.meta.layout = { precomputed: true, ticks: args['layout-ticks'] };
+    console.error(
+      `[adapter] precomputed layout: ${graph.nodes.length} nodes, ` +
+        `${args['layout-ticks']} ticks in ${Date.now() - t0}ms`,
+    );
+  } else {
+    graph.meta.layout = { precomputed: false };
+  }
 
   mkdirSync(args.out, { recursive: true });
   writeFileSync(join(args.out, 'graph.json'), JSON.stringify(graph));

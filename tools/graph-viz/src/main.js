@@ -34,6 +34,7 @@ const state = {
   visibleNodeIds: new Set(),
   edgeFilter: new Set(EDGE_KINDS),
   selectedId: null,
+  precomputedLayout: false,
 };
 
 async function loadJson(name) {
@@ -122,19 +123,64 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-// Glowing node: an emissive sphere whose size comes from the ontology style and
-// scales gently with degree so hubs read as bigger.
-function makeNodeObject(node) {
-  const { color, size } = styleFor(node.kind);
-  const radius = (size / 6) * (1 + Math.min(node.degree || 0, 40) / 80);
-  const geometry = new THREE.SphereGeometry(radius, 16, 16);
-  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
-  const sphere = new THREE.Mesh(geometry, material);
+function nodeRadius(node) {
+  const { size } = styleFor(node.kind);
+  return (size / 6) * (1 + Math.min(node.degree || 0, 40) / 80);
+}
 
-  const glowGeom = new THREE.SphereGeometry(radius * 1.6, 16, 16);
-  const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18 });
-  sphere.add(new THREE.Mesh(glowGeom, glowMat));
-  return sphere;
+// Nodes are drawn as a single InstancedMesh (one draw call for the whole graph)
+// rather than one Mesh per node. At ~24k nodes the per-mesh approach was ~49k
+// draw calls/frame; instancing collapses that to one. The glow shell is gone —
+// UnrealBloomPass supplies the neon halo. `nodeThreeObject` hands the force
+// engine an empty Object3D so it still tracks positions and lays out links,
+// while `nodePositionUpdate` writes each node's transform into the instance.
+const nodeInstances = {
+  mesh: null,
+  indexById: new Map(),
+  byIndex: [], // instanceId -> node (for raycast picking)
+  dummy: new THREE.Object3D(),
+};
+
+function buildNodeInstances(Graph, nodes) {
+  if (nodeInstances.mesh) {
+    Graph.scene().remove(nodeInstances.mesh);
+    nodeInstances.mesh.geometry.dispose();
+    nodeInstances.mesh.material.dispose();
+  }
+  // Unit sphere; per-instance scale carries the ontology size + degree bump.
+  const geometry = new THREE.SphereGeometry(1, 12, 12);
+  const material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95 });
+  const mesh = new THREE.InstancedMesh(geometry, material, nodes.length);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;
+
+  const color = new THREE.Color();
+  nodeInstances.indexById = new Map();
+  nodeInstances.byIndex = nodes;
+  nodes.forEach((node, i) => {
+    nodeInstances.indexById.set(node.id, i);
+    node.__radius = nodeRadius(node);
+    color.set(nodeColor(node));
+    mesh.setColorAt(i, color);
+  });
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+  Graph.scene().add(mesh);
+  nodeInstances.mesh = mesh;
+}
+
+function updateNodeInstance(node) {
+  const mesh = nodeInstances.mesh;
+  if (!mesh) return;
+  const i = nodeInstances.indexById.get(node.id);
+  if (i === undefined) return;
+  const d = nodeInstances.dummy;
+  d.position.set(node.x || 0, node.y || 0, node.z || 0);
+  const r = node.__radius || nodeRadius(node);
+  d.scale.setScalar(r);
+  d.updateMatrix();
+  mesh.setMatrixAt(i, d.matrix);
+  mesh.instanceMatrix.needsUpdate = true;
 }
 
 function visibleLink(link) {
@@ -149,21 +195,35 @@ function applyData(Graph) {
     const t = typeof l.target === 'object' ? l.target.id : l.target;
     return visIds.has(s) && visIds.has(t) && state.edgeFilter.has(l.kind);
   });
+  buildNodeInstances(Graph, nodes);
   Graph.graphData({ nodes, links });
+  for (const n of nodes) updateNodeInstance(n);
 }
 
 function buildGraph(container) {
   const Graph = new ForceGraph3D(container, { controlType: 'orbit' })
     .backgroundColor('#03060a')
     .showNavInfo(false)
-    .nodeThreeObject(makeNodeObject)
-    .nodeLabel(() => '') // custom sprites used instead of the default tooltip
+    // Empty placeholder: nodes are drawn by the shared InstancedMesh, but the
+    // force engine still needs an object per node to lay out links.
+    .nodeThreeObject(() => new THREE.Object3D())
+    .nodePositionUpdate((obj, coords, node) => {
+      node.x = coords.x;
+      node.y = coords.y;
+      node.z = coords.z;
+      updateNodeInstance(node);
+      return true; // we positioned the (invisible) object ourselves
+    })
     .linkColor((l) => EDGE_COLORS[l.kind] || '#22d3ee')
     .linkOpacity(0.4)
     .linkWidth((l) => (l.kind === 'CALLS' ? 0.6 : 0.3))
     .linkDirectionalParticles(0)
     .linkDirectionalParticleWidth(2)
-    .onNodeClick((node) => expandNode(Graph, node))
+    // Positions come precomputed from the adapter; freeze the live simulation so
+    // the first frame is static and cheap. Falls back to a short warmup when the
+    // graph was generated without offline layout (`--no-layout`).
+    .warmupTicks(state.precomputedLayout ? 0 : 20)
+    .cooldownTicks(state.precomputedLayout ? 0 : 200)
     .onBackgroundClick(() => selectNode(Graph, null));
 
   Graph.d3Force('charge').strength(-120);
@@ -173,24 +233,109 @@ function buildGraph(container) {
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.6, 0.6, 0.05);
   Graph.postProcessingComposer().addPass(bloom);
 
+  // Nodes live in an InstancedMesh, so 3d-force-graph's own node hover/click
+  // (which raycasts per-node Three objects) can't see them. Raycast the
+  // instanced mesh directly and drive the tooltip + click ourselves.
+  wireNodePicking(Graph, container);
+
   return Graph;
 }
 
-// Camera drift: slowly orbit the scene while idle for the "living HUD" feel.
-function startCameraDrift(Graph) {
-  let angle = 0;
-  let userInteracted = false;
-  const controls = Graph.controls();
-  controls.addEventListener('start', () => {
-    userInteracted = true;
+// Custom raycast picking against the node InstancedMesh: hover -> tooltip,
+// click -> expand. Throttled to pointer-move; reuses one Raycaster.
+function wireNodePicking(Graph, container) {
+  const raycaster = new THREE.Raycaster();
+  if (raycaster.params.Mesh) raycaster.params.Mesh.threshold = 0;
+  const pointer = new THREE.Vector2();
+  const tooltip = document.getElementById('node-tooltip');
+  let last = 0;
+  let downAt = null;
+
+  function pick(clientX, clientY) {
+    const mesh = nodeInstances.mesh;
+    if (!mesh) return null;
+    const rect = container.getBoundingClientRect();
+    pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, Graph.camera());
+    const hits = raycaster.intersectObject(mesh, false);
+    if (!hits.length || hits[0].instanceId == null) return null;
+    return nodeInstances.byIndex[hits[0].instanceId] || null;
+  }
+
+  container.addEventListener('pointermove', (e) => {
+    const now = performance.now();
+    if (now - last < 30) return; // throttle raycasts
+    last = now;
+    const node = pick(e.clientX, e.clientY);
+    if (node && tooltip) {
+      tooltip.innerHTML = `<span class="dot" style="background:${nodeColor(node)}"></span>${escapeHtml(node.label)} <em>${node.kind}</em>`;
+      tooltip.style.left = `${e.clientX + 14}px`;
+      tooltip.style.top = `${e.clientY + 14}px`;
+      tooltip.classList.remove('hidden');
+      container.style.cursor = 'pointer';
+    } else if (tooltip) {
+      tooltip.classList.add('hidden');
+      container.style.cursor = '';
+    }
   });
-  const distance = 600;
+
+  container.addEventListener('pointerleave', () => {
+    if (tooltip) tooltip.classList.add('hidden');
+  });
+
+  // Distinguish a click from an orbit drag: only treat as a click if the
+  // pointer barely moved between down and up.
+  container.addEventListener('pointerdown', (e) => {
+    downAt = { x: e.clientX, y: e.clientY };
+  });
+  container.addEventListener('pointerup', (e) => {
+    if (!downAt) return;
+    const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
+    downAt = null;
+    if (moved > 5) return;
+    const node = pick(e.clientX, e.clientY);
+    if (node) expandNode(Graph, node);
+  });
+}
+
+// Camera drift: slowly orbit the scene while idle for the "living HUD" feel.
+//
+// The drift orbits around the controls' current target at the camera's current
+// radius, so it preserves zoom and pan rather than snapping back to a fixed
+// distance. Zooming (wheel) does NOT interrupt the spin; only a rotate/pan drag
+// pauses it, and it resumes after a short idle.
+const DRIFT_RESUME_MS = 2500;
+function startCameraDrift(Graph) {
+  const controls = Graph.controls();
+  const camera = Graph.camera();
+  const dom = Graph.renderer().domElement;
+  let pausedUntil = 0;
+  let dragging = false;
+
+  // A pointer drag rotates/pans -> pause. Wheel (zoom) is intentionally ignored.
+  dom.addEventListener('pointerdown', () => {
+    dragging = true;
+  });
+  const release = () => {
+    if (dragging) pausedUntil = performance.now() + DRIFT_RESUME_MS;
+    dragging = false;
+  };
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
+
+  const angularSpeed = Math.PI / 1800; // radians per frame
   setInterval(() => {
-    if (userInteracted) return;
-    angle += Math.PI / 1800;
+    if (dragging || performance.now() < pausedUntil) return;
+    const target = controls.target;
+    const dx = camera.position.x - target.x;
+    const dz = camera.position.z - target.z;
+    const radius = Math.hypot(dx, dz); // preserve current zoom distance
+    if (radius < 1) return;
+    const angle = Math.atan2(dx, dz) + angularSpeed;
     Graph.cameraPosition({
-      x: distance * Math.sin(angle),
-      z: distance * Math.cos(angle),
+      x: target.x + radius * Math.sin(angle),
+      z: target.z + radius * Math.cos(angle),
     });
   }, 40);
 }
@@ -316,16 +461,23 @@ async function main() {
   try {
     const [graph, styles] = await Promise.all([loadJson('graph.json'), loadJson('styles.json')]);
     state.styles = styles;
+    state.precomputedLayout = Boolean(graph.meta?.layout?.precomputed);
     state.fullData = { nodes: graph.nodes, links: graph.links.map((l) => ({ ...l })) };
     indexData(state.fullData);
 
-    // Seed view: start from the highest-degree nodes so the demo opens on the
-    // dense, interesting core rather than an empty void; the rest expand on click.
-    const seedCount = Math.min(state.fullData.nodes.length, 400);
-    const seeds = [...state.fullData.nodes]
-      .sort((a, b) => (b.degree || 0) - (a.degree || 0))
-      .slice(0, seedCount);
-    state.visibleNodeIds = new Set(seeds.map((n) => n.id));
+    // Seed view: `?seed=<n>` caps how many of the highest-degree nodes show on
+    // load (0 or "all" = show everything). Default is all nodes in graph.json.
+    const seedParam = new URLSearchParams(window.location.search).get('seed');
+    const seedAll = seedParam === null || seedParam === 'all' || seedParam === '0';
+    if (seedAll) {
+      state.visibleNodeIds = new Set(state.fullData.nodes.map((n) => n.id));
+    } else {
+      const seedCount = Math.min(state.fullData.nodes.length, Number(seedParam) || 400);
+      const seeds = [...state.fullData.nodes]
+        .sort((a, b) => (b.degree || 0) - (a.degree || 0))
+        .slice(0, seedCount);
+      state.visibleNodeIds = new Set(seeds.map((n) => n.id));
+    }
 
     const Graph = buildGraph(container);
     window.__graph = Graph; // exposed for the Playwright smoke test

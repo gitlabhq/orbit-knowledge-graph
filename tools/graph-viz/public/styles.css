@@ -145,6 +145,33 @@ body {
   width: 9px;
   height: 9px;
   border-radius: 50%;
+  display: inline-block;
+}
+
+.node-tooltip {
+  position: fixed;
+  z-index: 30;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #e0f7ff;
+  background: rgba(3, 12, 20, 0.92);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 6px;
+  box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+  white-space: nowrap;
+}
+
+.node-tooltip em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .status {

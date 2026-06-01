@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "3d-force-graph": "1.79.0",
+    "d3-force-3d": "3.0.6",
     "three": "0.182.0"
   },
   "devDependencies": {
