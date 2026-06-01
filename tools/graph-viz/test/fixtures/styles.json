@@ -1,0 +1,18 @@
+{
+  "Directory": {
+    "color": "#06B6D4",
+    "size": 26
+  },
+  "File": {
+    "color": "#22D3EE",
+    "size": 24
+  },
+  "Definition": {
+    "color": "#2DD4BF",
+    "size": 26
+  },
+  "ImportedSymbol": {
+    "color": "#5EEAD4",
+    "size": 22
+  }
+}

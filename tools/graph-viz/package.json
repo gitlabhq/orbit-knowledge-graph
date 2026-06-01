@@ -1,0 +1,27 @@
+{
+  "name": "@orbit/graph-viz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "3D code-graph visualizer (TRON/JARVIS) over the local Orbit DuckDB code graph",
+  "bin": {
+    "orbit-graph-adapter": "scripts/adapter.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "adapter": "node scripts/adapter.mjs",
+    "serve": "node scripts/serve.mjs",
+    "test": "node --test test/adapter.test.mjs && playwright test",
+    "test:unit": "node --test test/adapter.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "3d-force-graph": "1.79.0",
+    "three": "0.182.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0",
+    "esbuild": "^0.25.5",
+    "yaml": "2.8.1"
+  }
+}

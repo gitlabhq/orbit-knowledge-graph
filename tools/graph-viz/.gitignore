@@ -1,0 +1,7 @@
+node_modules/
+tmp/
+public/bundle.js
+public/bundle.js.map
+public/data/
+test-results/
+playwright-report/

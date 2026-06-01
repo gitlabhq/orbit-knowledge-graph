@@ -1,0 +1,277 @@
+{
+  "nodes": [
+    {
+      "id": "1",
+      "kind": "Directory",
+      "label": "app",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app",
+      "language": null,
+      "degree": 2
+    },
+    {
+      "id": "2",
+      "kind": "Directory",
+      "label": "app/models",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/models",
+      "language": null,
+      "degree": 3
+    },
+    {
+      "id": "3",
+      "kind": "Directory",
+      "label": "app/services",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/services",
+      "language": null,
+      "degree": 3
+    },
+    {
+      "id": "10",
+      "kind": "File",
+      "label": "app/models/user.rb",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/models/user.rb",
+      "language": "ruby",
+      "degree": 4
+    },
+    {
+      "id": "11",
+      "kind": "File",
+      "label": "app/models/base.rb",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/models/base.rb",
+      "language": "ruby",
+      "degree": 3
+    },
+    {
+      "id": "12",
+      "kind": "File",
+      "label": "app/services/auth.rb",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/services/auth.rb",
+      "language": "ruby",
+      "degree": 2
+    },
+    {
+      "id": "13",
+      "kind": "File",
+      "label": "app/services/mailer.rb",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": "app/services/mailer.rb",
+      "language": "ruby",
+      "degree": 3
+    },
+    {
+      "id": "20",
+      "kind": "Definition",
+      "label": "User",
+      "fqn": "User",
+      "definitionType": "Class",
+      "filePath": "app/models/user.rb",
+      "language": null,
+      "degree": 2
+    },
+    {
+      "id": "21",
+      "kind": "Definition",
+      "label": "BaseModel",
+      "fqn": "BaseModel",
+      "definitionType": "Class",
+      "filePath": "app/models/base.rb",
+      "language": null,
+      "degree": 2
+    },
+    {
+      "id": "22",
+      "kind": "Definition",
+      "label": "authenticate",
+      "fqn": "Auth#authenticate",
+      "definitionType": "Method",
+      "filePath": "app/services/auth.rb",
+      "language": null,
+      "degree": 4
+    },
+    {
+      "id": "23",
+      "kind": "Definition",
+      "label": "find",
+      "fqn": "User.find",
+      "definitionType": "Method",
+      "filePath": "app/models/user.rb",
+      "language": null,
+      "degree": 4
+    },
+    {
+      "id": "24",
+      "kind": "Definition",
+      "label": "deliver",
+      "fqn": "Mailer#deliver",
+      "definitionType": "Method",
+      "filePath": "app/services/mailer.rb",
+      "language": null,
+      "degree": 3
+    },
+    {
+      "id": "25",
+      "kind": "Definition",
+      "label": "validate",
+      "fqn": "User#validate",
+      "definitionType": "Method",
+      "filePath": "app/models/user.rb",
+      "language": null,
+      "degree": 3
+    },
+    {
+      "id": "30",
+      "kind": "ImportedSymbol",
+      "label": "ActiveRecord",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": null,
+      "language": null,
+      "degree": 1
+    },
+    {
+      "id": "31",
+      "kind": "ImportedSymbol",
+      "label": "net/smtp",
+      "fqn": null,
+      "definitionType": null,
+      "filePath": null,
+      "language": null,
+      "degree": 1
+    }
+  ],
+  "links": [
+    {
+      "source": "1",
+      "target": "2",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "1",
+      "target": "3",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "2",
+      "target": "10",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "2",
+      "target": "11",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "3",
+      "target": "12",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "3",
+      "target": "13",
+      "kind": "CONTAINS"
+    },
+    {
+      "source": "10",
+      "target": "20",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "10",
+      "target": "23",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "10",
+      "target": "25",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "11",
+      "target": "21",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "12",
+      "target": "22",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "13",
+      "target": "24",
+      "kind": "DEFINES"
+    },
+    {
+      "source": "20",
+      "target": "21",
+      "kind": "EXTENDS"
+    },
+    {
+      "source": "11",
+      "target": "30",
+      "kind": "IMPORTS"
+    },
+    {
+      "source": "13",
+      "target": "31",
+      "kind": "IMPORTS"
+    },
+    {
+      "source": "22",
+      "target": "23",
+      "kind": "CALLS"
+    },
+    {
+      "source": "24",
+      "target": "23",
+      "kind": "CALLS"
+    },
+    {
+      "source": "25",
+      "target": "23",
+      "kind": "CALLS"
+    },
+    {
+      "source": "22",
+      "target": "25",
+      "kind": "CALLS"
+    },
+    {
+      "source": "24",
+      "target": "22",
+      "kind": "CALLS"
+    }
+  ],
+  "meta": {
+    "totalNodes": 15,
+    "totalLinks": 20,
+    "keptNodes": 15,
+    "keptLinks": 20,
+    "capped": false,
+    "cap": null,
+    "edgeKindCounts": {
+      "CONTAINS": 6,
+      "DEFINES": 6,
+      "EXTENDS": 1,
+      "IMPORTS": 2,
+      "CALLS": 5
+    },
+    "nodeKindCounts": {
+      "Directory": 3,
+      "File": 4,
+      "Definition": 6,
+      "ImportedSymbol": 2
+    }
+  }
+}
