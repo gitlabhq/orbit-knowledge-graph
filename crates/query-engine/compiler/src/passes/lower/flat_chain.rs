@@ -9,7 +9,7 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
+    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
     push_edge_predicates,
 };
@@ -37,7 +37,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             where_parts.extend(union_wheres);
             union
         } else if dedup_edges {
-            TableRef::scan_final(&hop.edge_table, &alias)
+            dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
         } else {
             TableRef::scan(&hop.edge_table, &alias)
         };
@@ -71,6 +71,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 start_col,
                 end_col,
                 &plan.table_columns,
+                dedup_edges,
             );
         }
 
@@ -147,6 +148,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                     start_col,
                                     end_col,
                                     &plan.table_columns,
+                                    false,
                                 );
                                 Expr::conjoin(nw)
                             },

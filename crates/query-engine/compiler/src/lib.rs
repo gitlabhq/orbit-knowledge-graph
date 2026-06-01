@@ -412,12 +412,14 @@ mod tests {
     }
 
     /// Regression for #801: when two or more hops self-join the edge table,
-    /// each edge scan must read with FINAL. The edge table is a
-    /// ReplacingMergeTree; without FINAL the self-join multiplies un-merged
-    /// row versions of each hop, inflating `count(mr)` multiplicatively
-    /// (the issue observed 7, 49, 245 for an MR that should return 1).
+    /// each edge scan must deduplicate ReplacingMergeTree row versions before
+    /// the join. Without it the self-join multiplies un-merged versions of
+    /// each hop, inflating `count(mr)` multiplicatively (the issue observed
+    /// 7, 49, 245 for an MR that should return 1). The dedup uses an argMax
+    /// GROUP BY subquery, which keeps the `source_id` projection (FINAL would
+    /// discard it and read ~170x more bytes).
     #[test]
-    fn multi_edge_self_join_reads_edges_with_final() {
+    fn multi_edge_self_join_dedups_edge_versions() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -436,17 +438,21 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("AS e0 FINAL") && sql.contains("AS e1 FINAL"),
-            "multi-edge self-join must read every edge scan with FINAL to \
-             collapse ReplacingMergeTree versions, got:\n{sql}"
+            sql.contains("argMax(e0._deleted, e0._version) = false")
+                && sql.contains("argMax(e1._deleted, e1._version) = false"),
+            "multi-edge self-join must dedup each edge scan via argMax, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("FROM gl_edge AS e0 FINAL"),
+            "dedup must keep the projection, not fall back to FINAL, got:\n{sql}"
         );
     }
 
-    /// A single-hop edge scan cannot fan a node out, so it keeps the cheaper
-    /// non-FINAL scan. FINAL on the hot single-edge path would be an
-    /// unnecessary merge-on-read cost.
+    /// A single-hop edge scan cannot fan a node out, so it stays a plain scan.
+    /// Deduplicating the hot single-edge path would cost an unnecessary
+    /// aggregation.
     #[test]
-    fn single_edge_scan_stays_non_final() {
+    fn single_edge_scan_stays_plain() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -463,8 +469,8 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("AS e0 FINAL"),
-            "single-hop edge scan must not use FINAL, got:\n{sql}"
+            !sql.contains("argMax"),
+            "single-hop edge scan must not dedup, got:\n{sql}"
         );
     }
 

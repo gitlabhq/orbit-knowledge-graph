@@ -247,6 +247,7 @@ pub(super) fn fk_values_from_candidate_scan(
 // Emit helpers: edge predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn push_edge_predicates(
     where_parts: &mut Vec<Expr>,
     alias: &str,
@@ -255,6 +256,7 @@ pub(super) fn push_edge_predicates(
     start_col: &str,
     end_col: &str,
     table_columns: &HashMap<String, HashSet<String>>,
+    skip_deleted: bool,
 ) {
     if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
         where_parts.push(f);
@@ -272,7 +274,9 @@ pub(super) fn push_edge_predicates(
             where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
         }
     }
-    where_parts.push(deleted_false(alias));
+    if !skip_deleted {
+        where_parts.push(deleted_false(alias));
+    }
 
     // Push node-level filters down to the edge scan when the edge table
     // carries those columns (e.g. project_id, branch on gl_code_edge).
@@ -299,6 +303,61 @@ pub(super) fn push_edge_predicates(
             }
         }
     }
+}
+
+pub(super) fn dedup_edge_scan(
+    edge_table: &str,
+    alias: &str,
+    table_columns: &HashMap<String, HashSet<String>>,
+) -> TableRef {
+    let Some(cols) = table_columns.get(edge_table) else {
+        return TableRef::scan_final(edge_table, alias);
+    };
+
+    let identity = [SOURCE_ID_COLUMN, RELATIONSHIP_KIND_COLUMN, TARGET_ID_COLUMN];
+
+    let mut projected: Vec<&str> = cols
+        .iter()
+        .map(String::as_str)
+        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
+        .collect();
+    projected.sort_unstable();
+
+    let mut select = Vec::with_capacity(identity.len() + projected.len());
+    for col in identity {
+        select.push(SelectExpr::col(alias, col));
+    }
+    for col in projected {
+        select.push(SelectExpr::new(
+            Expr::func(
+                "argMax",
+                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
+            ),
+            col,
+        ));
+    }
+
+    let group_by = identity.iter().map(|c| Expr::col(alias, *c)).collect();
+
+    let having = Expr::eq(
+        Expr::func(
+            "argMax",
+            vec![
+                Expr::col(alias, DELETED_COLUMN),
+                Expr::col(alias, VERSION_COLUMN),
+            ],
+        ),
+        Expr::lit(false),
+    );
+
+    let query = Query {
+        select,
+        from: TableRef::scan(edge_table, alias),
+        group_by,
+        having: Some(having),
+        ..Default::default()
+    };
+    TableRef::subquery(query, alias)
 }
 
 /// Emit denorm tag filters computed from `plan.denorm_columns`.
