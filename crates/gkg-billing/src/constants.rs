@@ -9,7 +9,7 @@ pub const REALM_SAAS: &str = "SaaS";
 pub const REALM_SM: &str = "SM";
 
 pub fn feature_qualified_name(source_type: &str) -> String {
-    format!("orbit-{source_type}")
+    format!("orbit_{source_type}")
 }
 
 pub fn normalize_realm(realm: &str) -> Option<&'static str> {
