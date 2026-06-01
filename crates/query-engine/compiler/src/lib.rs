@@ -411,6 +411,63 @@ mod tests {
         );
     }
 
+    /// Regression for #801: when two or more hops self-join the edge table,
+    /// each edge scan must read with FINAL. The edge table is a
+    /// ReplacingMergeTree; without FINAL the self-join multiplies un-merged
+    /// row versions of each hop, inflating `count(mr)` multiplicatively
+    /// (the issue observed 7, 49, 245 for an MR that should return 1).
+    #[test]
+    fn multi_edge_self_join_reads_edges_with_final() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("AS e0 FINAL") && sql.contains("AS e1 FINAL"),
+            "multi-edge self-join must read every edge scan with FINAL to \
+             collapse ReplacingMergeTree versions, got:\n{sql}"
+        );
+    }
+
+    /// A single-hop edge scan cannot fan a node out, so it keeps the cheaper
+    /// non-FINAL scan. FINAL on the hot single-edge path would be an
+    /// unnecessary merge-on-read cost.
+    #[test]
+    fn single_edge_scan_stays_non_final() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("AS e0 FINAL"),
+            "single-hop edge scan must not use FINAL, got:\n{sql}"
+        );
+    }
+
     /// Traversal with `id_range` (no `node_ids` or `filters`) must produce
     /// range conditions that reach the SQL. FK elision pushes range
     /// conditions onto the User node table subquery.

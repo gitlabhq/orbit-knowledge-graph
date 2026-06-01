@@ -17,6 +17,8 @@ use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
+    let dedup_edges = plan.hops.len() >= 2;
+
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
@@ -34,6 +36,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
             where_parts.extend(union_wheres);
             union
+        } else if dedup_edges {
+            TableRef::scan_final(&hop.edge_table, &alias)
         } else {
             TableRef::scan(&hop.edge_table, &alias)
         };
