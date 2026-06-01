@@ -17,6 +17,7 @@ mod notes;
 mod partitioning;
 mod projects;
 mod security;
+mod system_notes;
 mod watermarking;
 mod work_items;
 
@@ -86,6 +87,12 @@ async fn namespace_indexing() {
         merge_request_diffs::processes_merge_request_diff_files_with_edges,
         notes::processes_notes_with_edges,
         notes::filters_out_system_notes,
+        system_notes::materializes_mentions_and_lifecycle_edges,
+        system_notes::commit_noteable_lifecycle_produces_no_edge,
+        system_notes::same_project_reference_resolves_via_default_project,
+        system_notes::checkpoint_advances_after_draining_paged_window,
+        system_notes::incremental_run_skips_already_processed_notes,
+        system_notes::drops_unknown_action_and_unsupported_noteable_type,
         work_items::processes_work_items_with_edges,
         work_items::processes_work_item_single_value_edges,
         work_items::processes_standalone_assigned_edges,

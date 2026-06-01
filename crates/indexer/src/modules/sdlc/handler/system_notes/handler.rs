@@ -43,12 +43,15 @@ use crate::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerInitError, HandlerRegistry};
 use crate::modules::sdlc::datalake::{Datalake, DatalakeQuery};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::{NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 
 /// Physical edge table all system-note edges land in. `MENTIONS`,
 /// `REOPENED`, `CLOSED`, and `MERGED` all route to the default `gl_edge`
-/// table (none appears in `schema.yaml::settings.edge_tables`).
+/// table (none appears in `schema.yaml::settings.edge_tables`). Resolved to
+/// the schema-version-prefixed name at write time via
+/// [`prefixed_table_name`], matching every other write path.
 const EDGE_TABLE: &str = "gl_edge";
 
 /// Entity label for the per-entity SDLC metrics and the checkpoint key
@@ -165,11 +168,12 @@ impl Handler for SystemNotesHandler {
             .map(|c| c.watermark)
             .unwrap_or_else(|| DateTime::<Utc>::UNIX_EPOCH);
 
+        let edge_table = prefixed_table_name(EDGE_TABLE, *SCHEMA_VERSION);
         let writer = context
             .destination
-            .new_batch_writer(EDGE_TABLE)
+            .new_batch_writer(&edge_table)
             .await
-            .map_err(|e| HandlerError::Processing(format!("edge writer for {EDGE_TABLE}: {e}")))?;
+            .map_err(|e| HandlerError::Processing(format!("edge writer for {edge_table}: {e}")))?;
 
         // Keyset cursor within the (last_watermark, watermark] window.
         let mut cursor_created_at = last_watermark;
@@ -200,9 +204,7 @@ impl Handler for SystemNotesHandler {
             cursor_created_at = last.created_at;
             cursor_id = last.id;
 
-            let edges = self
-                .resolve_and_emit(&request.traversal_path, &notes)
-                .await?;
+            let edges = self.resolve_and_emit(&notes).await?;
 
             if !edges.is_empty() {
                 let batch = edge_record_batch(&edges)
@@ -210,7 +212,7 @@ impl Handler for SystemNotesHandler {
                 writer
                     .write_batch(&[batch])
                     .await
-                    .map_err(|e| HandlerError::Processing(format!("write {EDGE_TABLE}: {e}")))?;
+                    .map_err(|e| HandlerError::Processing(format!("write {edge_table}: {e}")))?;
                 total_edges += edges.len();
             }
 
@@ -287,7 +289,6 @@ impl SystemNotesHandler {
     /// Resolve the batch's references against the datalake and emit edges.
     async fn resolve_and_emit(
         &self,
-        traversal_path: &str,
         notes: &[ExtractedNote],
     ) -> Result<Vec<EmittedEdge>, HandlerError> {
         for n in notes {
@@ -302,9 +303,9 @@ impl SystemNotesHandler {
             }
         }
 
-        let default_projects = self.resolve_default_projects(traversal_path, notes).await?;
+        let default_projects = self.resolve_default_projects(notes).await?;
         let plan = plan_for_batch(notes, &default_projects);
-        let index = self.resolve_plan(traversal_path, &plan).await?;
+        let index = self.resolve_plan(&plan).await?;
 
         let edges = process_batch(notes, &default_projects, |r, default_project| {
             index.resolve(r, default_project)
@@ -319,7 +320,6 @@ impl SystemNotesHandler {
     /// [`process_batch`] can substitute it for unqualified references.
     async fn resolve_default_projects(
         &self,
-        traversal_path: &str,
         notes: &[ExtractedNote],
     ) -> Result<DefaultProjectLookup, HandlerError> {
         let project_ids: Vec<i64> = {
@@ -334,10 +334,7 @@ impl SystemNotesHandler {
 
         // Reverse routes lookup: source_id (project_id) -> path. ROUTES_SQL
         // filters on `path IN`, so use a dedicated id-keyed query here.
-        let params = json!({
-            "traversal_path": traversal_path,
-            "source_ids": project_ids,
-        });
+        let params = json!({ "source_ids": project_ids });
         let batches = self
             .datalake
             .query_batches(PROJECT_PATHS_SQL, params, None)
@@ -367,37 +364,25 @@ impl SystemNotesHandler {
 
     /// Fan the [`ResolutionPlan`] out to the routes + noteable lookups and
     /// build the [`ResolvedIndex`] the emitter consults.
-    async fn resolve_plan(
-        &self,
-        traversal_path: &str,
-        plan: &ResolutionPlan,
-    ) -> Result<ResolvedIndex, HandlerError> {
+    async fn resolve_plan(&self, plan: &ResolutionPlan) -> Result<ResolvedIndex, HandlerError> {
         if plan.paths.is_empty() {
             return Ok(ResolvedIndex::default());
         }
 
         let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-        let routes = self.query_routes(traversal_path, &paths).await?;
+        let routes = self.query_routes(&paths).await?;
 
         let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
         let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
 
-        let mr_entities = self
-            .query_entities(MERGE_REQUESTS_SQL, traversal_path, &mr_pairs)
-            .await?;
-        let wi_entities = self
-            .query_entities(WORK_ITEMS_SQL, traversal_path, &wi_pairs)
-            .await?;
+        let mr_entities = self.query_entities(MERGE_REQUESTS_SQL, &mr_pairs).await?;
+        let wi_entities = self.query_entities(WORK_ITEMS_SQL, &wi_pairs).await?;
 
         Ok(ResolvedIndex::build(&routes, &mr_entities, &wi_entities))
     }
 
-    async fn query_routes(
-        &self,
-        traversal_path: &str,
-        paths: &[&str],
-    ) -> Result<Vec<RouteRow>, HandlerError> {
-        let params = json!({ "traversal_path": traversal_path, "paths": paths });
+    async fn query_routes(&self, paths: &[&str]) -> Result<Vec<RouteRow>, HandlerError> {
+        let params = json!({ "paths": paths });
         let batches = self
             .datalake
             .query_batches(ROUTES_SQL, params, None)
@@ -428,13 +413,21 @@ impl SystemNotesHandler {
     async fn query_entities(
         &self,
         sql: &str,
-        traversal_path: &str,
         pairs: &[(i64, i64)],
     ) -> Result<Vec<EntityRow>, HandlerError> {
         if pairs.is_empty() {
             return Ok(Vec::new());
         }
-        let params = json!({ "traversal_path": traversal_path, "pairs": pairs });
+        // Pass the (project_id, iid) pairs as two parallel Int64 arrays; the
+        // SQL zips them back into the tuple IN-list server-side. A single
+        // Array(Tuple(...)) param can't survive the JSON parameter channel
+        // (a tuple serializes as a nested array, which ClickHouse rejects).
+        let project_ids: Vec<i64> = pairs.iter().map(|(p, _)| *p).collect();
+        let iids: Vec<i64> = pairs.iter().map(|(_, i)| *i).collect();
+        let params = json!({
+            "project_ids": project_ids,
+            "iids": iids,
+        });
         let batches = self
             .datalake
             .query_batches(sql, params, None)

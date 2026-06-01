@@ -36,12 +36,16 @@ pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
 /// SQL template for the routes-table batch lookup.
 ///
 /// Parameters:
-///   `{traversal_path:String}` — namespace scope prefix (e.g. `1/100/`).
 ///   `{paths:Array(String)}` — full_paths to look up.
 ///
 /// Returns `(source_type, source_id, path, traversal_path)`. The
 /// `_siphon_deleted = false` filter prevents resolving against a tombstoned
 /// project route.
+///
+/// The lookup is **not** scoped to the source note's `traversal_path`:
+/// cross-project references point at projects in other namespaces, and
+/// `siphon_routes.path` is globally unique, so a namespace-prefix filter
+/// here would silently drop every cross-namespace reference.
 pub const ROUTES_SQL: &str = "\
 SELECT \
     source_type, \
@@ -50,7 +54,6 @@ SELECT \
     traversal_path \
 FROM siphon_routes \
 WHERE _siphon_deleted = false \
-  AND startsWith(traversal_path, {traversal_path:String}) \
   AND path IN {paths:Array(String)} \
   AND source_type IN ('Project', 'Namespace')";
 
@@ -62,7 +65,6 @@ WHERE _siphon_deleted = false \
 /// [`ROUTES_SQL`] (which is keyed on `path`).
 ///
 /// Parameters:
-///   `{traversal_path:String}` — namespace scope prefix.
 ///   `{source_ids:Array(Int64)}` — project ids to resolve.
 ///
 /// Returns `(source_id, path)`.
@@ -73,14 +75,21 @@ SELECT \
 FROM siphon_routes \
 WHERE _siphon_deleted = false \
   AND source_type = 'Project' \
-  AND startsWith(traversal_path, {traversal_path:String}) \
   AND source_id IN {source_ids:Array(Int64)}";
 
 /// SQL template for the merge-request entity batch lookup.
 ///
 /// Parameters:
-///   `{traversal_path:String}` — namespace scope prefix.
-///   `{pairs:Array(Tuple(Int64, Int64))}` — `(target_project_id, iid)` tuples.
+///   `{project_ids:Array(Int64)}` + `{iids:Array(Int64)}` — parallel arrays
+///   of `(target_project_id, iid)` to look up, zipped server-side into the
+///   tuple IN-list. Two `Array(Int64)` params are used instead of a single
+///   `Array(Tuple(...))` because the JSON parameter channel serializes a
+///   tuple as a nested array (`[200,5]`), which ClickHouse rejects for
+///   `Array(Tuple(Int64, Int64))`; `arrayZip` rebuilds the tuples from the
+///   two flat arrays. The arrays must be the same length and index-aligned.
+///
+/// Not scoped to the source note's `traversal_path` (cross-project targets
+/// live in other namespaces); `(target_project_id, iid)` is globally unique.
 ///
 /// Returns `(id, target_project_id, iid)`.
 pub const MERGE_REQUESTS_SQL: &str = "\
@@ -90,8 +99,7 @@ SELECT \
     iid \
 FROM merge_requests \
 WHERE _siphon_deleted = false \
-  AND startsWith(traversal_path, {traversal_path:String}) \
-  AND (target_project_id, iid) IN {pairs:Array(Tuple(Int64, Int64))}";
+  AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)})";
 
 /// SQL template for the work-item entity batch lookup.
 ///
@@ -104,8 +112,7 @@ SELECT \
     iid \
 FROM work_items \
 WHERE _siphon_deleted = false \
-  AND startsWith(traversal_path, {traversal_path:String}) \
-  AND (project_id, iid) IN {pairs:Array(Tuple(Int64, Int64))}";
+  AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)})";
 
 /// A row from the `siphon_routes` lookup, keyed by `path`.
 ///
@@ -325,15 +332,26 @@ mod tests {
 
     #[test]
     fn routes_sql_uses_named_parameters() {
-        assert!(ROUTES_SQL.contains("{traversal_path:String}"));
         assert!(ROUTES_SQL.contains("{paths:Array(String)}"));
-        assert!(ROUTES_SQL.contains("startsWith(traversal_path"));
+        assert!(ROUTES_SQL.contains("path IN"));
+    }
+
+    #[test]
+    fn resolver_sql_is_not_namespace_scoped() {
+        // Cross-project references resolve against globally-unique keys
+        // (path / project_id+iid), so a source-namespace traversal_path
+        // filter would drop every cross-namespace reference.
+        assert!(!ROUTES_SQL.contains("startsWith(traversal_path"));
+        assert!(!MERGE_REQUESTS_SQL.contains("startsWith(traversal_path"));
+        assert!(!WORK_ITEMS_SQL.contains("startsWith(traversal_path"));
+        assert!(!PROJECT_PATHS_SQL.contains("startsWith(traversal_path"));
     }
 
     #[test]
     fn merge_requests_sql_uses_tuple_in_list() {
-        assert!(MERGE_REQUESTS_SQL.contains("{pairs:Array(Tuple(Int64, Int64))}"));
-        assert!(MERGE_REQUESTS_SQL.contains("(target_project_id, iid) IN"));
+        assert!(MERGE_REQUESTS_SQL.contains("{project_ids:Array(Int64)}"));
+        assert!(MERGE_REQUESTS_SQL.contains("{iids:Array(Int64)}"));
+        assert!(MERGE_REQUESTS_SQL.contains("(target_project_id, iid) IN arrayZip("));
     }
 
     #[test]
@@ -353,8 +371,9 @@ mod tests {
 
     #[test]
     fn work_items_sql_uses_project_id() {
-        assert!(WORK_ITEMS_SQL.contains("{pairs:Array(Tuple(Int64, Int64))}"));
-        assert!(WORK_ITEMS_SQL.contains("(project_id, iid) IN"));
+        assert!(WORK_ITEMS_SQL.contains("{project_ids:Array(Int64)}"));
+        assert!(WORK_ITEMS_SQL.contains("{iids:Array(Int64)}"));
+        assert!(WORK_ITEMS_SQL.contains("(project_id, iid) IN arrayZip("));
     }
 
     #[test]
