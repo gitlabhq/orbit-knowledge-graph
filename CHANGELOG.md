@@ -1,3 +1,35 @@
+## [0.67.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.66.0...v0.67.0) (2026-06-01)
+
+### Features
+
+* add project_id + branch columns to gl_code_edge ([39693e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/39693e0dc065a895e5ef97c012822877b332c393)) by Michael Usachenko
+* **indexer:** capture per-run resource stats in the SDLC pipeline ([ce410fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ce410fae671e791af0490f32050884644d86167f)) by Jean-Gabriel Doyon
+* **indexer:** correlate re-index dispatches with a campaign id ([6bb2b9c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6bb2b9c8bc0717731db05f6a0c5b3f58ba2f956e)) by Jean-Gabriel Doyon
+* **indexer:** move schema migration to dispatcher, gate indexers on readiness ([f0174c9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0174c9f33fd6af210a13a2fd72480a563c44731)) by Jean-Gabriel Doyon
+* **indexer:** pipeline Gitaly fetch and code analysis phases ([9a6d296](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9a6d296e8730f1e8b3d64b64d70202e42fe5c3c1)) by Michael Usachenko
+
+### Fixes
+
+* auto-inject node filters to edge scans for primary key scoping ([a2fa908](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2fa908cc6839b2d1082fd851b3587aa359e9d4b)) by Michael Usachenko
+* **billing:** use underscores in feature_qualified_name for orbit channels ([c605b7d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c605b7d9227b5f5700a08004c9130cf1904b95b1)) by Sharmad Nachnolkar
+* **compiler:** dedup self-joined edges with argMax to stop aggregation count inflation ([aa8de37](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/aa8de374edd21a42c388a5018a9e0be6b34981a1)) by Michael Angelo Rivera
+* **ruby:** link EXTENDS edges for qualified superclasses (269 → 337) ([3e1a377](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e1a377eadf939a2d257ff3be173edc1737b5328)) by Michael Angelo Rivera
+* **sdlc:** only advance watermark on completed checkpoints ([f79cf25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f79cf252f49ddea75f0e11ae8d350d1a2b2b7119)) by Jean-Gabriel Doyon
+
+### Other
+
+* bump AI review bot to Opus 4.8 (high) ([5509053](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5509053667eaae86dc59840433e2c7035a5df45f)) by Dmitry Gruzd
+* **compiler:** cover [#801](https://gitlab.com/gitlab-org/orbit/knowledge-graph/issues/801) edge-dedup count and match table sort key ([00d9d9c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/00d9d9cebc3d77a8bb5d1e0965028d7ed28ae68b)) by Michael Angelo Rivera
+* **dashboards:** add billing quota panels and sync dispatcher migration selectors ([7c62ea9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7c62ea94f4e4bb445bb9d42c195072018ace301f)) by Bohdan Parkhomchuk
+* **deps:** bump OXC to 0.133.0 and oxc_resolver to 11.20.0 ([cd79a0c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cd79a0c489e7be8f9f92fbefe39cd829d1a32bb6)) by Michael Angelo Rivera
+* **deps:** update rust crate async-nats to 0.49.0 ([d43da08](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d43da08598d114e96411f7bcd948591e44f66ac8)) by GitLab Renovate Bot
+* **deps:** update rust crate bumpalo to v3.20.3 ([b3dc5b9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b3dc5b9cff8d3e27634116759420e2e4da33868f)) by GitLab Renovate Bot
+* **deps:** update rust crate duckdb to v1.10503.1 ([a7c7046](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a7c70466028c61141d104f2b8dc512a64e1ee79a)) by GitLab Renovate Bot
+* **deps:** update rust crate mimalloc to v0.1.52 ([f240875](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f240875dd2c58e42b65ee6f7c581848d228bfe4f)) by GitLab Renovate Bot
+* **deps:** update rust crate reqwest to v0.13.4 ([17943b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/17943b7df18e004f6bccb58fbb2cd81ea5849480)) by GitLab Renovate Bot
+* **deps:** update rust crate toon-format to 0.5.0 ([08f90a1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/08f90a111143ad3453ec9eabf539211dc097ee6d)) by GitLab Renovate Bot
+* **deps:** update rust-analyzer crates to 0.0.334 ([31589af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/31589af381c85855a12a0f27945cd201815289a8)) by Jean-Gabriel Doyon
+
 ## [0.66.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.65.1...v0.66.0) (2026-05-29)
 
 ### Features
