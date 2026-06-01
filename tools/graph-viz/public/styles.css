@@ -1,0 +1,251 @@
+:root {
+  --bg: #03060a;
+  --cyan: #22d3ee;
+  --teal: #2dd4bf;
+  --panel: rgba(8, 18, 26, 0.72);
+  --border: rgba(45, 212, 191, 0.35);
+  --text: #d8feff;
+  --muted: #6fb7c4;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+#graph {
+  position: fixed;
+  inset: 0;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  letter-spacing: 0.15em;
+  color: var(--cyan);
+  text-shadow: 0 0 16px var(--cyan);
+  z-index: 50;
+  pointer-events: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+#hud-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 20px;
+  z-index: 20;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.brand-mark {
+  color: var(--cyan);
+  font-size: 22px;
+  text-shadow: 0 0 18px var(--cyan);
+}
+
+.brand-name {
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  color: var(--text);
+}
+
+.brand-sub {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.search-wrap {
+  position: relative;
+  flex: 0 1 360px;
+}
+
+#search {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.15);
+}
+
+#search::placeholder {
+  color: var(--muted);
+}
+
+#search-results {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#search-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#search-results li:hover {
+  background: rgba(34, 211, 238, 0.12);
+}
+
+#search-results em {
+  margin-left: auto;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.panel {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 30px rgba(34, 211, 238, 0.1);
+  z-index: 20;
+  min-width: 180px;
+}
+
+#legend {
+  left: 20px;
+  bottom: 20px;
+}
+
+#inspector {
+  right: 20px;
+  top: 70px;
+  max-width: 320px;
+}
+
+.panel-title {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.swatch {
+  width: 18px;
+  height: 4px;
+  border-radius: 3px;
+}
+
+.legend-label {
+  letter-spacing: 0.08em;
+}
+
+.hint {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.inspector-body .row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.inspector-body .k {
+  color: var(--muted);
+  min-width: 56px;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.inspector-body .v {
+  word-break: break-all;
+}
+
+.who-calls {
+  margin-top: 12px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: rgba(251, 191, 36, 0.1);
+  color: #fde68a;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+}
+
+.who-calls[data-disabled='true'] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.who-calls:hover[data-disabled='false'] {
+  background: rgba(251, 191, 36, 0.2);
+}

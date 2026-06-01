@@ -1,7 +1,12 @@
 node_modules/
 tmp/
+test-results/
+playwright-report/
+
+# The repo-root .gitignore has a bare `public` rule that would otherwise
+# exclude this whole directory. Re-include the authored static source and keep
+# only the generated build artifacts ignored.
+!public/
 public/bundle.js
 public/bundle.js.map
 public/data/
-test-results/
-playwright-report/

@@ -95,6 +95,20 @@ function paeth(a, b, c) {
   return c;
 }
 
+test('serves index.html with the renderer mount points', async ({ request }) => {
+  // Guards against a missing/untracked index.html: on a fresh clone `/` must
+  // serve the authored page (not 404), with the DOM nodes src/main.js mounts
+  // into and a reference to the built bundle.
+  const res = await request.get('/');
+  expect(res.status()).toBe(200);
+  const html = await res.text();
+  for (const id of ['graph', 'loading', 'status', 'search', 'search-results', 'legend-items', 'inspector']) {
+    expect(html, `index.html should contain id="${id}"`).toContain(`id="${id}"`);
+  }
+  expect(html).toContain('bundle.js');
+  expect(html).toContain('styles.css');
+});
+
 test('renders the 3D graph scene with nodes and no console errors', async ({ page }) => {
   const consoleErrors = [];
   page.on('console', (msg) => {

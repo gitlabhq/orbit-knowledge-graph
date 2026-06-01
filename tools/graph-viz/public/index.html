@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orbit · 3D Code Graph</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="graph"></div>
+
+    <div id="loading" class="overlay">Initializing graph…</div>
+
+    <header id="hud-top">
+      <div class="brand">
+        <span class="brand-mark">◈</span>
+        <span class="brand-name">ORBIT</span>
+        <span class="brand-sub">code graph</span>
+      </div>
+      <div class="search-wrap">
+        <input id="search" type="search" placeholder="Search symbols…" autocomplete="off" />
+        <ul id="search-results"></ul>
+      </div>
+      <div id="status" class="status">loading…</div>
+    </header>
+
+    <aside id="legend" class="panel">
+      <div class="panel-title">Edge types</div>
+      <div id="legend-items"></div>
+      <div class="hint">click a node to expand · search to fly</div>
+    </aside>
+
+    <aside id="inspector" class="panel hidden">
+      <div class="panel-title">Node</div>
+      <div class="inspector-body"></div>
+      <button class="who-calls" data-disabled="true">Who calls this →</button>
+    </aside>
+
+    <script type="module" src="bundle.js"></script>
+  </body>
+</html>
