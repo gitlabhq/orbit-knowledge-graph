@@ -26,8 +26,8 @@ fn dedup_svc() -> MockRedactionService {
     svc.allow(
         "merge_request",
         &[
-            9100, 9101, 9200, 9201, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801,
-            9900, 9901,
+            9100, 9101, 9200, 9201, 9210, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800,
+            9801, 9900, 9901,
         ],
     );
     svc
@@ -148,6 +148,52 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
             Some(3)
         );
     });
+}
+
+pub(super) async fn aggregation_multi_hop_self_join_dedups_edge_versions(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+         (9210, 210, 'Multi-hop dedup MR', 'opened', '1/100/1000/', 1000, '2024-06-01 00:00:00', false)",
+        t("gl_merge_request")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags, _version) VALUES
+         ('1/100/1000/', 9210, 'MergeRequest', 'HAS_LABEL',  7000, 'Label',   ['state:opened'], [], '2024-01-01 00:00:00'),
+         ('1/100/1000/', 9210, 'MergeRequest', 'HAS_LABEL',  7000, 'Label',   ['state:opened'], [], '2024-06-01 00:00:00'),
+         ('1/100/1000/', 9210, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], [], '2024-01-01 00:00:00'),
+         ('1/100/1000/', 9210, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], [], '2024-06-01 00:00:00')",
+        t("gl_edge")
+    ))
+    .await;
+
+    ctx.optimize_all().await;
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [9210]},
+                {"id": "label", "entity": "Label", "filters": {"title": "bug"}},
+                {"id": "project", "entity": "Project", "node_ids": [1000]}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.skip_requirement(Requirement::Filter {
+        field: "title".into(),
+    });
+    resp.assert_row_value_i64(0, "n", 1);
 }
 
 /// Search with filter: latest version matches the filter. Should return the row.

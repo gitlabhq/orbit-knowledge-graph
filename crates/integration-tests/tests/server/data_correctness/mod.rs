@@ -279,6 +279,7 @@ async fn data_correctness() {
         dedup::search_filter_returns_latest_matching_version,
         dedup::search_filter_excludes_stale_match,
         dedup::aggregation_dedup_counts_unique_entities,
+        dedup::aggregation_multi_hop_self_join_dedups_edge_versions,
         dedup::aggregation_filter_excludes_stale_mutable_match,
         dedup::traversal_dedup_returns_single_edge,
         dedup::traversal_filter_excludes_stale_version,

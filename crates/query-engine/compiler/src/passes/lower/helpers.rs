@@ -313,7 +313,11 @@ pub(super) fn dedup_edge_scan(
         return TableRef::scan_final(edge_table, alias);
     };
 
-    let identity = [SOURCE_ID_COLUMN, RELATIONSHIP_KIND_COLUMN, TARGET_ID_COLUMN];
+    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .filter(|c| cols.contains(*c))
+        .collect();
 
     let mut projected: Vec<&str> = cols
         .iter()
@@ -323,8 +327,8 @@ pub(super) fn dedup_edge_scan(
     projected.sort_unstable();
 
     let mut select = Vec::with_capacity(identity.len() + projected.len());
-    for col in identity {
-        select.push(SelectExpr::col(alias, col));
+    for col in &identity {
+        select.push(SelectExpr::col(alias, *col));
     }
     for col in projected {
         select.push(SelectExpr::new(
@@ -336,7 +340,10 @@ pub(super) fn dedup_edge_scan(
         ));
     }
 
-    let group_by = identity.iter().map(|c| Expr::col(alias, *c)).collect();
+    let group_by = identity
+        .iter()
+        .map(|c| Expr::col(alias, *c))
+        .collect::<Vec<_>>();
 
     let having = Expr::eq(
         Expr::func(
