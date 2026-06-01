@@ -411,6 +411,69 @@ mod tests {
         );
     }
 
+    /// Regression for #801: when two or more hops self-join the edge table,
+    /// each edge scan must deduplicate ReplacingMergeTree row versions before
+    /// the join. Without it the self-join multiplies un-merged versions of
+    /// each hop, inflating `count(mr)` multiplicatively (the issue observed
+    /// 7, 49, 245 for an MR that should return 1). The dedup uses an argMax
+    /// GROUP BY subquery, which keeps the `source_id` projection (FINAL would
+    /// discard it and read ~170x more bytes).
+    #[test]
+    fn multi_edge_self_join_dedups_edge_versions() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("argMax(e0._deleted, e0._version) = false")
+                && sql.contains("argMax(e1._deleted, e1._version) = false"),
+            "multi-edge self-join must dedup each edge scan via argMax, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("FROM gl_edge AS e0 FINAL"),
+            "dedup must keep the projection, not fall back to FINAL, got:\n{sql}"
+        );
+    }
+
+    /// A single-hop edge scan cannot fan a node out, so it stays a plain scan.
+    /// Deduplicating the hot single-edge path would cost an unnecessary
+    /// aggregation.
+    #[test]
+    fn single_edge_scan_stays_plain() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("argMax"),
+            "single-hop edge scan must not dedup, got:\n{sql}"
+        );
+    }
+
     /// Traversal with `id_range` (no `node_ids` or `filters`) must produce
     /// range conditions that reach the SQL. FK elision pushes range
     /// conditions onto the User node table subquery.
