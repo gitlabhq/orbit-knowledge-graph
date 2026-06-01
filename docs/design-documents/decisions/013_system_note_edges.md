@@ -98,6 +98,14 @@ This is a **custom `EntityPipeline` implementation**, not an ontology-driven pla
 
 Edge **kinds** are still declared in ontology YAML (`config/ontology/edges/{mentions,adds_commit,merged_at_commit,reopened}.yaml`); only the ETL **logic** is Rust. Existing edges that get new supplemental writes (`MERGED`, `CLOSED`, `RELATED_TO`) gain a documented comment pointing at the system-notes handler as an additional emitter.
 
+#### Why `CLOSED` / `MERGED` are re-emitted, and their mixed `_version` provenance
+
+`closed.yaml` (`fk_column: closed_by_id`) and `merged.yaml` (`fk_column: merge_user_id`) already materialize `User → entity` edges from the FK columns, which hold only the **last** closer/merger. The system-note path is intentionally additive: `system_note_metadata` records **every** lifecycle transition, so a workitem closed → reopened → closed again by two different users yields two distinct `(source_id=user, target=entity, CLOSED)` edges — historical coverage the FK column cannot express. This is the same reason `REOPENED` is net-new (Rails has no `reopened_by_id` FK at all).
+
+`gl_edge` is `ReplacingMergeTree(_version, _deleted)` keyed on `(traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind)`. When both pipelines emit the *same* (last-closer) edge key, the rows collapse to one and the survivor's `_version` is whichever pipeline wrote the larger timestamp — the FK ETL stamps the entity's replicated/updated time, the handler stamps the note's `created_at`.
+
+**This mixed `_version` provenance for the duplicated last-closer edge is expected and benign:** the edge's existence and endpoints are identical from both sources, and `_version` only drives ReplacingMergeTree dedup, not query results. Distinct historical closers have distinct `source_id`s and never collide. A future reader should not "fix" the apparent duplication by dropping the handler's `CLOSED`/`MERGED` emission — that would lose the historical-closer coverage.
+
 ### Extraction pipeline
 
 ```plaintext

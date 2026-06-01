@@ -6,6 +6,7 @@ pub mod siphon;
 pub use handlers::{
     default_test_watermark, entity_handler_with_partitions, global_envelope, global_handler,
     handler_context, namespace_envelope, namespace_handler, system_notes_handler,
+    system_notes_handler_capped,
 };
 pub use integration_testkit::{
     GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, assert_edge_count,

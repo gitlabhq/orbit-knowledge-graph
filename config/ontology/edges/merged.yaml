@@ -1,3 +1,10 @@
+# The `fk_column: merge_user_id` ETL below materializes the *last* merger.
+# The system-notes handler (ADR 013,
+# crates/indexer/src/modules/sdlc/handler/system_notes/) is an additional
+# emitter of this edge kind from `system_note_metadata.action = 'merged'`.
+# The two sources stamp `_version` differently (entity update time vs note
+# created_at); the duplicated edge collapses under ReplacingMergeTree and
+# the mixed provenance is expected — see ADR 013.
 description: User who merged a merge request
 
 variants:

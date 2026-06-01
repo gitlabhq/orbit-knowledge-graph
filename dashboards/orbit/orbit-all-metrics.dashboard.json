@@ -3765,7 +3765,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Total system notes dropped because their action is not handled by the parser.",
+         "description": "Guard counter for system notes whose action the parser rejects; normally zero (see scripts/check-system-note-actions.sh for drift).",
          "fieldConfig": {
             "defaults": {
                "custom": {

@@ -836,7 +836,7 @@
     {
       "otel_name": "gkg.indexer.sdlc.system_notes.unknown_action",
       "prom_name": "gkg_indexer_sdlc_system_notes_unknown_action_total",
-      "description": "Total system notes dropped because their action is not handled by the parser.",
+      "description": "Guard counter for system notes whose action the parser rejects; normally zero (see scripts/check-system-note-actions.sh for drift).",
       "kind": "counter",
       "labels": [
         "action"

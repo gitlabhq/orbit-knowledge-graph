@@ -118,6 +118,17 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
         .expect("system-notes handler must be registered")
 }
 
+/// The system-notes handler with a tuned page cap, for exercising the
+/// `MAX_PAGES_PER_RUN` cap-exit / resume path without seeding millions of
+/// rows. With `create_test_indexer_config`'s `datalake_batch_size = 1`, a
+/// `max_pages` of N stops after N single-row pages.
+pub fn system_notes_handler_capped(ctx: &TestContext, max_pages: usize) -> Arc<dyn Handler> {
+    let config = create_test_indexer_config(&ctx.config);
+    let handler =
+        indexer::modules::sdlc::build_system_notes_handler(&config).with_max_pages(max_pages);
+    Arc::new(handler)
+}
+
 pub async fn entity_handler_with_partitions(
     ctx: &TestContext,
     entity_name: &str,

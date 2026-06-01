@@ -83,13 +83,20 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
     DOMAIN,
 );
 
-// Cardinality is bounded by the vendored Rails `ICON_TYPES` list (~60–100
-// values), so the `action` label is safe. A non-zero count means the
-// system-notes handler saw a Rails action it does not yet handle and
-// dropped it — the signal that the vendored `ICON_TYPES` copy has drifted.
+// Defense-in-depth guard, not the primary drift detector. The extract query
+// pre-filters `action IN (handled set)`, which is the exact set the parser
+// accepts, so under normal operation this never increments — a drifted/new
+// Rails action isn't in the IN-list and is never SELECTed. The real drift
+// detector is the CI check `scripts/check-system-note-actions.sh`. This
+// counter only fires if the IN-list and `Action::parse` themselves drift
+// apart (e.g. an action added to `handled_actions()` but not to the parser),
+// which is a code bug rather than upstream drift. Cardinality is bounded by
+// the vendored `ICON_TYPES` list (~60–100 values), so the `action` label is
+// safe.
 pub const SYSTEM_NOTES_UNKNOWN_ACTION: MetricSpec = MetricSpec::counter(
     "gkg.indexer.sdlc.system_notes.unknown_action",
-    "Total system notes dropped because their action is not handled by the parser.",
+    "Guard counter for system notes whose action the parser rejects; \
+     normally zero (see scripts/check-system-note-actions.sh for drift).",
     None,
     &[labels::ACTION],
     DOMAIN,

@@ -48,6 +48,8 @@ pub(crate) mod resolve;
 pub(crate) mod vendored;
 
 pub use handler::register_handlers;
+#[doc(hidden)]
+pub use handler::{SystemNotesHandler, build_handler};
 
 use std::collections::HashMap;
 

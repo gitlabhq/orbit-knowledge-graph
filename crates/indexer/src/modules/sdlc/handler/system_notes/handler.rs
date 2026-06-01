@@ -39,7 +39,7 @@ use super::resolve::{
 use super::vendored::icon_types::{HANDLED_CROSS_REFERENCE_ACTIONS, HANDLED_LIFECYCLE_ACTIONS};
 use super::{DefaultProjectLookup, ExtractedNote, plan_for_batch, process_batch};
 use crate::IndexerConfig;
-use crate::checkpoint::{CheckpointStore, ClickHouseCheckpointStore};
+use crate::checkpoint::{Checkpoint, CheckpointStore, ClickHouseCheckpointStore};
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerInitError, HandlerRegistry};
 use crate::modules::sdlc::datalake::{Datalake, DatalakeQuery};
@@ -64,8 +64,49 @@ const ENTITY: &str = "SystemNote";
 const DEFAULT_BATCH_LIMIT: u64 = 10_000;
 
 /// Hard cap on pages per namespace message so a pathological backlog can't
-/// monopolise a worker; the next message resumes from the saved watermark.
+/// monopolise a worker. On hitting the cap the keyset cursor is persisted to
+/// the checkpoint so the next message resumes from it rather than re-scanning.
 const MAX_PAGES_PER_RUN: usize = 1_000;
+
+/// Keyset pagination cursor over the extract query's `ORDER BY (created_at,
+/// id)`. Persisted to the checkpoint's `cursor_values` (`[created_at, id]`)
+/// so a page-cap exit or crash resumes exactly after the last processed
+/// row instead of restarting the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Cursor {
+    created_at: DateTime<Utc>,
+    id: i64,
+}
+
+impl Cursor {
+    /// Cursor at the start of a window: the first keyset comparison
+    /// `(created_at, id) > (lower_bound, 0)` then admits every row.
+    fn start(lower_bound: DateTime<Utc>) -> Self {
+        Self {
+            created_at: lower_bound,
+            id: 0,
+        }
+    }
+
+    /// `[created_at, id]` for the checkpoint `cursor_values` column.
+    fn encode(&self) -> Vec<String> {
+        vec![format_ch(self.created_at), self.id.to_string()]
+    }
+
+    /// Parse a previously-encoded `cursor_values`. Returns `None` for a
+    /// completed checkpoint (`None`/empty) or any malformed value, in which
+    /// case the caller falls back to a fresh window rather than risk
+    /// resuming from a bad position.
+    fn decode(values: Option<&[String]>) -> Option<Self> {
+        let [created_at, id] = values? else {
+            return None;
+        };
+        Some(Self {
+            created_at: parse_ch(created_at)?,
+            id: id.parse().ok()?,
+        })
+    }
+}
 
 /// All Rails `system_note_metadata.action` values the parser handles,
 /// bound into the extract query's `{actions:Array(String)}` IN-list so the
@@ -84,11 +125,12 @@ pub struct SystemNotesHandler {
     checkpoint_store: Arc<dyn CheckpointStore>,
     subscription: Subscription,
     batch_limit: u64,
+    max_pages: usize,
     unknown_action: Counter<u64>,
 }
 
 impl SystemNotesHandler {
-    pub fn new(
+    pub(crate) fn new(
         datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         subscription: Subscription,
@@ -100,8 +142,16 @@ impl SystemNotesHandler {
             checkpoint_store,
             subscription,
             batch_limit,
+            max_pages: MAX_PAGES_PER_RUN,
             unknown_action: sdlc_metrics::SYSTEM_NOTES_UNKNOWN_ACTION.build_counter_u64(&meter),
         }
+    }
+
+    /// Override the per-message page cap. Used by integration tests to
+    /// exercise the cap-exit / resume path without seeding millions of rows.
+    pub fn with_max_pages(mut self, max_pages: usize) -> Self {
+        self.max_pages = max_pages.max(1);
+        self
     }
 
     fn checkpoint_key(namespace: i64) -> String {
@@ -116,6 +166,16 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
 ) -> Result<(), HandlerInitError> {
+    registry.register_handler(Box::new(build_handler(config)));
+    info!("registered SDLC system-notes edge handler");
+    Ok(())
+}
+
+/// Build the handler from config. Exposed (via the `system_notes` and
+/// `sdlc` module re-exports) so integration tests can construct it and tune
+/// `max_pages` through [`SystemNotesHandler::with_max_pages`] without seeding
+/// millions of rows to reach the production page cap.
+pub fn build_handler(config: &IndexerConfig) -> SystemNotesHandler {
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
@@ -135,10 +195,7 @@ pub fn register_handlers(
         subscription = subscription.with_config(topic_config);
     }
 
-    let handler = SystemNotesHandler::new(datalake, checkpoint_store, subscription, batch_limit);
-    registry.register_handler(Box::new(handler));
-    info!("registered SDLC system-notes edge handler");
-    Ok(())
+    SystemNotesHandler::new(datalake, checkpoint_store, subscription, batch_limit)
 }
 
 #[async_trait]
@@ -160,13 +217,29 @@ impl Handler for SystemNotesHandler {
         let started_at = Instant::now();
         let key = Self::checkpoint_key(request.namespace);
 
-        let last_watermark = self
+        let checkpoint = self
             .checkpoint_store
             .load(&key)
             .await
-            .map_err(|e| HandlerError::Processing(e.to_string()))?
-            .map(|c| c.watermark)
-            .unwrap_or_else(|| DateTime::<Utc>::UNIX_EPOCH);
+            .map_err(|e| HandlerError::Processing(e.to_string()))?;
+
+        // The keyset `(created_at, id)` cursor is the source of truth for
+        // position; the watermark window is a coarse range around it. A
+        // completed checkpoint (`cursor_values: None`) advances the window
+        // lower bound to its watermark. An in-progress one (`cursor_values:
+        // Some`) means a prior run stopped mid-window (page cap or crash) —
+        // re-open from epoch and let the cursor keyset-skip what was already
+        // processed, mirroring the entity handler in `handler/entity.rs`.
+        let (last_watermark, mut cursor) = match &checkpoint {
+            Some(cp) => match Cursor::decode(cp.cursor_values.as_deref()) {
+                Some(resumed) => (DateTime::<Utc>::UNIX_EPOCH, resumed),
+                None => (cp.watermark, Cursor::start(cp.watermark)),
+            },
+            None => (
+                DateTime::<Utc>::UNIX_EPOCH,
+                Cursor::start(DateTime::<Utc>::UNIX_EPOCH),
+            ),
+        };
 
         let edge_table = prefixed_table_name(EDGE_TABLE, *SCHEMA_VERSION);
         let writer = context
@@ -175,21 +248,22 @@ impl Handler for SystemNotesHandler {
             .await
             .map_err(|e| HandlerError::Processing(format!("edge writer for {edge_table}: {e}")))?;
 
-        // Keyset cursor within the (last_watermark, watermark] window.
-        let mut cursor_created_at = last_watermark;
-        let mut cursor_id: i64 = 0;
         let mut total_edges = 0usize;
         let mut total_notes = 0usize;
+        // `drained` flips to false only if we exhaust the page budget while
+        // pages are still full. A short/empty page means the window is
+        // fully processed, regardless of how many full pages preceded it —
+        // so the "exactly N full pages then empty" boundary still drains.
         let mut drained = true;
 
-        for page in 0..MAX_PAGES_PER_RUN {
+        for page in 0..self.max_pages {
             let notes = self
                 .extract_page(
                     &request.traversal_path,
                     last_watermark,
                     request.watermark,
-                    cursor_created_at,
-                    cursor_id,
+                    cursor.created_at,
+                    cursor.id,
                 )
                 .await?;
 
@@ -197,12 +271,15 @@ impl Handler for SystemNotesHandler {
                 break;
             }
             total_notes += notes.len();
+            let page_was_full = notes.len() as u64 >= self.batch_limit;
 
             // Advance the cursor to the last row of this page before
             // consuming the batch (rows are ORDER BY created_at, id).
             let last = &notes[notes.len() - 1];
-            cursor_created_at = last.created_at;
-            cursor_id = last.id;
+            cursor = Cursor {
+                created_at: last.created_at,
+                id: last.id,
+            };
 
             let edges = self.resolve_and_emit(&notes).await?;
 
@@ -216,30 +293,57 @@ impl Handler for SystemNotesHandler {
                 total_edges += edges.len();
             }
 
-            let page_was_full = notes.len() as u64 >= self.batch_limit;
             if !page_was_full {
+                // Reached the tail of the window.
                 break;
             }
-            if page + 1 == MAX_PAGES_PER_RUN {
-                // Stopped on the page cap with rows still in the window.
-                // Leave the checkpoint unchanged so the next namespace
-                // message re-enters from `last_watermark` and resumes.
+
+            if page + 1 == self.max_pages {
+                // Last allowed iteration and the page was still full, so the
+                // window may have more rows. Persist the cursor and stop;
+                // the next message resumes from it.
+                self.checkpoint_store
+                    .save_progress(
+                        &key,
+                        &Checkpoint {
+                            watermark: request.watermark,
+                            cursor_values: Some(cursor.encode()),
+                        },
+                    )
+                    .await
+                    .map_err(|e| HandlerError::Processing(e.to_string()))?;
                 drained = false;
-                warn!(
-                    namespace = request.namespace,
-                    "system_notes: hit MAX_PAGES_PER_RUN; resuming next message"
-                );
+                break;
             }
+
+            // Mid-window full page: persist the cursor so a crash resumes
+            // here rather than re-scanning the window from the start.
+            self.checkpoint_store
+                .save_progress(
+                    &key,
+                    &Checkpoint {
+                        watermark: request.watermark,
+                        cursor_values: Some(cursor.encode()),
+                    },
+                )
+                .await
+                .map_err(|e| HandlerError::Processing(e.to_string()))?;
         }
 
-        // Advance the watermark only when the whole window drained. A
-        // page-cap exit leaves the checkpoint where it was so no note in
-        // the unprocessed tail is skipped.
         if drained {
+            // Whole window processed: advance the watermark and clear the
+            // cursor so the next message starts a fresh incremental window.
             self.checkpoint_store
                 .save_completed(&key, &request.watermark)
                 .await
                 .map_err(|e| HandlerError::Processing(e.to_string()))?;
+        } else {
+            // Hit the page cap with rows still in the window. The cursor was
+            // persisted above; the next message resumes from it.
+            warn!(
+                namespace = request.namespace,
+                "system_notes: hit MAX_PAGES_PER_RUN; cursor persisted, resuming next message"
+            );
         }
 
         info!(
@@ -291,6 +395,11 @@ impl SystemNotesHandler {
         &self,
         notes: &[ExtractedNote],
     ) -> Result<Vec<EmittedEdge>, HandlerError> {
+        // Defense-in-depth: the extract query already pre-filters
+        // `action IN (handled set)`, so this normally never fires. It only
+        // catches the IN-list and `Action::parse` drifting apart in code
+        // (a bug), not upstream Rails drift — that lives in
+        // `scripts/check-system-note-actions.sh`.
         for n in notes {
             if super::parse::Action::parse(&n.action).is_none() {
                 self.unknown_action.add(
@@ -548,6 +657,13 @@ fn col_timestamp_micros(batch: &RecordBatch, name: &str, row: usize) -> Option<D
 
 fn format_ch(ts: DateTime<Utc>) -> String {
     ts.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
+}
+
+/// Inverse of [`format_ch`] for decoding a persisted cursor timestamp.
+fn parse_ch(s: &str) -> Option<DateTime<Utc>> {
+    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.6f")
+        .ok()
+        .map(|naive| naive.and_utc())
 }
 
 /// `gl_edge` logical columns in physical order. Tags are always empty for

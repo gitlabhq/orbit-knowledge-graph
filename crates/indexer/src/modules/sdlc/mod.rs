@@ -26,6 +26,11 @@ use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use tracing::info;
 
+/// Test-support surface for the system-notes handler, so integration tests
+/// can build it with a tuned page cap. Not part of the public API.
+#[doc(hidden)]
+pub use handler::system_notes::{SystemNotesHandler, build_handler as build_system_notes_handler};
+
 pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
