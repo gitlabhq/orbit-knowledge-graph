@@ -68,8 +68,6 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &alias,
                 hop,
                 &plan.nodes,
-                start_col,
-                end_col,
                 &plan.table_columns,
                 dedup_edges,
             );
@@ -145,8 +143,6 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                     &format!("{edge_alias}n"),
                                     hop,
                                     &plan.nodes,
-                                    start_col,
-                                    end_col,
                                     &plan.table_columns,
                                     false,
                                 );

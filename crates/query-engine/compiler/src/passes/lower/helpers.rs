@@ -247,17 +247,16 @@ pub(super) fn fk_values_from_candidate_scan(
 // Emit helpers: edge predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn push_edge_predicates(
     where_parts: &mut Vec<Expr>,
     alias: &str,
     hop: &Hop,
     nodes: &HashMap<String, NodePlan>,
-    start_col: &str,
-    end_col: &str,
     table_columns: &HashMap<String, HashSet<String>>,
     skip_deleted: bool,
 ) {
+    let (start_col, end_col) = hop.direction.edge_columns();
+
     if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
         where_parts.push(f);
     }
