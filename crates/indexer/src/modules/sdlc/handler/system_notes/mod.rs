@@ -17,28 +17,37 @@
 //! still come from YAML (`config/ontology/edges/{mentions,reopened}.yaml`);
 //! only the ETL logic is Rust.
 //!
-//! The handler is **not yet wired into the NATS engine** in this draft:
-//! the production registration plugs into the `EntityPipeline` extension
-//! point introduced by ADR 014 (`!1341`), which is scaffolded but not yet
-//! on `main`. The pipeline's *internal* code (parser, resolver, edge
-//! writer) is the production target shape; registration glue is the only
-//! piece deferred.
+//! ## How it is wired into the engine
+//!
+//! The handler ([`handler::SystemNotesHandler`]) is a standalone
+//! [`crate::handler::Handler`] registered through the engine's
+//! [`crate::handler::HandlerRegistry`], exactly like
+//! `crates/indexer/src/modules/namespace_deletion/`. It rides the existing
+//! [`crate::topic::NamespaceIndexingRequest`] subscription: the dispatcher
+//! already publishes one namespace indexing message per namespace, NATS
+//! fans it out to every subscriber, and this handler is one more
+//! subscriber alongside the per-entity handlers. It keeps its own
+//! checkpoint key (`{scope}.SystemNote`) so its watermark advances
+//! independently of the ontology entity handlers.
+//!
+//! ADR 014 sketches a future `EntityPipeline` custom-pipeline slot as the
+//! eventual home for this logic. That slot is not on `main` (it lives in
+//! the still-draft entity-handler stack), and it is not a prerequisite:
+//! the parse/resolve/emit/extract core here is pure and reusable, so
+//! migrating to the `EntityPipeline` slot later is a thin I/O-shell swap,
+//! not a rewrite. Until then this standalone handler is the as-built path.
 //!
 //! Custom-handler precedent in the existing codebase:
 //! `crates/indexer/src/modules/namespace_deletion/`.
-//!
-//! The module's public items are intentionally `dead_code`-allowed at the
-//! root: until the `EntityPipeline` registration glue lands on `main`, the
-//! handler is exercised only by its own unit tests, and clippy `-D warnings`
-//! would otherwise reject the unused-API surface.
-
-#![allow(dead_code)]
 
 pub(crate) mod emit;
 pub(crate) mod extract;
+pub(crate) mod handler;
 pub(crate) mod parse;
 pub(crate) mod resolve;
 pub(crate) mod vendored;
+
+pub use handler::register_handlers;
 
 use std::collections::HashMap;
 
@@ -57,15 +66,19 @@ pub(crate) struct ExtractedNote {
     pub noteable_id: i64,
     pub noteable_type: String,
     pub author_id: Option<i64>,
+    /// `siphon_notes.project_id` — the note's owning project. Resolved to a
+    /// path via `siphon_routes` to become the default project for
+    /// unqualified GFM references on this row.
+    pub project_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub traversal_path: String,
     pub action: String,
     /// `siphon_system_note_metadata.commit_count`. Populated only for the
-    /// `commit` action (Rails leaves it `NULL` for all others). The
-    /// production handler compares this against the parser's SHA count to
-    /// catch Rails-template-regression drift on the `<li>SHA - title</li>`
-    /// commit-list body shape; carrying the column on the row keeps the
-    /// SELECT in `extract.rs` stable when that assertion lands.
+    /// `commit` action (Rails leaves it `NULL` for all others). Carried on
+    /// the row so the SELECT in `extract.rs` stays stable for the planned
+    /// parsed-vs-replicated SHA-count drift assertion (commit edges are
+    /// out of scope until `Commit` nodes exist), hence not yet read.
+    #[allow(dead_code, reason = "reserved for the commit-count drift assertion")]
     pub commit_count: Option<i32>,
 }
 
@@ -81,17 +94,23 @@ pub(crate) type DefaultProjectLookup = HashMap<(String, i64), String>;
 /// resolver closure to look up targets, and return the resulting edge
 /// batch.
 ///
+/// `default_projects` supplies each row's owning project path (keyed on
+/// `(noteable_type, noteable_id)`) so same-project GFM shorthand resolves;
+/// it is stamped onto each [`NoteRow::default_project`] and handed to the
+/// resolver closure per reference.
+///
 /// Splitting the ClickHouse round-trip out as a closure keeps this function
 /// pure: the unit tests exercise the full pipeline with a stub resolver,
-/// and the production handler passes a closure that fans the
-/// [`ResolutionPlan`] returned by [`plan_for_batch`] out to the actual
-/// queries (see `resolve::ROUTES_SQL`, `resolve::MERGE_REQUESTS_SQL`,
-/// `resolve::WORK_ITEMS_SQL`). The closure captures the
-/// `DefaultProjectLookup` (or whatever shape the resolver needs) directly;
-/// only [`plan_for_batch`] takes the lookup as a parameter because the plan
-/// shape needs the default project at *planning* time (before the closure
-/// runs).
-pub(crate) fn process_batch<R>(notes: &[ExtractedNote], mut resolve: R) -> Vec<EmittedEdge>
+/// and the production handler ([`handler::SystemNotesHandler`]) passes a
+/// closure backed by the [`resolve::ResolvedIndex`] built from the
+/// [`ResolutionPlan`] that [`plan_for_batch`] fans out to ClickHouse (see
+/// `resolve::ROUTES_SQL`, `resolve::MERGE_REQUESTS_SQL`,
+/// `resolve::WORK_ITEMS_SQL`).
+pub(crate) fn process_batch<R>(
+    notes: &[ExtractedNote],
+    default_projects: &DefaultProjectLookup,
+    mut resolve: R,
+) -> Vec<EmittedEdge>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
@@ -100,10 +119,11 @@ where
         let Some(action) = Action::parse(&n.action) else {
             // Unknown action: log + drop. WARN-level (not debug) so a
             // staging deployment surfaces drift against Rails immediately
-            // without a log-level config push. The production handler emits
+            // without a log-level config push. The bounded cardinality of
+            // `ICON_TYPES` (~60–100) keeps the metric label dimension safe;
+            // the handler increments
             // `gkg.indexer.sdlc.system_notes.unknown_action_total{action}`
-            // here (ADR 013 step 8); the bounded cardinality of
-            // `ICON_TYPES` (~60–100) keeps the label dimension safe.
+            // around this drop (ADR 013 step 8).
             tracing::warn!(action = %n.action, "system_notes: unknown action, dropping");
             continue;
         };
@@ -115,8 +135,13 @@ where
             continue;
         };
         let references = parse_body(action, &n.note);
+        let default_project = default_projects
+            .get(&(n.noteable_type.clone(), n.noteable_id))
+            .cloned()
+            .unwrap_or_default();
         rows.push(NoteRow {
             traversal_path: n.traversal_path.clone(),
+            default_project,
             author_id: n.author_id,
             noteable_id: n.noteable_id,
             noteable_kind,
@@ -126,7 +151,7 @@ where
         });
     }
 
-    build_edges(&rows, |r, default_traversal| resolve(r, default_traversal))
+    build_edges(&rows, |r, default_project| resolve(r, default_project))
 }
 
 /// Materialise the [`ResolutionPlan`] for the batch — the list of distinct
@@ -175,6 +200,7 @@ mod tests {
             noteable_id,
             noteable_type: noteable_type.to_string(),
             author_id: Some(7),
+            project_id: Some(100),
             created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
             traversal_path: "1/100/".to_string(),
             action: action.to_string(),
@@ -191,10 +217,10 @@ mod tests {
             "MergeRequest",
             100,
         )];
-        let edges = process_batch(&notes, |_r, tp| {
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_r, _default| {
             Some(ResolvedTarget {
                 id: 456,
-                traversal_path: tp.to_string(),
+                traversal_path: "1/100/".to_string(),
             })
         });
         assert_eq!(edges.len(), 1);
@@ -202,9 +228,36 @@ mod tests {
     }
 
     #[test]
+    fn process_batch_passes_default_project_to_resolver() {
+        // `!456` is same-project shorthand; the handler must hand the
+        // resolver the source note's owning project from the lookup so the
+        // edge resolves against the right project.
+        let notes = vec![make_note(
+            1,
+            "cross_reference",
+            "mentioned in !456",
+            "MergeRequest",
+            100,
+        )];
+        let mut defaults = DefaultProjectLookup::new();
+        defaults.insert(("MergeRequest".to_string(), 100), "my/proj".to_string());
+
+        let mut seen_default = None;
+        let edges = process_batch(&notes, &defaults, |_r, default| {
+            seen_default = Some(default.to_string());
+            Some(ResolvedTarget {
+                id: 456,
+                traversal_path: "1/100/".to_string(),
+            })
+        });
+        assert_eq!(edges.len(), 1);
+        assert_eq!(seen_default.as_deref(), Some("my/proj"));
+    }
+
+    #[test]
     fn process_batch_emits_user_closed_edge_for_lifecycle_action() {
         let notes = vec![make_note(2, "closed", "closed", "Issue", 999)];
-        let edges = process_batch(&notes, |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "CLOSED");
         assert_eq!(edges[0].target_kind, "WorkItem");
@@ -214,14 +267,14 @@ mod tests {
     #[test]
     fn process_batch_drops_unknown_action_silently() {
         let notes = vec![make_note(3, "designs_added", "", "MergeRequest", 1)];
-        let edges = process_batch(&notes, |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert!(edges.is_empty());
     }
 
     #[test]
     fn process_batch_drops_unsupported_noteable_type_silently() {
         let notes = vec![make_note(4, "closed", "closed", "Snippet", 1)];
-        let edges = process_batch(&notes, |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert!(edges.is_empty());
     }
 

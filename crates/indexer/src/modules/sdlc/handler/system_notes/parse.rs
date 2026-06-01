@@ -84,6 +84,9 @@ impl Action {
         })
     }
 
+    /// Inverse of [`Action::parse`]. Exercised by the round-trip test; kept
+    /// as the canonical action→string mapping for diagnostics.
+    #[allow(dead_code, reason = "round-trip inverse of parse(); used in tests")]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CrossReference => "cross_reference",

@@ -111,6 +111,10 @@ pub async fn register_handlers(
         "registered SDLC entity handlers"
     );
 
+    // Custom Rust edge handler (ADR 013). Rides the namespace subscription
+    // alongside the ontology entity handlers; see `handler/system_notes/`.
+    handler::system_notes::register_handlers(registry, config)?;
+
     Ok(())
 }
 

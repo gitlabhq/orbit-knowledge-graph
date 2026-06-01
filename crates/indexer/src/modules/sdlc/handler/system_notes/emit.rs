@@ -95,6 +95,12 @@ pub struct EmittedEdge {
 #[derive(Debug, Clone)]
 pub struct NoteRow {
     pub traversal_path: String,
+    /// Full path of the source note's owning project (e.g. `gitlab-org/gitlab`).
+    /// Substituted for same-project GFM shorthand (`#123`, `!456`) when the
+    /// reference carries no explicit project prefix. Empty string when the
+    /// owning project is unknown — the resolver then declines to resolve
+    /// unqualified references on this row.
+    pub default_project: String,
     pub author_id: Option<i64>,
     pub noteable_id: i64,
     pub noteable_kind: NoteableKind,
@@ -104,8 +110,10 @@ pub struct NoteRow {
 }
 
 /// Emit edges for a batch of parsed notes given a target resolver. The
-/// resolver returns `None` for any unresolvable `(project_path, iid)` or
-/// commit SHA — those references are silently dropped.
+/// resolver receives each [`Reference`] plus the source row's
+/// `default_project` (for same-project shorthand) and returns `None` for any
+/// unresolvable `(project_path, iid)` or commit SHA — those references are
+/// silently dropped.
 pub fn build_edges<R>(rows: &[NoteRow], mut resolve: R) -> Vec<EmittedEdge>
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
@@ -120,13 +128,23 @@ where
                 let Some(author_id) = row.author_id else {
                     continue;
                 };
-                // `merged.yaml` only declares `User → MergeRequest` as a variant;
-                // Rails only emits `action='merged'` on MRs in practice, but a
-                // stray non-MR noteable (manual DB edit, Rails bug) would
-                // otherwise land an undeclared `User → WorkItem MERGED` edge
-                // in `gl_edge`. Drop it to keep the emitter honest about the
+                // Lifecycle edges target only the kinds their edge YAML
+                // declares. `closed.yaml` / `reopened.yaml` declare
+                // `User → MergeRequest` and `User → WorkItem`; `merged.yaml`
+                // declares only `User → MergeRequest`. A `Commit` noteable
+                // (no `Commit` node exists yet) or a `merged` action on a
+                // non-MR noteable — whether from a Rails bug or a manual DB
+                // edit — would otherwise land an undeclared edge variant in
+                // `gl_edge`. Drop those to keep the emitter honest about the
                 // edge-YAML contract.
-                if row.action == Action::Merged && row.noteable_kind != NoteableKind::MergeRequest {
+                let declared_target = match row.action {
+                    Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
+                    _ => matches!(
+                        row.noteable_kind,
+                        NoteableKind::MergeRequest | NoteableKind::WorkItem
+                    ),
+                };
+                if !declared_target {
                     continue;
                 }
                 let kind = match row.action {
@@ -167,7 +185,7 @@ where
             | Action::Commit
             | Action::Merge => {
                 for r in &row.references {
-                    let Some(resolved) = resolve(r, row.traversal_path.as_str()) else {
+                    let Some(resolved) = resolve(r, row.default_project.as_str()) else {
                         continue;
                     };
                     // Skip self-loops: a note attached to MR !100 that says
@@ -210,6 +228,7 @@ mod tests {
     ) -> NoteRow {
         NoteRow {
             traversal_path: "1/2/".to_string(),
+            default_project: "src/proj".to_string(),
             author_id: Some(7),
             noteable_id,
             noteable_kind,
@@ -292,6 +311,24 @@ mod tests {
         // noteable, the emitter should drop it instead of producing an
         // undeclared edge variant.
         let row = row_for(Action::Merged, "merged", NoteableKind::WorkItem, 42);
+        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn closed_on_commit_noteable_is_dropped() {
+        // `closed.yaml` / `reopened.yaml` declare only MergeRequest and
+        // WorkItem targets; there is no `Commit` node yet. A `closed`
+        // action landing on a `Commit` noteable must drop rather than emit
+        // an undeclared `User → Commit CLOSED` edge.
+        let row = row_for(Action::Closed, "closed", NoteableKind::Commit, 5);
+        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn reopened_on_commit_noteable_is_dropped() {
+        let row = row_for(Action::Reopened, "reopened", NoteableKind::Commit, 5);
         let edges = build_edges(&[row], always_resolve(0, "1/2/"));
         assert!(edges.is_empty());
     }

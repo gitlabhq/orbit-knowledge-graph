@@ -41,6 +41,15 @@
 ///     before the body crosses the wire. Mirrors the
 ///     `HANDLED_CROSS_REFERENCE_ACTIONS` ∪ `HANDLED_LIFECYCLE_ACTIONS`
 ///     vendored list.
+///
+/// Keyset pagination: the handler pages within a `(last_watermark,
+/// watermark]` window by carrying the last seen `(created_at, id)` forward
+/// as `{cursor_created_at}` / `{cursor_id}`. The half-open
+/// `(created_at, id) > (cursor_created_at, cursor_id)` predicate matches the
+/// `ORDER BY sn.created_at, sn.id` so each page resumes exactly after the
+/// previous one with no row skipped or repeated. The first page binds the
+/// cursor to `(last_watermark, 0)` so it degenerates to the window's lower
+/// bound.
 pub(super) const SYSTEM_NOTES_EXTRACT_SQL: &str = "\
 SELECT \
     sn.id AS id, \
@@ -61,6 +70,7 @@ WHERE sn.system = true \
   AND startsWith(sn.traversal_path, {traversal_path:String}) \
   AND sn.created_at > {last_watermark:DateTime64(6,'UTC')} \
   AND sn.created_at <= {watermark:DateTime64(6,'UTC')} \
+  AND (sn.created_at, sn.id) > ({cursor_created_at:DateTime64(6,'UTC')}, {cursor_id:Int64}) \
   AND snm.action IN {actions:Array(String)} \
 ORDER BY sn.created_at, sn.id \
 LIMIT {batch_limit:UInt64}";
@@ -96,6 +106,17 @@ mod tests {
         // because `note_id` is not present in `siphon_notes`. Make the join
         // shape explicit so a future copy-paste doesn't regress to it.
         assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("ON sn.id = snm.note_id"));
+    }
+
+    #[test]
+    fn extract_sql_uses_keyset_cursor_pagination() {
+        // The `(created_at, id)` keyset clause must match the ORDER BY so
+        // pages resume exactly after the previous one. Without it, every
+        // page would re-read the window's first `batch_limit` rows forever.
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{cursor_created_at:DateTime64(6,'UTC')}"));
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{cursor_id:Int64}"));
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("(sn.created_at, sn.id) > "));
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("ORDER BY sn.created_at, sn.id"));
     }
 
     #[test]

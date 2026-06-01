@@ -177,8 +177,8 @@ pub(super) async fn traversal_wildcard_user_to_mr_infers_relationship_kinds(ctx:
     resp.assert_edge_count("LAST_EDITED_BY", 0);
     resp.assert_edge_count("MERGED", 0);
     // REOPENED is sourced exclusively from `siphon_system_note_metadata.action =
-    // 'reopened'`; the system-notes handler is not yet wired into the engine
-    // (see ADR 013), so this fixture has no rows for it.
+    // 'reopened'` by the system-notes handler (ADR 013). This fixture seeds no
+    // system notes, so the wildcard expansion must report it with count 0.
     resp.assert_edge_count("REOPENED", 0);
     resp.assert_edge_count("REVIEWER", 0);
     resp.assert_edge_count("UPDATED_BY", 0);

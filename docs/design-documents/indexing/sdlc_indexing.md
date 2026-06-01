@@ -331,6 +331,8 @@ The handler reads system notes (the `system = true` complement of the user-note 
 
 Edge **kinds** are still declared in ontology YAML (`config/ontology/edges/mentions.yaml`, `config/ontology/edges/reopened.yaml`); only the ETL **logic** is Rust. Custom-handler precedent: `crates/indexer/src/modules/namespace_deletion/`.
 
+It registers as a standalone `Handler` via `HandlerRegistry::register_handler` (from `modules/sdlc::register_handlers`) on the existing `NamespaceIndexingRequest` subscription, alongside the ontology entity handlers. It keeps an independent checkpoint key (`ns.{id}.SystemNote`) and pages through the `(last_watermark, watermark]` window with a `(created_at, id)` keyset cursor, advancing the watermark only when the window fully drains.
+
 The handler's vendored Rails `ICON_TYPES` constant (`vendored/icon_types.rs`) plus the CI drift check `scripts/check-system-note-actions.sh` mirror the vendored-constant + drift-check pattern from ADR 012 (GOON format version) to bound Rails-side action drift.
 
 ##### Zero-downtime schema changes

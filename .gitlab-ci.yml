@@ -302,6 +302,21 @@ iglu-schema-check:
     - apk add --no-cache bash curl python3
     - bash ./scripts/iglu/check.sh
 
+system-note-actions-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  # Verifies the vendored Rails `SystemNoteMetadata::ICON_TYPES` copy
+  # (system_notes/vendored/icon_types.rs) still matches upstream. Drift
+  # would otherwise silently drop newly added Rails actions at runtime.
+  script:
+    - apk add --no-cache bash curl
+    - bash ./scripts/check-system-note-actions.sh
+
 fmt-check:
   stage: lint
   extends:

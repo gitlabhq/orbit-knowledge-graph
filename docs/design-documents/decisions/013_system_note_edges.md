@@ -59,14 +59,28 @@ Explicit non-goals: `@`-mention edges (separate `*_user_mentions` tables, tracke
 
 ```plaintext
 crates/indexer/src/modules/sdlc/handler/system_notes/
-  mod.rs            // SystemNotesPipeline: impl EntityPipeline + registration
+  mod.rs            // process_batch / plan_for_batch pure core + ExtractedNote
+  handler.rs        // SystemNotesHandler: impl Handler + register_handlers (I/O shell)
   extract.rs        // SQL for the JOIN(siphon_notes ⋈ siphon_system_note_metadata)
   parse.rs          // Regex + per-action dispatch (lifted verbatim from xtask POC)
-  resolve.rs        // siphon_routes IN-list and (project_id, iid) IN-list batchers
+  resolve.rs        // siphon_routes IN-list, (project_id, iid) IN-list, ResolvedIndex
   emit.rs           // Edge row construction → gl_edge writer
   vendored/icon_types.rs  // Vendored copy of Rails ICON_TYPES, pinned SHA
-  tests/            // Unit tests for parse.rs (regex coverage)
 ```
+
+> **Implementation note (as built).** The registration below is described
+> against an ADR 014 `EntityPipeline` extension point. That extension point
+> is not on `main` — the merged ADR 014 work (!1341) shipped a no-op
+> scaffold, and the `EntityIndexingHandler`/`EntityPipeline` routing layer
+> lives in a still-draft MR stack (!1349 → !1360 → !1362). It is also not a
+> prerequisite. The handler instead ships as a standalone
+> [`crate::handler::Handler`] (`SystemNotesHandler`) registered through
+> `HandlerRegistry::register_handler`, riding the existing
+> `NamespaceIndexingRequest` subscription, exactly like
+> `modules/namespace_deletion/`. The parse/resolve/emit core is pure and
+> reusable, so migrating to the `EntityPipeline` slot once it lands is a
+> thin I/O-shell swap. The forward-compatibility analysis below is retained
+> as the eventual target shape, not the current one.
 
 Under ADR 014's entity-level SDLC dispatch (scaffolded in [!1341][adr014-mr]), each entity-kind dispatched by `EntityDispatcher` flows through a single shared `EntityIndexingHandler`, which routes by `entity_kind` to a per-kind pipeline. ADR 014 introduces `SimpleEntityPipeline` as the default plan-driven pipeline and names SystemNotes specifically as the motivating example for the **`EntityPipeline`** custom-pipeline extension point:
 
@@ -159,7 +173,7 @@ Three-layer defence:
 4. Add the CI drift check `scripts/check-system-note-actions.sh` + lefthook hook (model: `scripts/check-goon-format-version.sh`).
 5. Add new edge YAML: `config/ontology/edges/{mentions.yaml, adds_commit.yaml, merged_at_commit.yaml, reopened.yaml}`. `RELATED_TO`, `CLOSED`, `MERGED` get a documented comment that the system-notes handler is an additional emitter; no YAML schema change.
 6. Register the new edge kinds in `config/ontology/schema.yaml`.
-7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration: insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341, now merged). The single shared handler routes by `entity_kind` automatically.
+7. Implement the handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting the parser and resolver from the POC at `crates/xtask/src/system_notes_bench/`. **As built, it is a standalone `Handler` (`SystemNotesHandler` in `handler.rs`)**, not an `EntityPipeline` — that extension point is not on `main` (see the implementation note above). `register_handlers` calls `HandlerRegistry::register_handler` from `modules/sdlc/mod.rs::register_handlers`, alongside the ontology entity handlers. It rides the existing `NamespaceIndexingRequest` subscription and keeps its own checkpoint key (`ns.{id}.SystemNote`). When the ADR 014 `EntityPipeline` slot lands, the pure `process_batch`/`plan_for_batch` core moves over unchanged; only the `handler.rs` I/O shell is replaced.
 
     Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
 8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":

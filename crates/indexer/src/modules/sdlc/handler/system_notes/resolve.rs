@@ -30,6 +30,7 @@ use super::parse::{RefKind, Reference};
 /// out at query time. Embedded as a string literal in [`ROUTES_SQL`] today;
 /// `routes_sql_contains_every_routable_source_type` asserts the two stay in
 /// sync.
+#[allow(dead_code, reason = "drives the ROUTES_SQL source-type sync test")]
 pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
 
 /// SQL template for the routes-table batch lookup.
@@ -52,6 +53,28 @@ WHERE _siphon_deleted = false \
   AND startsWith(traversal_path, {traversal_path:String}) \
   AND path IN {paths:Array(String)} \
   AND source_type IN ('Project', 'Namespace')";
+
+/// SQL template for the reverse routes lookup: project `source_id` → path.
+///
+/// Used to turn each source note's owning `project_id` into the default
+/// project path for unqualified GFM references on that row. Keyed on
+/// `source_id` (the project id) rather than `path`, so it complements
+/// [`ROUTES_SQL`] (which is keyed on `path`).
+///
+/// Parameters:
+///   `{traversal_path:String}` — namespace scope prefix.
+///   `{source_ids:Array(Int64)}` — project ids to resolve.
+///
+/// Returns `(source_id, path)`.
+pub const PROJECT_PATHS_SQL: &str = "\
+SELECT \
+    source_id, \
+    path \
+FROM siphon_routes \
+WHERE _siphon_deleted = false \
+  AND source_type = 'Project' \
+  AND startsWith(traversal_path, {traversal_path:String}) \
+  AND source_id IN {source_ids:Array(Int64)}";
 
 /// SQL template for the merge-request entity batch lookup.
 ///
@@ -141,7 +164,9 @@ impl ResolutionPlan {
     /// Build a plan from a batch of `(noteable_project_path, references)`
     /// tuples emitted by the parser. The default project path is substituted
     /// when a `Reference` carries no explicit project prefix (same-project
-    /// shorthand: `#123`, `!456`).
+    /// shorthand: `#123`, `!456`). The handler builds plans row-by-row via
+    /// [`ResolutionPlan::add_ref`]; this batch constructor backs the tests.
+    #[allow(dead_code, reason = "batch constructor used by resolver tests")]
     pub fn from_refs<'a, I>(refs: I) -> Self
     where
         I: IntoIterator<Item = (&'a str, &'a Reference)>,
@@ -183,7 +208,11 @@ impl ResolutionPlan {
             }
             RefKind::Commit => {
                 self.commit_ref_count += 1;
-                if !r.project_path.as_deref().unwrap_or("").is_empty() {
+                // Mirror the Issue/MR branches: a commit reference with no
+                // explicit project prefix still resolves against the
+                // noteable's default project, and the empty-default guard
+                // reuses `project_is_empty` rather than re-deriving it.
+                if !project_is_empty {
                     self.paths.insert(project);
                 }
             }
@@ -219,6 +248,74 @@ pub fn join_pairs(routes: &[RouteRow], entities: &[EntityRow]) -> HashMap<(Strin
                 .map(move |(&(_, iid), &id)| ((path.to_string(), iid), id))
         })
         .collect()
+}
+
+/// Runtime resolver index built from one routes lookup plus the per-kind
+/// noteable lookups (`MERGE_REQUESTS_SQL`, `WORK_ITEMS_SQL`). Keyed on
+/// `(project_path, kind, iid)` so the [`build_edges`] closure can resolve a
+/// parsed [`Reference`] — substituting the note's default project path for
+/// same-project shorthand — without re-querying ClickHouse per reference.
+///
+/// The target's `traversal_path` comes from the route row, so cross-project
+/// MENTIONS land in the *target's* namespace partition (matching the
+/// `gl_edge` primary key), which is what an inbound-edge query expects.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ResolvedIndex {
+    by_key: HashMap<(String, RefKind, i64), ResolvedTarget>,
+}
+
+impl ResolvedIndex {
+    /// Build the index from the routes rows and the two noteable lookups.
+    /// `mr_entities` come from `MERGE_REQUESTS_SQL`, `wi_entities` from
+    /// `WORK_ITEMS_SQL`; both are `(id, project_id, iid)` rows. Commit
+    /// references are not indexed here (no `Commit` node yet).
+    pub fn build(
+        routes: &[RouteRow],
+        mr_entities: &[EntityRow],
+        wi_entities: &[EntityRow],
+    ) -> Self {
+        let path_routes: HashMap<i64, (&str, &str)> = routes
+            .iter()
+            .filter(|r| r.source_type == "Project")
+            .map(|r| (r.source_id, (r.path.as_str(), r.traversal_path.as_str())))
+            .collect();
+
+        let mut by_key = HashMap::new();
+        for (kind, entities) in [
+            (RefKind::MergeRequest, mr_entities),
+            (RefKind::Issue, wi_entities),
+        ] {
+            for e in entities {
+                if let Some(&(path, traversal_path)) = path_routes.get(&e.project_id) {
+                    by_key.insert(
+                        (path.to_string(), kind, e.iid),
+                        ResolvedTarget {
+                            id: e.id,
+                            traversal_path: traversal_path.to_string(),
+                        },
+                    );
+                }
+            }
+        }
+        Self { by_key }
+    }
+
+    /// Resolve a single parsed reference, substituting `default_project` for
+    /// same-project shorthand (`#123` / `!456`). Commit references and
+    /// references with no `iid` (or an unknown project/pair) return `None`.
+    pub fn resolve(&self, r: &Reference, default_project: &str) -> Option<ResolvedTarget> {
+        if r.kind == RefKind::Commit {
+            return None;
+        }
+        let iid = r.iid?;
+        let project = r.project_path.as_deref().unwrap_or(default_project);
+        if project.is_empty() {
+            return None;
+        }
+        self.by_key
+            .get(&(project.to_string(), r.kind, iid))
+            .cloned()
+    }
 }
 
 #[cfg(test)]
@@ -298,6 +395,30 @@ mod tests {
     }
 
     #[test]
+    fn plan_uses_default_project_for_unqualified_commit_ref() {
+        // A commit SHA with no explicit project prefix must resolve against
+        // the noteable's default project, mirroring the Issue/MR branches.
+        let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
+        let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("my/proj", r)));
+        assert_eq!(plan.commit_ref_count, 1);
+        assert!(
+            plan.paths.contains("my/proj"),
+            "unqualified commit ref should add the default project path"
+        );
+    }
+
+    #[test]
+    fn plan_skips_commit_ref_with_empty_default_project() {
+        let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
+        let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("", r)));
+        assert_eq!(plan.commit_ref_count, 1);
+        assert!(
+            plan.paths.is_empty(),
+            "empty default project must not insert a blank path"
+        );
+    }
+
+    #[test]
     fn join_pairs_returns_resolved_entity_ids() {
         let routes = vec![RouteRow {
             source_type: "Project".to_string(),
@@ -334,5 +455,107 @@ mod tests {
         }];
         let resolved = join_pairs(&routes, &entities);
         assert!(resolved.is_empty());
+    }
+
+    fn gitlab_route() -> RouteRow {
+        RouteRow {
+            source_type: "Project".to_string(),
+            source_id: 999,
+            path: "gitlab-org/gitlab".to_string(),
+            traversal_path: "1/999/".to_string(),
+        }
+    }
+
+    #[test]
+    fn resolved_index_resolves_cross_project_mr_to_target_traversal_path() {
+        let index = ResolvedIndex::build(
+            &[gitlab_route()],
+            &[EntityRow {
+                id: 8675309,
+                project_id: 999,
+                iid: 42,
+            }],
+            &[],
+        );
+        let r = Reference {
+            kind: RefKind::MergeRequest,
+            project_path: Some("gitlab-org/gitlab".to_string()),
+            iid: Some(42),
+            commit_sha: None,
+        };
+        let resolved = index.resolve(&r, "other/proj").unwrap();
+        assert_eq!(resolved.id, 8675309);
+        assert_eq!(
+            resolved.traversal_path, "1/999/",
+            "edge lands in the target's namespace partition"
+        );
+    }
+
+    #[test]
+    fn resolved_index_uses_default_project_for_same_project_ref() {
+        let index = ResolvedIndex::build(
+            &[gitlab_route()],
+            &[],
+            &[EntityRow {
+                id: 555,
+                project_id: 999,
+                iid: 7,
+            }],
+        );
+        // `#7` with no explicit project resolves against the default.
+        let r = Reference {
+            kind: RefKind::Issue,
+            project_path: None,
+            iid: Some(7),
+            commit_sha: None,
+        };
+        assert_eq!(index.resolve(&r, "gitlab-org/gitlab").unwrap().id, 555);
+        // Empty default project never resolves.
+        assert!(index.resolve(&r, "").is_none());
+    }
+
+    #[test]
+    fn resolved_index_separates_mr_and_work_item_iid_namespaces() {
+        // An MR and a work item can share the same (project, iid); the index
+        // must key on kind so `!7` and `#7` don't collide.
+        let index = ResolvedIndex::build(
+            &[gitlab_route()],
+            &[EntityRow {
+                id: 100,
+                project_id: 999,
+                iid: 7,
+            }],
+            &[EntityRow {
+                id: 200,
+                project_id: 999,
+                iid: 7,
+            }],
+        );
+        let mr = Reference {
+            kind: RefKind::MergeRequest,
+            project_path: Some("gitlab-org/gitlab".to_string()),
+            iid: Some(7),
+            commit_sha: None,
+        };
+        let issue = Reference {
+            kind: RefKind::Issue,
+            project_path: Some("gitlab-org/gitlab".to_string()),
+            iid: Some(7),
+            commit_sha: None,
+        };
+        assert_eq!(index.resolve(&mr, "").unwrap().id, 100);
+        assert_eq!(index.resolve(&issue, "").unwrap().id, 200);
+    }
+
+    #[test]
+    fn resolved_index_returns_none_for_commit_refs() {
+        let index = ResolvedIndex::build(&[gitlab_route()], &[], &[]);
+        let r = Reference {
+            kind: RefKind::Commit,
+            project_path: Some("gitlab-org/gitlab".to_string()),
+            iid: None,
+            commit_sha: Some("54f7727c".to_string()),
+        };
+        assert!(index.resolve(&r, "").is_none());
     }
 }

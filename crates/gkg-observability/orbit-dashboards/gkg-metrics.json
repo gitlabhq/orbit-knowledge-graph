@@ -834,6 +834,17 @@
       "domain": "indexer.sdlc"
     },
     {
+      "otel_name": "gkg.indexer.sdlc.system_notes.unknown_action",
+      "prom_name": "gkg_indexer_sdlc_system_notes_unknown_action_total",
+      "description": "Total system notes dropped because their action is not handled by the parser.",
+      "kind": "counter",
+      "labels": [
+        "action"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
       "otel_name": "gkg.indexer.sdlc.transform.duration",
       "prom_name": "gkg_indexer_sdlc_transform_duration_seconds",
       "description": "Duration of DataFusion SQL transform per batch.",

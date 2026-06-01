@@ -18,8 +18,10 @@
 //! for the GOON format version
 //! (`scripts/check-goon-format-version.sh`).
 
-/// All known `system_note_metadata.action` values from Rails. Used by the
-/// drift-check script; not consumed by the parser at runtime.
+/// All known `system_note_metadata.action` values from Rails. Read by the
+/// `scripts/check-system-note-actions.sh` drift check and the subset tests;
+/// the parser dispatches off the `HANDLED_*` subsets, not this full list.
+#[allow(dead_code, reason = "consumed by the drift-check script and tests")]
 pub const ICON_TYPES: &[&str] = &[
     "commit",
     "description",
