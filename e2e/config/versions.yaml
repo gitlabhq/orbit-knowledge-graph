@@ -6,7 +6,7 @@ siphon:
   chart: "1.10.0"
   image:
     repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
-    tag: "0.0.87-beta"
+    tag: "0.0.99-beta"
 gitlab:
   # Devel (nightly) chart from gitlab-devel/gitlab. The chart version,
   # gitlab-org/gitlab ref, and CNG image digests below are all bumped
@@ -19,7 +19,14 @@ gitlab:
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "c549c67c6dd69e2be9753b2dc2e4b8b61601e727"
+  #
+  # TEMPORARY (test/e2e-refresh-projects-on-namespace-change): pointed at MR
+  # !238905 commit cedc59d0 to pull its db/siphon/tables/namespaces.yml change
+  # (adds refresh_on_change: projects on namespace change). The MR touches only
+  # siphon replication config, not the namespaces table schema, so the CNG image
+  # digests below stay on their master pin without schema skew. Revert to a
+  # master commit before merging.
+  ref: "cedc59d0cd0fb926b6c3f7ffdbd53ca8dd2e1bed"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
