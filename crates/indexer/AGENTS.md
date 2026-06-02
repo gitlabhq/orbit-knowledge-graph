@@ -91,13 +91,57 @@ Located in `testkit/`:
 
 ## Common tasks
 
+### Before writing a new handler: reuse existing infra
+
+Most handler work re-derives infrastructure the crate already provides. Before scaffolding a
+self-contained module, do an explicit "what does the codebase already give me?" pass. This is a
+reuse-first **default**, not a hard rule — but in review it is the single most common class of
+preventable feedback (see #2772, !1416). Check each of these first:
+
+- **Paging + checkpoint + cursor:** `Pipeline::run_plan` and `EntityHandler`
+  (`modules/sdlc/pipeline.rs`, `modules/sdlc/handler/entity.rs`) already provide windowed
+  extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
+  watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
+  checkpoint store in `modules/code/checkpoint.rs`.
+- **Arrow extraction:** decode datalake `RecordBatch` rows with the `gkg_utils::arrow` helpers
+  (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
+  `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
+- **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
+  in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
+  hardcode them; hardcoded specs silently drift from `config/graph.sql`.
+- **Filtering:** push row filters into the extraction SQL (`WHERE`, `action IN (...)`) instead of
+  post-filtering in Rust, so rows you discard never cross the wire.
+- **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
+  (e.g. `tokio::try_join!`), not sequentially.
+- **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
+  magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
+
+If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
+shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.
+
+Do not ship `#[allow(dead_code)]` to silence scaffold warnings — see the no-shipped-dead-code rule
+below and in the root `AGENTS.md`.
+
 ### Adding a handler
 
-1. Define event type implementing `Event`
-2. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
-3. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-4. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
-5. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+1. Run the **reuse-infra checklist above** before writing new code.
+2. Define event type implementing `Event`
+3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
+4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
+6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+
+### No `#[allow(dead_code)]` in shipped code
+
+This crate denies bare `#[allow(..)]` attributes (`clippy::allow_attributes_without_reason = "deny"`
+in `Cargo.toml`). Scaffold-era `#[allow(dead_code)]` markers must not survive into a merged MR:
+
+- If a symbol is test-only, gate it with `#[cfg(test)]` instead of allowing dead code.
+- If it is genuinely unused, delete it.
+- If you must keep an exception, it has to carry an explicit `reason`
+  (`#[allow(dead_code, reason = "…")]`) so the justification is reviewable, ideally linking an
+  issue. Prefer `#[expect(dead_code, reason = "…")]`, which fails once the code becomes used and so
+  self-cleans.
 
 ### Concurrency
 

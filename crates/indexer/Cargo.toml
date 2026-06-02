@@ -56,3 +56,17 @@ nats-client = { workspace = true, features = ["testkit"] }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
+
+# This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
+# attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the
+# workspace `[workspace.lints.clippy]` block, so the workspace lints are re-declared here.
+# Rationale: handler/pipeline work in this crate previously shipped scaffold-era
+# `#[allow(dead_code)]` markers (see !1416). Denying allows-without-reason turns every
+# `#[allow(..)]` into a reviewable, justified `#[allow(.., reason = "..")]`. See
+# `crates/indexer/AGENTS.md` and the no-shipped-dead-code rule in the root `AGENTS.md`.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "deny"

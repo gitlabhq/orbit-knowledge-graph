@@ -249,7 +249,10 @@ pub mod test_utils {
 
     #[derive(Default)]
     pub struct MockStaleDataCleaner {
-        #[allow(clippy::type_complexity)]
+        #[allow(
+            clippy::type_complexity,
+            reason = "test-only call recorder; the tuple mirrors the trait method arguments"
+        )]
         pub calls: Mutex<Vec<(String, i64, String, DateTime<Utc>)>>,
     }
 
