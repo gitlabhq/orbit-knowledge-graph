@@ -9,6 +9,7 @@ pub mod labels {
     pub const ERROR_KIND: &str = "error_kind";
     pub const HANDLER: &str = "handler";
     pub const ACTION: &str = "action";
+    pub const NOTEABLE_TYPE: &str = "noteable_type";
 }
 
 const DOMAIN: &str = "indexer.sdlc";
@@ -102,6 +103,19 @@ pub const SYSTEM_NOTES_UNKNOWN_ACTION: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+// A system note arrived with a `noteable_type` the edge mapper does not
+// handle (anything outside MergeRequest / the Issue family / Commit). These
+// rows are dropped before edge emission; a sustained non-zero count means
+// Rails added a noteable kind we should map. Cardinality is bounded by the
+// finite set of Rails STI noteable types, so the label is safe.
+pub const SYSTEM_NOTES_UNSUPPORTED_NOTEABLE: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.sdlc.system_notes.unsupported_noteable_type",
+    "System notes dropped because their noteable_type has no edge mapping.",
+    None,
+    &[labels::NOTEABLE_TYPE],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &PIPELINE_DURATION,
     &PIPELINE_ROWS_PROCESSED,
@@ -112,4 +126,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &TRANSFORM_DURATION,
     &WATERMARK_LAG,
     &SYSTEM_NOTES_UNKNOWN_ACTION,
+    &SYSTEM_NOTES_UNSUPPORTED_NOTEABLE,
 ];

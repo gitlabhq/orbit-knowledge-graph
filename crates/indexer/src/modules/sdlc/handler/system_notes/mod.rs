@@ -123,7 +123,11 @@ where
             continue;
         };
         let Some(noteable_kind) = NoteableKind::from_siphon(&n.noteable_type) else {
-            tracing::debug!(
+            // WARN (not debug) so a new Rails STI noteable type surfaces in
+            // staging without a log-level push. The handler increments
+            // `gkg.indexer.sdlc.system_notes.unsupported_noteable_type{noteable_type}`
+            // around this drop. Bounded label cardinality (finite STI set).
+            tracing::warn!(
                 noteable_type = %n.noteable_type,
                 "system_notes: unsupported noteable_type, dropping"
             );

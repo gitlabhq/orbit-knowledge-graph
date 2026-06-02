@@ -845,6 +845,17 @@
       "domain": "indexer.sdlc"
     },
     {
+      "otel_name": "gkg.indexer.sdlc.system_notes.unsupported_noteable_type",
+      "prom_name": "gkg_indexer_sdlc_system_notes_unsupported_noteable_type_total",
+      "description": "System notes dropped because their noteable_type has no edge mapping.",
+      "kind": "counter",
+      "labels": [
+        "noteable_type"
+      ],
+      "stability": "stable",
+      "domain": "indexer.sdlc"
+    },
+    {
       "otel_name": "gkg.indexer.sdlc.transform.duration",
       "prom_name": "gkg_indexer_sdlc_transform_duration_seconds",
       "description": "Duration of DataFusion SQL transform per batch.",

@@ -127,6 +127,7 @@ pub struct SystemNotesHandler {
     batch_limit: u64,
     max_pages: usize,
     unknown_action: Counter<u64>,
+    unsupported_noteable: Counter<u64>,
 }
 
 impl SystemNotesHandler {
@@ -144,6 +145,8 @@ impl SystemNotesHandler {
             batch_limit,
             max_pages: MAX_PAGES_PER_RUN,
             unknown_action: sdlc_metrics::SYSTEM_NOTES_UNKNOWN_ACTION.build_counter_u64(&meter),
+            unsupported_noteable: sdlc_metrics::SYSTEM_NOTES_UNSUPPORTED_NOTEABLE
+                .build_counter_u64(&meter),
         }
     }
 
@@ -395,11 +398,18 @@ impl SystemNotesHandler {
         &self,
         notes: &[ExtractedNote],
     ) -> Result<Vec<EmittedEdge>, HandlerError> {
-        // Defense-in-depth: the extract query already pre-filters
-        // `action IN (handled set)`, so this normally never fires. It only
-        // catches the IN-list and `Action::parse` drifting apart in code
-        // (a bug), not upstream Rails drift — that lives in
+        // Observability for the two drop paths in `process_batch`.
+        //
+        // `unknown_action` is defense-in-depth: the extract query already
+        // pre-filters `action IN (handled set)`, so it normally never fires.
+        // It only catches the IN-list and `Action::parse` drifting apart in
+        // code (a bug), not upstream Rails drift — that lives in
         // `scripts/check-system-note-actions.sh`.
+        //
+        // `unsupported_noteable` *can* fire at runtime: the extract query
+        // does not constrain `noteable_type`, so a note on a kind we don't
+        // map (e.g. a new Rails STI type) reaches here and is dropped. A
+        // sustained non-zero count signals a missing mapping.
         for n in notes {
             if super::parse::Action::parse(&n.action).is_none() {
                 self.unknown_action.add(
@@ -407,6 +417,14 @@ impl SystemNotesHandler {
                     &[KeyValue::new(
                         sdlc_metrics::labels::ACTION,
                         n.action.clone(),
+                    )],
+                );
+            } else if super::emit::NoteableKind::from_siphon(&n.noteable_type).is_none() {
+                self.unsupported_noteable.add(
+                    1,
+                    &[KeyValue::new(
+                        sdlc_metrics::labels::NOTEABLE_TYPE,
+                        n.noteable_type.clone(),
                     )],
                 );
             }
