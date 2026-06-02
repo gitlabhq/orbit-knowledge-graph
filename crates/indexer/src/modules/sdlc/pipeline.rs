@@ -1,3 +1,5 @@
+//! SDLC indexing pipeline: [`Extractor`] -> [`Transformer`] -> [`Loader`].
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -5,28 +7,45 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
-use futures::future::BoxFuture;
-use futures::stream::FuturesUnordered;
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::destination::Destination;
+use crate::destination::{Destination, StreamingWriter};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeQuery, ReadStats};
+use super::datalake::{DatalakeQuery, ReadStats, ReadStatsFuture, RecordBatchStream};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
-type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
-
 const MAX_RETRIES: u32 = 3;
 
+/// Read-ahead window. 8 blocks reaches cloud-throughput parity; more only costs memory.
+const WRITE_CHANNEL_CAPACITY: usize = 8;
+
+struct TableBatch {
+    transform_index: usize,
+    batch: RecordBatch,
+}
+
+// A page's `Batch`es always precede its `PageComplete`.
+enum WriteCommand {
+    Batch(TableBatch),
+    PageComplete {
+        cursor: Cursor,
+        extracted_rows: u64,
+        extracted_bytes: u64,
+        read_stats: ReadStats,
+    },
+}
+
+/// `read_*` are ClickHouse's scanned figures; `written_*` the transformed bytes inserted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PipelineStats {
     pub read_rows: u64,
@@ -44,13 +63,6 @@ impl PipelineStats {
         self.written_bytes += other.written_bytes;
         self.duration_ms = self.duration_ms.max(other.duration_ms);
     }
-}
-
-#[derive(Debug, Clone)]
-struct TableWriteCounts {
-    table: String,
-    rows: u64,
-    bytes: u64,
 }
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -91,124 +103,22 @@ impl Pipeline {
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
-        let mut cursor = Cursor::from_checkpoint(&checkpoint);
+        let cursor = Cursor::from_checkpoint(&checkpoint);
 
         if !cursor.is_first_page() {
             info!("resuming from saved cursor");
         }
 
-        let params = base_query.params();
-
-        let mut total_rows: u64 = 0;
-        let mut read_rows: u64 = 0;
-        let mut read_bytes: u64 = 0;
-        let mut written_rows: u64 = 0;
-        let mut written_bytes: u64 = 0;
-        let session = SessionContext::new();
-
-        let extract_start = Instant::now();
-        let (mut batches, read_stats) = self
-            .extract_batch(
-                &plan.name,
-                &base_query
-                    .clone()
-                    .with(CursorFilter {
-                        sort_key: &plan.sort_key,
-                        values: cursor.values(),
-                    })
-                    .to_sql(),
-                params.clone(),
+        let mut stats = self
+            .run(
+                context,
+                plan,
+                base_query,
+                cursor,
+                position_key,
+                target_watermark,
             )
             .await?;
-        read_rows += read_stats.read_rows;
-        read_bytes += read_stats.read_bytes;
-        let mut extract_elapsed = extract_start.elapsed();
-
-        loop {
-            if batches.is_empty() {
-                break;
-            }
-
-            let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes_in_batch: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            total_rows += rows_in_batch;
-            context
-                .observer
-                .lock()
-                .unwrap()
-                .extracted(rows_in_batch, bytes_in_batch);
-
-            info!(
-                rows = rows_in_batch,
-                duration_ms = extract_elapsed.as_millis() as u64,
-                "batch extracted"
-            );
-
-            cursor = cursor.advance(batches.last().unwrap(), &plan.sort_key)?;
-            let has_more = rows_in_batch >= plan.batch_size;
-
-            let (write_futures, per_table) = self
-                .transform(
-                    &session,
-                    &plan.name,
-                    batches,
-                    &plan.transforms,
-                    context.destination.as_ref(),
-                )
-                .await?;
-            {
-                let mut observer = context.observer.lock().unwrap();
-                for entry in &per_table {
-                    written_rows += entry.rows;
-                    written_bytes += entry.bytes;
-                    observer.record_graph_write(&entry.table, entry.rows, entry.bytes);
-                }
-            }
-
-            if has_more {
-                let next_sql = base_query
-                    .clone()
-                    .with(CursorFilter {
-                        sort_key: &plan.sort_key,
-                        values: cursor.values(),
-                    })
-                    .to_sql();
-                let (write_result, extract_result) = tokio::join!(
-                    self.drain_writes(write_futures),
-                    self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
-                );
-                write_result?;
-                let (next_batches, next_read_stats, next_elapsed) = extract_result?;
-                read_rows += next_read_stats.read_rows;
-                read_bytes += next_read_stats.read_bytes;
-
-                self.save_batch_progress(
-                    position_key,
-                    target_watermark,
-                    &cursor,
-                    &context.progress,
-                )
-                .await?;
-
-                batches = next_batches;
-                extract_elapsed = next_elapsed;
-            } else {
-                self.drain_writes(write_futures).await?;
-
-                self.save_batch_progress(
-                    position_key,
-                    target_watermark,
-                    &cursor,
-                    &context.progress,
-                )
-                .await?;
-
-                break;
-            }
-        }
 
         self.checkpoint_store
             .save_completed(position_key, &target_watermark)
@@ -221,17 +131,10 @@ impl Pipeline {
             })?;
 
         let elapsed = started_at.elapsed();
+        stats.duration_ms = elapsed.as_millis() as u64;
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
         self.metrics.record_watermark_lag(&target_watermark);
-
-        let stats = PipelineStats {
-            read_rows,
-            read_bytes,
-            written_rows,
-            written_bytes,
-            duration_ms: elapsed.as_millis() as u64,
-        };
 
         {
             let mut observer = context.observer.lock().unwrap();
@@ -239,14 +142,11 @@ impl Pipeline {
             observer.record_duration(stats.duration_ms);
         }
 
-        if total_rows > 0 {
+        if stats.written_rows > 0 || stats.read_rows > 0 {
             info!(
-                total_rows,
-                duration_ms = stats.duration_ms,
                 read_rows = stats.read_rows,
-                read_bytes = stats.read_bytes,
                 written_rows = stats.written_rows,
-                written_bytes = stats.written_bytes,
+                duration_ms = stats.duration_ms,
                 "pipeline completed"
             );
         } else {
@@ -259,198 +159,47 @@ impl Pipeline {
         Ok(stats)
     }
 
-    async fn extract_batch(
+    /// The only concurrent step: producer (extract + transform) streams to the
+    /// consumer (load) so the next page's read overlaps the current page's writes.
+    async fn run(
         &self,
-        pipeline_name: &str,
-        sql: &str,
-        params: Value,
-    ) -> Result<(Vec<RecordBatch>, ReadStats), HandlerError> {
-        let mut last_error = None;
-        // First attempt uses the datalake's default `max_block_size`.
-        // Subsequent attempts seed and then halve a per-call override so a
-        // ClickHouse-side Arrow String offset overflow self-corrects without
-        // bouncing the message to the dead letter stream.
-        let mut current_block_size: Option<u64> = None;
-
-        for attempt in 0..=MAX_RETRIES {
-            if attempt > 0 {
-                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-                tokio::time::sleep(backoff).await;
+        context: &PipelineContext,
+        plan: &Plan,
+        base_query: PreparedQuery,
+        cursor: Cursor,
+        position_key: &str,
+        target_watermark: DateTime<Utc>,
+    ) -> Result<PipelineStats, HandlerError> {
+        let (tx, rx) = mpsc::channel::<WriteCommand>(WRITE_CHANNEL_CAPACITY);
+        let producer = tokio::spawn(
+            Producer {
+                extractor: Extractor {
+                    datalake: Arc::clone(&self.datalake),
+                    retry_config: self.retry_config.clone(),
+                    params: base_query.params(),
+                },
+                transformer: Transformer {
+                    name: plan.name.clone(),
+                    transforms: plan.transforms.clone(),
+                },
+                metrics: self.metrics.clone(),
+                base_query,
+                sort_key: plan.sort_key.clone(),
+                batch_size: plan.batch_size,
             }
+            .run(cursor, tx),
+        );
 
-            let query_start = Instant::now();
-            match self
-                .datalake
-                .query_batches_with_summary(sql, params.clone(), current_block_size)
-                .await
-            {
-                Ok((batches, read_stats)) => {
-                    let bytes: u64 = batches
-                        .iter()
-                        .map(|b| b.get_array_memory_size() as u64)
-                        .sum();
-                    self.metrics.record_datalake_query(
-                        pipeline_name,
-                        query_start.elapsed().as_secs_f64(),
-                        bytes,
-                    );
-                    return Ok((batches, read_stats));
-                }
-                Err(err) => {
-                    warn!(
-                        attempt,
-                        max_retries = MAX_RETRIES,
-                        max_block_size = ?current_block_size,
-                        %err,
-                        "datalake query failed, retrying"
-                    );
-                    last_error = Some(HandlerError::Processing(format!(
-                        "datalake query failed: {err}"
-                    )));
-                    // Adaptive halving: shrink the next attempt's block size
-                    // so an Arrow String offset overflow on a too-large block
-                    // can self-correct without bouncing the message to the
-                    // dead letter stream. Bounds come from configuration so
-                    // operators can tune the seed and floor without a
-                    // release.
-                    current_block_size = Some(match current_block_size {
-                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
-                        None => self.retry_config.halving_initial_block_size,
-                    });
-                }
-            }
-        }
+        let consumed = self
+            .consume(rx, context, plan, position_key, target_watermark)
+            .await;
 
-        Err(last_error.unwrap())
-    }
-
-    async fn timed_extract_batch(
-        &self,
-        pipeline_name: &str,
-        sql: &str,
-        params: Value,
-    ) -> Result<(Vec<RecordBatch>, ReadStats, Duration), HandlerError> {
-        let start = Instant::now();
-        let (batches, read_stats) = self.extract_batch(pipeline_name, sql, params).await?;
-        Ok((batches, read_stats, start.elapsed()))
-    }
-
-    async fn transform(
-        &self,
-        session: &SessionContext,
-        pipeline_name: &str,
-        batches: Vec<RecordBatch>,
-        transforms: &[Transformation],
-        destination: &dyn Destination,
-    ) -> Result<(WriteFutures, Vec<TableWriteCounts>), HandlerError> {
-        let schema = batches[0].schema();
-
-        let _ = session.deregister_table(SOURCE_DATA_TABLE);
-        let mem_table = MemTable::try_new(schema, vec![batches]).map_err(|err| {
-            HandlerError::Processing(format!(
-                "failed to create mem table for {pipeline_name}: {err}"
-            ))
-        })?;
-
-        session
-            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to register table for {pipeline_name}: {err}"
-                ))
-            })?;
-
-        let mut total_transform_duration = Duration::ZERO;
-        let mut write_futures: WriteFutures = FuturesUnordered::new();
-        let mut per_table = Vec::new();
-
-        for transform in transforms {
-            let transform_start = Instant::now();
-            let mut result_batches = self
-                .execute_transform(session, &transform.sql)
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to transform {pipeline_name} for {}: {err}",
-                        transform.destination_table
-                    ))
-                })?;
-            let transform_elapsed = transform_start.elapsed();
-            total_transform_duration += transform_elapsed;
-
-            info!(
-                table = %transform.destination_table,
-                duration_ms = transform_elapsed.as_millis() as u64,
-                "transform executed"
-            );
-
-            prepare_batches(&mut result_batches, &transform.dict_encode_columns);
-
-            let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
-            if row_count == 0 {
-                continue;
-            }
-
-            let byte_count: u64 = result_batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
-            per_table.push(TableWriteCounts {
-                table: transform.destination_table.clone(),
-                rows: row_count as u64,
-                bytes: byte_count,
-            });
-
-            let destination_table = transform.destination_table.clone();
-            let writer = destination
-                .new_batch_writer(&destination_table)
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to create writer for {destination_table}: {err}"
-                    ))
-                })?;
-
-            write_futures.push(
-                async move {
-                    let write_start = Instant::now();
-                    writer.write_batch(&result_batches).await.map_err(|err| {
-                        HandlerError::Processing(format!(
-                            "failed to write to {destination_table}: {err}"
-                        ))
-                    })?;
-                    let write_elapsed = write_start.elapsed();
-
-                    info!(
-                        table = %destination_table,
-                        rows = row_count,
-                        duration_ms = write_elapsed.as_millis() as u64,
-                        "transform written"
-                    );
-
-                    Ok(())
-                }
-                .boxed(),
-            );
-
-            while let Some(Some(result)) = write_futures.next().now_or_never() {
-                result?;
-            }
-        }
-
-        self.metrics
-            .record_transform_duration(total_transform_duration.as_secs_f64());
-
-        let _ = session.deregister_table(SOURCE_DATA_TABLE);
-
-        Ok((write_futures, per_table))
-    }
-
-    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
-        while let Some(result) = futures.next().await {
-            result?;
-        }
-        Ok(())
+        // Producer error wins: a write failure usually means it failed first and
+        // dropped `tx`. `rx` (owned by `consume`) is already dropped, so no hang.
+        producer.await.map_err(|err| {
+            HandlerError::Processing(format!("extract task failed to join: {err}"))
+        })??;
+        consumed
     }
 
     async fn save_batch_progress(
@@ -476,15 +225,6 @@ impl Pipeline {
         Ok(())
     }
 
-    async fn execute_transform(
-        &self,
-        session: &SessionContext,
-        sql: &str,
-    ) -> Result<Vec<RecordBatch>, datafusion::error::DataFusionError> {
-        let dataframe = session.sql(sql).await?;
-        dataframe.collect().await
-    }
-
     async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
         match self.checkpoint_store.load(position_key).await {
             Ok(Some(checkpoint)) => checkpoint,
@@ -505,10 +245,396 @@ impl Pipeline {
             }
         }
     }
+
+    /// Checkpoints only on `PageComplete`, after the page's inserts are closed, so
+    /// the cursor never advances past rows ClickHouse hasn't durably accepted.
+    async fn consume(
+        &self,
+        mut rx: mpsc::Receiver<WriteCommand>,
+        context: &PipelineContext,
+        plan: &Plan,
+        position_key: &str,
+        target_watermark: DateTime<Utc>,
+    ) -> Result<PipelineStats, HandlerError> {
+        let mut loader = Loader::new(context.destination.as_ref(), plan);
+        let mut stats = PipelineStats::default();
+
+        while let Some(command) = rx.recv().await {
+            match command {
+                WriteCommand::Batch(output) => loader.write(output).await?,
+                WriteCommand::PageComplete {
+                    cursor,
+                    extracted_rows,
+                    extracted_bytes,
+                    read_stats,
+                } => {
+                    let written = loader.flush_page().await?;
+                    stats.read_rows += read_stats.read_rows;
+                    stats.read_bytes += read_stats.read_bytes;
+
+                    {
+                        let mut observer = context.observer.lock().unwrap();
+                        for (index, rows, bytes) in &written {
+                            observer.record_graph_write(
+                                &plan.transforms[*index].destination_table,
+                                *rows,
+                                *bytes,
+                            );
+                            stats.written_rows += rows;
+                            stats.written_bytes += bytes;
+                        }
+                        if extracted_rows > 0 {
+                            observer.extracted(extracted_rows, extracted_bytes);
+                        }
+                    }
+
+                    if extracted_rows > 0 {
+                        self.save_batch_progress(
+                            position_key,
+                            target_watermark,
+                            &cursor,
+                            &context.progress,
+                        )
+                        .await?;
+                    }
+                }
+            }
+        }
+
+        Ok(stats)
+    }
+}
+
+struct Extractor {
+    datalake: Arc<dyn DatalakeQuery>,
+    retry_config: DatalakeRetryConfig,
+    params: Value,
+}
+
+impl Extractor {
+    // On transient failure, retry with `max_block_size` seeded then halved down to
+    // the floor, so an oversized-block Arrow overflow can self-correct.
+    async fn open_page(
+        &self,
+        sql: &str,
+    ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), HandlerError> {
+        let mut last_error = None;
+        let mut current_block_size: Option<u64> = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
+                tokio::time::sleep(backoff).await;
+            }
+
+            match self
+                .datalake
+                .query_arrow_with_summary(sql, self.params.clone(), current_block_size)
+                .await
+            {
+                Ok(stream_and_stats) => return Ok(stream_and_stats),
+                Err(err) => {
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        max_block_size = ?current_block_size,
+                        %err,
+                        "datalake query failed, retrying"
+                    );
+                    last_error = Some(HandlerError::Processing(format!(
+                        "datalake query failed: {err}"
+                    )));
+                    current_block_size = Some(match current_block_size {
+                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
+                        None => self.retry_config.halving_initial_block_size,
+                    });
+                }
+            }
+        }
+
+        Err(last_error.unwrap())
+    }
+}
+
+/// The extension point. Transforms are row-wise (`SELECT … FROM source_data`),
+/// so transforming one block is equivalent to transforming the whole page.
+struct Transformer {
+    name: String,
+    transforms: Vec<Transformation>,
+}
+
+impl Transformer {
+    async fn run(
+        &self,
+        session: &SessionContext,
+        block: &RecordBatch,
+    ) -> Result<Vec<TableBatch>, HandlerError> {
+        self.load_block(session, block)?;
+
+        let mut outputs = Vec::new();
+        for (transform_index, transform) in self.transforms.iter().enumerate() {
+            for batch in self.project(session, transform).await? {
+                if batch.num_rows() > 0 {
+                    outputs.push(TableBatch {
+                        transform_index,
+                        batch,
+                    });
+                }
+            }
+        }
+
+        let _ = session.deregister_table(SOURCE_DATA_TABLE);
+        Ok(outputs)
+    }
+
+    fn load_block(
+        &self,
+        session: &SessionContext,
+        block: &RecordBatch,
+    ) -> Result<(), HandlerError> {
+        let _ = session.deregister_table(SOURCE_DATA_TABLE);
+        let mem_table =
+            MemTable::try_new(block.schema(), vec![vec![block.clone()]]).map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to create mem table for {}: {err}",
+                    self.name
+                ))
+            })?;
+        session
+            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to register table for {}: {err}",
+                    self.name
+                ))
+            })?;
+        Ok(())
+    }
+
+    async fn project(
+        &self,
+        session: &SessionContext,
+        transform: &Transformation,
+    ) -> Result<Vec<RecordBatch>, HandlerError> {
+        let dataframe = session.sql(&transform.sql).await.map_err(|err| {
+            HandlerError::Processing(format!(
+                "failed to plan transform {} for {}: {err}",
+                self.name, transform.destination_table
+            ))
+        })?;
+        let mut batches = dataframe.collect().await.map_err(|err| {
+            HandlerError::Processing(format!(
+                "failed to transform {} for {}: {err}",
+                self.name, transform.destination_table
+            ))
+        })?;
+        prepare_batches(&mut batches, &transform.dict_encode_columns);
+        Ok(batches)
+    }
+}
+
+/// Owned by the spawned task, so all fields are owned rather than borrowed.
+struct Producer {
+    extractor: Extractor,
+    transformer: Transformer,
+    metrics: SdlcMetrics,
+    base_query: PreparedQuery,
+    sort_key: Vec<String>,
+    batch_size: u64,
+}
+
+impl Producer {
+    async fn run(
+        self,
+        start_cursor: Cursor,
+        tx: mpsc::Sender<WriteCommand>,
+    ) -> Result<(), HandlerError> {
+        let session = SessionContext::new();
+        let mut cursor = start_cursor;
+
+        loop {
+            let page_sql = self
+                .base_query
+                .clone()
+                .with(CursorFilter {
+                    sort_key: &self.sort_key,
+                    values: cursor.values(),
+                })
+                .to_sql();
+
+            let extract_start = Instant::now();
+            let (mut stream, read_stats) = self.extractor.open_page(&page_sql).await?;
+
+            let mut page_cursor = cursor.clone();
+            let mut page_rows: u64 = 0;
+            let mut page_bytes: u64 = 0;
+            let mut transform_duration = Duration::ZERO;
+
+            while let Some(block) = stream.next().await {
+                let block = block.map_err(|err| {
+                    HandlerError::Processing(format!("datalake stream failed: {err}"))
+                })?;
+                if block.num_rows() == 0 {
+                    continue;
+                }
+
+                page_rows += block.num_rows() as u64;
+                page_bytes += block.get_array_memory_size() as u64;
+                page_cursor = page_cursor.advance(&block, &self.sort_key)?;
+
+                let transform_start = Instant::now();
+                let outputs = self.transformer.run(&session, &block).await?;
+                transform_duration += transform_start.elapsed();
+
+                for output in outputs {
+                    if tx.send(WriteCommand::Batch(output)).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+
+            // The summary arrives only after the page's body is fully read.
+            let read_stats = read_stats.await;
+
+            if page_rows > 0 {
+                self.metrics.record_datalake_query(
+                    &self.transformer.name,
+                    extract_start.elapsed().as_secs_f64(),
+                    page_bytes,
+                );
+                self.metrics
+                    .record_transform_duration(transform_duration.as_secs_f64());
+                info!(
+                    rows = page_rows,
+                    duration_ms = extract_start.elapsed().as_millis() as u64,
+                    "page extracted"
+                );
+            }
+
+            if tx
+                .send(WriteCommand::PageComplete {
+                    cursor: page_cursor.clone(),
+                    extracted_rows: page_rows,
+                    extracted_bytes: page_bytes,
+                    read_stats,
+                })
+                .await
+                .is_err()
+            {
+                return Ok(());
+            }
+
+            // A short page is the last; an empty page means nothing past the cursor.
+            if page_rows < self.batch_size {
+                break;
+            }
+            cursor = page_cursor;
+        }
+
+        Ok(())
+    }
+}
+
+struct Loader<'a> {
+    writers: Vec<PageWriter<'a>>,
+}
+
+impl<'a> Loader<'a> {
+    fn new(destination: &'a dyn Destination, plan: &'a Plan) -> Self {
+        let writers = plan
+            .transforms
+            .iter()
+            .map(|t| PageWriter::new(destination, &t.destination_table))
+            .collect();
+        Self { writers }
+    }
+
+    async fn write(&mut self, output: TableBatch) -> Result<(), HandlerError> {
+        self.writers[output.transform_index]
+            .write_batch(&output.batch)
+            .await
+    }
+
+    /// Returns `(transform index, rows, bytes)` for each table that wrote this page.
+    async fn flush_page(&mut self) -> Result<Vec<(usize, u64, u64)>, HandlerError> {
+        let mut written = Vec::new();
+        for (index, writer) in self.writers.iter_mut().enumerate() {
+            let (rows, bytes) = writer.finish_page().await?;
+            if rows > 0 {
+                written.push((index, rows, bytes));
+            }
+        }
+        Ok(written)
+    }
+}
+
+/// Opens its insert lazily, so a transform with no rows for a page never opens one.
+struct PageWriter<'a> {
+    destination: &'a dyn Destination,
+    table: &'a str,
+    writer: Option<Box<dyn StreamingWriter>>,
+    rows: u64,
+    bytes: u64,
+}
+
+impl<'a> PageWriter<'a> {
+    fn new(destination: &'a dyn Destination, table: &'a str) -> Self {
+        Self {
+            destination,
+            table,
+            writer: None,
+            rows: 0,
+            bytes: 0,
+        }
+    }
+
+    async fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), HandlerError> {
+        if self.writer.is_none() {
+            self.writer = Some(
+                self.destination
+                    .open_streaming_writer(self.table)
+                    .await
+                    .map_err(|err| {
+                        HandlerError::Processing(format!(
+                            "failed to create writer for {}: {err}",
+                            self.table
+                        ))
+                    })?,
+            );
+        }
+
+        self.writer
+            .as_mut()
+            .expect("writer opened above")
+            .write_batch(batch)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to write to {}: {err}", self.table))
+            })?;
+        self.rows += batch.num_rows() as u64;
+        self.bytes += batch.get_array_memory_size() as u64;
+        Ok(())
+    }
+
+    async fn finish_page(&mut self) -> Result<(u64, u64), HandlerError> {
+        if let Some(writer) = self.writer.take() {
+            writer.finish().await.map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to finish write for {}: {err}",
+                    self.table
+                ))
+            })?;
+        }
+        let counts = (self.rows, self.bytes);
+        self.rows = 0;
+        self.bytes = 0;
+        Ok(counts)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::plan::Transformation;
     use super::*;
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
@@ -563,6 +689,11 @@ mod tests {
     }
 
     fn test_batch(rows: usize) -> RecordBatch {
+        test_batch_range(1, rows)
+    }
+
+    /// A batch of `count` rows with `id` running `start_id..start_id+count`.
+    fn test_batch_range(start_id: i64, count: usize) -> RecordBatch {
         let schema = Arc::new(Schema::new(vec![
             ArrowField::new("id", ArrowDataType::Int64, false),
             ArrowField::new("name", ArrowDataType::Utf8, true),
@@ -570,10 +701,10 @@ mod tests {
             ArrowField::new("_deleted", ArrowDataType::Boolean, false),
         ]));
 
-        let ids: Vec<i64> = (1..=rows as i64).collect();
-        let names: Vec<Option<&str>> = (0..rows).map(|_| Some("test")).collect();
-        let versions: Vec<i64> = (1..=rows as i64).collect();
-        let deleted: Vec<bool> = vec![false; rows];
+        let ids: Vec<i64> = (start_id..start_id + count as i64).collect();
+        let names: Vec<Option<&str>> = (0..count).map(|_| Some("test")).collect();
+        let versions: Vec<i64> = ids.clone();
+        let deleted: Vec<bool> = vec![false; count];
 
         RecordBatch::try_new(
             schema,
@@ -612,15 +743,6 @@ mod tests {
             _params: Value,
             _max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
 
@@ -630,7 +752,24 @@ mod tests {
                 self.batch_size / 2
             };
 
-            Ok(vec![test_batch(rows)])
+            // Split each page into two blocks to exercise multi-block streaming
+            // within a page; the last block's last row drives the cursor.
+            let first = rows / 2;
+            let second = rows - first;
+            let blocks = vec![
+                Ok(test_batch_range(1, first)),
+                Ok(test_batch_range(first as i64 + 1, second)),
+            ];
+            Ok(Box::pin(futures::stream::iter(blocks)))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Ok(vec![])
         }
     }
 
@@ -819,26 +958,30 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            Ok(Box::pin(futures::stream::empty()))
+            self.calls.lock().unwrap().push(max_block_size);
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Ok(Box::pin(futures::stream::empty()));
+            }
+            match responses.remove(0) {
+                Ok(batches) => {
+                    let items: Vec<Result<RecordBatch, DatalakeError>> =
+                        batches.into_iter().map(Ok).collect();
+                    Ok(Box::pin(futures::stream::iter(items)))
+                }
+                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
+            }
         }
 
         async fn query_batches(
             &self,
             _sql: &str,
             _params: Value,
-            max_block_size: Option<u64>,
+            _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                return Ok(vec![]);
-            }
-            match responses.remove(0) {
-                Ok(batches) => Ok(batches),
-                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
-            }
+            Ok(vec![])
         }
     }
 
@@ -985,8 +1128,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Returns one page of rows plus a fixed `ReadStats` on the first extract,
-    /// then nothing — so a single-page run exercises the stats accumulation.
+    /// Returns one page plus a fixed `ReadStats` from its summary, then nothing.
     struct StatsDatalake {
         rows: usize,
         read_stats: ReadStats,
@@ -1000,7 +1142,7 @@ mod tests {
             _sql: &str,
             _params: Value,
             _max_block_size: Option<u64>,
-        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+        ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
 
@@ -1013,19 +1155,24 @@ mod tests {
             Ok(vec![])
         }
 
-        async fn query_batches_with_summary(
+        async fn query_arrow_with_summary(
             &self,
             _sql: &str,
             _params: Value,
             _max_block_size: Option<u64>,
-        ) -> Result<(Vec<RecordBatch>, ReadStats), DatalakeError> {
+        ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), DatalakeError> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;
-            if *calls == 1 {
-                Ok((vec![test_batch(self.rows)], self.read_stats))
-            } else {
-                Ok((vec![], ReadStats::default()))
-            }
+            let (blocks, stats): (Vec<Result<RecordBatch, DatalakeError>>, ReadStats) =
+                if *calls == 1 {
+                    (vec![Ok(test_batch(self.rows))], self.read_stats)
+                } else {
+                    (vec![], ReadStats::default())
+                };
+            Ok((
+                Box::pin(futures::stream::iter(blocks)),
+                Box::pin(async move { stats }),
+            ))
         }
     }
 
@@ -1058,18 +1205,15 @@ mod tests {
             .await
             .expect("run should succeed");
 
-        assert_eq!(
-            stats.read_rows, 5,
-            "read rows come from the datalake summary"
-        );
+        assert_eq!(stats.read_rows, 5, "read rows come from the summary");
         assert_eq!(stats.read_bytes, 4096, "read bytes come from the summary");
         assert_eq!(
             stats.written_rows, 5,
-            "transform emits the 5 extracted rows to the graph"
+            "transform emits the 5 extracted rows"
         );
         assert!(
             stats.written_bytes > 0,
-            "written bytes reflect the transformed batch size"
+            "written bytes reflect the batch size"
         );
     }
 }

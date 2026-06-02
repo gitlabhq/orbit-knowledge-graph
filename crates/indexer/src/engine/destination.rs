@@ -28,9 +28,50 @@ pub trait BatchWriter: Send + Sync {
     async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError>;
 }
 
+/// An insert kept open across `RecordBatch` writes; all batches land as one
+/// logical write on [`finish`](Self::finish), so the caller never holds the
+/// whole insert at once.
+#[async_trait]
+pub trait StreamingWriter: Send {
+    async fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), DestinationError>;
+    async fn finish(self: Box<Self>) -> Result<(), DestinationError>;
+}
+
 /// Creates writers for a storage backend.
 #[async_trait]
 pub trait Destination: Send + Sync {
     async fn new_batch_writer(&self, table: &str)
     -> Result<Box<dyn BatchWriter>, DestinationError>;
+
+    /// Opens a [`StreamingWriter`]. The default buffers and writes on `finish`,
+    /// so only backends that gain from true streaming (ClickHouse) override it.
+    async fn open_streaming_writer(
+        &self,
+        table: &str,
+    ) -> Result<Box<dyn StreamingWriter>, DestinationError> {
+        Ok(Box::new(BufferingStreamingWriter {
+            writer: self.new_batch_writer(table).await?,
+            batches: Vec::new(),
+        }))
+    }
+}
+
+struct BufferingStreamingWriter {
+    writer: Box<dyn BatchWriter>,
+    batches: Vec<RecordBatch>,
+}
+
+#[async_trait]
+impl StreamingWriter for BufferingStreamingWriter {
+    async fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), DestinationError> {
+        self.batches.push(batch.clone());
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> Result<(), DestinationError> {
+        if self.batches.is_empty() {
+            return Ok(());
+        }
+        self.writer.write_batch(&self.batches).await
+    }
 }
