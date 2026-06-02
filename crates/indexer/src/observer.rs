@@ -45,15 +45,14 @@ pub trait IndexingObserver: Send {
 
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
-    fn set_traversal_path(&mut self, traversal_path: &str) {
-        if let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(traversal_path)
-        {
-            self.set_namespace(namespace_id);
+    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
+        let Some(path) = traversal_path else { return };
+        if let Some(namespace_id) = gkg_utils::traversal_path::top_level_namespace_id(path) {
+            self.set_namespace(Some(namespace_id));
         }
     }
 
-    fn set_namespace(&mut self, _namespace_id: i64) {}
+    fn set_namespace(&mut self, _namespace_id: Option<i64>) {}
 
     fn set_entity_type(&mut self, _entity_type: &str) {}
 
@@ -119,13 +118,13 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
-    fn set_traversal_path(&mut self, traversal_path: &str) {
+    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
         for o in self.iter_mut() {
             o.set_traversal_path(traversal_path);
         }
     }
 
-    fn set_namespace(&mut self, namespace_id: i64) {
+    fn set_namespace(&mut self, namespace_id: Option<i64>) {
         for o in self.iter_mut() {
             o.set_namespace(namespace_id);
         }
@@ -231,7 +230,7 @@ mod tests {
         fn set_pipeline_type(&mut self, _: PipelineType) {
             self.push("set_pipeline_type");
         }
-        fn set_traversal_path(&mut self, _: &str) {
+        fn set_traversal_path(&mut self, _: Option<&str>) {
             self.push("set_traversal_path");
         }
         fn set_entity_type(&mut self, _: &str) {
@@ -272,7 +271,7 @@ mod tests {
         obs.set_dispatch_id(Uuid::new_v4());
         obs.set_campaign_id(Some("migration-v48".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_traversal_path("42/100/");
+        obs.set_traversal_path(Some("42/100/"));
         obs.set_entity_type("MergeRequest");
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);

@@ -209,12 +209,12 @@ impl IndexingObserver for SnowplowIndexingObserver {
         self.pipeline_type = Some(pipeline_type);
     }
 
-    fn set_traversal_path(&mut self, traversal_path: &str) {
-        self.traversal_path = Some(traversal_path.to_owned());
+    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
+        self.traversal_path = traversal_path.map(str::to_owned);
     }
 
-    fn set_namespace(&mut self, namespace_id: i64) {
-        self.namespace_id = Some(namespace_id);
+    fn set_namespace(&mut self, namespace_id: Option<i64>) {
+        self.namespace_id = namespace_id;
     }
 
     fn set_entity_type(&mut self, entity_type: &str) {
@@ -350,7 +350,7 @@ mod tests {
         obs.set_pipeline_type(PipelineType::Code);
         obs.set_project(99, "main");
         obs.set_commit_sha(Some("deadbeef".to_string()));
-        obs.set_traversal_path("42/100/200/");
+        obs.set_traversal_path(Some("42/100/200/"));
         obs.set_indexing_mode(IndexingMode::Full);
         obs.record_source_bytes(123_456);
         obs.files_processed(500, 480, 20);
@@ -399,7 +399,7 @@ mod tests {
         obs.set_campaign_id(Some("namespace-backfill".to_string()));
         obs.set_pipeline_type(PipelineType::Code);
         obs.set_project(1, "main");
-        obs.set_traversal_path("42/100/");
+        obs.set_traversal_path(Some("42/100/"));
         obs.finish();
 
         let events = tracker.drain();
@@ -415,7 +415,7 @@ mod tests {
         obs.set_campaign_id(Some("migration-v48".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
         obs.set_entity_type("MergeRequest");
-        obs.set_traversal_path("42/100/");
+        obs.set_traversal_path(Some("42/100/"));
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.record_datalake_read(1000, 50_000);
         obs.record_graph_write("gl_merge_request", 1000, 40_000);

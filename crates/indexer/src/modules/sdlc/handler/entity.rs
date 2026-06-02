@@ -115,11 +115,8 @@ impl EntityHandler {
         observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
-        if let Some(traversal_path) = &request.traversal_path {
-            observer.set_traversal_path(traversal_path);
-        } else if let Some(namespace_id) = request.namespace_id {
-            observer.set_namespace(namespace_id);
-        }
+        observer.set_traversal_path(request.traversal_path.as_deref());
+        observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
         let parent_checkpoint = self

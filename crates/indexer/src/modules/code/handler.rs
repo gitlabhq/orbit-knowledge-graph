@@ -200,7 +200,7 @@ impl CodeIndexingTaskHandler {
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
         observer.set_commit_sha(request.commit_sha.clone());
-        observer.set_traversal_path(&request.traversal_path);
+        observer.set_traversal_path(Some(&request.traversal_path));
         observer.set_indexing_mode(if had_prior_checkpoint {
             IndexingMode::Incremental
         } else {
