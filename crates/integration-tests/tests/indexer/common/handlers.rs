@@ -124,8 +124,9 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
 /// `max_pages` of N stops after N single-row pages.
 pub fn system_notes_handler_capped(ctx: &TestContext, max_pages: usize) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
-    let handler =
-        indexer::modules::sdlc::build_system_notes_handler(&config).with_max_pages(max_pages);
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let handler = indexer::modules::sdlc::build_system_notes_handler(&config, &ontology)
+        .with_max_pages(max_pages);
     Arc::new(handler)
 }
 

@@ -15,7 +15,7 @@
 //! two batched IN-list queries, build `gl_edge` rows, write them, advance the
 //! checkpoint.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -25,6 +25,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gkg_observability::indexer::sdlc as sdlc_metrics;
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use ontology::{DataType as OntDataType, Ontology};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use serde_json::json;
@@ -128,6 +129,10 @@ pub struct SystemNotesHandler {
     max_pages: usize,
     unknown_action: Counter<u64>,
     unsupported_noteable: Counter<u64>,
+    /// `gl_edge` column specs, derived once from the ontology at
+    /// construction (see [`edge_specs`]) so the write schema can't drift
+    /// from `config/graph.sql`.
+    edge_specs: Vec<ColumnSpec>,
 }
 
 impl SystemNotesHandler {
@@ -136,6 +141,7 @@ impl SystemNotesHandler {
         checkpoint_store: Arc<dyn CheckpointStore>,
         subscription: Subscription,
         batch_limit: u64,
+        edge_specs: Vec<ColumnSpec>,
     ) -> Self {
         let meter = gkg_observability::meter();
         Self {
@@ -147,6 +153,7 @@ impl SystemNotesHandler {
             unknown_action: sdlc_metrics::SYSTEM_NOTES_UNKNOWN_ACTION.build_counter_u64(&meter),
             unsupported_noteable: sdlc_metrics::SYSTEM_NOTES_UNSUPPORTED_NOTEABLE
                 .build_counter_u64(&meter),
+            edge_specs,
         }
     }
 
@@ -168,8 +175,9 @@ impl SystemNotesHandler {
 pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
+    ontology: &Ontology,
 ) -> Result<(), HandlerInitError> {
-    registry.register_handler(Box::new(build_handler(config)));
+    registry.register_handler(Box::new(build_handler(config, ontology)));
     info!("registered SDLC system-notes edge handler");
     Ok(())
 }
@@ -178,7 +186,7 @@ pub fn register_handlers(
 /// `sdlc` module re-exports) so integration tests can construct it and tune
 /// `max_pages` through [`SystemNotesHandler::with_max_pages`] without seeding
 /// millions of rows to reach the production page cap.
-pub fn build_handler(config: &IndexerConfig) -> SystemNotesHandler {
+pub fn build_handler(config: &IndexerConfig, ontology: &Ontology) -> SystemNotesHandler {
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
@@ -198,7 +206,13 @@ pub fn build_handler(config: &IndexerConfig) -> SystemNotesHandler {
         subscription = subscription.with_config(topic_config);
     }
 
-    SystemNotesHandler::new(datalake, checkpoint_store, subscription, batch_limit)
+    SystemNotesHandler::new(
+        datalake,
+        checkpoint_store,
+        subscription,
+        batch_limit,
+        edge_specs(ontology),
+    )
 }
 
 #[async_trait]
@@ -287,7 +301,7 @@ impl Handler for SystemNotesHandler {
             let edges = self.resolve_and_emit(&notes).await?;
 
             if !edges.is_empty() {
-                let batch = edge_record_batch(&edges)
+                let batch = edge_record_batch(&edges, &self.edge_specs)
                     .map_err(|e| HandlerError::Processing(format!("edge batch: {e}")))?;
                 writer
                     .write_batch(&[batch])
@@ -677,63 +691,69 @@ fn parse_ch(s: &str) -> Option<DateTime<Utc>> {
         .map(|naive| naive.and_utc())
 }
 
-/// `gl_edge` logical columns in physical order. Tags are always empty for
-/// system-note edges (the source/target nodes carry their own tags from
-/// their entity ETL); `_deleted` is always false (system notes are
-/// append-only and ReplacingMergeTree dedupes on `_version`).
-fn edge_specs() -> Vec<ColumnSpec> {
-    vec![
-        ColumnSpec {
-            name: "traversal_path".into(),
-            col_type: ColumnType::Str,
+/// `gl_edge` column specs derived from the ontology so the write schema
+/// tracks `config/graph.sql` automatically. Mirrors the ontology-driven
+/// `edge_specs` in `modules/code/arrow_converter.rs`, but scoped to the
+/// single default edge table (`gl_edge`) that all system-note edges land
+/// in — the code path builds the union across every edge table because it
+/// also writes `gl_code_edge`.
+///
+/// `EmittedEdge::write_row` addresses columns by name, so the only contract
+/// is that every column the ontology declares for `gl_edge` is written.
+/// `source_tags` / `target_tags` come from the denormalized columns (always
+/// empty for system-note edges — endpoints carry their own tags from their
+/// entity ETL); `_version` / `_deleted` are the infra columns.
+fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+    let table = ontology.edge_table();
+    let Some(config) = ontology.edge_table_config(table) else {
+        // The default edge table is always present in a loaded ontology;
+        // an absent config means a malformed schema and is a hard bug.
+        panic!("ontology is missing a config for the default edge table {table:?}");
+    };
+
+    let dict_fields: HashSet<String> = config
+        .storage
+        .columns
+        .iter()
+        .filter(|col| col.ch_type.starts_with("LowCardinality"))
+        .map(|col| col.name.clone())
+        .collect();
+
+    let mut specs: Vec<ColumnSpec> = config
+        .columns
+        .iter()
+        .map(|c| ColumnSpec {
+            name: c.name.clone(),
+            col_type: match c.data_type {
+                OntDataType::Int => ColumnType::Int,
+                OntDataType::Bool => ColumnType::Bool,
+                OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
+                _ => ColumnType::Str,
+            },
             nullable: false,
-        },
-        ColumnSpec {
-            name: "source_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "source_kind".into(),
-            col_type: ColumnType::DictStr,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "relationship_kind".into(),
-            col_type: ColumnType::DictStr,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_kind".into(),
-            col_type: ColumnType::DictStr,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "source_tags".into(),
+        })
+        .collect();
+
+    for col in &config.storage.denormalized_columns {
+        specs.push(ColumnSpec {
+            name: col.name.clone(),
             col_type: ColumnType::StrList,
             nullable: false,
-        },
-        ColumnSpec {
-            name: "target_tags".into(),
-            col_type: ColumnType::StrList,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_version".into(),
-            col_type: ColumnType::TimestampMicros,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_deleted".into(),
-            col_type: ColumnType::Bool,
-            nullable: false,
-        },
-    ]
+        });
+    }
+
+    specs.push(ColumnSpec {
+        name: "_version".into(),
+        col_type: ColumnType::TimestampMicros,
+        nullable: false,
+    });
+    specs.push(ColumnSpec {
+        name: "_deleted".into(),
+        col_type: ColumnType::Bool,
+        nullable: false,
+    });
+    specs
 }
 
 impl AsRecordBatch for EmittedEdge {
@@ -754,8 +774,11 @@ impl AsRecordBatch for EmittedEdge {
     }
 }
 
-fn edge_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, arrow::error::ArrowError> {
-    EmittedEdge::to_record_batch(edges, &edge_specs(), &())
+fn edge_record_batch(
+    edges: &[EmittedEdge],
+    specs: &[ColumnSpec],
+) -> Result<RecordBatch, arrow::error::ArrowError> {
+    EmittedEdge::to_record_batch(edges, specs, &())
 }
 
 #[cfg(test)]
@@ -763,6 +786,14 @@ mod tests {
     use super::*;
     use arrow::array::{BooleanArray, ListArray};
     use chrono::TimeZone;
+
+    /// `gl_edge` specs derived from the embedded ontology — the same path
+    /// the production handler takes, so these tests would catch a drift
+    /// between the ontology and `EmittedEdge::write_row`.
+    fn test_specs() -> Vec<ColumnSpec> {
+        let ontology = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        edge_specs(&ontology)
+    }
 
     #[test]
     fn checkpoint_key_uses_entity_scoped_namespace_prefix() {
@@ -799,16 +830,21 @@ mod tests {
 
     #[test]
     fn edge_record_batch_matches_gl_edge_columns() {
-        let batch = edge_record_batch(&[edge("MENTIONS", 10, 20)]).unwrap();
+        let specs = test_specs();
+        let batch = edge_record_batch(&[edge("MENTIONS", 10, 20)], &specs).unwrap();
         let schema = batch.schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        // The ontology-derived spec must cover every column
+        // `EmittedEdge::write_row` writes, plus the infra columns. Order
+        // follows the ontology column list (logical columns, then
+        // denormalized tags, then `_version` / `_deleted`).
         assert_eq!(
             names,
             vec![
                 "traversal_path",
+                "relationship_kind",
                 "source_id",
                 "source_kind",
-                "relationship_kind",
                 "target_id",
                 "target_kind",
                 "source_tags",
@@ -839,7 +875,8 @@ mod tests {
 
     #[test]
     fn edge_record_batch_writes_values_and_empty_tags() {
-        let batch = edge_record_batch(&[edge("MENTIONS", 10, 20)]).unwrap();
+        let specs = test_specs();
+        let batch = edge_record_batch(&[edge("MENTIONS", 10, 20)], &specs).unwrap();
         // relationship_kind / source_kind / target_kind are LowCardinality
         // (dictionary-encoded), matching the gl_edge column types.
         assert_eq!(dict_value(&batch, "relationship_kind", 0), "MENTIONS");
@@ -865,7 +902,9 @@ mod tests {
 
     #[test]
     fn edge_record_batch_handles_multiple_rows() {
-        let batch = edge_record_batch(&[edge("MENTIONS", 1, 2), edge("REOPENED", 3, 4)]).unwrap();
+        let specs = test_specs();
+        let batch =
+            edge_record_batch(&[edge("MENTIONS", 1, 2), edge("REOPENED", 3, 4)], &specs).unwrap();
         assert_eq!(batch.num_rows(), 2);
     }
 }
