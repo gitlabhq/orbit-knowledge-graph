@@ -515,14 +515,12 @@ impl SystemNotesHandler {
         let mut rows = Vec::new();
         for batch in &batches {
             for row in 0..batch.num_rows() {
-                if let (Some(source_type), Some(source_id), Some(path), Some(tp)) = (
-                    ArrowUtils::get_column_string(batch, "source_type", row),
+                if let (Some(source_id), Some(path), Some(tp)) = (
                     ArrowUtils::get_column::<Int64Type>(batch, "source_id", row),
                     ArrowUtils::get_column_string(batch, "path", row),
                     ArrowUtils::get_column_string(batch, "traversal_path", row),
                 ) {
                     rows.push(RouteRow {
-                        source_type,
                         source_id,
                         path,
                         traversal_path: tp,
@@ -593,9 +591,9 @@ fn pairs_with_project_id(
     path_pairs: &std::collections::HashSet<(String, i64)>,
     routes: &[RouteRow],
 ) -> Vec<(i64, i64)> {
+    // `ROUTES_SQL` already restricts to `source_type = 'Project'`.
     let path_to_id: HashMap<&str, i64> = routes
         .iter()
-        .filter(|r| r.source_type == "Project")
         .map(|r| (r.path.as_str(), r.source_id))
         .collect();
     let mut out: Vec<(i64, i64)> = path_pairs

@@ -22,23 +22,16 @@ use std::collections::{HashMap, HashSet};
 
 use super::parse::{RefKind, Reference};
 
-/// The handful of source_type values from `siphon_routes` we care about when
-/// resolving GFM-style project paths.
-///
-/// Routes also stores `Namespace`, `User`, etc., but those never appear as
-/// the *owning project* of a referenced entity, so the resolver filters them
-/// out at query time. Embedded as a string literal in [`ROUTES_SQL`] today;
-/// `routes_sql_contains_every_routable_source_type` asserts the two stay in
-/// sync.
-#[allow(dead_code, reason = "drives the ROUTES_SQL source-type sync test")]
-pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
-
 /// SQL template for the routes-table batch lookup.
 ///
 /// Parameters:
 ///   `{paths:Array(String)}` — full_paths to look up.
 ///
-/// Returns `(source_type, source_id, path, traversal_path)`.
+/// Returns `(source_id, path, traversal_path)`. Only `Project` routes are
+/// returned: a referenced entity's *owning route* is always a project, and
+/// both consumers (`pairs_with_project_id`, `ResolvedIndex::build`) drop
+/// non-project rows anyway, so filtering `source_type = 'Project'` at the
+/// query keeps `Namespace`/`User`/etc. rows off the wire entirely.
 ///
 /// `siphon_routes` is a `ReplacingMergeTree` whose sort key *includes*
 /// `traversal_path`. The traversal-path reconciler re-inserts a row with the
@@ -59,22 +52,20 @@ pub const ROUTABLE_SOURCE_TYPES: &[&str] = &["Project", "Namespace"];
 /// here would silently drop every cross-namespace reference.
 pub const ROUTES_SQL: &str = "\
 SELECT \
-    source_type, \
     source_id, \
     path, \
     traversal_path \
 FROM ( \
     SELECT \
         id, \
-        source_type, \
         source_id, \
         path, \
         argMax(traversal_path, _siphon_replicated_at) AS traversal_path, \
         argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
     FROM siphon_routes \
     WHERE path IN {paths:Array(String)} \
-      AND source_type IN ('Project', 'Namespace') \
-    GROUP BY id, source_type, source_id, path \
+      AND source_type = 'Project' \
+    GROUP BY id, source_id, path \
 ) \
 WHERE _siphon_deleted = false";
 
@@ -167,24 +158,19 @@ FROM ( \
 ) \
 WHERE _siphon_deleted = false";
 
-/// A row from the `siphon_routes` lookup, keyed by `path`.
-///
-/// Used in unit tests today; the runtime CH benchmark consumes Arrow
-/// `RecordBatch` directly and does not materialize this struct. The
-/// production handler will.
-#[allow(dead_code)]
+/// A row from the `siphon_routes` lookup, keyed by `path`. Decoded from the
+/// `ROUTES_SQL` result in `handler::query_routes`. `ROUTES_SQL` already
+/// filters `source_type = 'Project'`, so every row here is a project route.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteRow {
-    pub source_type: String,
     pub source_id: i64,
     pub path: String,
     pub traversal_path: String,
 }
 
 /// A row from a `(project_id, iid) → id` lookup against a noteable table.
-///
-/// Used in unit tests today; see [`RouteRow`] for the runtime story.
-#[allow(dead_code)]
+/// Decoded from `MERGE_REQUESTS_SQL` / `WORK_ITEMS_SQL` in
+/// `handler::query_entities`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityRow {
     pub id: i64,
@@ -299,9 +285,9 @@ impl ResolvedIndex {
         mr_entities: &[EntityRow],
         wi_entities: &[EntityRow],
     ) -> Self {
+        // `ROUTES_SQL` already restricts to `source_type = 'Project'`.
         let path_routes: HashMap<i64, (&str, &str)> = routes
             .iter()
-            .filter(|r| r.source_type == "Project")
             .map(|r| (r.source_id, (r.path.as_str(), r.traversal_path.as_str())))
             .collect();
 
@@ -405,18 +391,16 @@ mod tests {
     }
 
     #[test]
-    fn routes_sql_contains_every_routable_source_type() {
-        // Close the loop between the documented `ROUTABLE_SOURCE_TYPES`
-        // const and the literal IN-list embedded in ROUTES_SQL: if a
-        // future contributor extends one without the other, this fails
-        // with a clear message instead of silently dropping a source-type.
-        for t in ROUTABLE_SOURCE_TYPES {
-            let needle = format!("'{t}'");
-            assert!(
-                ROUTES_SQL.contains(&needle),
-                "ROUTES_SQL missing routable source_type {t:?}"
-            );
-        }
+    fn routes_sql_filters_to_project_routes_at_query_time() {
+        // The only routable owner of a referenced entity is a project, and
+        // both consumers drop non-project rows, so the query filters
+        // `source_type = 'Project'` rather than fetching every route kind and
+        // discarding in Rust.
+        assert!(ROUTES_SQL.contains("source_type = 'Project'"));
+        assert!(
+            !ROUTES_SQL.contains("'Namespace'"),
+            "non-project routes must not be fetched"
+        );
     }
 
     #[test]
@@ -468,7 +452,6 @@ mod tests {
 
     fn gitlab_route() -> RouteRow {
         RouteRow {
-            source_type: "Project".to_string(),
             source_id: 999,
             path: "gitlab-org/gitlab".to_string(),
             traversal_path: "1/999/".to_string(),
