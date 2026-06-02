@@ -103,6 +103,7 @@ impl CodeIndexingDeps {
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
             CodeIndexingTaskRequest::subscription(),
+            indexer::analytics::IndexingAnalytics::disabled(),
         )
     }
 }

@@ -21,6 +21,7 @@ mod test_helpers;
 use std::sync::Arc;
 
 use crate::IndexerConfig;
+use crate::analytics::IndexingAnalytics;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use crate::topic::{CODE_INDEXING_TASK_TOPIC, CodeIndexingTaskRequest};
@@ -44,6 +45,7 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -110,6 +112,7 @@ pub fn register_handlers(
         metrics,
         config.nats.ack_wait(),
         subscription,
+        analytics,
     )));
 
     Ok(())

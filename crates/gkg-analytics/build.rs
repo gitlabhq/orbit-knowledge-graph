@@ -32,6 +32,8 @@ const VENDOR: &str = "com.gitlab";
 const SCHEMAS: &[(&str, &str)] = &[
     ("orbit_common", "OrbitCommon"),
     ("orbit_query", "OrbitQuery"),
+    ("orbit_sdlc_indexing", "OrbitSdlcIndexing"),
+    ("orbit_code_indexing", "OrbitCodeIndexing"),
 ];
 
 fn main() {

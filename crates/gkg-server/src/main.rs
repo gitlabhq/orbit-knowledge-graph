@@ -105,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
                 schema: config.schema.clone(),
+                analytics: config.analytics.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await

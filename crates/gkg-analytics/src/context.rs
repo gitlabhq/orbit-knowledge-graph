@@ -65,12 +65,66 @@ impl SnowplowContext for OrbitQueryContext {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// orbit_sdlc_indexing
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct OrbitSdlcIndexingContext {
+    pub data: orbit_sdlc_indexing::OrbitSdlcIndexing,
+}
+
+impl OrbitSdlcIndexingContext {
+    pub fn new(data: orbit_sdlc_indexing::OrbitSdlcIndexing) -> Self {
+        Self { data }
+    }
+}
+
+impl SnowplowContext for OrbitSdlcIndexingContext {
+    fn schema(&self) -> &str {
+        orbit_sdlc_indexing::SCHEMA_URI
+    }
+
+    fn data(&self) -> serde_json::Value {
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitSdlcIndexing is always serializable")
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// orbit_code_indexing
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct OrbitCodeIndexingContext {
+    pub data: orbit_code_indexing::OrbitCodeIndexing,
+}
+
+impl OrbitCodeIndexingContext {
+    pub fn new(data: orbit_code_indexing::OrbitCodeIndexing) -> Self {
+        Self { data }
+    }
+}
+
+impl SnowplowContext for OrbitCodeIndexingContext {
+    fn schema(&self) -> &str {
+        orbit_code_indexing::SCHEMA_URI
+    }
+
+    fn data(&self) -> serde_json::Value {
+        serde_json::to_value(&self.data)
+            .expect("generated OrbitCodeIndexing is always serializable")
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Schema URIs (re-exported for callers that need the bare URI string,
 // e.g. assertions in observer and integration tests).
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub const ORBIT_COMMON_SCHEMA: &str = orbit_common::SCHEMA_URI;
 pub const ORBIT_QUERY_SCHEMA: &str = orbit_query::SCHEMA_URI;
+pub const ORBIT_SDLC_INDEXING_SCHEMA: &str = orbit_sdlc_indexing::SCHEMA_URI;
+pub const ORBIT_CODE_INDEXING_SCHEMA: &str = orbit_code_indexing::SCHEMA_URI;
 
 /// Return the inlined schema JSON for `name` at its pinned version.
 ///
@@ -81,6 +135,8 @@ pub fn load_schema_json(name: &str) -> serde_json::Value {
     let raw = match name {
         "orbit_common" => orbit_common::SCHEMA_JSON,
         "orbit_query" => orbit_query::SCHEMA_JSON,
+        "orbit_sdlc_indexing" => orbit_sdlc_indexing::SCHEMA_JSON,
+        "orbit_code_indexing" => orbit_code_indexing::SCHEMA_JSON,
         other => panic!("unknown iglu schema {other:?}"),
     };
     serde_json::from_str(raw).expect("vendored Iglu schema is valid JSON")

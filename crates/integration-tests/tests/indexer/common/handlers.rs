@@ -73,9 +73,14 @@ async fn build_fan_out(
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        indexer::analytics::IndexingAnalytics::disabled(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
     let handlers = registry.handlers_for(&subscription);
     assert!(!handlers.is_empty(), "no handlers for {name}");
     Arc::new(FanOutHandler {
@@ -109,9 +114,14 @@ pub async fn entity_handler_with_partitions(
 
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        indexer::analytics::IndexingAnalytics::disabled(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
 
     let handler_name = format!("entity.{}", entity_name.to_lowercase());
     registry

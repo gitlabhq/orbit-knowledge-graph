@@ -19,6 +19,7 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
+gkg-analytics = { path = "../gkg-analytics" }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
@@ -27,6 +28,7 @@ flate2 = { workspace = true }
 futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
+labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
@@ -52,6 +54,8 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
+jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
