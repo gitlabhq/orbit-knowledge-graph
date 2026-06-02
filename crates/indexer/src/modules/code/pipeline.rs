@@ -472,6 +472,20 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         if had_prior_checkpoint {
+            // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
+            info!(
+                project_id,
+                branch = %branch,
+                watermark = %indexed_at,
+                definitions = result.stats.definitions_count,
+                imports = result.stats.imports_count,
+                files = result.stats.files_indexed,
+                directories = result.stats.directories_indexed,
+                files_discovered = result.stats.files_discovered,
+                faulted = result.faults.len(),
+                skipped = result.skipped.len(),
+                "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
+            );
             let cleanup_start = Instant::now();
             if let Err(error) = self
                 .stale_data_cleaner
