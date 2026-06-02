@@ -1,3 +1,5 @@
+#[cfg(feature = "bench-sdlc")]
+pub mod bench;
 mod datalake;
 pub mod dispatch;
 mod handler;
@@ -39,7 +41,7 @@ pub async fn register_handlers(
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
         datalake_client,
-        entity_handler_config.datalake_batch_size,
+        datalake::DEFAULT_STREAM_BLOCK_SIZE,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));

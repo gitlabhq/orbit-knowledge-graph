@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, QuerySummary};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use serde_json::Value;
 use thiserror::Error;
@@ -26,8 +27,12 @@ impl From<clickhouse::error::Error> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
-/// Resource stats reported by the datalake for a single read, parsed from the
-/// `X-ClickHouse-Summary` response header. Used for indexing cost attribution.
+/// Resolves to the [`ReadStats`] for a streamed read once its stream is fully
+/// drained: ClickHouse only sends the summary header after the response body.
+pub(crate) type ReadStatsFuture = BoxFuture<'static, ReadStats>;
+
+/// ClickHouse's scanned rows/bytes for one read, from the `X-ClickHouse-Summary`
+/// header. Feeds per-entity indexing cost attribution.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ReadStats {
     pub read_rows: u64,
@@ -50,16 +55,25 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
-    async fn query_batches_with_summary(
+    /// Streams a page and reports its scanned rows/bytes. The default reuses
+    /// [`query_arrow`](Self::query_arrow) and reports no stats, which is enough
+    /// for the partitioning probe and tests; only [`Datalake`] surfaces the real
+    /// summary.
+    async fn query_arrow_with_summary(
         &self,
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ReadStats), DatalakeError> {
-        let batches = self.query_batches(sql, params, max_block_size).await?;
-        Ok((batches, ReadStats::default()))
+    ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), DatalakeError> {
+        let stream = self.query_arrow(sql, params, max_block_size).await?;
+        Ok((stream, Box::pin(async { ReadStats::default() })))
     }
 }
+
+/// Rows per Arrow block ClickHouse emits when streaming a page. Decoupled from
+/// the page `batch_size` (the SQL `LIMIT`) so peak memory tracks one block, not
+/// the whole page.
+pub(crate) const DEFAULT_STREAM_BLOCK_SIZE: u64 = 65_536;
 
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
@@ -127,45 +141,47 @@ impl DatalakeQuery for Datalake {
         Ok(batches)
     }
 
-    async fn query_batches_with_summary(
+    async fn query_arrow_with_summary(
         &self,
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(Vec<RecordBatch>, ReadStats), DatalakeError> {
+    ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), DatalakeError> {
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
-        let query = self
+        let (stream, summary) = self
             .build_query(sql, params)
-            .with_setting("max_block_size", block_size.to_string());
-
-        let (batches, summary) = query
-            .fetch_arrow_with_summary()
+            .fetch_arrow_streamed_with_summary(block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
-        let batches = batches
-            .into_iter()
-            .filter(|batch| batch.num_rows() > 0)
-            .collect();
+        let stream = stream
+            .map(|result| result.map_err(|e| DatalakeError::Query(e.to_string())))
+            .boxed();
+        let read_stats = Box::pin(async move {
+            summary
+                .await
+                .ok()
+                .flatten()
+                .map(read_stats_from_summary)
+                .unwrap_or_default()
+        });
 
-        let read_stats = summary
-            .map(|summary| {
-                let read_rows = summary.read_rows();
-                let read_bytes = summary.read_bytes();
-                if read_rows.is_none() || read_bytes.is_none() {
-                    debug!(
-                        ?read_rows,
-                        ?read_bytes,
-                        "datalake summary missing read_rows/read_bytes; defaulting to 0"
-                    );
-                }
-                ReadStats {
-                    read_rows: read_rows.unwrap_or(0),
-                    read_bytes: read_bytes.unwrap_or(0),
-                }
-            })
-            .unwrap_or_default();
+        Ok((stream, read_stats))
+    }
+}
 
-        Ok((batches, read_stats))
+fn read_stats_from_summary(summary: QuerySummary) -> ReadStats {
+    let read_rows = summary.read_rows();
+    let read_bytes = summary.read_bytes();
+    if read_rows.is_none() || read_bytes.is_none() {
+        debug!(
+            ?read_rows,
+            ?read_bytes,
+            "datalake summary missing read_rows/read_bytes; defaulting to 0"
+        );
+    }
+    ReadStats {
+        read_rows: read_rows.unwrap_or(0),
+        read_bytes: read_bytes.unwrap_or(0),
     }
 }

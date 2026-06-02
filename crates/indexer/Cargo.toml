@@ -7,6 +7,11 @@ license = "LicenseRef-EE"
 [features]
 default = []
 testkit = ["nats-client/testkit"]
+bench-sdlc = []
+
+[[bin]]
+name = "bench_sdlc"
+required-features = ["bench-sdlc"]
 
 [dependencies]
 async-nats = { workspace = true }
