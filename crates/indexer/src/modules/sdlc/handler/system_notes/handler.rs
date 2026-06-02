@@ -19,12 +19,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
+use arrow::array::{Array, Int64Array};
+use arrow::datatypes::{Int64Type, TimestampMicrosecondType};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gkg_observability::indexer::sdlc as sdlc_metrics;
-use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
+use gkg_utils::arrow::{ArrowUtils, AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 use ontology::{DataType as OntDataType, Ontology};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
@@ -486,8 +487,8 @@ impl SystemNotesHandler {
         for batch in &batches {
             for row in 0..batch.num_rows() {
                 if let (Some(source_id), Some(path)) = (
-                    col_i64(batch, "source_id", row),
-                    col_string(batch, "path", row),
+                    ArrowUtils::get_column::<Int64Type>(batch, "source_id", row),
+                    ArrowUtils::get_column_string(batch, "path", row),
                 ) {
                     id_to_path.insert(source_id, path);
                 }
@@ -534,10 +535,10 @@ impl SystemNotesHandler {
         for batch in &batches {
             for row in 0..batch.num_rows() {
                 if let (Some(source_type), Some(source_id), Some(path), Some(tp)) = (
-                    col_string(batch, "source_type", row),
-                    col_i64(batch, "source_id", row),
-                    col_string(batch, "path", row),
-                    col_string(batch, "traversal_path", row),
+                    ArrowUtils::get_column_string(batch, "source_type", row),
+                    ArrowUtils::get_column::<Int64Type>(batch, "source_id", row),
+                    ArrowUtils::get_column_string(batch, "path", row),
+                    ArrowUtils::get_column_string(batch, "traversal_path", row),
                 ) {
                     rows.push(RouteRow {
                         source_type,
@@ -577,13 +578,20 @@ impl SystemNotesHandler {
 
         let mut rows = Vec::new();
         for batch in &batches {
+            let project_id_col =
+                ArrowUtils::get_column_by_index::<Int64Array>(batch, 1).filter(|_| {
+                    // Second column is target_project_id (MR) or project_id
+                    // (WI); both decode positionally as `(id, project_id, iid)`.
+                    batch.num_columns() >= 2
+                });
             for row in 0..batch.num_rows() {
-                // Second column is target_project_id (MR) or project_id (WI);
-                // both decode positionally as `(id, project_id, iid)`.
+                let project_id = project_id_col
+                    .filter(|arr| !arr.is_null(row))
+                    .map(|arr| arr.value(row));
                 if let (Some(id), Some(project_id), Some(iid)) = (
-                    col_i64(batch, "id", row),
-                    col_i64_at(batch, 1, row),
-                    col_i64(batch, "iid", row),
+                    ArrowUtils::get_column::<Int64Type>(batch, "id", row),
+                    project_id,
+                    ArrowUtils::get_column::<Int64Type>(batch, "iid", row),
                 ) {
                     rows.push(EntityRow {
                         id,
@@ -628,23 +636,23 @@ fn decode_extracted_notes(batch: &RecordBatch, out: &mut Vec<ExtractedNote>) {
             Some(tp),
             Some(action),
         ) = (
-            col_i64(batch, "id", row),
-            col_i64(batch, "noteable_id", row),
-            col_string(batch, "noteable_type", row),
+            ArrowUtils::get_column::<Int64Type>(batch, "id", row),
+            ArrowUtils::get_column::<Int64Type>(batch, "noteable_id", row),
+            ArrowUtils::get_column_string(batch, "noteable_type", row),
             col_timestamp_micros(batch, "created_at", row),
-            col_string(batch, "traversal_path", row),
-            col_string(batch, "action", row),
+            ArrowUtils::get_column_string(batch, "traversal_path", row),
+            ArrowUtils::get_column_string(batch, "action", row),
         )
         else {
             continue;
         };
         out.push(ExtractedNote {
             id,
-            note: col_string(batch, "note", row).unwrap_or_default(),
+            note: ArrowUtils::get_column_string(batch, "note", row).unwrap_or_default(),
             noteable_id,
             noteable_type,
-            author_id: col_i64(batch, "author_id", row),
-            project_id: col_i64(batch, "project_id", row),
+            author_id: ArrowUtils::get_column::<Int64Type>(batch, "author_id", row),
+            project_id: ArrowUtils::get_column::<Int64Type>(batch, "project_id", row),
             created_at,
             traversal_path: tp,
             action,
@@ -652,32 +660,12 @@ fn decode_extracted_notes(batch: &RecordBatch, out: &mut Vec<ExtractedNote>) {
     }
 }
 
-fn col_i64(batch: &RecordBatch, name: &str, row: usize) -> Option<i64> {
-    let idx = batch.schema().index_of(name).ok()?;
-    col_i64_at(batch, idx, row)
-}
-
-fn col_i64_at(batch: &RecordBatch, idx: usize, row: usize) -> Option<i64> {
-    let arr = batch.column(idx).as_any().downcast_ref::<Int64Array>()?;
-    (!arr.is_null(row)).then(|| arr.value(row))
-}
-
-fn col_string(batch: &RecordBatch, name: &str, row: usize) -> Option<String> {
-    let idx = batch.schema().index_of(name).ok()?;
-    let arr = batch.column(idx).as_any().downcast_ref::<StringArray>()?;
-    (!arr.is_null(row)).then(|| arr.value(row).to_string())
-}
-
+/// `ArrowUtils::get_column::<TimestampMicrosecondType>` returns the raw
+/// `i64` micros; system-note rows carry `created_at` as `DateTime64(6)`, so
+/// convert to a `DateTime<Utc>` here.
 fn col_timestamp_micros(batch: &RecordBatch, name: &str, row: usize) -> Option<DateTime<Utc>> {
-    let idx = batch.schema().index_of(name).ok()?;
-    let arr = batch
-        .column(idx)
-        .as_any()
-        .downcast_ref::<TimestampMicrosecondArray>()?;
-    if arr.is_null(row) {
-        return None;
-    }
-    DateTime::<Utc>::from_timestamp_micros(arr.value(row))
+    let micros = ArrowUtils::get_column::<TimestampMicrosecondType>(batch, name, row)?;
+    DateTime::<Utc>::from_timestamp_micros(micros)
 }
 
 fn format_ch(ts: DateTime<Utc>) -> String {
@@ -880,8 +868,14 @@ mod tests {
         // relationship_kind / source_kind / target_kind are LowCardinality
         // (dictionary-encoded), matching the gl_edge column types.
         assert_eq!(dict_value(&batch, "relationship_kind", 0), "MENTIONS");
-        assert_eq!(col_i64(&batch, "source_id", 0), Some(10));
-        assert_eq!(col_i64(&batch, "target_id", 0), Some(20));
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "source_id", 0),
+            Some(10)
+        );
+        assert_eq!(
+            ArrowUtils::get_column::<Int64Type>(&batch, "target_id", 0),
+            Some(20)
+        );
         assert_eq!(dict_value(&batch, "source_kind", 0), "MergeRequest");
         assert_eq!(dict_value(&batch, "target_kind", 0), "WorkItem");
 
