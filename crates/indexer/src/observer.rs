@@ -59,9 +59,13 @@ pub trait IndexingObserver: Send {
 
     fn set_project(&mut self, _project_id: i64, _branch: &str) {}
 
+    fn set_commit_sha(&mut self, _commit_sha: Option<String>) {}
+
     fn set_indexing_mode(&mut self, _mode: IndexingMode) {}
 
     fn extracted(&mut self, _rows: u64, _bytes: u64) {}
+
+    fn record_source_bytes(&mut self, _bytes: u64) {}
 
     fn files_processed(&mut self, _discovered: u64, _parsed: u64, _skipped: u64) {}
 
@@ -139,6 +143,12 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
+    fn set_commit_sha(&mut self, commit_sha: Option<String>) {
+        for o in self.iter_mut() {
+            o.set_commit_sha(commit_sha.clone());
+        }
+    }
+
     fn set_indexing_mode(&mut self, mode: IndexingMode) {
         for o in self.iter_mut() {
             o.set_indexing_mode(mode);
@@ -148,6 +158,12 @@ impl IndexingObserver for MultiObserver {
     fn extracted(&mut self, rows: u64, bytes: u64) {
         for o in self.iter_mut() {
             o.extracted(rows, bytes);
+        }
+    }
+
+    fn record_source_bytes(&mut self, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_source_bytes(bytes);
         }
     }
 

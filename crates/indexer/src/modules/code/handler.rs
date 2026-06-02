@@ -11,6 +11,7 @@ use super::metrics::CodeMetrics;
 use super::observer::CodeOtelObserver;
 use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
+use crate::analytics::IndexingAnalytics;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
@@ -37,9 +38,14 @@ pub struct CodeIndexingTaskHandler {
     metrics: CodeMetrics,
     lock_ttl: Duration,
     subscription: Subscription,
+    analytics: IndexingAnalytics,
 }
 
 impl CodeIndexingTaskHandler {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub fn new(
         pipeline: Arc<CodeIndexingPipeline>,
         repository_service: Arc<dyn RepositoryService>,
@@ -47,6 +53,7 @@ impl CodeIndexingTaskHandler {
         metrics: CodeMetrics,
         lock_ttl: Duration,
         subscription: Subscription,
+        analytics: IndexingAnalytics,
     ) -> Self {
         Self {
             pipeline,
@@ -55,6 +62,7 @@ impl CodeIndexingTaskHandler {
             metrics,
             lock_ttl,
             subscription,
+            analytics,
         }
     }
 }
@@ -183,13 +191,15 @@ impl CodeIndexingTaskHandler {
             "starting code indexing"
         );
 
-        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
-            CodeOtelObserver::new(self.metrics.clone()),
-        )]);
+        let mut observers: Vec<Box<dyn IndexingObserver>> =
+            vec![Box::new(CodeOtelObserver::new(self.metrics.clone()))];
+        observers.extend(self.analytics.observer());
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(observers);
         observer.set_dispatch_id(request.dispatch_id);
         observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Code);
         observer.set_project(request.project_id, &branch);
+        observer.set_commit_sha(request.commit_sha.clone());
         observer.set_traversal_path(&request.traversal_path);
         observer.set_indexing_mode(if had_prior_checkpoint {
             IndexingMode::Incremental
@@ -388,6 +398,7 @@ mod tests {
                 metrics,
                 Duration::from_secs(60),
                 CodeIndexingTaskRequest::subscription(),
+                IndexingAnalytics::disabled(),
             );
 
             Self {

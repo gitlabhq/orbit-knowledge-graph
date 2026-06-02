@@ -12,6 +12,7 @@ use std::sync::Arc;
 use ontology::EtlScope;
 
 use crate::IndexerConfig;
+use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
@@ -29,6 +30,7 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    analytics: IndexingAnalytics,
 ) -> Result<(), HandlerInitError> {
     let entity_handler_config = config.engine.handlers.entity_handler.clone();
 
@@ -82,6 +84,7 @@ pub async fn register_handlers(
             metrics.clone(),
             global_subscription.clone(),
             strategy,
+            analytics.clone(),
         )));
         global_count += 1;
     }
@@ -96,6 +99,7 @@ pub async fn register_handlers(
             metrics.clone(),
             namespace_subscription.clone(),
             strategy,
+            analytics.clone(),
         )));
         namespaced_count += 1;
     }

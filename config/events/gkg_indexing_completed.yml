@@ -1,0 +1,21 @@
+---
+description: An indexing run (code or SDLC) completed in the GKG indexer, carrying its per-dispatch resource cost
+internal_events: true
+status: active
+action: gkg_indexing_completed
+identifiers:
+- namespace
+product_group: knowledge_graph
+product_categories:
+- knowledge_graph
+milestone: '19.1'
+introduced_by_url: https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/750
+contexts:
+- orbit_common
+- orbit_sdlc_indexing
+- orbit_code_indexing
+tiers:
+- free
+- premium
+- ultimate
+classification: duo

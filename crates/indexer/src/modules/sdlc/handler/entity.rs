@@ -7,6 +7,7 @@ use tokio::task::JoinSet;
 use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
+use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
@@ -29,6 +30,7 @@ pub struct EntityHandler {
     metrics: SdlcMetrics,
     subscription: Subscription,
     partition_strategy: Option<PartitionStrategy>,
+    analytics: IndexingAnalytics,
 }
 
 struct IndexingRequest {
@@ -54,6 +56,7 @@ impl EntityHandler {
         metrics: SdlcMetrics,
         subscription: Subscription,
         partition_strategy: Option<PartitionStrategy>,
+        analytics: IndexingAnalytics,
     ) -> Self {
         let handler_name = format!("entity.{}", plan.name.to_lowercase());
         Self {
@@ -66,6 +69,7 @@ impl EntityHandler {
             metrics,
             subscription,
             partition_strategy,
+            analytics,
         }
     }
 
@@ -103,14 +107,17 @@ impl EntityHandler {
         context: HandlerContext,
         request: IndexingRequest,
     ) -> Result<(), HandlerError> {
-        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
-            SdlcOtelObserver::new(self.metrics.clone()),
-        )]);
+        let mut observers: Vec<Box<dyn IndexingObserver>> =
+            vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
+        observers.extend(self.analytics.observer());
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(observers);
         observer.set_dispatch_id(request.dispatch_id);
         observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
-        if let Some(namespace_id) = request.namespace_id {
+        if let Some(traversal_path) = &request.traversal_path {
+            observer.set_traversal_path(traversal_path);
+        } else if let Some(namespace_id) = request.namespace_id {
             observer.set_namespace(namespace_id);
         }
 
@@ -447,6 +454,7 @@ mod tests {
             test_metrics(),
             subscription,
             None,
+            IndexingAnalytics::disabled(),
         )
     }
 

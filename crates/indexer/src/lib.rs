@@ -26,6 +26,7 @@
 //! - [`modules::sdlc`] - SDLC entities (users, projects, MRs, CI, etc.)
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
+pub mod analytics;
 pub mod campaign;
 pub mod checkpoint;
 pub mod clickhouse;
@@ -160,16 +161,24 @@ pub async fn run(
 
     let registry = Arc::new(HandlerRegistry::default());
 
+    let analytics = analytics::IndexingAnalytics::from_config(&config.analytics)?;
+    if analytics.is_enabled() {
+        info!(
+            collector_url = %config.analytics.collector_url,
+            "indexing analytics enabled"
+        );
+    }
+
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
-        modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        modules::sdlc::register_handlers(&registry, config, &ontology, analytics.clone()).await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
         info!("initializing Code handlers");
-        modules::code::register_handlers(&registry, config, &ontology)?;
+        modules::code::register_handlers(&registry, config, &ontology, analytics.clone())?;
     } else {
         info!("Code handlers disabled by engine.modules");
     }
