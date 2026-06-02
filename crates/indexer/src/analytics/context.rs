@@ -11,10 +11,9 @@ use labkit_events::Error as LabkitError;
 
 use crate::observer::IndexingMode;
 
-/// What triggered an indexing run. The indexer cannot distinguish a
-/// scheduled backfill from a manual one, so only `Push` and `Scheduled`
-/// are derived today (a campaign-correlated dispatch is treated as
-/// scheduled; everything else as push).
+/// What triggered an indexing run. The indexer can't tell a scheduled
+/// backfill from a manual one, so a campaign-correlated dispatch is treated
+/// as `Scheduled` and everything else as `Push`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TriggerType {
     Push,

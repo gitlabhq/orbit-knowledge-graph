@@ -1,11 +1,8 @@
-//! [`SnowplowIndexingObserver`] accumulates the per-dispatch stats emitted
-//! through [`IndexingObserver`] and, on `finish`, emits a single
-//! `gkg_indexing_completed` Snowplow event carrying the run's resource cost.
-//!
-//! One event per dispatch: SDLC dispatches carry an `orbit_sdlc_indexing`
-//! context (per entity type), code dispatches an `orbit_code_indexing`
-//! context. Both ride alongside `orbit_common`. Runs that error out are
-//! skipped so partial costs don't pollute the cost-attribution dataset.
+//! [`SnowplowIndexingObserver`] accumulates per-dispatch stats and, on
+//! `finish`, emits one `gkg_indexing_completed` event with the run's resource
+//! cost: an `orbit_sdlc_indexing` or `orbit_code_indexing` context alongside
+//! `orbit_common`. Errored runs are skipped so partial costs don't pollute
+//! the cost-attribution dataset.
 
 use std::sync::Arc;
 
