@@ -382,7 +382,7 @@ impl CodeIndexingPipeline {
         );
 
         let flush_start = Instant::now();
-        let write_totals = match buffered_sink.flush().await {
+        let per_table_writes = match buffered_sink.flush().await {
             Ok(totals) => totals,
             Err(e) => {
                 return Err(HandlerError::Permanent {
@@ -429,7 +429,9 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
-        observer.record_graph_write(write_totals.rows, write_totals.bytes);
+        for write in &per_table_writes {
+            observer.record_graph_write(&write.table, write.rows, write.bytes);
+        }
         observer.record_duration(indexing_start.elapsed().as_millis() as u64);
 
         for skipped in &result.skipped {

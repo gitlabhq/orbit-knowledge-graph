@@ -46,8 +46,9 @@ impl PipelineStats {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct WriteCounts {
+#[derive(Debug, Clone)]
+struct TableWriteCounts {
+    table: String,
     rows: u64,
     bytes: u64,
 }
@@ -149,7 +150,7 @@ impl Pipeline {
             cursor = cursor.advance(batches.last().unwrap(), &plan.sort_key)?;
             let has_more = rows_in_batch >= plan.batch_size;
 
-            let (write_futures, write_counts) = self
+            let (write_futures, per_table) = self
                 .transform(
                     &session,
                     &plan.name,
@@ -158,8 +159,14 @@ impl Pipeline {
                     context.destination.as_ref(),
                 )
                 .await?;
-            written_rows += write_counts.rows;
-            written_bytes += write_counts.bytes;
+            {
+                let mut observer = context.observer.lock().unwrap();
+                for entry in &per_table {
+                    written_rows += entry.rows;
+                    written_bytes += entry.bytes;
+                    observer.record_graph_write(&entry.table, entry.rows, entry.bytes);
+                }
+            }
 
             if has_more {
                 let next_sql = base_query
@@ -229,7 +236,6 @@ impl Pipeline {
         {
             let mut observer = context.observer.lock().unwrap();
             observer.record_datalake_read(stats.read_rows, stats.read_bytes);
-            observer.record_graph_write(stats.written_rows, stats.written_bytes);
             observer.record_duration(stats.duration_ms);
         }
 
@@ -336,7 +342,7 @@ impl Pipeline {
         batches: Vec<RecordBatch>,
         transforms: &[Transformation],
         destination: &dyn Destination,
-    ) -> Result<(WriteFutures, WriteCounts), HandlerError> {
+    ) -> Result<(WriteFutures, Vec<TableWriteCounts>), HandlerError> {
         let schema = batches[0].schema();
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
@@ -356,7 +362,7 @@ impl Pipeline {
 
         let mut total_transform_duration = Duration::ZERO;
         let mut write_futures: WriteFutures = FuturesUnordered::new();
-        let mut write_counts = WriteCounts::default();
+        let mut per_table = Vec::new();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -385,11 +391,15 @@ impl Pipeline {
                 continue;
             }
 
-            write_counts.rows += row_count as u64;
-            write_counts.bytes += result_batches
+            let byte_count: u64 = result_batches
                 .iter()
                 .map(|b| b.get_array_memory_size() as u64)
-                .sum::<u64>();
+                .sum();
+            per_table.push(TableWriteCounts {
+                table: transform.destination_table.clone(),
+                rows: row_count as u64,
+                bytes: byte_count,
+            });
 
             let destination_table = transform.destination_table.clone();
             let writer = destination
@@ -433,7 +443,7 @@ impl Pipeline {
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
 
-        Ok((write_futures, write_counts))
+        Ok((write_futures, per_table))
     }
 
     async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
