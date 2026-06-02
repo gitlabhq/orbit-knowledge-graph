@@ -39,7 +39,7 @@ settings:
         indexes:
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_target, order_by: [traversal_path, target_id, relationship_kind]}
+          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, target_id, relationship_kind]}
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
@@ -76,8 +76,8 @@ settings:
           - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
           - {name: idx_branch, column: branch, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_source, order_by: [traversal_path, source_id, relationship_kind]}
-          - {type: lightweight, name: by_target, order_by: [traversal_path, project_id, branch, target_id, relationship_kind]}
+          - {type: lightweight, name: by_source, versioned_sort_key: [traversal_path, source_id, relationship_kind]}
+          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, project_id, branch, target_id, relationship_kind]}
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, project_id, branch, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
@@ -107,7 +107,7 @@ settings:
         indexes:
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_target, order_by: [traversal_path, target_id, relationship_kind]}
+          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, target_id, relationship_kind]}
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]

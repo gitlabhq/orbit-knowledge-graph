@@ -264,10 +264,10 @@ storage:
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_user_id, order_by: [user_id]}
-    - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
-    - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}
-    - {type: lightweight, name: by_status_id, order_by: [status, id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_user_id, versioned_sort_key: [user_id]}
+    - {type: lightweight, name: by_merge_request_id, versioned_sort_key: [merge_request_id]}
+    - {type: lightweight, name: by_auto_canceled_by_id, versioned_sort_key: [auto_canceled_by_id]}
+    - {type: lightweight, name: by_status_id, versioned_sort_key: [status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

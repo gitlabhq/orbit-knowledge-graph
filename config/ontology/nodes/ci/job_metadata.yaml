@@ -133,7 +133,7 @@ storage:
     - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_build_id, order_by: [build_id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_build_id, versioned_sort_key: [build_id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

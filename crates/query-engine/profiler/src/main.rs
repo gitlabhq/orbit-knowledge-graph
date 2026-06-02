@@ -92,6 +92,17 @@ struct Cli {
     /// Supports @filepath for SQL files.
     #[arg(long)]
     raw_sql: bool,
+
+    /// Compile only: print rendered SQL without executing.
+    #[arg(long, value_enum)]
+    compile_only: Option<CompileShow>,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+enum CompileShow {
+    Base,
+    Hydration,
+    Both,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -215,6 +226,93 @@ fn embedded_schema_version() -> u32 {
         .expect("config/SCHEMA_VERSION must contain a valid u32")
 }
 
+fn compile_one(
+    query_json: &str,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Result<compiler::CompiledQueryContext> {
+    compiler::compile(query_json, ontology, security_ctx)
+        .map_err(|e| anyhow::anyhow!("compilation failed: {e}"))
+}
+
+fn format_hydration(plan: &compiler::HydrationPlan) -> String {
+    match plan {
+        compiler::HydrationPlan::None => "None".to_string(),
+        compiler::HydrationPlan::Static(templates) => {
+            let parts: Vec<String> = templates
+                .iter()
+                .map(|t| {
+                    format!(
+                        "-- {} ({}): SELECT {} FROM {} FINAL WHERE id IN (...)",
+                        t.node_alias,
+                        t.entity_type,
+                        t.columns.join(", "),
+                        t.destination_table,
+                    )
+                })
+                .collect();
+            parts.join("\n")
+        }
+        compiler::HydrationPlan::Dynamic(_) => "Dynamic (resolved at runtime)".to_string(),
+    }
+}
+
+fn run_compile_only(
+    query_json: &str,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+    show: &CompileShow,
+    cli: &Cli,
+) -> Result<()> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(query_json).context("failed to parse query JSON")?;
+
+    let is_single = matches!(parsed.get("query_type"), Some(serde_json::Value::String(_)));
+
+    let entries: Vec<(String, String)> = if is_single {
+        vec![("query".to_string(), query_json.to_string())]
+    } else {
+        let obj = parsed
+            .as_object()
+            .context("multi-query file must be a JSON object")?;
+        let mut entries: Vec<_> = obj
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap()))
+            .collect();
+        if let Some(ref f) = cli.filter {
+            let re = regex::Regex::new(f)?;
+            entries.retain(|(k, _)| re.is_match(k));
+        }
+        entries
+    };
+
+    for (name, json) in &entries {
+        let compiled = compile_one(json, ontology, security_ctx)?;
+        if entries.len() > 1 {
+            eprintln!("--- {} ---", name);
+        }
+        match show {
+            CompileShow::Base => {
+                println!("{}", compiled.base.render());
+            }
+            CompileShow::Hydration => {
+                println!("{}", format_hydration(&compiled.hydration));
+            }
+            CompileShow::Both => {
+                println!("-- base");
+                println!("{}", compiled.base.render());
+                println!();
+                println!("-- hydration");
+                println!("{}", format_hydration(&compiled.hydration));
+            }
+        }
+        if entries.len() > 1 {
+            println!();
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -250,6 +348,10 @@ async fn main() -> Result<()> {
 
     let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
+
+    if let Some(show) = &cli.compile_only {
+        return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);
+    }
 
     let custom_settings: std::collections::HashMap<String, String> = cli
         .settings

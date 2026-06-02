@@ -154,8 +154,8 @@ storage:
     - {name: idx_scan_id, column: scan_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_scanner_id, column: scanner_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_scan_id, order_by: [scan_id]}
-    - {type: lightweight, name: by_scanner_id, order_by: [scanner_id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_scan_id, versioned_sort_key: [scan_id]}
+    - {type: lightweight, name: by_scanner_id, versioned_sort_key: [scanner_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

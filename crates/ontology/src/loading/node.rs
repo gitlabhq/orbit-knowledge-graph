@@ -204,7 +204,18 @@ pub(crate) enum StorageProjectionYaml {
     #[serde(rename = "reorder")]
     Reorder { name: String, order_by: Vec<String> },
     #[serde(rename = "lightweight")]
-    Lightweight { name: String, order_by: Vec<String> },
+    Lightweight {
+        name: String,
+        /// Raw ORDER BY columns. Mutually exclusive with `versioned_sort_key`.
+        #[serde(default)]
+        order_by: Vec<String>,
+        /// Prefix columns for a dedup-compatible LWP. The table sort key and
+        /// `_version` are appended automatically, producing an ORDER BY of
+        /// `(prefix..., sort_key..., _version)`. Mutually exclusive with
+        /// `order_by`.
+        #[serde(default)]
+        versioned_sort_key: Vec<String>,
+    },
     #[serde(rename = "aggregate")]
     Aggregate {
         name: String,
@@ -364,7 +375,7 @@ impl NodeYaml {
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
-        let storage = convert_node_storage(self.storage.unwrap_or_default());
+        let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
         Ok(NodeEntity {
             name,
@@ -507,7 +518,7 @@ impl EtlYaml {
     }
 }
 
-fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
+fn convert_node_storage(yaml: NodeStorageYaml, sort_key: &[String]) -> NodeStorage {
     NodeStorage {
         version_only_engine: yaml.version_only_engine,
         primary_key: yaml.primary_key,
@@ -529,7 +540,7 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
         projections: yaml
             .projections
             .into_iter()
-            .map(convert_storage_projection)
+            .map(|p| convert_storage_projection(p, sort_key))
             .collect(),
         settings: yaml.settings,
     }
@@ -544,13 +555,38 @@ pub(crate) fn convert_storage_index(yaml: StorageIndexYaml) -> StorageIndex {
     }
 }
 
-pub(crate) fn convert_storage_projection(yaml: StorageProjectionYaml) -> StorageProjection {
+pub(crate) fn convert_storage_projection(
+    yaml: StorageProjectionYaml,
+    sort_key: &[String],
+) -> StorageProjection {
     match yaml {
         StorageProjectionYaml::Reorder { name, order_by } => {
             StorageProjection::Reorder { name, order_by }
         }
-        StorageProjectionYaml::Lightweight { name, order_by } => {
-            StorageProjection::Lightweight { name, order_by }
+        StorageProjectionYaml::Lightweight {
+            name,
+            order_by,
+            versioned_sort_key,
+        } => {
+            let resolved = if !versioned_sort_key.is_empty() {
+                let mut cols = versioned_sort_key;
+                for col in sort_key {
+                    if !cols.contains(col) {
+                        cols.push(col.clone());
+                    }
+                }
+                let version = crate::constants::VERSION_COLUMN.to_string();
+                if !cols.contains(&version) {
+                    cols.push(version);
+                }
+                cols
+            } else {
+                order_by
+            };
+            StorageProjection::Lightweight {
+                name,
+                order_by: resolved,
+            }
         }
         StorageProjectionYaml::Aggregate {
             name,
@@ -846,5 +882,111 @@ mod tests {
                 ("project_id", "IN_PROJECT"),
             ]
         );
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_builds_full_ordering() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_project_id".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["project_id".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(
+                    order_by,
+                    vec!["project_id", "traversal_path", "id", "_version"]
+                );
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_does_not_duplicate_overlap() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_tp".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["traversal_path".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(order_by, vec!["traversal_path", "id", "_version"]);
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_does_not_duplicate_version() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_ver".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["project_id".into(), "_version".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(
+                    order_by,
+                    vec!["project_id", "_version", "traversal_path", "id"]
+                );
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_raw_order_by_passes_through() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_raw".into(),
+                order_by: vec!["project_id".into()],
+                versioned_sort_key: vec![],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(order_by, vec!["project_id"]);
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn reorder_and_aggregate_pass_through_unchanged() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+
+        let reorder = convert_storage_projection(
+            StorageProjectionYaml::Reorder {
+                name: "r".into(),
+                order_by: vec!["col_a".into()],
+            },
+            &sort_key,
+        );
+        assert!(matches!(reorder, StorageProjection::Reorder { .. }));
+
+        let agg = convert_storage_projection(
+            StorageProjectionYaml::Aggregate {
+                name: "a".into(),
+                select: vec!["x".into()],
+                group_by: vec!["y".into()],
+            },
+            &sort_key,
+        );
+        assert!(matches!(agg, StorageProjection::Aggregate { .. }));
     }
 }

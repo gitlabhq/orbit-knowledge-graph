@@ -46,8 +46,8 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, project_id, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -82,9 +82,9 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_file_path file_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_file_path_ngram file_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, project_id, branch, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, branch, id, _version)),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY (branch, traversal_path, project_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -121,11 +121,11 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_environment_id environment_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_environment_id (SELECT _part_offset ORDER BY environment_id),
-    PROJECTION by_user_id (SELECT _part_offset ORDER BY user_id),
-    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_environment_id (SELECT _part_offset ORDER BY (environment_id, traversal_path, id, _version)),
+    PROJECTION by_user_id (SELECT _part_offset ORDER BY (user_id, traversal_path, id, _version)),
+    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id, traversal_path, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -149,9 +149,9 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, project_id, branch, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, branch, id, _version)),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY (branch, traversal_path, project_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -191,10 +191,10 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
-    PROJECTION by_tier_state (SELECT _part_offset ORDER BY (tier, state, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY (merge_request_id, traversal_path, id, _version)),
+    PROJECTION by_tier_state (SELECT _part_offset ORDER BY (tier, state, id, traversal_path, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -220,9 +220,9 @@ CREATE TABLE IF NOT EXISTS gl_file (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, project_id, branch, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, branch, id, _version)),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY (branch, traversal_path, project_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -254,10 +254,10 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scan_id scan_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scanner_id scanner_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_scan_id (SELECT _part_offset ORDER BY scan_id),
-    PROJECTION by_scanner_id (SELECT _part_offset ORDER BY scanner_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_scan_id (SELECT _part_offset ORDER BY (scan_id, traversal_path, id, _version)),
+    PROJECTION by_scanner_id (SELECT _part_offset ORDER BY (scanner_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -283,7 +283,7 @@ CREATE TABLE IF NOT EXISTS gl_group (
     INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -318,9 +318,9 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_import_path import_path TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_import_path_ngram import_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, project_id, branch, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, branch, id, _version)),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY (branch, traversal_path, project_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -375,16 +375,16 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_pipeline_id pipeline_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_runner_id runner_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_auto_canceled_by_id auto_canceled_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_user_id (SELECT _part_offset ORDER BY user_id),
-    PROJECTION by_upstream_pipeline_id (SELECT _part_offset ORDER BY upstream_pipeline_id),
-    PROJECTION by_stage_id (SELECT _part_offset ORDER BY stage_id),
-    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY pipeline_id),
-    PROJECTION by_runner_id (SELECT _part_offset ORDER BY runner_id),
-    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY auto_canceled_by_id),
-    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id)),
-    PROJECTION by_pipeline_status (SELECT _part_offset ORDER BY (traversal_path, pipeline_id, status, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_user_id (SELECT _part_offset ORDER BY (user_id, traversal_path, id, _version)),
+    PROJECTION by_upstream_pipeline_id (SELECT _part_offset ORDER BY (upstream_pipeline_id, traversal_path, id, _version)),
+    PROJECTION by_stage_id (SELECT _part_offset ORDER BY (stage_id, traversal_path, id, _version)),
+    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY (pipeline_id, traversal_path, id, _version)),
+    PROJECTION by_runner_id (SELECT _part_offset ORDER BY (runner_id, traversal_path, id, _version)),
+    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY (auto_canceled_by_id, traversal_path, id, _version)),
+    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id, traversal_path, _version)),
+    PROJECTION by_pipeline_status (SELECT _part_offset ORDER BY (traversal_path, pipeline_id, status, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -410,9 +410,9 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     _deleted Bool DEFAULT false,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_build_id (SELECT _part_offset ORDER BY build_id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, build_id, _version)),
+    PROJECTION by_build_id (SELECT _part_offset ORDER BY (build_id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, build_id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -440,9 +440,9 @@ CREATE TABLE IF NOT EXISTS gl_label (
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_group_id group_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_group_id (SELECT _part_offset ORDER BY group_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_group_id (SELECT _part_offset ORDER BY (group_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -524,19 +524,19 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_closed_by_id closed_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_head_pipeline_id head_pipeline_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_latest_merge_request_diff_id latest_merge_request_diff_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_author_id (SELECT _part_offset ORDER BY author_id),
-    PROJECTION by_merge_user_id (SELECT _part_offset ORDER BY merge_user_id),
-    PROJECTION by_milestone_id (SELECT _part_offset ORDER BY milestone_id),
-    PROJECTION by_source_project_id (SELECT _part_offset ORDER BY source_project_id),
-    PROJECTION by_updated_by_id (SELECT _part_offset ORDER BY updated_by_id),
-    PROJECTION by_last_edited_by_id (SELECT _part_offset ORDER BY last_edited_by_id),
-    PROJECTION by_closed_by_id (SELECT _part_offset ORDER BY closed_by_id),
-    PROJECTION by_head_pipeline_id (SELECT _part_offset ORDER BY head_pipeline_id),
-    PROJECTION by_latest_merge_request_diff_id (SELECT _part_offset ORDER BY latest_merge_request_diff_id),
-    PROJECTION by_state_id (SELECT _part_offset ORDER BY (state, id)),
-    PROJECTION by_project_state (SELECT _part_offset ORDER BY (traversal_path, project_id, state, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_author_id (SELECT _part_offset ORDER BY (author_id, traversal_path, id, _version)),
+    PROJECTION by_merge_user_id (SELECT _part_offset ORDER BY (merge_user_id, traversal_path, id, _version)),
+    PROJECTION by_milestone_id (SELECT _part_offset ORDER BY (milestone_id, traversal_path, id, _version)),
+    PROJECTION by_source_project_id (SELECT _part_offset ORDER BY (source_project_id, traversal_path, id, _version)),
+    PROJECTION by_updated_by_id (SELECT _part_offset ORDER BY (updated_by_id, traversal_path, id, _version)),
+    PROJECTION by_last_edited_by_id (SELECT _part_offset ORDER BY (last_edited_by_id, traversal_path, id, _version)),
+    PROJECTION by_closed_by_id (SELECT _part_offset ORDER BY (closed_by_id, traversal_path, id, _version)),
+    PROJECTION by_head_pipeline_id (SELECT _part_offset ORDER BY (head_pipeline_id, traversal_path, id, _version)),
+    PROJECTION by_latest_merge_request_diff_id (SELECT _part_offset ORDER BY (latest_merge_request_diff_id, traversal_path, id, _version)),
+    PROJECTION by_state_id (SELECT _part_offset ORDER BY (state, id, traversal_path, _version)),
+    PROJECTION by_project_state (SELECT _part_offset ORDER BY (traversal_path, project_id, state, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -566,9 +566,9 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY (merge_request_id, traversal_path, id, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -608,10 +608,10 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_merge_request_diff_id merge_request_diff_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
-    PROJECTION by_merge_request_diff_id (SELECT _part_offset ORDER BY merge_request_diff_id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY (merge_request_id, traversal_path, id, _version)),
+    PROJECTION by_merge_request_diff_id (SELECT _part_offset ORDER BY (merge_request_diff_id, traversal_path, id, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -643,9 +643,9 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_group_id group_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_group_id (SELECT _part_offset ORDER BY group_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_group_id (SELECT _part_offset ORDER BY (group_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -683,10 +683,10 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_noteable_id noteable_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_author_id author_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_author_id (SELECT _part_offset ORDER BY author_id),
-    PROJECTION by_noteable (SELECT _part_offset ORDER BY (traversal_path, noteable_type, noteable_id, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_author_id (SELECT _part_offset ORDER BY (author_id, traversal_path, id, _version)),
+    PROJECTION by_noteable (SELECT _part_offset ORDER BY (traversal_path, noteable_type, noteable_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -730,12 +730,12 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_user_id user_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_merge_request_id merge_request_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_auto_canceled_by_id auto_canceled_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_user_id (SELECT _part_offset ORDER BY user_id),
-    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
-    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY auto_canceled_by_id),
-    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_user_id (SELECT _part_offset ORDER BY (user_id, traversal_path, id, _version)),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY (merge_request_id, traversal_path, id, _version)),
+    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY (auto_canceled_by_id, traversal_path, id, _version)),
+    PROJECTION by_status_id (SELECT _part_offset ORDER BY (status, id, traversal_path, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -765,7 +765,7 @@ CREATE TABLE IF NOT EXISTS gl_project (
     INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -792,7 +792,7 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     INDEX idx_runner_type runner_type TYPE set(4) GRANULARITY 2,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_runner_type (SELECT _part_offset ORDER BY (runner_type, id))
+    PROJECTION by_runner_type (SELECT _part_offset ORDER BY (runner_type, id, _version))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
@@ -815,10 +815,10 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_pipeline_id pipeline_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY pipeline_id),
-    PROJECTION by_build_id (SELECT _part_offset ORDER BY build_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY (pipeline_id, traversal_path, id, _version)),
+    PROJECTION by_build_id (SELECT _part_offset ORDER BY (build_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -845,10 +845,10 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_pipeline_id pipeline_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY pipeline_id),
-    PROJECTION by_pipeline (SELECT _part_offset ORDER BY (traversal_path, pipeline_id, id)),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY (pipeline_id, traversal_path, id, _version)),
+    PROJECTION by_pipeline (SELECT _part_offset ORDER BY (traversal_path, pipeline_id, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -932,13 +932,13 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_confirmed_by_id confirmed_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_resolved_by_id resolved_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_dismissed_by_id dismissed_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_finding_id (SELECT _part_offset ORDER BY finding_id),
-    PROJECTION by_author_id (SELECT _part_offset ORDER BY author_id),
-    PROJECTION by_confirmed_by_id (SELECT _part_offset ORDER BY confirmed_by_id),
-    PROJECTION by_resolved_by_id (SELECT _part_offset ORDER BY resolved_by_id),
-    PROJECTION by_dismissed_by_id (SELECT _part_offset ORDER BY dismissed_by_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_finding_id (SELECT _part_offset ORDER BY (finding_id, traversal_path, id, _version)),
+    PROJECTION by_author_id (SELECT _part_offset ORDER BY (author_id, traversal_path, id, _version)),
+    PROJECTION by_confirmed_by_id (SELECT _part_offset ORDER BY (confirmed_by_id, traversal_path, id, _version)),
+    PROJECTION by_resolved_by_id (SELECT _part_offset ORDER BY (resolved_by_id, traversal_path, id, _version)),
+    PROJECTION by_dismissed_by_id (SELECT _part_offset ORDER BY (dismissed_by_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -967,8 +967,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -1008,11 +1008,11 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     INDEX idx_scanner_id scanner_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_vulnerability_id vulnerability_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_primary_identifier_id primary_identifier_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_scanner_id (SELECT _part_offset ORDER BY scanner_id),
-    PROJECTION by_vulnerability_id (SELECT _part_offset ORDER BY vulnerability_id),
-    PROJECTION by_primary_identifier_id (SELECT _part_offset ORDER BY primary_identifier_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_scanner_id (SELECT _part_offset ORDER BY (scanner_id, traversal_path, id, _version)),
+    PROJECTION by_vulnerability_id (SELECT _part_offset ORDER BY (vulnerability_id, traversal_path, id, _version)),
+    PROJECTION by_primary_identifier_id (SELECT _part_offset ORDER BY (primary_identifier_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -1038,8 +1038,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_project_id project_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -1083,12 +1083,12 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_milestone_id milestone_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_namespace_id namespace_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_closed_by_id closed_by_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY id),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
-    PROJECTION by_author_id (SELECT _part_offset ORDER BY author_id),
-    PROJECTION by_milestone_id (SELECT _part_offset ORDER BY milestone_id),
-    PROJECTION by_namespace_id (SELECT _part_offset ORDER BY namespace_id),
-    PROJECTION by_closed_by_id (SELECT _part_offset ORDER BY closed_by_id),
+    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, _version)),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, id, _version)),
+    PROJECTION by_author_id (SELECT _part_offset ORDER BY (author_id, traversal_path, id, _version)),
+    PROJECTION by_milestone_id (SELECT _part_offset ORDER BY (milestone_id, traversal_path, id, _version)),
+    PROJECTION by_namespace_id (SELECT _part_offset ORDER BY (namespace_id, traversal_path, id, _version)),
+    PROJECTION by_closed_by_id (SELECT _part_offset ORDER BY (closed_by_id, traversal_path, id, _version)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -1111,7 +1111,7 @@ CREATE TABLE IF NOT EXISTS gl_ci_edge (
     INDEX idx_target_id target_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
-    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
+    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind, source_id, source_kind, target_kind, _version)),
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
@@ -1140,8 +1140,8 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     INDEX idx_branch branch TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
-    PROJECTION by_source (SELECT _part_offset ORDER BY (traversal_path, source_id, relationship_kind)),
-    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, project_id, branch, target_id, relationship_kind)),
+    PROJECTION by_source (SELECT _part_offset ORDER BY (traversal_path, source_id, relationship_kind, project_id, branch, target_id, source_kind, target_kind, _version)),
+    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, project_id, branch, target_id, relationship_kind, source_id, source_kind, target_kind, _version)),
     PROJECTION node_edge_counts (
       SELECT traversal_path, project_id, branch, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, project_id, branch, source_kind, target_kind, relationship_kind
@@ -1165,7 +1165,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     INDEX idx_target_id target_id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
-    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind)),
+    PROJECTION by_target (SELECT _part_offset ORDER BY (traversal_path, target_id, relationship_kind, source_id, source_kind, target_kind, _version)),
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
