@@ -68,6 +68,18 @@ appConfigDefaults:
     url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
     stream_name: "e2e_siphon_event_stream"
     oversize_bucket_name: "e2e_siphon_oversize_bucket"
+    # Since siphon 0.0.99-beta the oversize/snapshot event store is configured
+    # via object_storage_config and defaults to bucket "repl_events_bucket".
+    # Only the producer's SetupNatsStreams creates an object store, and it
+    # creates the one named by oversize_bucket_name — the queue itself just
+    # opens object_storage_config.bucket_name (get, never create). So the two
+    # must name the same bucket or the producer/consumer crash-loop with
+    # "getting NATS object store: bucket not found". Pin it to the bucket we
+    # actually create. All three fields are required when this block is set.
+    object_storage_config:
+      identifier: "nats-object-storage"
+      type: "nats"
+      bucket_name: "e2e_siphon_oversize_bucket"
   clickhouse:
     host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
     port: 9000
