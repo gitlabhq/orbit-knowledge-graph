@@ -723,8 +723,11 @@ pub async fn page_cap_persists_cursor_and_resumes(ctx: &TestContext) {
     let cursor_values =
         ArrowUtils::get_column_by_name::<StringArray>(&cp[0], "cursor_values").unwrap();
     let raw = cursor_values.value(0);
+    // The shared SDLC `Cursor` formats timestamps as ISO `…T…Z` (no
+    // sub-second precision), so the persisted keyset cursor lands at note 2's
+    // whole-second `created_at`.
     assert!(
-        raw != "null" && raw.contains("2024-01-15 10:00:00"),
+        raw != "null" && raw.contains("2024-01-15T10:00:00Z"),
         "cap exit persists the keyset cursor at note 2, got {raw:?}"
     );
 

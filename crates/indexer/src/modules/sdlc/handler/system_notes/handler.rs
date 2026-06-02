@@ -33,7 +33,9 @@ use serde_json::json;
 use tracing::{info, warn};
 
 use super::emit::EmittedEdge;
-use super::extract::SYSTEM_NOTES_EXTRACT_SQL;
+use super::extract::{
+    CURSOR_ADVANCE_KEY, CURSOR_PLACEHOLDER, CURSOR_SORT_KEY, SYSTEM_NOTES_EXTRACT_SQL,
+};
 use super::resolve::{
     EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
     RouteRow, WORK_ITEMS_SQL,
@@ -42,9 +44,10 @@ use super::vendored::icon_types::{HANDLED_CROSS_REFERENCE_ACTIONS, HANDLED_LIFEC
 use super::{DefaultProjectLookup, ExtractedNote, plan_for_batch, process_batch};
 use crate::IndexerConfig;
 use crate::checkpoint::{Checkpoint, CheckpointStore, ClickHouseCheckpointStore};
-use crate::clickhouse::ClickHouseConfigurationExt;
+use crate::clickhouse::{ClickHouseConfigurationExt, TIMESTAMP_FORMAT};
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerInitError, HandlerRegistry};
 use crate::modules::sdlc::datalake::{Datalake, DatalakeQuery};
+use crate::modules::sdlc::plan::{Cursor, CursorFilter, Filter};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::{NAMESPACE_HANDLER_TOPIC, NamespaceIndexingRequest};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
@@ -69,46 +72,6 @@ const DEFAULT_BATCH_LIMIT: u64 = 10_000;
 /// monopolise a worker. On hitting the cap the keyset cursor is persisted to
 /// the checkpoint so the next message resumes from it rather than re-scanning.
 const MAX_PAGES_PER_RUN: usize = 1_000;
-
-/// Keyset pagination cursor over the extract query's `ORDER BY (created_at,
-/// id)`. Persisted to the checkpoint's `cursor_values` (`[created_at, id]`)
-/// so a page-cap exit or crash resumes exactly after the last processed
-/// row instead of restarting the window.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Cursor {
-    created_at: DateTime<Utc>,
-    id: i64,
-}
-
-impl Cursor {
-    /// Cursor at the start of a window: the first keyset comparison
-    /// `(created_at, id) > (lower_bound, 0)` then admits every row.
-    fn start(lower_bound: DateTime<Utc>) -> Self {
-        Self {
-            created_at: lower_bound,
-            id: 0,
-        }
-    }
-
-    /// `[created_at, id]` for the checkpoint `cursor_values` column.
-    fn encode(&self) -> Vec<String> {
-        vec![format_ch(self.created_at), self.id.to_string()]
-    }
-
-    /// Parse a previously-encoded `cursor_values`. Returns `None` for a
-    /// completed checkpoint (`None`/empty) or any malformed value, in which
-    /// case the caller falls back to a fresh window rather than risk
-    /// resuming from a bad position.
-    fn decode(values: Option<&[String]>) -> Option<Self> {
-        let [created_at, id] = values? else {
-            return None;
-        };
-        Some(Self {
-            created_at: parse_ch(created_at)?,
-            id: id.parse().ok()?,
-        })
-    }
-}
 
 /// All Rails `system_note_metadata.action` values the parser handles,
 /// bound into the extract query's `{actions:Array(String)}` IN-list so the
@@ -241,22 +204,21 @@ impl Handler for SystemNotesHandler {
             .await
             .map_err(|e| HandlerError::Processing(e.to_string()))?;
 
-        // The keyset `(created_at, id)` cursor is the source of truth for
-        // position; the watermark window is a coarse range around it. A
-        // completed checkpoint (`cursor_values: None`) advances the window
-        // lower bound to its watermark. An in-progress one (`cursor_values:
-        // Some`) means a prior run stopped mid-window (page cap or crash) —
+        // The keyset cursor is the source of truth for position; the
+        // watermark window is a coarse range around it. Reuses the shared
+        // SDLC `Cursor` (the same keyset machinery as the entity pipeline in
+        // `handler/entity.rs`): a completed checkpoint (`cursor_values: None`)
+        // yields an empty (first-page) cursor and advances the window lower
+        // bound to its watermark; an in-progress one (`cursor_values: Some`)
+        // means a prior run stopped mid-window (page cap or crash), so we
         // re-open from epoch and let the cursor keyset-skip what was already
-        // processed, mirroring the entity handler in `handler/entity.rs`.
+        // processed.
         let (last_watermark, mut cursor) = match &checkpoint {
-            Some(cp) => match Cursor::decode(cp.cursor_values.as_deref()) {
-                Some(resumed) => (DateTime::<Utc>::UNIX_EPOCH, resumed),
-                None => (cp.watermark, Cursor::start(cp.watermark)),
-            },
-            None => (
-                DateTime::<Utc>::UNIX_EPOCH,
-                Cursor::start(DateTime::<Utc>::UNIX_EPOCH),
-            ),
+            Some(cp) if cp.cursor_values.is_some() => {
+                (DateTime::<Utc>::UNIX_EPOCH, Cursor::from_checkpoint(cp))
+            }
+            Some(cp) => (cp.watermark, Cursor::first_page()),
+            None => (DateTime::<Utc>::UNIX_EPOCH, Cursor::first_page()),
         };
 
         let edge_table = prefixed_table_name(EDGE_TABLE, *SCHEMA_VERSION);
@@ -275,13 +237,12 @@ impl Handler for SystemNotesHandler {
         let mut drained = true;
 
         for page in 0..self.max_pages {
-            let notes = self
+            let (notes, advanced) = self
                 .extract_page(
                     &request.traversal_path,
                     last_watermark,
                     request.watermark,
-                    cursor.created_at,
-                    cursor.id,
+                    &cursor,
                 )
                 .await?;
 
@@ -291,13 +252,10 @@ impl Handler for SystemNotesHandler {
             total_notes += notes.len();
             let page_was_full = notes.len() as u64 >= self.batch_limit;
 
-            // Advance the cursor to the last row of this page before
-            // consuming the batch (rows are ORDER BY created_at, id).
-            let last = &notes[notes.len() - 1];
-            cursor = Cursor {
-                created_at: last.created_at,
-                id: last.id,
-            };
+            // Advance the cursor to the last row of this page (the rows are
+            // `ORDER BY sn.created_at, sn.id`, so the shared `Cursor::advance`
+            // reads the keyset off the final batch row).
+            cursor = advanced;
 
             let edges = self.resolve_and_emit(&notes).await?;
 
@@ -325,7 +283,7 @@ impl Handler for SystemNotesHandler {
                         &key,
                         &Checkpoint {
                             watermark: request.watermark,
-                            cursor_values: Some(cursor.encode()),
+                            cursor_values: cursor.to_checkpoint_values(),
                         },
                     )
                     .await
@@ -341,7 +299,7 @@ impl Handler for SystemNotesHandler {
                     &key,
                     &Checkpoint {
                         watermark: request.watermark,
-                        cursor_values: Some(cursor.encode()),
+                        cursor_values: cursor.to_checkpoint_values(),
                     },
                 )
                 .await
@@ -376,28 +334,42 @@ impl Handler for SystemNotesHandler {
 }
 
 impl SystemNotesHandler {
-    /// Run one page of the extract query and decode the rows.
+    /// Run one page of the extract query, decode the rows, and return the
+    /// cursor advanced past the last row of the page. The keyset predicate
+    /// is produced by the shared [`CursorFilter`] over [`CURSOR_SORT_KEY`]
+    /// and substituted into the `{{cursor}}` placeholder, so paging reuses
+    /// the SDLC pipeline's cursor SQL rather than a hand-written clause.
     async fn extract_page(
         &self,
         traversal_path: &str,
         last_watermark: DateTime<Utc>,
         watermark: DateTime<Utc>,
-        cursor_created_at: DateTime<Utc>,
-        cursor_id: i64,
-    ) -> Result<Vec<ExtractedNote>, HandlerError> {
+        cursor: &Cursor,
+    ) -> Result<(Vec<ExtractedNote>, Cursor), HandlerError> {
+        let sort_key: Vec<String> = CURSOR_SORT_KEY.iter().map(|s| s.to_string()).collect();
+        let cursor_clause = CursorFilter {
+            sort_key: &sort_key,
+            values: cursor.values(),
+        }
+        .condition();
+        let cursor_sql = if cursor_clause.is_empty() {
+            String::new()
+        } else {
+            format!("AND ({cursor_clause})")
+        };
+        let sql = SYSTEM_NOTES_EXTRACT_SQL.replace(CURSOR_PLACEHOLDER, &cursor_sql);
+
         let mut params = json!({
             "traversal_path": traversal_path,
-            "last_watermark": format_ch(last_watermark),
-            "watermark": format_ch(watermark),
-            "cursor_created_at": format_ch(cursor_created_at),
-            "cursor_id": cursor_id,
+            "last_watermark": last_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            "watermark": watermark.format(TIMESTAMP_FORMAT).to_string(),
             "batch_limit": self.batch_limit,
         });
         params[super::extract::ACTIONS_PARAM_NAME] = json!(handled_actions());
 
         let batches = self
             .datalake
-            .query_batches(SYSTEM_NOTES_EXTRACT_SQL, params, Some(self.batch_limit))
+            .query_batches(&sql, params, Some(self.batch_limit))
             .await
             .map_err(|e| HandlerError::Processing(format!("system_notes extract: {e}")))?;
 
@@ -405,7 +377,16 @@ impl SystemNotesHandler {
         for batch in &batches {
             decode_extracted_notes(batch, &mut notes);
         }
-        Ok(notes)
+
+        // Advance the cursor off the last non-empty batch. The cursor sort
+        // key is table-qualified (`sn.created_at`), but the SELECT aliases
+        // those to bare `created_at` / `id`, so advance on the bare names.
+        let advance_key: Vec<String> = CURSOR_ADVANCE_KEY.iter().map(|s| s.to_string()).collect();
+        let advanced = match batches.iter().rev().find(|b| b.num_rows() > 0) {
+            Some(batch) => Cursor::first_page().advance(batch, &advance_key)?,
+            None => cursor.clone(),
+        };
+        Ok((notes, advanced))
     }
 
     /// Resolve the batch's references against the datalake and emit edges.
@@ -628,26 +609,19 @@ fn pairs_with_project_id(
 
 fn decode_extracted_notes(batch: &RecordBatch, out: &mut Vec<ExtractedNote>) {
     for row in 0..batch.num_rows() {
-        let (
-            Some(id),
-            Some(noteable_id),
-            Some(noteable_type),
-            Some(created_at),
-            Some(tp),
-            Some(action),
-        ) = (
-            ArrowUtils::get_column::<Int64Type>(batch, "id", row),
+        // `sn.id` stays in the SELECT (the cursor advances off it via the
+        // result batch) but isn't carried on `ExtractedNote` — parse, resolve
+        // and emit key off `noteable_id` / `created_at`, not the note id.
+        let (Some(noteable_id), Some(noteable_type), Some(created_at), Some(tp), Some(action)) = (
             ArrowUtils::get_column::<Int64Type>(batch, "noteable_id", row),
             ArrowUtils::get_column_string(batch, "noteable_type", row),
             col_timestamp_micros(batch, "created_at", row),
             ArrowUtils::get_column_string(batch, "traversal_path", row),
             ArrowUtils::get_column_string(batch, "action", row),
-        )
-        else {
+        ) else {
             continue;
         };
         out.push(ExtractedNote {
-            id,
             note: ArrowUtils::get_column_string(batch, "note", row).unwrap_or_default(),
             noteable_id,
             noteable_type,
@@ -666,17 +640,6 @@ fn decode_extracted_notes(batch: &RecordBatch, out: &mut Vec<ExtractedNote>) {
 fn col_timestamp_micros(batch: &RecordBatch, name: &str, row: usize) -> Option<DateTime<Utc>> {
     let micros = ArrowUtils::get_column::<TimestampMicrosecondType>(batch, name, row)?;
     DateTime::<Utc>::from_timestamp_micros(micros)
-}
-
-fn format_ch(ts: DateTime<Utc>) -> String {
-    ts.format("%Y-%m-%d %H:%M:%S%.6f").to_string()
-}
-
-/// Inverse of [`format_ch`] for decoding a persisted cursor timestamp.
-fn parse_ch(s: &str) -> Option<DateTime<Utc>> {
-    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.6f")
-        .ok()
-        .map(|naive| naive.and_utc())
 }
 
 /// `gl_edge` column specs derived from the ontology so the write schema

@@ -63,7 +63,6 @@ use resolve::{ResolutionPlan, ResolvedTarget};
 /// and emits edges from these rows in batches.
 #[derive(Debug, Clone)]
 pub(crate) struct ExtractedNote {
-    pub id: i64,
     pub note: String,
     pub noteable_id: i64,
     pub noteable_type: String,
@@ -186,15 +185,8 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    fn make_note(
-        id: i64,
-        action: &str,
-        body: &str,
-        noteable_type: &str,
-        noteable_id: i64,
-    ) -> ExtractedNote {
+    fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {
         ExtractedNote {
-            id,
             note: body.to_string(),
             noteable_id,
             noteable_type: noteable_type.to_string(),
@@ -209,7 +201,6 @@ mod tests {
     #[test]
     fn process_batch_emits_mentions_edge_for_cross_reference() {
         let notes = vec![make_note(
-            1,
             "cross_reference",
             "mentioned in !456",
             "MergeRequest",
@@ -231,7 +222,6 @@ mod tests {
         // resolver the source note's owning project from the lookup so the
         // edge resolves against the right project.
         let notes = vec![make_note(
-            1,
             "cross_reference",
             "mentioned in !456",
             "MergeRequest",
@@ -254,7 +244,7 @@ mod tests {
 
     #[test]
     fn process_batch_emits_user_closed_edge_for_lifecycle_action() {
-        let notes = vec![make_note(2, "closed", "closed", "Issue", 999)];
+        let notes = vec![make_note("closed", "closed", "Issue", 999)];
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "CLOSED");
@@ -264,14 +254,14 @@ mod tests {
 
     #[test]
     fn process_batch_drops_unknown_action_silently() {
-        let notes = vec![make_note(3, "designs_added", "", "MergeRequest", 1)];
+        let notes = vec![make_note("designs_added", "", "MergeRequest", 1)];
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert!(edges.is_empty());
     }
 
     #[test]
     fn process_batch_drops_unsupported_noteable_type_silently() {
-        let notes = vec![make_note(4, "closed", "closed", "Snippet", 1)];
+        let notes = vec![make_note("closed", "closed", "Snippet", 1)];
         let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
         assert!(edges.is_empty());
     }
@@ -280,21 +270,18 @@ mod tests {
     fn plan_for_batch_collects_distinct_iid_pairs() {
         let notes = vec![
             make_note(
-                1,
                 "cross_reference",
                 "mentioned in gitlab-org/gitlab!42",
                 "MergeRequest",
                 100,
             ),
             make_note(
-                2,
                 "cross_reference",
                 "mentioned in gitlab-org/gitlab!42",
                 "MergeRequest",
                 101,
             ),
             make_note(
-                3,
                 "cross_reference",
                 "mentioned in gitlab-org/gitlab#9",
                 "MergeRequest",
