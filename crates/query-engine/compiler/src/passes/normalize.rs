@@ -102,15 +102,19 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     for table in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(table) {
-            input.compiler.table_columns.insert(
-                table.to_string(),
-                config
-                    .storage
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<HashSet<_>>(),
-            );
+            let mut col_set: HashSet<_> = config
+                .storage
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect();
+            for dc in &config.storage.denormalized_columns {
+                col_set.insert(dc.name.clone());
+            }
+            input
+                .compiler
+                .table_columns
+                .insert(table.to_string(), col_set);
         }
     }
 
@@ -612,5 +616,40 @@ mod tests {
         );
 
         assert_eq!(result.relationships[0].fk_column, None);
+    }
+
+    #[test]
+    fn table_columns_include_denormalized_columns() {
+        let result = normalize_query(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [
+                    {"type": "MEMBER_OF", "from": "u", "to": "g"}
+                ]
+            }"#,
+        );
+
+        let edge_cols = result
+            .compiler
+            .table_columns
+            .get("gl_edge")
+            .expect("gl_edge must be in table_columns");
+
+        assert!(
+            edge_cols.contains("source_tags"),
+            "table_columns[gl_edge] must include denormalized source_tags"
+        );
+        assert!(
+            edge_cols.contains("target_tags"),
+            "table_columns[gl_edge] must include denormalized target_tags"
+        );
+        assert!(
+            edge_cols.contains("source_id"),
+            "table_columns[gl_edge] must include storage column source_id"
+        );
     }
 }
