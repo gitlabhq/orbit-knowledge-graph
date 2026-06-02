@@ -61,7 +61,10 @@ pub struct CodeIndexingPipeline {
 }
 
 impl CodeIndexingPipeline {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "pipeline constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub fn new(
         resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
@@ -287,7 +290,10 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "internal indexing step threads the full per-run context; splitting would not improve clarity"
+    )]
     async fn run_indexing(
         &self,
         context: &HandlerContext,

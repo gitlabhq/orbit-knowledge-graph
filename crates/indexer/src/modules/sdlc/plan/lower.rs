@@ -266,7 +266,10 @@ fn lower_filters(filters: &[EdgeFilter]) -> Option<String> {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQL builder takes each edge-transform input as a distinct typed parameter"
+)]
 fn build_edge_transform_sql(
     source_id: &str,
     source_kind: &str,

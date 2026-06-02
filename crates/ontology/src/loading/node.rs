@@ -14,7 +14,14 @@ use super::EtlSettings;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
-    #[allow(dead_code)]
+    /// Canonical entity name (e.g. `Project`, `MergeRequest`). Mirrors the
+    /// `schema.yaml` registry key the loader actually reads for node identity;
+    /// kept here as human-facing self-documentation so each node file states
+    /// which entity it defines without cross-referencing `schema.yaml`.
+    #[expect(
+        dead_code,
+        reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
+    )]
     node_type: String,
     domain: String,
     #[serde(default)]

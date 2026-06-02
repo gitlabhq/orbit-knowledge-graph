@@ -179,12 +179,10 @@ pub mod test_utils {
     use parking_lot::Mutex;
     use std::collections::HashMap;
 
-    #[allow(dead_code)]
     pub struct MockCodeCheckpointStore {
         checkpoints: Mutex<HashMap<(String, i64, String), CodeIndexingCheckpoint>>,
     }
 
-    #[allow(dead_code)]
     impl MockCodeCheckpointStore {
         pub fn new() -> Self {
             Self {

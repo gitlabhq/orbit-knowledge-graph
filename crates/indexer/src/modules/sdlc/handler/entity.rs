@@ -41,7 +41,10 @@ struct IndexingRequest {
 }
 
 impl EntityHandler {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub(in crate::modules::sdlc) fn new(
         plan: Plan,
         scope: EtlScope,

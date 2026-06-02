@@ -107,7 +107,10 @@ pub struct MigrationCompletionChecker {
 }
 
 impl MigrationCompletionChecker {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "completion checker constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub fn new(
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
