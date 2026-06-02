@@ -17,6 +17,7 @@ use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
+    let is_aggregation = matches!(plan.body, PlanBody::Aggregation { .. });
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
@@ -29,11 +30,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
-        // Build edge source: UNION ALL for multi-hop, plain scan for single.
+        // Build edge source: UNION ALL for multi-hop, FINAL for single-hop
+        // aggregations (correctness: dedup un-merged versions before counting),
+        // plain scan otherwise.
         let edge_source = if is_multi_hop {
             let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
             where_parts.extend(union_wheres);
             union
+        } else if is_aggregation {
+            TableRef::scan_final(&hop.edge_table, &alias)
         } else {
             TableRef::scan(&hop.edge_table, &alias)
         };
@@ -64,9 +69,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &alias,
                 hop,
                 &plan.nodes,
-                start_col,
-                end_col,
                 &plan.table_columns,
+                false,
             );
         }
 
@@ -140,9 +144,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                                     &format!("{edge_alias}n"),
                                     hop,
                                     &plan.nodes,
-                                    start_col,
-                                    end_col,
                                     &plan.table_columns,
+                                    false,
                                 );
                                 Expr::conjoin(nw)
                             },
