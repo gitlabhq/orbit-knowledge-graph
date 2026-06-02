@@ -7,9 +7,7 @@
 #
 # Identifiers MUST match `application_identifier` values in `values/siphon.yaml.gotmpl`.
 
-# Required since siphon 0.0.99-beta: the main NATS stream name. Must match the
-# producer's `queueing.stream_name` in `values/siphon.yaml.gotmpl`. Used to
-# auto-generate consumer names as "<stream_name>-consumer-<stream_identifier>".
+# Required since siphon 0.0.99-beta; must match the producer's queueing.stream_name.
 stream_name: e2e_siphon_event_stream
 
 producers:

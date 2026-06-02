@@ -20,14 +20,9 @@ gitlab:
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
   #
-  # DEPENDENCY: temporarily pinned to gitlab-org/gitlab!238905 commit cedc59d0,
-  # which adds `refresh_on_change: projects` to db/siphon/tables/namespaces.yml
-  # (refresh the projects stream when its namespace changes). This MR's e2e relies
-  # on that rule, so the pin must stay here until !238905 merges. The MR touches
-  # only siphon replication config, not the namespaces table schema, so the CNG
-  # image digests below stay on their master pin without schema skew.
-  # PRE-MERGE: once !238905 is on master, move this ref to a master commit that
-  # includes it (via scripts/bump-gitlab-pins.sh) and drop this note.
+  # DEPENDENCY: pinned to gitlab-org/gitlab!238905 (commit cedc59d0) for its
+  # refresh_on_change rule in db/siphon/tables/namespaces.yml; move to a master
+  # commit once it merges. Replication-config only, so CNG digests stay pinned.
   ref: "cedc59d0cd0fb926b6c3f7ffdbd53ca8dd2e1bed"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image

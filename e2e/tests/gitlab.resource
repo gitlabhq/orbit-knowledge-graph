@@ -114,14 +114,9 @@ Enable Knowledge Graph Once
     END
 
 Create Project
-    [Documentation]    Create a project under ${namespace_id} and return its dict. The
-    ...                project's traversal_path is populated asynchronously: Siphon's
-    ...                refresh_on_change rule (namespaces -> projects) re-emits the projects
-    ...                row once the namespace's traversal_path lands, so the
-    ...                `project_namespace_traversal_paths_mv` chain re-fires without a manual
-    ...                nudge. Callers must wait for indexing rather than assume the row is
-    ...                immediately queryable. This is the path under test: if refresh_on_change
-    ...                regresses, the per-entity waits below will fail here.
+    [Documentation]    Create a project under ${namespace_id} and return its dict. Its
+    ...                traversal_path lands asynchronously via Siphon's refresh_on_change
+    ...                rule (namespaces -> projects), so callers must wait for indexing.
     [Arguments]    ${name}    ${namespace_id}    ${visibility}=public
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=${visibility}
