@@ -236,15 +236,26 @@ impl Handler for SystemNotesHandler {
         // so the "exactly N full pages then empty" boundary still drains.
         let mut drained = true;
 
+        // The cursor for page N+1 is known as soon as page N's extract
+        // returns (it advances off N's last row), so prefetch the next page's
+        // extract concurrently with resolving + writing the current page —
+        // the datalake read for N+1 overlaps the resolver/write round-trips
+        // for N rather than running strictly after them. The prefetch only
+        // reads (`&self`), so it can't race the writer or checkpoint store.
+        let mut pending = Some(
+            self.extract_page(
+                &request.traversal_path,
+                last_watermark,
+                request.watermark,
+                &cursor,
+            )
+            .await?,
+        );
+
         for page in 0..self.max_pages {
-            let (notes, advanced) = self
-                .extract_page(
-                    &request.traversal_path,
-                    last_watermark,
-                    request.watermark,
-                    &cursor,
-                )
-                .await?;
+            let Some((notes, advanced)) = pending.take() else {
+                break;
+            };
 
             if notes.is_empty() {
                 break;
@@ -256,6 +267,19 @@ impl Handler for SystemNotesHandler {
             // `ORDER BY sn.created_at, sn.id`, so the shared `Cursor::advance`
             // reads the keyset off the final batch row).
             cursor = advanced;
+
+            // Kick off the next page's extract before resolving/writing this
+            // one, so the two overlap. Skipped once we know this is the last
+            // page (short page, or the page-cap boundary below).
+            let at_page_cap = page + 1 == self.max_pages;
+            let prefetch = (page_was_full && !at_page_cap).then(|| {
+                self.extract_page(
+                    &request.traversal_path,
+                    last_watermark,
+                    request.watermark,
+                    &cursor,
+                )
+            });
 
             let edges = self.resolve_and_emit(&notes).await?;
 
@@ -274,26 +298,9 @@ impl Handler for SystemNotesHandler {
                 break;
             }
 
-            if page + 1 == self.max_pages {
-                // Last allowed iteration and the page was still full, so the
-                // window may have more rows. Persist the cursor and stop;
-                // the next message resumes from it.
-                self.checkpoint_store
-                    .save_progress(
-                        &key,
-                        &Checkpoint {
-                            watermark: request.watermark,
-                            cursor_values: cursor.to_checkpoint_values(),
-                        },
-                    )
-                    .await
-                    .map_err(|e| HandlerError::Processing(e.to_string()))?;
-                drained = false;
-                break;
-            }
-
-            // Mid-window full page: persist the cursor so a crash resumes
-            // here rather than re-scanning the window from the start.
+            // Persist the cursor after every full page so a crash (or the
+            // page-cap exit below) resumes from here rather than re-scanning
+            // the window from the start.
             self.checkpoint_store
                 .save_progress(
                     &key,
@@ -304,6 +311,20 @@ impl Handler for SystemNotesHandler {
                 )
                 .await
                 .map_err(|e| HandlerError::Processing(e.to_string()))?;
+
+            if at_page_cap {
+                // Last allowed iteration and the page was still full, so the
+                // window may have more rows; the cursor we just persisted lets
+                // the next message resume.
+                drained = false;
+                break;
+            }
+
+            // Await the prefetched next page (kicked off above).
+            pending = match prefetch {
+                Some(fut) => Some(fut.await?),
+                None => None,
+            };
         }
 
         if drained {
@@ -493,13 +514,20 @@ impl SystemNotesHandler {
         }
 
         let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
+        // The routes lookup must complete first — it maps each project path
+        // to a `project_id` that the MR/work-item `(project_id, iid)` lookups
+        // key on.
         let routes = self.query_routes(&paths).await?;
 
         let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
         let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
 
-        let mr_entities = self.query_entities(MERGE_REQUESTS_SQL, &mr_pairs).await?;
-        let wi_entities = self.query_entities(WORK_ITEMS_SQL, &wi_pairs).await?;
+        // The MR and work-item lookups are independent, so run them
+        // concurrently rather than serially.
+        let (mr_entities, wi_entities) = tokio::try_join!(
+            self.query_entities(MERGE_REQUESTS_SQL, &mr_pairs),
+            self.query_entities(WORK_ITEMS_SQL, &wi_pairs),
+        )?;
 
         Ok(ResolvedIndex::build(&routes, &mr_entities, &wi_entities))
     }
