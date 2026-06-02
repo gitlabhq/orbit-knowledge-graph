@@ -485,6 +485,7 @@ pub(super) fn build_multi_hop_union(
     hop: &Hop,
     alias: &str,
     nodes: &HashMap<String, NodePlan>,
+    table_columns: &HashMap<String, HashSet<String>>,
 ) -> (TableRef, Vec<Expr>) {
     let start = hop.min_hops.max(1);
     let (start_col, end_col) = hop.direction.edge_columns();
@@ -505,6 +506,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
+                table_columns,
             )
         })
         .collect();
@@ -540,9 +542,18 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
+    table_columns: &HashMap<String, HashSet<String>>,
 ) -> Query {
-    let mut from = TableRef::scan(edge_table, "e1");
-    // First edge: relationship kind + _deleted filter.
+    let needs_dedup = depth >= 2;
+    let edge_scan = |alias: &str| -> TableRef {
+        if needs_dedup {
+            dedup_edge_scan(edge_table, alias, table_columns)
+        } else {
+            TableRef::scan(edge_table, alias)
+        }
+    };
+
+    let mut from = edge_scan("e1");
     let mut where_parts = Vec::new();
     if let Some(types) = type_filter
         && let Some(f) = Expr::col_in(
@@ -557,16 +568,19 @@ pub(super) fn build_depth_arm(
     {
         where_parts.push(f);
     }
-    where_parts.push(deleted_false("e1"));
+    if !needs_dedup {
+        where_parts.push(deleted_false("e1"));
+    }
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let right = TableRef::scan(edge_table, &curr);
+        let right = edge_scan(&curr);
         let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
-        // _deleted = false on every chained edge.
-        join_on = Expr::and(join_on, deleted_false(&curr));
+        if !needs_dedup {
+            join_on = Expr::and(join_on, deleted_false(&curr));
+        }
         if let Some(types) = type_filter
             && let Some(tc) = Expr::col_in(
                 &curr,

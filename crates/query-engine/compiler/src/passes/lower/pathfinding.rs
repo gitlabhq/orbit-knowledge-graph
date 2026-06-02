@@ -6,7 +6,7 @@
 //! then combines via direct (depth-1) + intersection (forward meets backward).
 //! Dedup is baked into anchor CTEs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
 use serde_json::Value;
@@ -16,6 +16,7 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
+use super::helpers::dedup_edge_scan;
 use crate::passes::plan::{NodePlan, PathFindingBody, Plan};
 use crate::passes::shared::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
@@ -66,6 +67,7 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
         include_tp: pf.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
+        table_columns: &plan.table_columns,
     };
 
     let forward_cte = Cte::new(
@@ -428,6 +430,7 @@ struct FrontierOpts<'a> {
     scope_cte: Option<&'a str>,
     include_tp: bool,
     anchor_denorm_tags: Vec<Expr>,
+    table_columns: &'a HashMap<String, HashSet<String>>,
 }
 
 fn build_frontier(
@@ -462,9 +465,18 @@ fn build_frontier_arm(
         FDir::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
     };
 
+    let needs_dedup = depth >= 2;
+    let frontier_edge_scan = |alias: &str| -> TableRef {
+        if needs_dedup && opts.edge_tables.len() == 1 {
+            dedup_edge_scan(&opts.edge_tables[0], alias, opts.table_columns)
+        } else {
+            edge_table_scan(opts.edge_tables, alias)
+        }
+    };
+
     let last = format!("e{depth}");
 
-    let mut from = edge_table_scan(opts.edge_tables, "e1");
+    let mut from = frontier_edge_scan("e1");
     // Use specific first-hop filter if provided, otherwise fall back to
     // the general rel_type_filter so e1 isn't left unfiltered.
     let effective_first = if opts.first_hop_filter.is_some() {
@@ -476,7 +488,7 @@ fn build_frontier_arm(
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let edge_tbl = edge_table_scan(opts.edge_tables, &curr);
+        let edge_tbl = frontier_edge_scan(&curr);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         if opts.include_tp {
             join_cond = Expr::and(
@@ -493,7 +505,9 @@ fn build_frontier_arm(
         if let Some(sc) = opts.scope_cte {
             join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
         }
-        join_cond = Expr::and(join_cond, deleted_false(&curr));
+        if !needs_dedup {
+            join_cond = Expr::and(join_cond, deleted_false(&curr));
+        }
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
 
@@ -553,7 +567,11 @@ fn build_frontier_arm(
         select.push(SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN));
     }
 
-    let deleted_cond = Some(deleted_false("e1"));
+    let deleted_cond = if needs_dedup {
+        None
+    } else {
+        Some(deleted_false("e1"))
+    };
 
     let mut all_conds = vec![
         anchor_cond,

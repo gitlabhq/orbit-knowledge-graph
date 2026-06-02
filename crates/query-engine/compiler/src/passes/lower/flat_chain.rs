@@ -33,7 +33,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
         // Build edge source: UNION ALL for multi-hop, plain scan for single.
         let edge_source = if is_multi_hop {
-            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
+            let (union, union_wheres) =
+                build_multi_hop_union(hop, &alias, &plan.nodes, &plan.table_columns);
             where_parts.extend(union_wheres);
             union
         } else if dedup_edges {
