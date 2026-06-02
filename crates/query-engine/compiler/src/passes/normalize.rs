@@ -617,4 +617,39 @@ mod tests {
 
         assert_eq!(result.relationships[0].fk_column, None);
     }
+
+    #[test]
+    fn table_columns_include_denormalized_columns() {
+        let result = normalize_query(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "g", "entity": "Group"}
+                ],
+                "relationships": [
+                    {"type": "MEMBER_OF", "from": "u", "to": "g"}
+                ]
+            }"#,
+        );
+
+        let edge_cols = result
+            .compiler
+            .table_columns
+            .get("gl_edge")
+            .expect("gl_edge must be in table_columns");
+
+        assert!(
+            edge_cols.contains("source_tags"),
+            "table_columns[gl_edge] must include denormalized source_tags"
+        );
+        assert!(
+            edge_cols.contains("target_tags"),
+            "table_columns[gl_edge] must include denormalized target_tags"
+        );
+        assert!(
+            edge_cols.contains("source_id"),
+            "table_columns[gl_edge] must include storage column source_id"
+        );
+    }
 }
