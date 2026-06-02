@@ -111,6 +111,7 @@ impl SnowplowIndexingObserver {
 
     fn emit(&self) {
         let Some(dispatch_id) = self.dispatch_id else {
+            tracing::warn!("indexing analytics event dropped: dispatch_id was never set");
             return;
         };
         let (namespace_id, root_namespace_id) = self.namespace_ids();

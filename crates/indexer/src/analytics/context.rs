@@ -28,6 +28,12 @@ fn validation<E: std::fmt::Display>(field: &'static str) -> impl FnOnce(E) -> La
     }
 }
 
+/// Clamp to `i64::MAX` so an over-range count can't wrap to a negative,
+/// schema-invalid value (the Iglu schemas cap these fields at `i64::MAX`).
+fn saturating_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
 pub(crate) fn build_common(
     config: &AnalyticsConfig,
     root_namespace_id: Option<i64>,
@@ -88,11 +94,11 @@ pub(crate) fn build_sdlc(inputs: SdlcInputs) -> Result<OrbitSdlcIndexingContext,
                 .map(str::parse)
                 .transpose()
                 .map_err(validation("campaign_id"))?,
-            read_rows: inputs.read_rows as i64,
-            read_bytes: inputs.read_bytes as i64,
-            written_rows: inputs.written_rows as i64,
-            written_bytes: inputs.written_bytes as i64,
-            duration_ms: inputs.duration_ms as i64,
+            read_rows: saturating_i64(inputs.read_rows),
+            read_bytes: saturating_i64(inputs.read_bytes),
+            written_rows: saturating_i64(inputs.written_rows),
+            written_bytes: saturating_i64(inputs.written_bytes),
+            duration_ms: saturating_i64(inputs.duration_ms),
         },
     ))
 }
@@ -159,17 +165,17 @@ pub(crate) fn build_code(inputs: CodeInputs) -> Result<OrbitCodeIndexingContext,
                 .map(str::parse)
                 .transpose()
                 .map_err(validation("campaign_id"))?,
-            files_discovered: inputs.files_discovered as i64,
-            files_parsed: inputs.files_parsed as i64,
-            files_skipped: inputs.files_skipped as i64,
-            bytes_discovered: inputs.bytes_discovered as i64,
-            directories_indexed: inputs.directories_indexed as i64,
-            definitions_indexed: inputs.definitions_indexed as i64,
-            imported_symbols_indexed: inputs.imported_symbols_indexed as i64,
-            edges_indexed: inputs.edges_indexed as i64,
-            written_rows: inputs.written_rows as i64,
-            written_bytes: inputs.written_bytes as i64,
-            duration_ms: inputs.duration_ms as i64,
+            files_discovered: saturating_i64(inputs.files_discovered),
+            files_parsed: saturating_i64(inputs.files_parsed),
+            files_skipped: saturating_i64(inputs.files_skipped),
+            bytes_discovered: saturating_i64(inputs.bytes_discovered),
+            directories_indexed: saturating_i64(inputs.directories_indexed),
+            definitions_indexed: saturating_i64(inputs.definitions_indexed),
+            imported_symbols_indexed: saturating_i64(inputs.imported_symbols_indexed),
+            edges_indexed: saturating_i64(inputs.edges_indexed),
+            written_rows: saturating_i64(inputs.written_rows),
+            written_bytes: saturating_i64(inputs.written_bytes),
+            duration_ms: saturating_i64(inputs.duration_ms),
         },
     ))
 }
