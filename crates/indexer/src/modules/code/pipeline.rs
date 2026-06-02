@@ -418,6 +418,7 @@ impl CodeIndexingPipeline {
             self.metrics.record_language_timing(lt);
         }
 
+        observer.record_source_bytes(result.stats.bytes_discovered);
         observer.files_processed(
             result.stats.files_discovered as u64,
             parsed_count as u64,

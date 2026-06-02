@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
 use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfigError, EngineConfiguration, GitlabClientConfiguration,
-    NatsConfiguration, ScheduleConfig, SchemaConfig,
+    AnalyticsConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
+    GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
 
@@ -34,6 +34,8 @@ pub struct IndexerConfig {
     pub health_bind_address: SocketAddr,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub analytics: AnalyticsConfig,
 }
 
 impl Default for IndexerConfig {
@@ -47,6 +49,7 @@ impl Default for IndexerConfig {
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),
+            analytics: AnalyticsConfig::default(),
         }
     }
 }
@@ -79,6 +82,9 @@ pub enum IndexerError {
 
     #[error("Invalid engine configuration: {0}")]
     InvalidEngineConfig(#[from] EngineConfigError),
+
+    #[error("Analytics tracker initialization failed: {0}")]
+    Analytics(#[from] labkit_events::Error),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
