@@ -955,6 +955,15 @@
             "description": "Column name. Lowercase with underscores."
           },
           "description": "GROUP BY columns (for aggregate projections)."
+        },
+        "versioned_sort_key": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "Prefix columns for a dedup-compatible lightweight projection. The table sort key and _version are appended automatically."
         }
       },
       "required": ["type", "name"],
