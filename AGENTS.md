@@ -84,6 +84,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Analytics event definition | `config/events/gkg_query_executed.yml` |
 | Analytics contexts (Snowplow) | `crates/gkg-analytics/src/context.rs` (types), `crates/gkg-server/src/analytics/` (builders + observer) |
 | Billing config + observer | `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs` |
+| SOX billing authoring rules | `docs/dev/sox-billing-boundary.md` |
 | Query profiler CLI | `crates/query-engine/profiler/`, `mise query:profile` |
 
 ## Crate map
@@ -130,6 +131,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Check crates.io for latest version before adding dependencies.
 - Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
+- Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
 
 ## MR and issue descriptions
 
