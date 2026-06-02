@@ -9,7 +9,7 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
+    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
     push_edge_predicates,
 };
@@ -18,6 +18,8 @@ use crate::passes::shared::filter_to_expr;
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let is_aggregation = matches!(plan.body, PlanBody::Aggregation { .. });
+    let dedup_edges = plan.hops.len() >= 2;
+
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
@@ -30,13 +32,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
-        // Build edge source: UNION ALL for multi-hop, FINAL for single-hop
-        // aggregations (correctness: dedup un-merged versions before counting),
-        // plain scan otherwise.
+        // Build edge source: UNION ALL for variable-length hops, argMax dedup
+        // for multi-hop same-table self-joins, FINAL for single-hop aggregations
+        // (dedup un-merged versions before counting), plain scan otherwise.
         let edge_source = if is_multi_hop {
             let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
             where_parts.extend(union_wheres);
             union
+        } else if dedup_edges {
+            dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
         } else if is_aggregation {
             TableRef::scan_final(&hop.edge_table, &alias)
         } else {
@@ -70,7 +74,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 hop,
                 &plan.nodes,
                 &plan.table_columns,
-                false,
+                dedup_edges,
             );
         }
 
