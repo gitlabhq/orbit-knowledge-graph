@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use arrow::array::{Array, Int32Array, Int64Array, StringArray, TimestampMicrosecondArray};
+use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -616,7 +616,6 @@ fn decode_extracted_notes(batch: &RecordBatch, out: &mut Vec<ExtractedNote>) {
             created_at,
             traversal_path: tp,
             action,
-            commit_count: col_i32(batch, "commit_count", row),
         });
     }
 }
@@ -628,12 +627,6 @@ fn col_i64(batch: &RecordBatch, name: &str, row: usize) -> Option<i64> {
 
 fn col_i64_at(batch: &RecordBatch, idx: usize, row: usize) -> Option<i64> {
     let arr = batch.column(idx).as_any().downcast_ref::<Int64Array>()?;
-    (!arr.is_null(row)).then(|| arr.value(row))
-}
-
-fn col_i32(batch: &RecordBatch, name: &str, row: usize) -> Option<i32> {
-    let idx = batch.schema().index_of(name).ok()?;
-    let arr = batch.column(idx).as_any().downcast_ref::<Int32Array>()?;
     (!arr.is_null(row)).then(|| arr.value(row))
 }
 

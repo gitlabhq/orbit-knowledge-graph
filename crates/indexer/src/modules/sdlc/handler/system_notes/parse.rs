@@ -85,8 +85,9 @@ impl Action {
     }
 
     /// Inverse of [`Action::parse`]. Exercised by the round-trip test; kept
-    /// as the canonical action→string mapping for diagnostics.
-    #[allow(dead_code, reason = "round-trip inverse of parse(); used in tests")]
+    /// as the canonical action→string mapping. Test-only — production code
+    /// carries the raw `siphon_system_note_metadata.action` string instead.
+    #[cfg(test)]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::CrossReference => "cross_reference",
@@ -112,9 +113,10 @@ impl Action {
     /// `"reopened"`, `"opened"`) and which do not need text parsing. The
     /// resolved edge is `User --ACTION--> Noteable` from the note row alone.
     ///
-    /// Exposed for downstream callers (the future production handler will
-    /// branch on this); referenced from tests today.
-    #[allow(dead_code)]
+    /// Test-only: `emit::build_edges` matches on the concrete `Action`
+    /// variants directly, so this predicate is documentation/assertion sugar
+    /// rather than a production branch.
+    #[cfg(test)]
     pub fn is_lifecycle(self) -> bool {
         matches!(
             self,

@@ -75,13 +75,6 @@ pub(crate) struct ExtractedNote {
     pub created_at: DateTime<Utc>,
     pub traversal_path: String,
     pub action: String,
-    /// `siphon_system_note_metadata.commit_count`. Populated only for the
-    /// `commit` action (Rails leaves it `NULL` for all others). Carried on
-    /// the row so the SELECT in `extract.rs` stays stable for the planned
-    /// parsed-vs-replicated SHA-count drift assertion (commit edges are
-    /// out of scope until `Commit` nodes exist), hence not yet read.
-    #[allow(dead_code, reason = "reserved for the commit-count drift assertion")]
-    pub commit_count: Option<i32>,
 }
 
 /// Best-effort default-project lookup keyed on `(noteable_type, noteable_id)`.
@@ -206,7 +199,6 @@ mod tests {
             created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
             traversal_path: "1/100/".to_string(),
             action: action.to_string(),
-            commit_count: None,
         }
     }
 

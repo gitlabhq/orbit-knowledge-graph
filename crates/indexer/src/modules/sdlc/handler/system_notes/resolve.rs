@@ -214,10 +214,6 @@ pub struct ResolutionPlan {
     pub issue_pairs: HashSet<(String, i64)>,
     /// Distinct (project_path, iid) tuples for merge requests.
     pub mr_pairs: HashSet<(String, i64)>,
-    /// Number of commit SHAs in the batch (commits don't need a routes/IID
-    /// lookup — they're resolved by SHA against a separate commits table or
-    /// stored as standalone Commit nodes once we add them).
-    pub commit_ref_count: usize,
 }
 
 impl ResolutionPlan {
@@ -226,7 +222,7 @@ impl ResolutionPlan {
     /// when a `Reference` carries no explicit project prefix (same-project
     /// shorthand: `#123`, `!456`). The handler builds plans row-by-row via
     /// [`ResolutionPlan::add_ref`]; this batch constructor backs the tests.
-    #[allow(dead_code, reason = "batch constructor used by resolver tests")]
+    #[cfg(test)]
     pub fn from_refs<'a, I>(refs: I) -> Self
     where
         I: IntoIterator<Item = (&'a str, &'a Reference)>,
@@ -267,47 +263,16 @@ impl ResolutionPlan {
                 }
             }
             RefKind::Commit => {
-                self.commit_ref_count += 1;
-                // Mirror the Issue/MR branches: a commit reference with no
-                // explicit project prefix still resolves against the
-                // noteable's default project, and the empty-default guard
-                // reuses `project_is_empty` rather than re-deriving it.
-                if !project_is_empty {
-                    self.paths.insert(project);
-                }
+                // Commit references resolve to nothing today (no `Commit`
+                // node type yet, see ADR 013), so they add no routes/IID
+                // lookup work: `ResolvedIndex::resolve` returns `None` for
+                // `RefKind::Commit` and `emit::build_edges` drops them. The
+                // `project_is_empty` binding is unused on this branch but
+                // kept for the shared match shape.
+                let _ = project_is_empty;
             }
         }
     }
-}
-
-/// In-memory join: given routes (path → source_id) and entity rows
-/// (project_id, iid → id), return resolved entity IDs keyed back to the
-/// original `(project_path, iid)` pairs the parser produced.
-///
-/// Exercised by unit tests. The runtime CH benchmark currently only counts
-/// per-stage rows; the production handler will replace the test harness
-/// with this join + an edge writer.
-#[allow(dead_code)]
-pub fn join_pairs(routes: &[RouteRow], entities: &[EntityRow]) -> HashMap<(String, i64), i64> {
-    let path_to_source: HashMap<&str, i64> = routes
-        .iter()
-        .filter(|r| r.source_type == "Project")
-        .map(|r| (r.path.as_str(), r.source_id))
-        .collect();
-    let pid_iid_to_id: HashMap<(i64, i64), i64> = entities
-        .iter()
-        .map(|e| ((e.project_id, e.iid), e.id))
-        .collect();
-
-    path_to_source
-        .iter()
-        .flat_map(|(path, &source_id)| {
-            pid_iid_to_id
-                .iter()
-                .filter(move |((pid, _), _)| *pid == source_id)
-                .map(move |(&(_, iid), &id)| ((path.to_string(), iid), id))
-        })
-        .collect()
 }
 
 /// Runtime resolver index built from one routes lookup plus the per-kind
@@ -490,75 +455,15 @@ mod tests {
     }
 
     #[test]
-    fn plan_counts_commits_separately() {
-        let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
-        let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("p", r)));
-        assert_eq!(plan.commit_ref_count, 1);
-        assert!(plan.issue_pairs.is_empty());
-        assert!(plan.mr_pairs.is_empty());
-    }
-
-    #[test]
-    fn plan_uses_default_project_for_unqualified_commit_ref() {
-        // A commit SHA with no explicit project prefix must resolve against
-        // the noteable's default project, mirroring the Issue/MR branches.
+    fn plan_ignores_commit_refs() {
+        // Commit references resolve to nothing today (no `Commit` node yet),
+        // so they add no routes/IID lookup work — not even the default
+        // project path, since no edge can ever come out of them.
         let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
         let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("my/proj", r)));
-        assert_eq!(plan.commit_ref_count, 1);
-        assert!(
-            plan.paths.contains("my/proj"),
-            "unqualified commit ref should add the default project path"
-        );
-    }
-
-    #[test]
-    fn plan_skips_commit_ref_with_empty_default_project() {
-        let refs = extract(Action::CrossReference, "mentioned in 54f7727c");
-        let plan = ResolutionPlan::from_refs(refs.iter().map(|r| ("", r)));
-        assert_eq!(plan.commit_ref_count, 1);
-        assert!(
-            plan.paths.is_empty(),
-            "empty default project must not insert a blank path"
-        );
-    }
-
-    #[test]
-    fn join_pairs_returns_resolved_entity_ids() {
-        let routes = vec![RouteRow {
-            source_type: "Project".to_string(),
-            source_id: 999,
-            path: "gitlab-org/gitlab".to_string(),
-            traversal_path: "1/".to_string(),
-        }];
-        let entities = vec![EntityRow {
-            id: 8675309,
-            project_id: 999,
-            iid: 42,
-        }];
-        let resolved = join_pairs(&routes, &entities);
-        assert_eq!(
-            resolved.get(&("gitlab-org/gitlab".to_string(), 42)),
-            Some(&8675309)
-        );
-    }
-
-    #[test]
-    fn join_pairs_ignores_namespace_rows() {
-        // Namespace routes are returned by the routes lookup but they're not
-        // project owners; the join filters them out.
-        let routes = vec![RouteRow {
-            source_type: "Namespace".to_string(),
-            source_id: 7,
-            path: "gitlab-org".to_string(),
-            traversal_path: "1/".to_string(),
-        }];
-        let entities = vec![EntityRow {
-            id: 1,
-            project_id: 7,
-            iid: 99,
-        }];
-        let resolved = join_pairs(&routes, &entities);
-        assert!(resolved.is_empty());
+        assert!(plan.paths.is_empty());
+        assert!(plan.issue_pairs.is_empty());
+        assert!(plan.mr_pairs.is_empty());
     }
 
     fn gitlab_route() -> RouteRow {

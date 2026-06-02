@@ -60,8 +60,7 @@ SELECT \
     sn.project_id AS project_id, \
     sn.created_at AS created_at, \
     sn.traversal_path AS traversal_path, \
-    snm.action AS action, \
-    snm.commit_count AS commit_count \
+    snm.action AS action \
 FROM siphon_notes AS sn \
 INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id \
 WHERE sn.system = true \
@@ -124,16 +123,5 @@ mod tests {
         // Exploits the leading column of siphon_notes.PRIMARY KEY for index
         // skipping rather than a per-row equality.
         assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("startsWith(sn.traversal_path"));
-    }
-
-    #[test]
-    fn extract_sql_pulls_commit_count_for_drift_assertion() {
-        // The production handler compares `commit_count` against the
-        // parser's SHA count for `action='commit'` rows; a Rails template
-        // change that breaks `extract_commit_shas_from_list` shows up here
-        // before it shows up in edge density. Keep the column in the SELECT
-        // even before the metric is wired so the SQL doesn't need a churn
-        // when it lands.
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("snm.commit_count"));
     }
 }
