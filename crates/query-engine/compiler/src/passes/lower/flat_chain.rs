@@ -1,6 +1,6 @@
 //! Emit: flat edge chain.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use ontology::constants::*;
 
@@ -17,7 +17,14 @@ use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
-    let dedup_edges = plan.hops.len() >= 2;
+    // Only dedup edge scans when the same table appears in multiple hops.
+    // Self-joining un-merged ReplacingMergeTree versions causes multiplicative
+    // cardinality blowup; cross-table hops cannot fan out this way.
+    let mut table_counts: HashMap<&str, usize> = HashMap::new();
+    for hop in &plan.hops {
+        *table_counts.entry(&hop.edge_table).or_default() += 1;
+    }
+    let needs_dedup = |table: &str| table_counts.get(table).copied().unwrap_or(0) >= 2;
 
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
@@ -33,11 +40,10 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
         // Build edge source: UNION ALL for multi-hop, plain scan for single.
         let edge_source = if is_multi_hop {
-            let (union, union_wheres) =
-                build_multi_hop_union(hop, &alias, &plan.nodes, &plan.table_columns);
+            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
             where_parts.extend(union_wheres);
             union
-        } else if dedup_edges {
+        } else if needs_dedup(&hop.edge_table) {
             dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
         } else {
             TableRef::scan(&hop.edge_table, &alias)
@@ -70,7 +76,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 hop,
                 &plan.nodes,
                 &plan.table_columns,
-                dedup_edges,
+                needs_dedup(&hop.edge_table),
             );
         }
 

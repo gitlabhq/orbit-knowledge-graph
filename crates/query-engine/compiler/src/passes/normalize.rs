@@ -102,15 +102,19 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     }
     for table in ontology.edge_tables() {
         if let Some(config) = ontology.edge_table_config(table) {
-            input.compiler.table_columns.insert(
-                table.to_string(),
-                config
-                    .storage
-                    .columns
-                    .iter()
-                    .map(|column| column.name.clone())
-                    .collect::<HashSet<_>>(),
-            );
+            let mut col_set: HashSet<_> = config
+                .storage
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect();
+            for dc in &config.storage.denormalized_columns {
+                col_set.insert(dc.name.clone());
+            }
+            input
+                .compiler
+                .table_columns
+                .insert(table.to_string(), col_set);
         }
     }
 
