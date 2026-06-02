@@ -23,13 +23,8 @@ spec:
             robotframework=={{ .Values.robotframework.version }} \
             robotframework-requests=={{ .Values.robotframework.requestsVersion }}
           set +e
-          # TEMPORARY (flakiness trials on test/e2e-refresh-projects-on-namespace-change):
-          # run only suites 01-03 (setup/smoke, SDLC indexing, code indexing) to shorten
-          # each run. These exercise the project-creation path where the refresh_on_change
-          # race lives. Restore `/tests/` for full coverage before merging.
           robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
-            --consolecolors off --exitonfailure \
-            /tests/01_setup_and_smoke.robot /tests/02_indexing.robot /tests/03_code_indexing.robot
+            --consolecolors off --exitonfailure /tests/
           RC=$?
           echo "---XUNIT_REPORT_START---"
           cat /tmp/results/xunit.xml 2>/dev/null
