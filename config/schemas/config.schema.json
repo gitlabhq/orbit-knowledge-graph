@@ -587,14 +587,14 @@
           "type": "integer",
           "format": "uint64",
           "default": 65536,
-          "minimum": 0
+          "minimum": 1
         },
         "write_channel_capacity": {
           "description": "Read-ahead window for the streaming ingestion pipeline: how many extracted\nblocks may be buffered ahead of the ClickHouse writer. Higher values keep the\nwriter fed (more throughput) at the cost of peak memory. Tune up in\nmemory-generous deployments; the default is conservative.",
           "type": "integer",
           "format": "uint",
           "default": 8,
-          "minimum": 0
+          "minimum": 1
         }
       },
       "additionalProperties": false

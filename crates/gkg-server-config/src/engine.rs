@@ -179,12 +179,14 @@ pub struct EntityHandlerConfig {
     /// writer fed (more throughput) at the cost of peak memory. Tune up in
     /// memory-generous deployments; the default is conservative.
     #[serde(default = "default_write_channel_capacity")]
+    #[schemars(range(min = 1))]
     pub write_channel_capacity: usize,
 
     /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
     /// amortize per-batch write round-trips (more throughput) at the cost of peak
     /// memory per in-flight block.
     #[serde(default = "default_stream_block_size")]
+    #[schemars(range(min = 1))]
     pub stream_block_size: u64,
 }
 
@@ -511,6 +513,13 @@ impl EngineConfiguration {
         if self.modules.is_empty() {
             return Err(EngineConfigError::NoModulesEnabled);
         }
+        let entity_handler = &self.handlers.entity_handler;
+        if entity_handler.write_channel_capacity == 0 {
+            return Err(EngineConfigError::ZeroWriteChannelCapacity);
+        }
+        if entity_handler.stream_block_size == 0 {
+            return Err(EngineConfigError::ZeroStreamBlockSize);
+        }
         Ok(())
     }
 }
@@ -522,6 +531,12 @@ pub enum EngineConfigError {
          leave it unset to register all modules (universal indexer)"
     )]
     NoModulesEnabled,
+
+    #[error("engine.handlers.entity_handler.write_channel_capacity must be at least 1")]
+    ZeroWriteChannelCapacity,
+
+    #[error("engine.handlers.entity_handler.stream_block_size must be at least 1")]
+    ZeroStreamBlockSize,
 }
 
 /// Top-level schedule configuration.
@@ -602,5 +617,25 @@ modules: [sdlc, namespace_deletion]
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.write_channel_capacity, 32);
         assert_eq!(cfg.stream_block_size, 262_144);
+    }
+
+    #[test]
+    fn zero_write_channel_capacity_fails_validation() {
+        let mut cfg = EngineConfiguration::default();
+        cfg.handlers.entity_handler.write_channel_capacity = 0;
+        assert!(matches!(
+            cfg.validate(),
+            Err(EngineConfigError::ZeroWriteChannelCapacity)
+        ));
+    }
+
+    #[test]
+    fn zero_stream_block_size_fails_validation() {
+        let mut cfg = EngineConfiguration::default();
+        cfg.handlers.entity_handler.stream_block_size = 0;
+        assert!(matches!(
+            cfg.validate(),
+            Err(EngineConfigError::ZeroStreamBlockSize)
+        ));
     }
 }
