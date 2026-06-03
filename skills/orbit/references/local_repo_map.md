@@ -138,7 +138,7 @@ surfaces.
 
 Walks down the `EXTENDS` relationship from a base class, trait, interface, or
 struct up to depth 6. Use it to estimate the blast radius of a base abstraction
-change. Treat large hierarchy counts as graph coverage, not authoritative truth.
+change.
 
 ### `imports PATTERN`
 
@@ -155,8 +155,7 @@ Signatures are extracted by reading source files and applying a language-neutral
 regular expression to a small window starting at the indexed `start_line`. If a
 signature cannot be extracted, the script prints the bare definition name.
 
-The repo map is a planning aid over Orbit Local's Code Graph coverage. Do not
-present its counts as exhaustive; treat them as graph coverage.
+The repo map is a planning aid over Orbit Local's Code Graph coverage.
 
 ## Budget and anti-patterns
 

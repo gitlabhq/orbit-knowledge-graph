@@ -29,17 +29,15 @@ and pass entity names to scope the response:
 ```bash
 glab orbit remote schema MergeRequest Project   # scoped properties
 glab orbit remote dsl                           # full query DSL JSON Schema
-glab orbit remote tools                         # MCP tool manifest
 ```
 
 Always fetch the DSL with `glab orbit remote dsl` — it is the source of truth
-for the query body shape. The `tools` manifest is for MCP wiring, not DSL
-discovery.
+for the query body shape.
 
 Calling `schema` without arguments returns the full ontology (~28 KB) and is
-rarely what you want. Re-fetching `schema` or `tools` between turns is pure
-latency — schemas do not change within a session. Cache the response (or just
-keep it in agent context) and reuse it.
+rarely what you want. Re-fetching `schema` between turns is pure latency —
+schemas do not change within a session. Cache the response (or just keep it in
+agent context) and reuse it.
 
 Each `glab orbit remote query` invocation has fixed per-call overhead
 (process startup, auth load, HTTPS round-trip). Prefer one `aggregation`
@@ -114,11 +112,6 @@ several wrong-looking-correct shapes. Two traps come up often:
   here can substantially undercount historical coverage on long-lived
   files. See
   [`recipes.md`](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
-- **Inheritance trees can be incomplete.** `Definition` indexing is known
-  to under-cover large class hierarchies (e.g. `ApplicationRecord`) and
-  EE-namespaced subclasses. Present a graph-only subclass count as graph
-  coverage, not an authoritative total. See
-  [`recipes.md`](references/recipes.md#subclasses--descendants-of-a-class).
 
 ## Iteration budget
 
@@ -169,18 +162,13 @@ Orbit answers are graph queries against ClickHouse, not an authoritative
 source of truth. Always present results with their coverage caveats. The
 agent should:
 
-1. **Distinguish counts from completeness.** Phrase results as "Orbit
-   returned N matches" rather than "there are N". The graph is not an
-   authoritative total, so reserve "there are N" for cases where the gap
-   classes below do not apply.
-2. **Surface known coverage gaps inline.** If the query falls into one of
+1. **Surface known coverage gaps inline.** If the query falls into one of
    the documented gap classes — historical file coverage
-   (`HAS_LATEST_DIFF` vs `HAS_DIFF`), large or EE-namespaced inheritance
-   trees, time-bounded aggregates — append a one-line caveat to the
-   answer, not a buried footnote.
-3. **Show the query.** Include the JSON request body (collapsed if long)
+   (`HAS_LATEST_DIFF` vs `HAS_DIFF`), time-bounded aggregates — append a
+   one-line caveat to the answer, not a buried footnote.
+2. **Show the query.** Include the JSON request body (collapsed if long)
    so the user can audit the traversal.
-4. **Do not invent a "Methodology" header that implies rigor the
+3. **Do not invent a "Methodology" header that implies rigor the
    underlying data does not support.** A "Methodology" section is
    appropriate when the query itself is non-obvious; it is not a
    substitute for coverage caveats.

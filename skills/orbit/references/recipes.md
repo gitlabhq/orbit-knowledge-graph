@@ -264,21 +264,6 @@ class is namespaced:
 }
 ```
 
-> **Coverage gap on large or EE-namespaced inheritance trees.** Definition
-> indexing is known to be incomplete for:
->
-> - **Large trees.** `ApplicationRecord` has been observed at ~64%
->   coverage (489 indexed vs ~769 actual subclasses).
-> - **EE-only subclasses.** `Boards::BaseService` returns its 15 direct CE
->   subclasses but misses ~5 EE subclasses in the `EpicLists` namespace.
-> - **Small trees are fine.** `Members::BaseService` returns 6/6 correct.
->
-> When the parent class is well-known and the result count looks low,
-> report the graph result as "incomplete coverage" and do not present a
-> graph-only inheritance count as an authoritative total. See the
-> "Reporting results" section in [`SKILL.md`](../SKILL.md) for phrasing
-> guidance.
-
 ## `traversal` (multi-node) — start from nodes, follow relationships
 
 List opened merge requests and their authors. Requires at least two nodes and
