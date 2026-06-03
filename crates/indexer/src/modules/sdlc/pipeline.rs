@@ -26,8 +26,10 @@ use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-/// Read-ahead window. 8 blocks reaches cloud-throughput parity; more only costs memory.
-const WRITE_CHANNEL_CAPACITY: usize = 8;
+/// Default read-ahead window when not overridden via
+/// `EntityHandlerConfig::write_channel_capacity`. Higher values keep the writer
+/// fed (more throughput) at the cost of peak memory.
+const DEFAULT_WRITE_CHANNEL_CAPACITY: usize = 8;
 
 struct TableBatch {
     transform_index: usize,
@@ -76,6 +78,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
+    write_channel_capacity: usize,
 }
 
 impl Pipeline {
@@ -90,7 +93,14 @@ impl Pipeline {
             checkpoint_store,
             metrics,
             retry_config,
+            write_channel_capacity: DEFAULT_WRITE_CHANNEL_CAPACITY,
         }
+    }
+
+    /// Override the read-ahead window (see `EntityHandlerConfig::write_channel_capacity`).
+    pub fn with_write_channel_capacity(mut self, capacity: usize) -> Self {
+        self.write_channel_capacity = capacity.max(1);
+        self
     }
 
     pub async fn run_plan(
@@ -170,7 +180,7 @@ impl Pipeline {
         position_key: &str,
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
-        let (tx, rx) = mpsc::channel::<WriteCommand>(WRITE_CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::channel::<WriteCommand>(self.write_channel_capacity);
         let producer = tokio::spawn(
             Producer {
                 extractor: Extractor {
