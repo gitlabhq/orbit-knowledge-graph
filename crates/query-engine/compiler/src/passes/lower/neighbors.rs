@@ -212,16 +212,25 @@ pub fn emit_neighbors(
             ));
         } else {
             if !has_non_denorm {
+                let center_sort_key = plan
+                    .table_sort_keys
+                    .get(&center_table)
+                    .map(|v| v.as_slice());
+                let center_scan = super::helpers::latest_node_scan(
+                    &center_table,
+                    &center_id,
+                    vec![deleted_false(&center_id)],
+                    center_sort_key,
+                );
                 from = TableRef::join(
                     JoinType::Inner,
                     from,
-                    TableRef::scan_final(&center_table, &center_id),
+                    center_scan,
                     Expr::eq(
                         Expr::col(edge_alias, center_edge_col),
                         Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
                     ),
                 );
-                where_parts.push(deleted_false(&center_id));
             }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),

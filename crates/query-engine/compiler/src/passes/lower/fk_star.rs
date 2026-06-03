@@ -11,8 +11,8 @@ use crate::error::{QueryError, Result};
 use super::EmitOutput;
 use super::helpers::{
     NarrowSource, emit_filter_subquery, emit_node_join_with_narrowing,
-    fk_values_from_candidate_scan, latest_node_predicates, node_ids_from_candidate_scan,
-    node_select_columns,
+    fk_values_from_candidate_scan, latest_node_predicates, latest_node_scan,
+    node_ids_from_candidate_scan, node_select_columns,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
@@ -123,14 +123,12 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         }
     }
 
-    let mut from = TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(center_table, center_alias),
-            where_clause: Expr::conjoin(center_where_parts),
-            ..Default::default()
-        },
+    let center_sort_key = plan.table_sort_keys.get(center_table).map(|v| v.as_slice());
+    let mut from = latest_node_scan(
+        center_table,
         center_alias,
+        center_where_parts,
+        center_sort_key,
     );
 
     // Each hop: target node connected via FK column.

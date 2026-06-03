@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
-use super::helpers::{latest_node_predicates, node_select_columns};
+use super::helpers::{latest_node_predicates, latest_node_scan, node_select_columns};
 use crate::passes::plan::*;
 
 pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
@@ -19,14 +19,15 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
-    let from = TableRef::scan_final(table, alias);
+    let sort_key = plan.table_sort_keys.get(table).map(|v| v.as_slice());
     let where_parts = latest_node_predicates(alias, np);
+    let from = latest_node_scan(table, alias, where_parts, sort_key);
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {
         from,
         edge_aliases: vec![],
-        where_parts,
+        where_parts: vec![],
         select,
         ctes: vec![],
         edge_if_predicates: None,

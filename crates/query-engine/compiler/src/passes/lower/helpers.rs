@@ -395,6 +395,46 @@ pub(super) fn dedup_edge_scan(
     TableRef::subquery(query, alias)
 }
 
+/// Build a node scan with dedup: LIMIT BY when sort key is available,
+/// FINAL otherwise. Used for center nodes, single-node queries, and
+/// neighbors center where the full row is needed.
+pub(super) fn latest_node_scan(
+    table: &str,
+    alias: &str,
+    where_parts: Vec<Expr>,
+    sort_key: Option<&[String]>,
+) -> TableRef {
+    if let Some(sk) = sort_key {
+        let mut order_by: Vec<OrderExpr> = sk
+            .iter()
+            .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+            .collect();
+        order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+        let limit_by_cols: Vec<Expr> = sk.iter().map(|col| Expr::col(alias, col)).collect();
+        TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan(table, alias),
+                where_clause: Expr::conjoin(where_parts),
+                order_by,
+                limit_by: Some((1, limit_by_cols)),
+                ..Default::default()
+            },
+            alias,
+        )
+    } else {
+        TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan_final(table, alias),
+                where_clause: Expr::conjoin(where_parts),
+                ..Default::default()
+            },
+            alias,
+        )
+    }
+}
+
 /// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
 /// single-hop edge aggregations, with WHERE predicates injected.
 ///
