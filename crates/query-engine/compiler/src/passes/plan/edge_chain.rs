@@ -84,6 +84,18 @@ impl NodePlan {
     pub fn uses_default_pk(&self) -> bool {
         self.redaction_id_column == DEFAULT_PRIMARY_KEY
     }
+
+    /// Whether this node has point selectivity (node_ids, id_range) or at
+    /// least one high-selectivity filter. Used to decide if a narrowing CTE
+    /// is worth the cost of a pre-scan.
+    pub fn has_selective_filters(&self) -> bool {
+        !self.node_ids.is_empty()
+            || self.id_range.is_some()
+            || self
+                .filters
+                .iter()
+                .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

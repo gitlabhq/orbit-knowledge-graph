@@ -169,6 +169,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             } else if target_np.filters.is_empty()
                 && target_np.node_ids.is_empty()
                 && target_np.id_range.is_none()
+                && center_np.has_selective_filters()
             {
                 let narrow_name = format!("_narrow_{}", fk.target_node);
                 ctes.push(Cte::new(
