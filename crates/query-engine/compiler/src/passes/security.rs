@@ -26,7 +26,7 @@ use regex::Regex;
 
 use serde_json::Value;
 
-use crate::ast::{Expr, Node, Query, TableRef};
+use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -99,6 +99,12 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
     Ok(())
 }
 
+/// Above this threshold, fall back to `arrayExists` to avoid very large
+/// OR chains that bloat SQL size and parse time. 100 covers the vast
+/// majority of real users; pathological cases degrade gracefully to the
+/// lambda form (which still filters rows, just without PK index pruning).
+const MAX_OR_PATHS: usize = 100;
+
 fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
     match paths.len() {
         0 => Expr::Literal(Value::Bool(false)),
@@ -110,8 +116,13 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
             }
             let lcp = lowest_common_prefix(&collapsed);
             let lcp_filter = starts_with_expr(alias, &lcp);
-            let or_filter = path_or_filter(alias, &collapsed);
-            Expr::and(lcp_filter, or_filter)
+            let detail_filter = if collapsed.len() <= MAX_OR_PATHS {
+                path_or_filter(alias, &collapsed)
+            } else {
+                let refs: Vec<&str> = collapsed.iter().map(String::as_str).collect();
+                path_array_filter(alias, &refs)
+            };
+            Expr::and(lcp_filter, detail_filter)
         }
     }
 }
@@ -228,8 +239,7 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
 
 /// OR chain of `startsWith(alias.traversal_path, path)` for each path.
 ///
-/// Unlike the previous `arrayExists(lambda, array)` form, each
-/// `startsWith` is visible to ClickHouse's PK index analyser, enabling
+/// Each `startsWith` is visible to ClickHouse's PK index analyser, enabling
 /// granule pruning per path prefix. This matters inside `dedup_edge_scan`
 /// subqueries where `argMax GROUP BY` must materialise every matching row:
 /// PK range pruning reduces the scan from the entire LCP namespace to
@@ -238,6 +248,32 @@ fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
     let mut iter = paths.iter().map(|p| starts_with_expr(alias, p));
     let first = iter.next().expect("paths is non-empty (caller checks)");
     iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
+}
+
+/// Fallback for large path sets: `arrayExists(p -> startsWith(tp, p), paths)`.
+///
+/// Compact and parameterised but opaque to ClickHouse's PK index — the
+/// engine evaluates the lambda per-row instead of pruning granules.
+fn path_array_filter(alias: &str, paths: &[&str]) -> Expr {
+    let lambda_param = "_gkg_path";
+    Expr::func(
+        "arrayExists",
+        vec![
+            Expr::lambda(
+                lambda_param,
+                starts_with_value_expr(alias, Expr::ident(lambda_param)),
+            ),
+            Expr::param(
+                ChType::String.to_array(),
+                serde_json::Value::Array(
+                    paths
+                        .iter()
+                        .map(|path| serde_json::Value::String((*path).to_string()))
+                        .collect(),
+                ),
+            ),
+        ],
+    )
 }
 
 pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
@@ -372,6 +408,34 @@ mod tests {
         let expr = build_path_filter("u", &["1/2/4/", "1/2/5/"]);
         // Should be: startsWith(..., '1/2/') AND (startsWith(..., '1/2/4/') OR startsWith(..., '1/2/5/'))
         assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
+    }
+
+    #[test]
+    fn many_paths_falls_back_to_array_exists() {
+        let paths: Vec<String> = (0..=MAX_OR_PATHS as u64)
+            .map(|i| format!("1/{i}/"))
+            .collect();
+        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let expr = build_path_filter("e", &refs);
+        let dbg = format!("{expr:?}");
+        assert!(
+            dbg.contains("arrayExists"),
+            "should fall back to arrayExists above MAX_OR_PATHS, got: {dbg}"
+        );
+    }
+
+    #[test]
+    fn below_threshold_uses_or_starts_with() {
+        let paths: Vec<String> = (0..MAX_OR_PATHS as u64)
+            .map(|i| format!("1/{i}/"))
+            .collect();
+        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let expr = build_path_filter("e", &refs);
+        let dbg = format!("{expr:?}");
+        assert!(
+            !dbg.contains("arrayExists"),
+            "should use OR-of-startsWith at or below MAX_OR_PATHS, got: {dbg}"
+        );
     }
 
     #[test]
