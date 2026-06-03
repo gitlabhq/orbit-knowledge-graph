@@ -3,7 +3,8 @@
 
 Usage:
     remote_repo_map.py extends   NAME         [--project-id ID] [--branch B] [--depth N]
-    remote_repo_map.py ancestors NAME         [--project-id ID] [--branch B] [--depth N]
+    remote_repo_map.py ancestors NAME         [--project-id ID] [--branch B] [--depth N] [--filter-prefix P]
+    remote_repo_map.py includes  BASE PREFIX  [--project-id ID] [--branch B] [--depth N]
     remote_repo_map.py class     NAME         [--project-id ID] [--branch B]
     remote_repo_map.py api       PATH_PREFIX  [--project-id ID] [--branch B]
     remote_repo_map.py callers   NAME         [--project-id ID] [--branch B]
@@ -96,7 +97,14 @@ def _resolve_name(name: str) -> tuple[str, str]:
 
 
 def cmd_extends(args: argparse.Namespace) -> None:
-    """Find all descendants of a class/module via EXTENDS, up to --depth hops."""
+    """Find all descendants of a class/module via EXTENDS — single server-side multi-hop traversal.
+
+    Uses min_hops/max_hops on the RelationshipSelector to collapse the old
+    N×M frontier loop (one query per frontier node per hop) into a single
+    server-side traversal.  For a class with 16 direct subclasses at depth=2
+    the old approach required 16+256=272 sequential API calls (~2.5 min);
+    this version issues exactly one query regardless of depth.
+    """
     pid    = args.project_id
     branch = args.branch
     depth  = max(1, min(args.depth, 3))  # server caps traversal at 3
@@ -105,120 +113,188 @@ def cmd_extends(args: argparse.Namespace) -> None:
 
     filter_key, filter_val = _resolve_name(args.name)
 
-    seen: set[str] = set()
-    # frontier tracks (filter_key, filter_val) pairs for the next hop
-    frontier: list[tuple[str, str]] = [(filter_key, filter_val)]
-    all_rows: list[tuple[int, str, str, str]] = []  # (depth, fqn, type, file:line)
+    body = {"query": {
+        "query_type": "traversal",
+        "nodes": [
+            {
+                "id": "base", "entity": "Definition",
+                "filters": {**_base_filters(pid, branch), filter_key: {"op": "eq", "value": filter_val}},
+                "columns": ["fqn", "name"],
+            },
+            {
+                "id": "child", "entity": "Definition",
+                "filters": _base_filters(pid, branch),
+                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+            },
+        ],
+        "relationships": [
+            {"type": "EXTENDS", "from": "child", "to": "base", "min_hops": 1, "max_hops": depth}
+        ],
+        "limit": 200,
+    }}
 
-    for hop in range(1, depth + 1):
-        if not frontier:
-            break
-        next_frontier: list[tuple[str, str]] = []
-        for fk, fv in frontier:
-            body = {"query": {
-                "query_type": "traversal",
-                "nodes": [
-                    {
-                        "id": "base", "entity": "Definition",
-                        "filters": {**_base_filters(pid, branch), fk: {"op": "eq", "value": fv}},
-                        "columns": ["id", "fqn", "name"],
-                    },
-                    {
-                        "id": "child", "entity": "Definition",
-                        "filters": _base_filters(pid, branch),
-                        "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-                    },
-                ],
-                "relationships": [{"type": "EXTENDS", "from": "child", "to": "base"}],
-                "limit": 100,
-            }}
-            result  = _query(body)
-            children = [
-                n for n in _nodes(result, "Definition")
-                if n.get("fqn") != fv and n.get("name") != fv and n.get("id") not in seen
-            ]
-            for c in children:
-                node_id = c.get("id")
-                if node_id:
-                    seen.add(node_id)
-                loc = f"{c.get('file_path','')}:{c.get('start_line','')}"
-                all_rows.append((hop, c.get("fqn", c.get("name", "?")), c.get("definition_type", "?"), loc))
-                # Subsequent hops use the short name (children are not namespaced in frontier)
-                next_frontier.append(("name", c.get("name", "")))
-        frontier = list({fv: (fk, fv) for fk, fv in next_frontier}.values())
+    result = _query(body)
+    rows = [
+        n for n in _nodes(result, "Definition")
+        if n.get("name") != args.name and n.get("fqn") != args.name
+    ]
 
     print(f"EXTENDS — descendants of {args.name!r} (depth ≤ {depth})")
     print("=" * 78)
-    if not all_rows:
+    if not rows:
         print("(no descendants found — class may not be indexed on this branch)")
         return
-    print(f"{'depth':>5}  {'type':12}  {'fqn':<60}  location")
+    print(f"{'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for depth_val, fqn, kind, loc in all_rows:
-        print(f"{depth_val:>5}  {kind:12}  {fqn[:60]:<60}  {loc}")
-    print(f"\n{len(all_rows)} descendant(s) found")
+    for n in rows:
+        fqn  = n.get("fqn", n.get("name", "?"))
+        kind = n.get("definition_type", "?")
+        loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
+        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+    print(f"\n{len(rows)} descendant(s) found")
 
 
 def cmd_ancestors(args: argparse.Namespace) -> None:
-    """Walk EXTENDS edges upward to find parent/ancestor classes."""
+    """Walk EXTENDS edges upward — single server-side multi-hop traversal.
+
+    Uses fqn filter instead of name to avoid ambiguous matches
+    (e.g. 'Issue' matches app/models/issue.rb AND qa/resource/issue.rb).
+    Pass --filter-prefix app/models/concerns to list only included concerns.
+
+    Uses min_hops/max_hops on the RelationshipSelector to issue a single
+    query instead of the old N×M frontier loop.
+    """
     pid    = args.project_id
     branch = args.branch
     depth  = max(1, min(args.depth, 3))
     if args.depth != depth:
         print(f"(depth clamped to {depth}; server limit is 3)", file=sys.stderr)
 
-    filter_key, filter_val = _resolve_name(args.name)
+    body = {"query": {
+        "query_type": "traversal",
+        "nodes": [
+            {
+                "id": "child", "entity": "Definition",
+                "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.name}},
+                "columns": ["fqn", "name"],
+            },
+            {
+                "id": "ancestor", "entity": "Definition",
+                "filters": _base_filters(pid, branch),
+                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+            },
+        ],
+        "relationships": [
+            {"type": "EXTENDS", "from": "child", "to": "ancestor", "min_hops": 1, "max_hops": depth}
+        ],
+        "limit": 200,
+    }}
 
-    seen: set[str] = set()
-    frontier: list[tuple[str, str]] = [(filter_key, filter_val)]
-    all_rows: list[tuple[int, str, str, str]] = []
+    result = _query(body)
+    rows = [
+        n for n in _nodes(result, "Definition")
+        if n.get("fqn") != args.name
+    ]
 
-    for hop in range(1, depth + 1):
-        if not frontier:
-            break
-        next_frontier: list[tuple[str, str]] = []
-        for fk, fv in frontier:
-            body = {"query": {
-                "query_type": "traversal",
-                "nodes": [
-                    {
-                        "id": "child", "entity": "Definition",
-                        "filters": {**_base_filters(pid, branch), fk: {"op": "eq", "value": fv}},
-                        "columns": ["id", "fqn", "name"],
-                    },
-                    {
-                        "id": "parent", "entity": "Definition",
-                        "filters": _base_filters(pid, branch),
-                        "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
-                    },
-                ],
-                "relationships": [{"type": "EXTENDS", "from": "child", "to": "parent"}],
-                "limit": 20,
-            }}
-            result = _query(body)
-            parents = [
-                n for n in _nodes(result, "Definition")
-                if n.get("fqn") != fv and n.get("name") != fv and n.get("id") not in seen
-            ]
-            for p in parents:
-                node_id = p.get("id")
-                if node_id:
-                    seen.add(node_id)
-                loc = f"{p.get('file_path','')}:{p.get('start_line','')}"
-                all_rows.append((hop, p.get("fqn", p.get("name", "?")), p.get("definition_type", "?"), loc))
-                next_frontier.append(("name", p.get("name", "")))
-        frontier = list({fv: (fk, fv) for fk, fv in next_frontier}.values())
+    prefix = getattr(args, "filter_prefix", None) or ""
+    if prefix:
+        rows = [n for n in rows if (n.get("file_path") or "").startswith(prefix)]
 
-    print(f"ANCESTORS — of {args.name!r} (depth ≤ {depth})")
+    print(f"ANCESTORS — of {args.name!r} (depth ≤ {depth})"
+          + (f"  [filter: {prefix}]" if prefix else ""))
     print("=" * 78)
-    if not all_rows:
+    if not rows:
         print("(no ancestors found — class may not be indexed on this branch)")
         return
-    print(f"{'hop':>3}  {'type':12}  {'fqn':<60}  location")
+    print(f"{'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for hop_val, fqn, kind, loc in all_rows:
-        print(f"{hop_val:>3}  {kind:12}  {fqn[:60]:<60}  {loc}")
-    print(f"\n{len(all_rows)} ancestor(s) found")
+    for n in rows:
+        fqn  = n.get("fqn", n.get("name", "?"))
+        kind = n.get("definition_type", "?")
+        loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
+        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+    print(f"\n{len(rows)} ancestor(s) found")
+
+
+def cmd_includes(args: argparse.Namespace) -> None:
+    """For each descendant of BASE, list concerns they include from PREFIX — single query.
+
+    More efficient than code_extends + N × code_ancestors: single 3-hop traversal
+    (BASE ← EXTENDS ← descendants ← EXTENDS → concerns_in_prefix).
+    Returns a per-descendant breakdown grouped by model.
+
+    Example: includes Noteable app/models/concerns
+      -> For each Noteable model (Issue, MergeRequest, etc.), the concerns it includes.
+    """
+    pid    = args.project_id
+    branch = args.branch
+    depth  = max(1, min(getattr(args, "depth", 1), 3))
+
+    body = {"query": {
+        "query_type": "traversal",
+        "nodes": [
+            {
+                "id": "base", "entity": "Definition",
+                "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.base}},
+                "columns": ["fqn", "name"],
+            },
+            {
+                "id": "descendant", "entity": "Definition",
+                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+            },
+            {
+                "id": "concern", "entity": "Definition",
+                "filters": {"file_path": {"op": "starts_with", "value": args.prefix.rstrip("/") + "/"}},
+                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+            },
+        ],
+        "relationships": [
+            {"type": "EXTENDS", "from": "descendant", "to": "base",
+             "min_hops": 1, "max_hops": depth},
+            {"type": "EXTENDS", "from": "descendant", "to": "concern"},
+        ],
+        "limit": 500,
+    }}
+
+    result = _query(body)
+    all_nodes = _nodes(result, "Definition")
+    edges = result.get("result", {}).get("edges", [])
+
+    id_to_node = {n["id"]: n for n in all_nodes if "id" in n}
+    base_ids    = {n["id"] for n in all_nodes if n.get("fqn") == args.base or n.get("name") == args.base}
+    prefix      = args.prefix.rstrip("/") + "/"
+    concern_ids = {n["id"] for n in all_nodes if (n.get("file_path") or "").startswith(prefix) and "id" in n}
+    desc_ids    = {n["id"] for n in all_nodes if "id" in n and n["id"] not in base_ids and n["id"] not in concern_ids}
+
+    desc_to_concerns: dict[str, set[str]] = {did: set() for did in desc_ids}
+    for e in edges:
+        from_id, to_id = e.get("from_id"), e.get("to_id")
+        if from_id in desc_ids and to_id in concern_ids:
+            desc_to_concerns[from_id].add(to_id)
+
+    print(f"INCLUDES — concerns for descendants of {args.base!r}")
+    print(f"  prefix: {prefix}  |  descendants: {len(desc_ids)}  |  total concerns: {len(concern_ids)}")
+    print("=" * 78)
+    if not desc_ids:
+        print("(no descendants found — class may not be indexed on this branch)")
+        return
+
+    for did in sorted(desc_ids, key=lambda d: (id_to_node.get(d, {}).get("file_path") or "")):
+        dnode = id_to_node.get(did, {})
+        dfqn  = dnode.get("fqn") or dnode.get("name") or "?"
+        dloc  = f"{dnode.get('file_path', '')}:{dnode.get('start_line', '')}"
+        cids  = desc_to_concerns[did]
+        print(f"\n{dfqn}  @ {dloc}")
+        if not cids:
+            print("  (no concerns from this prefix indexed)")
+        else:
+            for cn in sorted((id_to_node.get(c, {}) for c in cids), key=lambda x: (x.get("file_path") or "")):
+                cfqn = cn.get("fqn") or cn.get("name") or "?"
+                cloc = f"{cn.get('file_path', '')}:{cn.get('start_line', '')}"
+                print(f"  + {cfqn:<55}  {cloc}")
+
+    total = sum(len(v) for v in desc_to_concerns.values())
+    print(f"\n{len(desc_ids)} descendant(s), {total} total concern inclusions")
 
 
 def cmd_class(args: argparse.Namespace) -> None:
@@ -433,15 +509,24 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_ext = sub.add_parser("extends", help="descendants of a base class via EXTENDS")
+    p_ext = sub.add_parser("extends", help="descendants of a base class via EXTENDS (single multi-hop query)")
     p_ext.add_argument("name")
     p_ext.add_argument("--depth", type=int, default=2,
                        help="Traversal depth 1-3 (default: 2)")
 
-    p_anc = sub.add_parser("ancestors", help="parent/ancestor classes via EXTENDS edges (walk upward)")
-    p_anc.add_argument("name")
+    p_anc = sub.add_parser("ancestors", help="parent/ancestor classes via EXTENDS edges (single multi-hop query)")
+    p_anc.add_argument("name", help="Fully-qualified class name (fqn), e.g. 'Ci::Build'")
     p_anc.add_argument("--depth", type=int, default=3,
                        help="Traversal depth 1-3 (default: 3)")
+    p_anc.add_argument("--filter-prefix", default="",
+                       help="Only show ancestors whose file_path starts with this prefix "
+                            "(e.g. app/models/concerns to list included concerns only).")
+
+    p_inc = sub.add_parser("includes", help="per-descendant concern matrix via single 3-hop query")
+    p_inc.add_argument("base", help="Base class/module FQN, e.g. 'Noteable'")
+    p_inc.add_argument("prefix", help="File-path prefix to filter concerns, e.g. 'app/models/concerns'")
+    p_inc.add_argument("--depth", type=int, default=1,
+                       help="Depth for descendant traversal, 1-3 (default: 1)")
 
     p_cls = sub.add_parser("class", help="all members of a class via DEFINES")
     p_cls.add_argument("name")
@@ -457,6 +542,7 @@ def main() -> None:
     dispatch = {
         "extends":   cmd_extends,
         "ancestors": cmd_ancestors,
+        "includes":  cmd_includes,
         "class":     cmd_class,
         "api":       cmd_api,
         "callers":   cmd_callers,
@@ -466,3 +552,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
