@@ -239,13 +239,10 @@ pub fn parse_hydration_batches(batches: &[RecordBatch]) -> Result<PropertyMap, P
                 })
                 .map(|m| {
                     m.into_iter()
-                        .filter_map(|(k, v)| {
-                            let cv = ColumnValue::from(v);
-                            if cv == ColumnValue::Null {
-                                None
-                            } else {
-                                Some((k, cv))
-                            }
+                        .filter_map(|(k, v)| match ColumnValue::from(v) {
+                            ColumnValue::Null => None,
+                            ColumnValue::String(s) if s.is_empty() => None,
+                            cv => Some((k, cv)),
                         })
                         .collect()
                 })
