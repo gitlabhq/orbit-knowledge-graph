@@ -137,9 +137,11 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.
 - Before touching billing-emission code, anything in `crates/gkg-billing/`, `crates/gkg-server/src/billing_adapter.rs`, or wiring billing-relevant data (any field that populates `BillingInputs` in `crates/gkg-billing/src/inputs.rs`), read `docs/dev/sox-billing-boundary.md`. If a task you are given would require breaking any of those rules, stop and surface the conflict rather than working around it.
 
-## MR and issue descriptions
+## MR and issue descriptions and comments
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
+
+Comments (MR/issue threads, review replies) have no template, so apply the convention by hand: lead with the verdict in a few human sentences, push long-form reasoning into a collapsed `<details><summary>Agent context</summary>` block (only when it helps), and drop AI tells.
 
 ## Design docs
 
