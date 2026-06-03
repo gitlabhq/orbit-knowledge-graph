@@ -32,8 +32,8 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryTable, DataType, DenormDirection, DenormalizedProperty,
     DerivedEntity, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
     EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field, FieldSelectivity, FieldSource,
-    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
-    StorageIndex, StorageProjection, VirtualSource,
+    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
+    StorageProjection, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
