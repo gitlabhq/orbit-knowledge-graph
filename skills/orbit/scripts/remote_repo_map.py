@@ -71,11 +71,65 @@ def _nodes(result: dict, node_type: str | None = None) -> list[dict]:
     return nodes
 
 
+def _edges(result: dict) -> list[dict]:
+    """Return the instance-level edges from a graph/raw query response.
+
+    The raw formatter always emits an `edges` array (required field in
+    config/schemas/query_response.json), with `from_id`/`to_id` string IDs and,
+    for variable-length traversals, a `depth` hop count (absent on single-hop
+    edges).
+    """
+    return result.get("result", {}).get("edges", [])
+
+
 def _base_filters(project_id: int, branch: str) -> dict:
     return {
         "project_id": {"op": "eq", "value": project_id},
         "branch":     {"op": "eq", "value": branch},
     }
+
+
+# ── Pure helpers (no I/O — unit-testable against canned responses) ─────────────
+
+def _filter_by_prefix(rows: list[dict], prefix: str) -> list[dict]:
+    """Keep only rows whose `file_path` starts with `prefix` (no-op if empty)."""
+    if not prefix:
+        return rows
+    return [n for n in rows if (n.get("file_path") or "").startswith(prefix)]
+
+
+def _concern_ids_under_prefix(nodes: list[dict], prefix: str) -> set[str]:
+    """Ids of nodes whose `file_path` is under `prefix`.
+
+    An empty prefix matches nothing — "every file is a concern" is meaningless,
+    so we deliberately classify zero concerns rather than treat "" as match-all.
+    """
+    norm_prefix = prefix.rstrip("/") + "/" if prefix.strip() else None
+    if norm_prefix is None:
+        return set()
+    return {
+        n["id"] for n in nodes
+        if "id" in n and (n.get("file_path") or "").startswith(norm_prefix)
+    }
+
+
+def _map_descendant_concerns(
+    edges: list[dict], desc_ids: set[str], concern_ids: set[str]
+) -> dict[str, set[str]]:
+    """Build the per-descendant → concern-ids mapping from EXTENDS edges.
+
+    Robust to edge orientation (selectivity reordering can swap `from`/`to`): we
+    accept a descendant↔concern edge in either direction. A descendant that is
+    also a concern (a concern that extends the base) is never mapped to itself.
+    """
+    desc_to_concerns: dict[str, set[str]] = {did: set() for did in desc_ids}
+    for e in edges:
+        from_id, to_id = e.get("from_id"), e.get("to_id")
+        if from_id in desc_ids and to_id in concern_ids and from_id != to_id:
+            desc_to_concerns[from_id].add(to_id)
+        elif to_id in desc_ids and from_id in concern_ids and from_id != to_id:
+            desc_to_concerns[to_id].add(from_id)
+    return desc_to_concerns
 
 
 # ── Subcommands ───────────────────────────────────────────────────────────────
@@ -124,18 +178,23 @@ def cmd_extends(args: argparse.Namespace) -> None:
             {
                 "id": "child", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "child", "to": "base", "min_hops": 1, "max_hops": depth}
         ],
-        "limit": 200,
+        # Max server-side cap. Multi-hop fan-out on wide trees can exceed a few
+        # hundred nodes; a low limit truncates the result non-deterministically
+        # (the server has no stable order before truncation), so we request the
+        # full cap to keep multi-hop results stable and complete.
+        "limit": 1000,
     }}
 
     result = _query(body)
+    all_nodes = _nodes(result, "Definition")
     rows = [
-        n for n in _nodes(result, "Definition")
+        n for n in all_nodes
         if n.get("name") != args.name and n.get("fqn") != args.name
     ]
 
@@ -146,7 +205,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
         return
     print(f"{'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for n in rows:
+    for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
         fqn  = n.get("fqn", n.get("name", "?"))
         kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
@@ -181,24 +240,26 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             {
                 "id": "ancestor", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "child", "to": "ancestor", "min_hops": 1, "max_hops": depth}
         ],
-        "limit": 200,
+        # See cmd_extends: request the full cap so multi-hop ancestor chains are
+        # not truncated non-deterministically.
+        "limit": 1000,
     }}
 
     result = _query(body)
+    all_nodes = _nodes(result, "Definition")
     rows = [
-        n for n in _nodes(result, "Definition")
+        n for n in all_nodes
         if n.get("fqn") != args.name
     ]
 
     prefix = getattr(args, "filter_prefix", None) or ""
-    if prefix:
-        rows = [n for n in rows if (n.get("file_path") or "").startswith(prefix)]
+    rows = _filter_by_prefix(rows, prefix)
 
     print(f"ANCESTORS — of {args.name!r} (depth ≤ {depth})"
           + (f"  [filter: {prefix}]" if prefix else ""))
@@ -208,7 +269,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
         return
     print(f"{'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for n in rows:
+    for n in sorted(rows, key=lambda x: x.get("file_path") or ""):
         fqn  = n.get("fqn", n.get("name", "?"))
         kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
@@ -230,54 +291,98 @@ def cmd_includes(args: argparse.Namespace) -> None:
     branch = args.branch
     depth  = max(1, min(getattr(args, "depth", 1), 3))
 
-    body = {"query": {
+    norm_prefix = args.prefix.rstrip("/") + "/"
+    base_key, base_val = _resolve_name(args.base)
+
+    # Two 2-node traversals instead of one 3-node branching traversal: Orbit
+    # Remote does not currently return results for a single query with two
+    # relationships fanning out from a shared node (it returns an empty set), so
+    # we (1) find the descendants of BASE, then (2) map those descendants to the
+    # concerns they extend. This is still far cheaper than the old
+    # "1 extends + N ancestors" pattern: exactly two queries regardless of fan-out.
+
+    # Query 1 — descendants of BASE.
+    desc_body = {"query": {
         "query_type": "traversal",
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
-                "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.base}},
-                "columns": ["fqn", "name"],
+                "filters": {**_base_filters(pid, branch), base_key: {"op": "eq", "value": base_val}},
+                "columns": ["id", "fqn", "name"],
             },
             {
                 "id": "descendant", "entity": "Definition",
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
-            },
-            {
-                "id": "concern", "entity": "Definition",
-                "filters": {"file_path": {"op": "starts_with", "value": args.prefix.rstrip("/") + "/"}},
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "filters": _base_filters(pid, branch),
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "base",
-             "min_hops": 1, "max_hops": depth},
-            {"type": "EXTENDS", "from": "descendant", "to": "concern"},
+             "min_hops": 1, "max_hops": depth}
         ],
-        "limit": 500,
+        "limit": 1000,
     }}
-
-    result = _query(body)
-    all_nodes = _nodes(result, "Definition")
-    edges = result.get("result", {}).get("edges", [])
-
-    id_to_node = {n["id"]: n for n in all_nodes if "id" in n}
-    base_ids    = {n["id"] for n in all_nodes if n.get("fqn") == args.base or n.get("name") == args.base}
-    prefix      = args.prefix.rstrip("/") + "/"
-    concern_ids = {n["id"] for n in all_nodes if (n.get("file_path") or "").startswith(prefix) and "id" in n}
-    desc_ids    = {n["id"] for n in all_nodes if "id" in n and n["id"] not in base_ids and n["id"] not in concern_ids}
-
-    desc_to_concerns: dict[str, set[str]] = {did: set() for did in desc_ids}
-    for e in edges:
-        from_id, to_id = e.get("from_id"), e.get("to_id")
-        if from_id in desc_ids and to_id in concern_ids:
-            desc_to_concerns[from_id].add(to_id)
+    desc_nodes = [
+        n for n in _nodes(_query(desc_body), "Definition")
+        if n.get("fqn") != args.base and n.get("name") != args.base
+    ]
+    id_to_node = {n["id"]: n for n in desc_nodes if "id" in n}
+    desc_ids = set(id_to_node)
 
     print(f"INCLUDES — concerns for descendants of {args.base!r}")
-    print(f"  prefix: {prefix}  |  descendants: {len(desc_ids)}  |  total concerns: {len(concern_ids)}")
-    print("=" * 78)
     if not desc_ids:
+        print(f"  prefix: {norm_prefix}")
+        print("=" * 78)
         print("(no descendants found — class may not be indexed on this branch)")
         return
+
+    # Query 2 — for those descendants, the concerns under PREFIX they extend.
+    concern_body = {"query": {
+        "query_type": "traversal",
+        "nodes": [
+            {
+                "id": "descendant", "entity": "Definition",
+                "filters": _base_filters(pid, branch),
+                "node_ids": [int(d) for d in desc_ids],
+                "columns": ["id", "fqn", "name"],
+            },
+            {
+                "id": "concern", "entity": "Definition",
+                "filters": {**_base_filters(pid, branch),
+                            "file_path": {"op": "starts_with", "value": norm_prefix}},
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
+            },
+        ],
+        # Direct includes only (single hop, intentional): the concerns each
+        # descendant mixes in itself, not transitively.
+        "relationships": [
+            {"type": "EXTENDS", "from": "descendant", "to": "concern",
+             "min_hops": 1, "max_hops": 1}
+        ],
+        "limit": 1000,
+    }}
+    concern_result = _query(concern_body)
+    concern_nodes = _nodes(concern_result, "Definition")
+    # Add concern nodes without clobbering the richer descendant rows from Q1
+    # (the descendant nodes reappear here with fewer columns).
+    for n in concern_nodes:
+        if "id" in n and n["id"] not in id_to_node:
+            id_to_node[n["id"]] = n
+
+    concern_ids = _concern_ids_under_prefix(concern_nodes, args.prefix)
+    # Drop the base itself from concerns: when the base lives under PREFIX (a
+    # base concern), its descendants extend it directly, but it should not be
+    # reported as a concern of its own descendants.
+    concern_ids -= {
+        n["id"] for n in concern_nodes
+        if "id" in n and (n.get("fqn") == args.base or n.get("name") == base_val)
+    }
+    desc_to_concerns = _map_descendant_concerns(
+        _edges(concern_result), desc_ids, concern_ids
+    )
+
+    print(f"  prefix: {norm_prefix}  |  descendants: {len(desc_ids)}  |  total concerns: {len(concern_ids)}")
+    print("=" * 78)
 
     for did in sorted(desc_ids, key=lambda d: (id_to_node.get(d, {}).get("file_path") or "")):
         dnode = id_to_node.get(did, {})
