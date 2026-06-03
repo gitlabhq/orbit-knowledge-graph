@@ -85,11 +85,18 @@ fn edge_count(batches: &[arrow::record_batch::RecordBatch]) -> usize {
 }
 
 /// Happy path: a realistic mix of same-project MENTIONS, a cross-project
-/// MENTIONS, and a REOPENED lifecycle action all materialize the expected
-/// `gl_edge` rows - and nothing else.
+/// (but same-top-level-namespace) MENTIONS, and a REOPENED lifecycle action
+/// all materialize the expected `gl_edge` rows - and nothing else.
+///
+/// The cross-project target lives in a *different project* under the *same
+/// top-level namespace* as the source (`1/100/200/` -> `1/100/400/`). v1
+/// bounds resolution to the source top-level namespace, so this still
+/// resolves; a *cross-top-level* reference is covered separately by
+/// [`cross_top_level_reference_is_not_resolved`].
 pub async fn materializes_mentions_and_lifecycle_edges(ctx: &TestContext) {
-    // Two projects: the source project (1/100/200/) and a cross-project
-    // target in another namespace (1/300/400/).
+    // Two projects, both under top-level namespace 100: the source project
+    // (1/100/200/) and a cross-project target in a sibling project
+    // (1/100/400/).
     create_route(
         ctx,
         1,
@@ -105,16 +112,16 @@ pub async fn materializes_mentions_and_lifecycle_edges(ctx: &TestContext) {
         2,
         400,
         "Project",
-        "other-group/other-proj",
-        300,
-        "1/300/400/",
+        "my-group/other-proj",
+        100,
+        "1/100/400/",
     )
     .await;
 
     // Reference targets.
     seed_merge_request(ctx, 10, 5, 200, "1/100/200/").await; // !5 same-project
     seed_work_item(ctx, 20, 9, 200, 100, "1/100/200/").await; // #9 same-project
-    seed_merge_request(ctx, 30, 42, 400, "1/300/400/").await; // cross-project !42
+    seed_merge_request(ctx, 30, 42, 400, "1/100/400/").await; // cross-project !42 (same top-level)
 
     // Source MR (id 1000, iid 1) lives in my-proj.
     // - cross_reference to !5 (same project) -> MENTIONS MR->MR
@@ -145,11 +152,12 @@ pub async fn materializes_mentions_and_lifecycle_edges(ctx: &TestContext) {
         "2024-01-15 10:00:00",
     )
     .await;
-    // - cross_reference to other-group/other-proj!42 -> MENTIONS MR->MR (cross-project)
+    // - cross_reference to my-group/other-proj!42 -> MENTIONS MR->MR
+    //   (cross-project, same top-level namespace)
     seed_system_note(
         ctx,
         3,
-        "mentioned in other-group/other-proj!42",
+        "mentioned in my-group/other-proj!42",
         "cross_reference",
         "MergeRequest",
         1000,
@@ -202,10 +210,11 @@ pub async fn materializes_mentions_and_lifecycle_edges(ctx: &TestContext) {
     assert_eq!(target_kind.value(1), "WorkItem");
     assert_eq!(target_id.value(2), 30);
     assert_eq!(target_kind.value(2), "MergeRequest");
-    // The cross-project edge lands in the target's namespace partition.
+    // The cross-project edge lands in the target's namespace partition (the
+    // target project is a sibling under the same top-level namespace).
     assert_eq!(
         tp.value(2),
-        "1/300/400/",
+        "1/100/400/",
         "cross-project MENTIONS uses the target's traversal_path"
     );
 
@@ -654,11 +663,18 @@ async fn insert_route_version(
 
 /// Regression for the cross-project `0/` bug: `siphon_routes` is a
 /// ReplacingMergeTree whose sort key includes `traversal_path`, so the
-/// traversal-path reconciler's stale (`0/`) and reconciled (`1/22/94/`) rows
+/// traversal-path reconciler's stale (`0/`) and reconciled (`1/100/94/`) rows
 /// for the same project coexist and never collapse under `FINAL`. The
 /// resolver must deduplicate by PG primary key + `argMax(_siphon_replicated_at)`
 /// and pick the reconciled row, so a cross-project MENTIONS lands in the
 /// target's namespace partition rather than `0/`.
+///
+/// The target project is a sibling under the *same top-level namespace* as
+/// the source (`1/100/200/` -> `1/100/94/`): v1 bounds resolution to the
+/// source top-level namespace, and this test isolates the `argMax` dedup, not
+/// the cross-top-level behaviour. Note the stale `0/` row also falls outside
+/// the `1/100/` prefix, so picking it (the bug) would additionally drop the
+/// edge — making this a doubly-strong guard under the bounded resolver.
 pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &TestContext) {
     // Source project (where the note lives) and its route.
     create_route(
@@ -673,7 +689,7 @@ pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &T
     .await;
 
     // Target project route, present as BOTH a stale 0/ row and a later
-    // reconciled 1/22/94/ row for the same PG id (id = 2). Insert the stale
+    // reconciled 1/100/94/ row for the same PG id (id = 2). Insert the stale
     // row second by wall-clock-of-insertion to make ordering adversarial:
     // the reconciled row carries the larger _siphon_replicated_at, so only
     // argMax (not row order, not FINAL) resolves it correctly.
@@ -682,9 +698,9 @@ pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &T
         2,
         400,
         "Project",
-        "toolbox/proj-a",
+        "src-group/proj-a",
         94,
-        "1/22/94/",
+        "1/100/94/",
         "2024-01-20 12:05:00",
     )
     .await;
@@ -693,7 +709,7 @@ pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &T
         2,
         400,
         "Project",
-        "toolbox/proj-a",
+        "src-group/proj-a",
         94,
         "0/",
         "2024-01-20 12:00:00",
@@ -701,13 +717,13 @@ pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &T
     .await;
 
     // The cross-project target work item lives in the reconciled namespace.
-    seed_work_item(ctx, 30, 7, 400, 94, "1/22/94/").await;
+    seed_work_item(ctx, 30, 7, 400, 94, "1/100/94/").await;
 
     // A note in the source project cross-references the target by full path.
     seed_system_note(
         ctx,
         1,
-        "mentioned in toolbox/proj-a#7",
+        "mentioned in src-group/proj-a#7",
         "cross_reference",
         "MergeRequest",
         1000,
@@ -740,7 +756,101 @@ pub async fn cross_project_mentions_uses_reconciled_route_not_stale_zero(ctx: &T
     assert_eq!(tid.value(0), 30);
     assert_eq!(
         tp.value(0),
-        "1/22/94/",
+        "1/100/94/",
         "edge must land in the reconciled namespace partition, not the stale 0/ route"
+    );
+}
+
+/// v1 limitation guard: a cross-reference whose target lives in a *different
+/// top-level namespace* is intentionally NOT resolved. The resolver bounds
+/// every datalake scan to the source note's top-level namespace prefix
+/// (`startsWith(traversal_path, "{org}/{top_level_ns}/")`) so it never
+/// full-scans the shared Siphon datalake; the cost is that cross-top-level
+/// references are deferred (see ADR 013 "Coverage and known limitations").
+/// This asserts the deliberate drop so the limitation can't silently regress
+/// into either a wrong edge or an unbounded scan.
+pub async fn cross_top_level_reference_is_not_resolved(ctx: &TestContext) {
+    // Source project under top-level namespace 100.
+    create_route(
+        ctx,
+        1,
+        200,
+        "Project",
+        "my-group/my-proj",
+        100,
+        "1/100/200/",
+    )
+    .await;
+    // Target project under a DIFFERENT top-level namespace (300). Its route
+    // and work item are fully present and correct — the only reason the edge
+    // must not materialize is the top-level-namespace bound.
+    create_route(
+        ctx,
+        2,
+        400,
+        "Project",
+        "other-group/other-proj",
+        300,
+        "1/300/400/",
+    )
+    .await;
+    seed_work_item(ctx, 30, 7, 400, 300, "1/300/400/").await;
+
+    // A same-top-level target, to prove the handler ran and resolves what it
+    // should within the bound.
+    seed_work_item(ctx, 40, 9, 200, 100, "1/100/200/").await;
+
+    // Cross-top-level reference by full path: must be dropped.
+    seed_system_note(
+        ctx,
+        1,
+        "mentioned in other-group/other-proj#7",
+        "cross_reference",
+        "MergeRequest",
+        1000,
+        1,
+        200,
+        "1/100/200/",
+        "2024-01-15 09:00:00",
+    )
+    .await;
+    // Same-top-level reference: must resolve.
+    seed_system_note(
+        ctx,
+        2,
+        "mentioned in #9",
+        "cross_reference",
+        "MergeRequest",
+        1000,
+        1,
+        200,
+        "1/100/200/",
+        "2024-01-15 10:00:00",
+    )
+    .await;
+
+    system_notes_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .expect("system-notes handler should succeed");
+
+    let mentions = ctx
+        .query(&format!(
+            "SELECT target_id, traversal_path FROM {} FINAL WHERE relationship_kind = 'MENTIONS'",
+            t("gl_edge")
+        ))
+        .await;
+    // Only the same-top-level #9 edge resolves; the cross-top-level #7 drops.
+    assert_eq!(
+        edge_count(&mentions),
+        1,
+        "only the same-top-level reference resolves; cross-top-level is deferred"
+    );
+    let tid = ArrowUtils::get_column_by_name::<Int64Array>(&mentions[0], "target_id").unwrap();
+    assert_eq!(
+        tid.value(0),
+        40,
+        "the resolved edge targets the same-top-level work item, not the cross-top-level one"
     );
 }

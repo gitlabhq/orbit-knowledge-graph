@@ -32,6 +32,24 @@ pub fn top_level_namespace_id(path: &str) -> Option<i64> {
     segments.next().and_then(|s| s.parse().ok())
 }
 
+/// The top-level-namespace prefix of a traversal path: the first two
+/// segments with a trailing slash (`<org_id>/<top_level_ns_id>/`).
+///
+/// `"42/100/" → Some("42/100/")`, `"42/100/1000/" → Some("42/100/")`.
+/// Returns `None` when the path has fewer than two numeric segments, so a
+/// malformed path can never produce `startsWith(traversal_path, "")` (which
+/// would match every row). Used to bound the system-notes resolver scans to a
+/// single top-level namespace partition.
+pub fn root_prefix(path: &str) -> Option<String> {
+    let mut segments = path.split('/').filter(|s| !s.is_empty());
+    let org = segments.next()?;
+    let top_level = segments.next()?;
+    if org.parse::<u64>().is_err() || top_level.parse::<u64>().is_err() {
+        return None;
+    }
+    Some(format!("{org}/{top_level}/"))
+}
+
 /// Extract the leaf namespace ID (last segment) from a traversal path.
 ///
 /// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
@@ -120,6 +138,38 @@ mod tests {
     #[test]
     fn top_level_namespace_id_empty() {
         assert_eq!(top_level_namespace_id(""), None);
+    }
+
+    #[test]
+    fn root_prefix_two_segments() {
+        assert_eq!(root_prefix("42/100/"), Some("42/100/".to_string()));
+    }
+
+    #[test]
+    fn root_prefix_truncates_deeper_paths() {
+        assert_eq!(root_prefix("42/100/1000/"), Some("42/100/".to_string()));
+        assert_eq!(
+            root_prefix("42/100/1000/2000/"),
+            Some("42/100/".to_string())
+        );
+    }
+
+    #[test]
+    fn root_prefix_single_segment_is_none() {
+        // A single segment can't form a top-level prefix; returning None
+        // prevents an empty/over-broad startsWith match.
+        assert_eq!(root_prefix("42/"), None);
+    }
+
+    #[test]
+    fn root_prefix_empty_is_none() {
+        assert_eq!(root_prefix(""), None);
+    }
+
+    #[test]
+    fn root_prefix_non_numeric_is_none() {
+        assert_eq!(root_prefix("abc/100/"), None);
+        assert_eq!(root_prefix("42/abc/"), None);
     }
 
     #[test]

@@ -313,10 +313,16 @@ impl SystemNotesTransform {
     fn reset_drop_counts(&self) {}
 
     /// Resolve a page's references against the datalake and emit edges.
+    ///
+    /// `root_prefix` is the source top-level namespace prefix
+    /// (`{org}/{top_level_ns}/`) that bounds every resolver scan to one
+    /// top-level partition; see [`resolve::ROUTES_SQL`]. v1 resolves only
+    /// references whose target lives under this prefix.
     async fn resolve_and_emit(
         &self,
         datalake: &dyn DatalakeQuery,
         notes: &[ExtractedNote],
+        root_prefix: &str,
     ) -> Result<Vec<EmittedEdge>, HandlerError> {
         // Observability for the two drop paths in `process_batch`.
         //
@@ -350,9 +356,9 @@ impl SystemNotesTransform {
             }
         }
 
-        let default_projects = resolve_default_projects(datalake, notes).await?;
+        let default_projects = resolve_default_projects(datalake, notes, root_prefix).await?;
         let plan = plan_for_batch(notes, &default_projects);
-        let index = resolve_plan(datalake, &plan).await?;
+        let index = resolve_plan(datalake, &plan, root_prefix).await?;
 
         let edges = process_batch(notes, &default_projects, |r, default_project| {
             index.resolve(r, default_project)
@@ -376,7 +382,24 @@ impl PageTransform for SystemNotesTransform {
             return Ok(Vec::new());
         }
 
-        let edges = self.resolve_and_emit(datalake, &notes).await?;
+        // All notes in a page come from one dispatched namespace, so they
+        // share a top-level-namespace root. Derive the bounding prefix from
+        // the page; if no note has a well-formed traversal_path (malformed
+        // dispatch), skip the page rather than scan the datalake unbounded —
+        // an empty prefix would make `startsWith` match every row.
+        let Some(root_prefix) = notes
+            .iter()
+            .find_map(|n| gkg_utils::traversal_path::root_prefix(&n.traversal_path))
+        else {
+            tracing::warn!(
+                "system_notes: page has no valid traversal_path root; skipping resolution"
+            );
+            return Ok(Vec::new());
+        };
+
+        let edges = self
+            .resolve_and_emit(datalake, &notes, &root_prefix)
+            .await?;
         if edges.is_empty() {
             return Ok(Vec::new());
         }
@@ -398,6 +421,7 @@ impl PageTransform for SystemNotesTransform {
 async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
     notes: &[ExtractedNote],
+    root_prefix: &str,
 ) -> Result<DefaultProjectLookup, HandlerError> {
     let project_ids: Vec<i64> = {
         let mut ids: Vec<i64> = notes.iter().filter_map(|n| n.project_id).collect();
@@ -410,8 +434,10 @@ async fn resolve_default_projects(
     }
 
     // Reverse routes lookup: source_id (project_id) -> path. ROUTES_SQL filters
-    // on `path IN`, so use a dedicated id-keyed query here.
-    let params = json!({ "source_ids": project_ids });
+    // on `path IN`, so use a dedicated id-keyed query here. Bounded to the
+    // source top-level namespace; the source notes' own projects always live
+    // within it.
+    let params = json!({ "root_prefix": root_prefix, "source_ids": project_ids });
     let batches = datalake
         .query_batches(PROJECT_PATHS_SQL, params, None)
         .await
@@ -443,6 +469,7 @@ async fn resolve_default_projects(
 async fn resolve_plan(
     datalake: &dyn DatalakeQuery,
     plan: &ResolutionPlan,
+    root_prefix: &str,
 ) -> Result<ResolvedIndex, HandlerError> {
     if plan.paths.is_empty() {
         return Ok(ResolvedIndex::default());
@@ -451,7 +478,9 @@ async fn resolve_plan(
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
     // The routes lookup must complete first — it maps each project path to a
     // `project_id` that the MR/work-item `(project_id, iid)` lookups key on.
-    let routes = query_routes(datalake, &paths).await?;
+    // All three are bounded to `root_prefix`, so a cross-top-level reference
+    // simply does not resolve (its route/entity falls outside the prefix).
+    let routes = query_routes(datalake, &paths, root_prefix).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
@@ -459,8 +488,8 @@ async fn resolve_plan(
     // The MR and work-item lookups are independent, so run them concurrently
     // rather than serially.
     let (mr_entities, wi_entities) = tokio::try_join!(
-        query_entities(datalake, MERGE_REQUESTS_SQL, &mr_pairs),
-        query_entities(datalake, WORK_ITEMS_SQL, &wi_pairs),
+        query_entities(datalake, MERGE_REQUESTS_SQL, &mr_pairs, root_prefix),
+        query_entities(datalake, WORK_ITEMS_SQL, &wi_pairs, root_prefix),
     )?;
 
     Ok(ResolvedIndex::build(&routes, &mr_entities, &wi_entities))
@@ -469,8 +498,9 @@ async fn resolve_plan(
 async fn query_routes(
     datalake: &dyn DatalakeQuery,
     paths: &[&str],
+    root_prefix: &str,
 ) -> Result<Vec<RouteRow>, HandlerError> {
-    let params = json!({ "paths": paths });
+    let params = json!({ "root_prefix": root_prefix, "paths": paths });
     let batches = datalake
         .query_batches(ROUTES_SQL, params, None)
         .await
@@ -499,6 +529,7 @@ async fn query_entities(
     datalake: &dyn DatalakeQuery,
     sql: &str,
     pairs: &[(i64, i64)],
+    root_prefix: &str,
 ) -> Result<Vec<EntityRow>, HandlerError> {
     if pairs.is_empty() {
         return Ok(Vec::new());
@@ -506,10 +537,12 @@ async fn query_entities(
     // Pass the (project_id, iid) pairs as two parallel Int64 arrays; the SQL
     // zips them back into the tuple IN-list server-side. A single
     // Array(Tuple(...)) param can't survive the JSON parameter channel (a tuple
-    // serializes as a nested array, which ClickHouse rejects).
+    // serializes as a nested array, which ClickHouse rejects). `root_prefix`
+    // bounds the scan to the source top-level namespace partition.
     let project_ids: Vec<i64> = pairs.iter().map(|(p, _)| *p).collect();
     let iids: Vec<i64> = pairs.iter().map(|(_, i)| *i).collect();
     let params = json!({
+        "root_prefix": root_prefix,
         "project_ids": project_ids,
         "iids": iids,
     });

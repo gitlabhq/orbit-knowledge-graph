@@ -46,10 +46,19 @@ use super::parse::{RefKind, Reference};
 /// aggregation so a live route isn't dropped by an older tombstone (or kept
 /// by a stale live row).
 ///
-/// The lookup is **not** scoped to the source note's `traversal_path`:
-/// cross-project references point at projects in other namespaces, and
-/// `siphon_routes.path` is globally unique, so a namespace-prefix filter
-/// here would silently drop every cross-namespace reference.
+/// **Bounded to the source note's top-level namespace.** `siphon_routes` is
+/// `ORDER BY (traversal_path, source_type, source_id, id)`, so the
+/// `path`/`source_id` filters alone can't prune the primary index and the
+/// lookup degrades to a full scan of the shared Siphon datalake. The
+/// `startsWith(traversal_path, {root_prefix:String})` leg restricts the scan
+/// to the source's top-level namespace partition (`{org}/{top_level_ns}/`),
+/// turning the full scan into a primary-index range scan. The trade-off is
+/// that v1 resolves only **same-top-level-namespace** references; a
+/// cross-top-level reference (`other-group/proj#5`) lives outside the prefix
+/// and is silently not resolved (under-counts, never a wrong edge). See ADR
+/// 013 "Coverage and known limitations" — cross-top-level resolution is
+/// deferred to the graph-DB dictionary lever, which also resolves the
+/// cross-namespace edge-visibility (authz) question.
 pub const ROUTES_SQL: &str = "\
 SELECT \
     source_id, \
@@ -63,7 +72,8 @@ FROM ( \
         argMax(traversal_path, _siphon_replicated_at) AS traversal_path, \
         argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
     FROM siphon_routes \
-    WHERE path IN {paths:Array(String)} \
+    WHERE startsWith(siphon_routes.traversal_path, {root_prefix:String}) \
+      AND path IN {paths:Array(String)} \
       AND source_type = 'Project' \
     GROUP BY id, source_id, path \
 ) \
@@ -77,9 +87,14 @@ WHERE _siphon_deleted = false";
 /// [`ROUTES_SQL`] (which is keyed on `path`).
 ///
 /// Deduplicated by PG primary key the same way as [`ROUTES_SQL`] — see that
-/// constant for why `FINAL` is insufficient here.
+/// constant for why `FINAL` is insufficient here. Bounded to the source's
+/// top-level namespace by `startsWith(traversal_path, {root_prefix:String})`
+/// for the same primary-index-pruning reason; the source notes' own projects
+/// always live within their top-level namespace, so this leg never drops a
+/// row we need.
 ///
 /// Parameters:
+///   `{root_prefix:String}` — the source top-level namespace prefix.
 ///   `{source_ids:Array(Int64)}` — project ids to resolve.
 ///
 /// Returns `(source_id, path)`.
@@ -94,7 +109,8 @@ FROM ( \
         path, \
         argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
     FROM siphon_routes \
-    WHERE source_type = 'Project' \
+    WHERE startsWith(traversal_path, {root_prefix:String}) \
+      AND source_type = 'Project' \
       AND source_id IN {source_ids:Array(Int64)} \
     GROUP BY id, source_id, path \
 ) \
@@ -111,8 +127,14 @@ WHERE _siphon_deleted = false";
 ///   `Array(Tuple(Int64, Int64))`; `arrayZip` rebuilds the tuples from the
 ///   two flat arrays. The arrays must be the same length and index-aligned.
 ///
-/// Not scoped to the source note's `traversal_path` (cross-project targets
-/// live in other namespaces); `(target_project_id, iid)` is globally unique.
+/// **Bounded to the source note's top-level namespace.** `merge_requests` is
+/// `ORDER BY (traversal_path, id)`, so a `(target_project_id, iid)` filter
+/// can't prune the primary index — without a `traversal_path` leg this is a
+/// full scan of one of the largest tables in the shared Siphon datalake. The
+/// `startsWith(traversal_path, {root_prefix:String})` leg restricts it to the
+/// source's top-level namespace partition (primary-index range scan). v1 thus
+/// resolves only same-top-level-namespace MR references; cross-top-level
+/// targets are deferred (see [`ROUTES_SQL`] and ADR 013).
 ///
 /// `merge_requests` is a `ReplacingMergeTree`, so it is deduplicated by PG
 /// primary key (`id`) with `argMax(..., _siphon_replicated_at)` — same
@@ -132,7 +154,8 @@ FROM ( \
         iid, \
         argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
     FROM merge_requests \
-    WHERE (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
+    WHERE startsWith(traversal_path, {root_prefix:String}) \
+      AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, target_project_id, iid \
 ) \
 WHERE _siphon_deleted = false";
@@ -140,7 +163,10 @@ WHERE _siphon_deleted = false";
 /// SQL template for the work-item entity batch lookup.
 ///
 /// Parameters identical to [`MERGE_REQUESTS_SQL`] but keyed on `project_id`.
-/// Deduplicated by PG primary key the same way. Returns `(id, project_id, iid)`.
+/// Deduplicated by PG primary key the same way, and bounded to the source's
+/// top-level namespace by `startsWith(traversal_path, {root_prefix:String})`
+/// for the same primary-index-pruning reason (`work_items` is
+/// `ORDER BY (traversal_path, id)`). Returns `(id, project_id, iid)`.
 pub const WORK_ITEMS_SQL: &str = "\
 SELECT \
     id, \
@@ -153,7 +179,8 @@ FROM ( \
         iid, \
         argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
     FROM work_items \
-    WHERE (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
+    WHERE startsWith(traversal_path, {root_prefix:String}) \
+      AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, project_id, iid \
 ) \
 WHERE _siphon_deleted = false";
@@ -341,14 +368,28 @@ mod tests {
     }
 
     #[test]
-    fn resolver_sql_is_not_namespace_scoped() {
-        // Cross-project references resolve against globally-unique keys
-        // (path / project_id+iid), so a source-namespace traversal_path
-        // filter would drop every cross-namespace reference.
-        assert!(!ROUTES_SQL.contains("startsWith(traversal_path"));
-        assert!(!MERGE_REQUESTS_SQL.contains("startsWith(traversal_path"));
-        assert!(!WORK_ITEMS_SQL.contains("startsWith(traversal_path"));
-        assert!(!PROJECT_PATHS_SQL.contains("startsWith(traversal_path"));
+    fn resolver_sql_is_bounded_to_source_top_level_namespace() {
+        // v1 resolves only within the source note's top-level namespace: each
+        // resolver query carries a `startsWith(traversal_path, {root_prefix})`
+        // leg so the leading-PK `traversal_path` column prunes the scan to one
+        // top-level namespace partition instead of scanning the whole shared
+        // Siphon datalake table. Cross-top-level references fall outside the
+        // prefix and are intentionally not resolved (deferred — see ADR 013).
+        //
+        // ROUTES_SQL aliases `argMax(traversal_path, …) AS traversal_path`, so
+        // its bound must reference the raw `siphon_routes.traversal_path`
+        // column to avoid `ILLEGAL_AGGREGATION`; the other three don't project
+        // `traversal_path`, so the bare column is unambiguous.
+        for sql in [PROJECT_PATHS_SQL, MERGE_REQUESTS_SQL, WORK_ITEMS_SQL] {
+            assert!(
+                sql.contains("startsWith(traversal_path, {root_prefix:String})"),
+                "resolver query must be bounded by the source top-level prefix: {sql}"
+            );
+        }
+        assert!(
+            ROUTES_SQL.contains("startsWith(siphon_routes.traversal_path, {root_prefix:String})"),
+            "routes query must bound on the raw column to avoid ILLEGAL_AGGREGATION: {ROUTES_SQL}"
+        );
     }
 
     #[test]
