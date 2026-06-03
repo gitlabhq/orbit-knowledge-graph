@@ -141,7 +141,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 
-Comments (MR/issue threads, review replies) have no template, so apply the convention by hand: lead with the verdict in a few human sentences, push long-form reasoning into a collapsed `<details><summary>Agent context</summary>` block (only when it helps), and drop AI tells. For comments posted as a person, match their voice (e.g. the `write-as-dgruzd` skill).
+Comments (MR/issue threads, review replies) have no template, so apply the convention by hand: lead with the verdict in a few human sentences, push long-form reasoning into a collapsed `<details><summary>Agent context</summary>` block (only when it helps), and drop AI tells.
 
 ## Design docs
 
