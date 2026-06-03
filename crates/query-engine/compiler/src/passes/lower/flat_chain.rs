@@ -216,6 +216,11 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         None
                     };
 
+                    let node_sort_key = np
+                        .table
+                        .as_deref()
+                        .and_then(|t| plan.table_sort_keys.get(t))
+                        .map(|v| v.as_slice());
                     let (new_from, ns, nw) = emit_node_join_with_narrowing(
                         from,
                         np,
@@ -223,6 +228,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         edge_col,
                         false,
                         narrow_source,
+                        node_sort_key,
                     )?;
                     from = new_from;
                     selects.extend(ns);
