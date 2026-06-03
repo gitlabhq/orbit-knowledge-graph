@@ -1,3 +1,4 @@
+mod billing_event_emitter;
 mod context;
 mod tracker;
 
