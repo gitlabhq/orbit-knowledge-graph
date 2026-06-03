@@ -19,11 +19,7 @@ gitlab:
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  #
-  # DEPENDENCY: pinned to gitlab-org/gitlab!238905 (commit cedc59d0) for its
-  # refresh_on_change rule in db/siphon/tables/namespaces.yml; move to a master
-  # commit once it merges. Replication-config only, so CNG digests stay pinned.
-  ref: "cedc59d0cd0fb926b6c3f7ffdbd53ca8dd2e1bed"
+  ref: "03d8e3fb8d2fc6bdf862d16187e65806436a20d5"
   # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
   # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
   # avoids version skew between webservice (Rails) and its workhorse sidecar:
