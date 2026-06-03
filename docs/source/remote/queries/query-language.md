@@ -290,8 +290,7 @@ Find merged merge requests in a project:
 
 Find every pipeline that ran for one merge request. Always filter
 `Pipeline.source = "merge_request_event"` to match what the merge request's
-**Pipelines** tab, the REST `/merge_requests/:iid/pipelines` endpoint, and
-the GraphQL `mergeRequest.pipelines` connection return:
+**Pipelines** tab shows:
 
 ```json
 {
@@ -320,8 +319,7 @@ including the downstream child pipelines (`source = "parent_pipeline"`)
 that the top-level MR pipelines trigger. Without the
 `source = "merge_request_event"` filter, the result over-counts by a large
 factor on any MR that uses parent-child pipeline fan-out, and does not
-match the MR UI or the REST and GraphQL definitions of "pipelines for this
-MR". Apply the same filter when traversing
+match what the MR **Pipelines** tab shows. Apply the same filter when traversing
 `MergeRequest --TRIGGERED--> Pipeline` in a multi-node query.
 
 `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` is a different edge. It

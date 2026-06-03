@@ -23,13 +23,22 @@ For the full field reference see [`query_language.md`](query_language.md).
 ## Look up a GitLab project's numeric ID
 
 Many filters (e.g. `project_id` on MergeRequest) need the numeric project ID.
-Get it from the URL-encoded full path (`/` → `%2F`):
+Query the `Project` entity by `full_path` and read back its `id`:
 
-```bash
-glab api "projects/gitlab-org%2Forbit%2Fknowledge-graph" | jq '.id'
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "columns": ["id", "full_path"],
+      "filters": {"full_path": {"op": "eq", "value": "gitlab-org/orbit/knowledge-graph"}}
+    },
+    "limit": 1
+  }
+}
 ```
-
-`glab api` does not support `--jq`. Always pipe to `jq`.
 
 ## Look up a merge request by IID
 
@@ -83,8 +92,7 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 > `Pipeline.merge_request_id` and the `MergeRequest --TRIGGERED--> Pipeline`
 > edge return parents **and** children. Without the `source` filter you
 > will over-count by a factor of 5-10× and the answer will not match the
-> MR's **Pipelines** tab, the REST `/merge_requests/:iid/pipelines`
-> endpoint, or the GraphQL `mergeRequest.pipelines` connection.
+> MR's **Pipelines** tab.
 > `MergeRequest --HAS_HEAD_PIPELINE--> Pipeline` is unrelated: it points
 > to the one current head pipeline, useful for "what is running now" but
 > not for history.
@@ -223,9 +231,7 @@ history — see the canonical field descriptions on
 > **Known coverage gap.** `HAS_FILE` edges between `MergeRequestDiff` and
 > `MergeRequestDiffFile` are sparsely populated in the current Orbit
 > dataset. If this query returns far fewer files than expected for a
-> given MR, fall back to the GitLab Commits REST API
-> (`GET /projects/:id/repository/commits/:sha/diff`) for that MR's diff
-> list. Report the result as "incomplete coverage" rather than as
+> given MR, report the result as "incomplete coverage" rather than as
 > authoritative.
 
 ## Subclasses / descendants of a class
@@ -262,17 +268,16 @@ class is namespaced:
 > indexing is known to be incomplete for:
 >
 > - **Large trees.** `ApplicationRecord` has been observed at ~64%
->   coverage (489 indexed vs 769 by `grep -r "class.*<.*ApplicationRecord"`).
+>   coverage (489 indexed vs ~769 actual subclasses).
 > - **EE-only subclasses.** `Boards::BaseService` returns its 15 direct CE
 >   subclasses but misses ~5 EE subclasses in the `EpicLists` namespace.
 > - **Small trees are fine.** `Members::BaseService` returns 6/6 correct.
 >
 > When the parent class is well-known and the result count looks low,
-> cross-check with `grep -rn "class \\w\\+ < ${ParentClass}" path/to/repo`
-> and report both numbers, flagging the graph result as "incomplete
-> coverage". Do not present a graph-only inheritance count as
-> authoritative without a second-source check. See the "Reporting
-> results" section in [`SKILL.md`](../SKILL.md) for phrasing guidance.
+> report the graph result as "incomplete coverage" and do not present a
+> graph-only inheritance count as an authoritative total. See the
+> "Reporting results" section in [`SKILL.md`](../SKILL.md) for phrasing
+> guidance.
 
 ## `traversal` (multi-node) — start from nodes, follow relationships
 

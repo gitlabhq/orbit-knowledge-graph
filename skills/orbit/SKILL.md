@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.11.0
+version: 0.12.0
 license: MIT
 metadata:
   audience: developers
@@ -12,10 +12,9 @@ metadata:
 # Orbit (GitLab Knowledge Graph) skill
 
 Query the GitLab Knowledge Graph (product name **Orbit**) via the typed
-`glab orbit remote` CLI subcommands (shipped in glab v1.94.0+).
-
-**Do not use `glab api orbit/*`.** The typed CLI handles the
-`Content-Type` header, response framing, and exit codes for you.
+`glab orbit remote` CLI subcommands (shipped in glab v1.94.0+). The typed
+CLI handles the `Content-Type` header, response framing, and exit codes for
+you — always go through `glab orbit remote`.
 
 ## Discovery
 
@@ -33,9 +32,9 @@ glab orbit remote dsl                           # full query DSL JSON Schema
 glab orbit remote tools                         # MCP tool manifest
 ```
 
-Always fetch the DSL with `glab orbit remote dsl` (which hits
-`/api/v4/orbit/schema/dsl`) — it is the source of truth for the query body
-shape. The `tools` manifest is for MCP wiring, not DSL discovery.
+Always fetch the DSL with `glab orbit remote dsl` — it is the source of truth
+for the query body shape. The `tools` manifest is for MCP wiring, not DSL
+discovery.
 
 Calling `schema` without arguments returns the full ontology (~28 KB) and is
 rarely what you want. Re-fetching `schema` or `tools` between turns is pure
@@ -100,9 +99,7 @@ several wrong-looking-correct shapes. Two traps come up often:
   Pipeline` edge return parents *and* children. Apply the
   `source = "merge_request_event"` filter (or use the canonical recipe in
   [`recipes.md`](references/recipes.md#pipelines-that-ran-for-one-merge-request))
-  to match what the MR **Pipelines** tab, the REST
-  `/merge_requests/:iid/pipelines` endpoint, and the GraphQL
-  `mergeRequest.pipelines` connection return.
+  to match what the MR **Pipelines** tab shows.
 - **Prefer single-node queries when you can bound the target entity
   directly.** Adding extra nodes/relationships only to "anchor" the query
   (for example, joining `Project` + `MergeRequest` + `Pipeline` when you
@@ -119,8 +116,8 @@ several wrong-looking-correct shapes. Two traps come up often:
   [`recipes.md`](references/recipes.md#mrs-that-touched-a-file-historical-coverage).
 - **Inheritance trees can be incomplete.** `Definition` indexing is known
   to under-cover large class hierarchies (e.g. `ApplicationRecord`) and
-  EE-namespaced subclasses. Never present a graph-only subclass count as
-  authoritative without a `grep` cross-check. See
+  EE-namespaced subclasses. Present a graph-only subclass count as graph
+  coverage, not an authoritative total. See
   [`recipes.md`](references/recipes.md#subclasses--descendants-of-a-class).
 
 ## Iteration budget
@@ -173,9 +170,9 @@ source of truth. Always present results with their coverage caveats. The
 agent should:
 
 1. **Distinguish counts from completeness.** Phrase results as "Orbit
-   returned N matches" rather than "there are N". Reserve "there are N"
-   only when you have cross-verified against a second source (REST API,
-   `git log`, `grep`).
+   returned N matches" rather than "there are N". The graph is not an
+   authoritative total, so reserve "there are N" for cases where the gap
+   classes below do not apply.
 2. **Surface known coverage gaps inline.** If the query falls into one of
    the documented gap classes — historical file coverage
    (`HAS_LATEST_DIFF` vs `HAS_DIFF`), large or EE-namespaced inheritance
@@ -183,13 +180,7 @@ agent should:
    answer, not a buried footnote.
 3. **Show the query.** Include the JSON request body (collapsed if long)
    so the user can audit the traversal.
-4. **Cross-check when the user explicitly asks for a high-stakes count,
-   or when the query falls into a documented gap class.** Run a
-   second-source check (REST endpoint, `glab api ...`, or local
-   `grep`) before committing to a number. Do not pre-emptively run a
-   second-source check on every answer — that fights the iteration
-   budget.
-5. **Do not invent a "Methodology" header that implies rigor the
+4. **Do not invent a "Methodology" header that implies rigor the
    underlying data does not support.** A "Methodology" section is
    appropriate when the query itself is non-obvious; it is not a
    substitute for coverage caveats.
