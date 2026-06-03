@@ -362,9 +362,9 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("COUNT()") || sql.contains("count()"),
-            "unfiltered edge-only count must emit bare COUNT() for projection \
-             routing, got:\n{sql}"
+            sql.contains("COUNT()") || sql.contains("count()") || sql.contains("countIf("),
+            "unfiltered edge-only count must emit bare COUNT() or countIf() \
+             (LIMIT BY dedup path), got:\n{sql}"
         );
         assert!(
             !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),

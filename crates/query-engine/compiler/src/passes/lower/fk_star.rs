@@ -227,6 +227,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             where_parts,
             select: selects,
             ctes,
+            edge_if_predicates: None,
         });
     }
     for (i, hop) in plan.hops.iter().enumerate() {
@@ -284,6 +285,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         where_parts,
         select: selects,
         ctes,
+        edge_if_predicates: None,
     })
 }
 

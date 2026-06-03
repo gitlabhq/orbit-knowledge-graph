@@ -10,11 +10,41 @@ use crate::error::{QueryError, Result};
 use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
+    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
     push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
+
+/// Collect all edge predicates for a hop into a target vec.
+fn collect_edge_predicates(
+    target: &mut Vec<Expr>,
+    alias: &str,
+    hop: &Hop,
+    plan: &Plan,
+    start_col: &str,
+    end_col: &str,
+    ctes: &mut Vec<Cte>,
+    tagged_nodes: &mut HashSet<String>,
+    narrowed_nodes: &mut HashSet<String>,
+) {
+    push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
+    for (prop, filter) in &hop.filters {
+        target.push(filter_to_expr(alias, prop, filter));
+    }
+    emit_denorm_tags(target, plan, hop, alias, start_col, end_col, tagged_nodes);
+    emit_node_ids_on_edge(target, alias, hop, &plan.nodes, start_col, end_col);
+    emit_filter_narrowing(
+        target,
+        hop,
+        &plan.nodes,
+        alias,
+        start_col,
+        end_col,
+        ctes,
+        narrowed_nodes,
+    );
+}
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let is_aggregation = matches!(plan.body, PlanBody::Aggregation { .. });
@@ -26,91 +56,117 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut from: Option<TableRef> = None;
     let mut tagged_nodes: HashSet<String> = HashSet::new();
     let mut narrowed_nodes: HashSet<String> = HashSet::new();
+    let mut edge_if_predicates: Option<Expr> = None;
 
     for (i, hop) in plan.hops.iter().enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
-        // Build edge source: UNION ALL for variable-length hops, argMax dedup
-        // for multi-hop same-table self-joins, FINAL for single-hop aggregations
-        // (dedup un-merged versions before counting), plain scan otherwise.
-        let edge_source = if is_multi_hop {
-            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
-            where_parts.extend(union_wheres);
-            union
-        } else if dedup_edges {
-            dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
-        } else if is_aggregation {
-            TableRef::scan_final(&hop.edge_table, &alias)
-        } else {
-            TableRef::scan(&hop.edge_table, &alias)
-        };
+        // Single-hop aggregation with a known sort key: use LIMIT BY dedup
+        // with -If combinators instead of FINAL.
+        let use_limit_by = is_aggregation
+            && !dedup_edges
+            && !is_multi_hop
+            && plan.table_sort_keys.contains_key(&hop.edge_table);
 
-        // JOIN to previous hop (or set as initial FROM) using pre-resolved
-        // join columns.
-        if let Some(prev_from) = from.take() {
-            let jc = hop
-                .join_prev
-                .as_ref()
-                .expect("non-first hop must have join_prev");
-            from = Some(TableRef::join(
-                JoinType::Inner,
-                prev_from,
-                edge_source,
-                Expr::eq(
-                    Expr::col(&jc.prev_alias, &jc.prev_col),
-                    Expr::col(&alias, &jc.curr_col),
-                ),
+        if use_limit_by {
+            let sort_key = &plan.table_sort_keys[&hop.edge_table];
+            let mut inner_preds = Vec::new();
+            collect_edge_predicates(
+                &mut inner_preds,
+                &alias,
+                hop,
+                plan,
+                start_col,
+                end_col,
+                &mut ctes,
+                &mut tagged_nodes,
+                &mut narrowed_nodes,
+            );
+
+            edge_if_predicates = Expr::conjoin(inner_preds.clone());
+
+            from = Some(limit_by_edge_scan(
+                &hop.edge_table,
+                &alias,
+                sort_key,
+                inner_preds,
             ));
         } else {
-            from = Some(edge_source);
-        }
+            let edge_source = if is_multi_hop {
+                let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
+                where_parts.extend(union_wheres);
+                union
+            } else if dedup_edges {
+                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
+            } else if is_aggregation {
+                TableRef::scan_final(&hop.edge_table, &alias)
+            } else {
+                TableRef::scan(&hop.edge_table, &alias)
+            };
 
-        if !is_multi_hop {
-            push_edge_predicates(
+            if let Some(prev_from) = from.take() {
+                let jc = hop
+                    .join_prev
+                    .as_ref()
+                    .expect("non-first hop must have join_prev");
+                from = Some(TableRef::join(
+                    JoinType::Inner,
+                    prev_from,
+                    edge_source,
+                    Expr::eq(
+                        Expr::col(&jc.prev_alias, &jc.prev_col),
+                        Expr::col(&alias, &jc.curr_col),
+                    ),
+                ));
+            } else {
+                from = Some(edge_source);
+            }
+
+            if !is_multi_hop {
+                push_edge_predicates(
+                    &mut where_parts,
+                    &alias,
+                    hop,
+                    &plan.nodes,
+                    &plan.table_columns,
+                    dedup_edges,
+                );
+            }
+
+            for (prop, filter) in &hop.filters {
+                where_parts.push(filter_to_expr(&alias, prop, filter));
+            }
+
+            emit_denorm_tags(
+                &mut where_parts,
+                plan,
+                hop,
+                &alias,
+                start_col,
+                end_col,
+                &mut tagged_nodes,
+            );
+            emit_node_ids_on_edge(
                 &mut where_parts,
                 &alias,
                 hop,
                 &plan.nodes,
-                &plan.table_columns,
-                dedup_edges,
+                start_col,
+                end_col,
+            );
+            emit_filter_narrowing(
+                &mut where_parts,
+                hop,
+                &plan.nodes,
+                &alias,
+                start_col,
+                end_col,
+                &mut ctes,
+                &mut narrowed_nodes,
             );
         }
-
-        // Relationship-level filters (edge property predicates from the query).
-        for (prop, filter) in &hop.filters {
-            where_parts.push(filter_to_expr(&alias, prop, filter));
-        }
-
-        // Compute denorm tags from plan.denorm_columns.
-        emit_denorm_tags(
-            &mut where_parts,
-            plan,
-            hop,
-            &alias,
-            start_col,
-            end_col,
-            &mut tagged_nodes,
-        );
-        emit_node_ids_on_edge(
-            &mut where_parts,
-            &alias,
-            hop,
-            &plan.nodes,
-            start_col,
-            end_col,
-        );
-        emit_filter_narrowing(
-            &mut where_parts,
-            hop,
-            &plan.nodes,
-            &alias,
-            start_col,
-            end_col,
-            &mut ctes,
-            &mut narrowed_nodes,
-        );
 
         edge_aliases.push(alias);
     }
@@ -198,5 +254,6 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         where_parts,
         select: selects,
         ctes,
+        edge_if_predicates,
     })
 }
