@@ -37,6 +37,7 @@ reqwest = { workspace = true }
 rustls = { workspace = true }
 query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
+jsonschema = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 labkit-events = { workspace = true }
@@ -62,7 +63,6 @@ prost-build = { workspace = true }
 
 [dev-dependencies]
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
-jsonschema = { workspace = true }
 tokio = { workspace = true }
 
 [lints.rust]
