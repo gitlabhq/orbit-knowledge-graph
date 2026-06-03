@@ -355,7 +355,7 @@ fn elide_fk_hops<'a>(
                     InputFilter {
                         op: Some(FilterOp::Eq),
                         value: Some(serde_json::Value::Number(pinned_ids[0].into())),
-                        data_type: None,
+                        ..Default::default()
                     }
                 } else {
                     InputFilter {
@@ -366,7 +366,7 @@ fn elide_fk_hops<'a>(
                                 .map(|&id| serde_json::Value::Number(id.into()))
                                 .collect(),
                         )),
-                        data_type: None,
+                        ..Default::default()
                     }
                 };
                 fk_np.filters.push((fk_column, filter));

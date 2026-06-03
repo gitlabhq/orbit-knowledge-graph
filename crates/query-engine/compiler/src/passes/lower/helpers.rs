@@ -447,7 +447,12 @@ pub(super) fn emit_filter_narrowing(
         let Some(np) = nodes.get(node_alias) else {
             continue;
         };
-        let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
+        let has_point_selectivity = !np.node_ids.is_empty() || np.id_range.is_some();
+        let has_selective_filters = np
+            .filters
+            .iter()
+            .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High);
+        let selective = has_point_selectivity || has_selective_filters;
         let should_narrow = match np.hydration {
             // FilterOnly nodes get their CTE + IN predicate from
             // emit_filter_subquery in the second loop.

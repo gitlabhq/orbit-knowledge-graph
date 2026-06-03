@@ -470,6 +470,9 @@ pub struct InputFilter {
     /// Populated by the validate pass; lets the lowerer bind temporal columns
     /// with their typed CH param.
     pub data_type: Option<ontology::DataType>,
+    /// Populated by the validate pass from the ontology field definition.
+    /// Used by the planner to decide whether a filter justifies a narrowing CTE.
+    pub selectivity: ontology::FieldSelectivity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr)]

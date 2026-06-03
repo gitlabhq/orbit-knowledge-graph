@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashSet};
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
-    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig,
-    StorageIndex, StorageProjection, VirtualSource,
+    DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
+    RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
 };
 use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -143,6 +143,8 @@ struct PropertyYaml {
     filterable: bool,
     #[serde(default)]
     admin_only: bool,
+    #[serde(default)]
+    selectivity: Option<FieldSelectivity>,
     #[serde(default)]
     description: Option<String>,
 }
@@ -291,6 +293,10 @@ impl NodeYaml {
                     }
                 };
 
+                let selectivity = prop_def
+                    .selectivity
+                    .unwrap_or_else(|| FieldSelectivity::from_data_type(prop_def.data_type));
+
                 Ok(Field {
                     name: prop_name,
                     source,
@@ -301,6 +307,7 @@ impl NodeYaml {
                     like_allowed: prop_def.like_allowed,
                     filterable: prop_def.filterable,
                     admin_only: prop_def.admin_only,
+                    selectivity,
                     description: prop_def.description,
                 })
             })

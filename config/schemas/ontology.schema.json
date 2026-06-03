@@ -127,6 +127,11 @@
               "type": "boolean",
               "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
               "default": false
+            },
+            "selectivity": {
+              "type": "string",
+              "enum": ["low", "high"],
+              "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             }
           },
           "required": ["type", "source"],
