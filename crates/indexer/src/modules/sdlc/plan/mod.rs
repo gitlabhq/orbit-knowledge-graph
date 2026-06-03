@@ -200,11 +200,27 @@ pub(in crate::modules::sdlc) struct Plan {
     pub watermark_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
-    pub transforms: Vec<Transformation>,
-    /// Name of the transform that turns extracted blocks into graph rows,
-    /// resolved from the registry. `data_fusion` consumes `transforms`; a
-    /// custom name (e.g. `system_notes`) ignores them and emits its own.
-    pub transform: String,
+    pub transform: TransformSpec,
+}
+
+/// How an extracted block becomes graph rows. `DataFusion` carries the
+/// declarative SQL projections the built-in transform runs; `Named` defers to a
+/// custom transform resolved from the registry (e.g. `system_notes`), which
+/// owns its own outputs and ignores SQL projections entirely.
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) enum TransformSpec {
+    DataFusion(Vec<Transformation>),
+    Named(String),
+}
+
+impl Plan {
+    #[cfg(test)]
+    pub(in crate::modules::sdlc) fn transformations(&self) -> &[Transformation] {
+        match &self.transform {
+            TransformSpec::DataFusion(transforms) => transforms,
+            TransformSpec::Named(_) => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -328,8 +344,7 @@ mod tests {
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key,
             batch_size,
-            transforms: vec![],
-            transform: ontology::DEFAULT_TRANSFORM.to_string(),
+            transform: TransformSpec::DataFusion(vec![]),
         }
     }
 

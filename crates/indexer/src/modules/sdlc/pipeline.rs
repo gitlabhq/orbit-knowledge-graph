@@ -100,8 +100,8 @@ impl Pipeline {
         self
     }
 
-    /// Override the default registry (which only knows `data_fusion`) with one
-    /// that also carries custom transforms.
+    /// Override the default (empty) registry with one carrying custom
+    /// transforms. `data_fusion` plans build inline and need no registry entry.
     pub fn with_registry(mut self, registry: Arc<TransformRegistry>) -> Self {
         self.registry = registry;
         self
@@ -184,7 +184,7 @@ impl Pipeline {
         position_key: &str,
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
-        let transform = self.registry.build(&plan.transform, plan)?;
+        let transform = self.registry.build(plan)?;
 
         let (tx, rx) = mpsc::channel::<WriteCommand>(self.write_channel_capacity);
         let producer = tokio::spawn(
@@ -204,7 +204,13 @@ impl Pipeline {
         );
 
         let consumed = self
-            .consume(rx, context, transform.as_ref(), position_key, target_watermark)
+            .consume(
+                rx,
+                context,
+                transform.as_ref(),
+                position_key,
+                target_watermark,
+            )
             .await;
 
         // Producer error wins: a write failure usually means it failed first and
@@ -289,11 +295,7 @@ impl Pipeline {
                     {
                         let mut observer = context.observer.lock().unwrap();
                         for (index, rows, bytes) in &written {
-                            observer.record_graph_write(
-                                &outputs[*index],
-                                *rows,
-                                *bytes,
-                            );
+                            observer.record_graph_write(&outputs[*index], *rows, *bytes);
                             stats.written_rows += rows;
                             stats.written_bytes += bytes;
                         }
@@ -629,7 +631,7 @@ impl<'a> PageWriter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::plan::Transformation;
+    use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
     use crate::modules::sdlc::datalake::DatalakeError;
@@ -658,15 +660,14 @@ mod tests {
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
-            transform: ontology::DEFAULT_TRANSFORM.to_string(),
-            transforms: vec![Transformation {
+            transform: TransformSpec::DataFusion(vec![Transformation {
                 sql: format!(
                     "SELECT id, name FROM {}",
                     crate::modules::sdlc::plan::SOURCE_DATA_TABLE
                 ),
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
-            }],
+            }]),
         }
     }
 

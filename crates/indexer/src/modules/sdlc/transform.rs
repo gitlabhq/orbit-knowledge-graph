@@ -11,11 +11,9 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use gkg_utils::arrow::prepare_batches;
 
-use ontology::DEFAULT_TRANSFORM;
-
 use crate::handler::HandlerError;
 
-use super::plan::{Plan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{Plan, SOURCE_DATA_TABLE, TransformSpec, Transformation};
 
 /// A transformed batch tagged with the [`BlockTransform::outputs`] entry it
 /// writes to.
@@ -129,51 +127,40 @@ impl BlockTransform for DataFusionTransform {
 
 type TransformFactory = Box<dyn Fn(&Plan) -> Arc<dyn BlockTransform> + Send + Sync>;
 
-/// Maps a transform name to a factory. `data_fusion` is built in; custom
-/// transforms self-register here so a plan referencing one resolves instead of
-/// being skipped.
+/// Holds the pluggable custom transforms, keyed by name. The built-in
+/// `data_fusion` projection is not stored here; it is the default arm of
+/// [`TransformSpec`] and built inline by [`TransformRegistry::build`].
+#[derive(Default)]
 pub(in crate::modules::sdlc) struct TransformRegistry {
     factories: HashMap<String, TransformFactory>,
 }
 
-impl Default for TransformRegistry {
-    fn default() -> Self {
-        let mut registry = Self {
-            factories: HashMap::new(),
-        };
-        registry.register(DEFAULT_TRANSFORM, |plan| {
-            Arc::new(DataFusionTransform::new(
-                plan.name.clone(),
-                plan.transforms.clone(),
-            ))
-        });
-        registry
-    }
-}
-
 impl TransformRegistry {
-    pub(in crate::modules::sdlc) fn register(
-        &mut self,
-        name: impl Into<String>,
-        factory: impl Fn(&Plan) -> Arc<dyn BlockTransform> + Send + Sync + 'static,
-    ) {
-        self.factories.insert(name.into(), Box::new(factory));
-    }
-
-    pub(in crate::modules::sdlc) fn contains(&self, name: &str) -> bool {
-        self.factories.contains_key(name)
+    /// A `DataFusion` plan always builds; a `Named` plan only when its transform
+    /// has been registered (otherwise the handler is skipped).
+    pub(in crate::modules::sdlc) fn is_registered(&self, transform: &TransformSpec) -> bool {
+        match transform {
+            TransformSpec::DataFusion(_) => true,
+            TransformSpec::Named(name) => self.factories.contains_key(name),
+        }
     }
 
     pub(in crate::modules::sdlc) fn build(
         &self,
-        name: &str,
         plan: &Plan,
     ) -> Result<Arc<dyn BlockTransform>, HandlerError> {
-        self.factories
-            .get(name)
-            .map(|factory| factory(plan))
-            .ok_or_else(|| {
-                HandlerError::Processing(format!("no transform registered for '{name}'"))
-            })
+        match &plan.transform {
+            TransformSpec::DataFusion(transforms) => Ok(Arc::new(DataFusionTransform::new(
+                plan.name.clone(),
+                transforms.clone(),
+            ))),
+            TransformSpec::Named(name) => self
+                .factories
+                .get(name)
+                .map(|factory| factory(plan))
+                .ok_or_else(|| {
+                    HandlerError::Processing(format!("no transform registered for '{name}'"))
+                }),
+        }
     }
 }

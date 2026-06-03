@@ -81,8 +81,8 @@ pub async fn register_handlers(
     let mut global_count = 0;
     let mut namespaced_count = 0;
     for plan in plans.global {
-        if !transform_registry.contains(&plan.transform) {
-            info!(entity = %plan.name, transform = %plan.transform, "skipping handler: transform not registered");
+        if !transform_registry.is_registered(&plan.transform) {
+            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
@@ -100,8 +100,8 @@ pub async fn register_handlers(
         global_count += 1;
     }
     for plan in plans.namespaced {
-        if !transform_registry.contains(&plan.transform) {
-            info!(entity = %plan.name, transform = %plan.transform, "skipping handler: transform not registered");
+        if !transform_registry.is_registered(&plan.transform) {
+            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
             continue;
         }
         let strategy = partition_strategies.get(&plan.name).cloned();
@@ -165,13 +165,10 @@ mod tests {
             .find(|p| p.name == "SystemNote")
             .expect("SystemNote derived entity should produce a namespaced plan");
 
-        assert_eq!(
-            system_note.transform, "system_notes",
-            "derived entities name a custom transform, not data_fusion"
-        );
         assert!(
-            system_note.transforms.is_empty(),
-            "derived entities carry no SQL transforms"
+            matches!(&system_note.transform, plan::TransformSpec::Named(name) if name == "system_notes"),
+            "derived entities name a custom transform, not data_fusion: {:?}",
+            system_note.transform
         );
         let template = &system_note.extract_template;
         assert!(
