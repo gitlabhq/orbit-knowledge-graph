@@ -1223,9 +1223,9 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
         b.col("import_path")?
             .push_str(self.pool.get(self.import.path))?;
         b.col("identifier_name")?
-            .push_opt_str(self.import.name.map(|id| self.pool.get(id)))?;
+            .push_str(self.import.name.map(|id| self.pool.get(id)).unwrap_or(""))?;
         b.col("identifier_alias")?
-            .push_opt_str(self.import.alias.map(|id| self.pool.get(id)))?;
+            .push_str(self.import.alias.map(|id| self.pool.get(id)).unwrap_or(""))?;
         write_range(b, &self.import.range)?;
         Ok(())
     }

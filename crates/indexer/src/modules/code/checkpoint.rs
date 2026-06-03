@@ -156,14 +156,14 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
                 r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)
-                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:Nullable(String)}}, {{indexed_at:String}})
+                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:String}})
             "#
             ))
             .param("traversal_path", &checkpoint.traversal_path)
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)
             .param("last_task_id", checkpoint.last_task_id)
-            .param("last_commit", &checkpoint.last_commit)
+            .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
             .param("indexed_at", formatted_timestamp)
             .execute()
             .await
