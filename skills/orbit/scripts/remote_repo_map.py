@@ -123,6 +123,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
             },
             {
                 "id": "child", "entity": "Definition",
+                "filters": _base_filters(pid, branch),
                 "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
@@ -179,6 +180,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             },
             {
                 "id": "ancestor", "entity": "Definition",
+                "filters": _base_filters(pid, branch),
                 "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
@@ -550,3 +552,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
