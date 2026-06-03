@@ -78,7 +78,9 @@
           "entity-handler": {
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
-            "partition_overrides": {}
+            "partition_overrides": {},
+            "stream_block_size": 65536,
+            "write_channel_capacity": 8
           }
         },
         "max_concurrent_workers": 16,
@@ -517,7 +519,9 @@
             "entity-handler": {
               "batch_size_overrides": {},
               "datalake_batch_size": 500000,
-              "partition_overrides": {}
+              "partition_overrides": {},
+              "stream_block_size": 65536,
+              "write_channel_capacity": 8
             }
           }
         },
@@ -577,6 +581,20 @@
             "minimum": 0
           },
           "default": {}
+        },
+        "stream_block_size": {
+          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 65536,
+          "minimum": 0
+        },
+        "write_channel_capacity": {
+          "description": "Read-ahead window for the streaming ingestion pipeline: how many extracted\nblocks may be buffered ahead of the ClickHouse writer. Higher values keep the\nwriter fed (more throughput) at the cost of peak memory. Tune up in\nmemory-generous deployments; the default is conservative.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8,
+          "minimum": 0
         }
       },
       "additionalProperties": false
@@ -711,7 +729,9 @@
           "default": {
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
-            "partition_overrides": {}
+            "partition_overrides": {},
+            "stream_block_size": 65536,
+            "write_channel_capacity": 8
           }
         }
       },

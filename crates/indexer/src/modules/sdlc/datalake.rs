@@ -66,10 +66,6 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     }
 }
 
-/// Rows per Arrow block when streaming a page, decoupled from the page `LIMIT`
-/// so peak memory tracks one block rather than the whole page.
-pub(crate) const DEFAULT_STREAM_BLOCK_SIZE: u64 = 65_536;
-
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
