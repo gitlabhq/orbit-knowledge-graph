@@ -71,11 +71,108 @@ def _nodes(result: dict, node_type: str | None = None) -> list[dict]:
     return nodes
 
 
+def _edges(result: dict) -> list[dict]:
+    """Return the instance-level edges from a graph/raw query response.
+
+    The raw formatter always emits an `edges` array (required field in
+    config/schemas/query_response.json), with `from_id`/`to_id` string IDs and,
+    for variable-length traversals, a `depth` hop count (absent on single-hop
+    edges).
+    """
+    return result.get("result", {}).get("edges", [])
+
+
 def _base_filters(project_id: int, branch: str) -> dict:
     return {
         "project_id": {"op": "eq", "value": project_id},
         "branch":     {"op": "eq", "value": branch},
     }
+
+
+# ── Pure helpers (no I/O — unit-testable against canned responses) ─────────────
+
+def _node_hop_depths(edges: list[dict]) -> dict[str, int]:
+    """Map each non-anchor endpoint id to the fewest hops that reach it.
+
+    For a variable-length traversal the raw formatter collapses each path into a
+    single anchor→endpoint edge carrying a `depth` hop count.  We don't assume an
+    edge direction (selectivity reordering can swap `from`/`to`), so we attribute
+    the depth to *both* endpoints and keep the minimum seen per id.  Single-hop
+    edges omit `depth`; treat those as depth 1.
+    """
+    depths: dict[str, int] = {}
+    for e in edges:
+        depth = e.get("depth")
+        if depth is None:
+            depth = 1
+        for endpoint in (e.get("from_id"), e.get("to_id")):
+            if endpoint is None:
+                continue
+            prev = depths.get(endpoint)
+            if prev is None or depth < prev:
+                depths[endpoint] = depth
+    return depths
+
+
+def _filter_by_prefix(rows: list[dict], prefix: str) -> list[dict]:
+    """Keep only rows whose `file_path` starts with `prefix` (no-op if empty)."""
+    if not prefix:
+        return rows
+    return [n for n in rows if (n.get("file_path") or "").startswith(prefix)]
+
+
+def _partition_includes(
+    all_nodes: list[dict], edges: list[dict], base: str, prefix: str
+) -> tuple[dict[str, dict], set[str], dict[str, set[str]]]:
+    """Partition an `includes` response into a per-descendant → concerns mapping.
+
+    Returns `(id_to_node, concern_ids, desc_to_concerns)`.  Classification rules,
+    in priority order:
+
+    1. A node is the *base* iff it matches `base` by `fqn`/`name`. Base wins over
+       the concern rule, so a base that itself lives under `prefix` (a base
+       concern) is never reported as a concern of its own descendants.
+    2. A node is a *concern* iff its `file_path` is under `prefix` (and is not
+       the base). A concern that also extends the base stays classified as a
+       concern, so the per-descendant breakdown lists leaf inclusions only and
+       never double-counts.
+    3. Everything else reachable is a *descendant*.
+
+    The descendant→concern mapping is read from the `edges` array and is robust
+    to selectivity reordering (which can swap an edge's `from`/`to`): we accept a
+    descendant↔concern edge in either orientation.
+    """
+    # An empty prefix matches nothing: "every file is a concern" is meaningless,
+    # so we deliberately classify zero concerns rather than treat "" as a
+    # match-all prefix.
+    norm_prefix = prefix.rstrip("/") + "/" if prefix.strip() else None
+    id_to_node = {n["id"]: n for n in all_nodes if "id" in n}
+
+    base_ids = {
+        nid for nid, n in id_to_node.items()
+        if n.get("fqn") == base or n.get("name") == base
+    }
+
+    concern_ids = {
+        nid for nid, n in id_to_node.items()
+        if norm_prefix is not None
+        and (n.get("file_path") or "").startswith(norm_prefix)
+        and nid not in base_ids
+    }
+
+    desc_ids = {
+        nid for nid in id_to_node
+        if nid not in base_ids and nid not in concern_ids
+    }
+
+    desc_to_concerns: dict[str, set[str]] = {did: set() for did in desc_ids}
+    for e in edges:
+        from_id, to_id = e.get("from_id"), e.get("to_id")
+        if from_id in desc_ids and to_id in concern_ids:
+            desc_to_concerns[from_id].add(to_id)
+        elif to_id in desc_ids and from_id in concern_ids:
+            desc_to_concerns[to_id].add(from_id)
+    return id_to_node, concern_ids, desc_to_concerns
 
 
 # ── Subcommands ───────────────────────────────────────────────────────────────
@@ -124,7 +221,7 @@ def cmd_extends(args: argparse.Namespace) -> None:
             {
                 "id": "child", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
@@ -138,19 +235,22 @@ def cmd_extends(args: argparse.Namespace) -> None:
         n for n in _nodes(result, "Definition")
         if n.get("name") != args.name and n.get("fqn") != args.name
     ]
+    hop_depths = _node_hop_depths(_edges(result))
 
     print(f"EXTENDS — descendants of {args.name!r} (depth ≤ {depth})")
     print("=" * 78)
     if not rows:
         print("(no descendants found — class may not be indexed on this branch)")
         return
-    print(f"{'type':12}  {'fqn':<60}  location")
+    print(f"{'depth':>5}  {'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for n in rows:
+    for n in sorted(rows, key=lambda x: (hop_depths.get(x.get("id"), 1),
+                                         x.get("file_path") or "")):
         fqn  = n.get("fqn", n.get("name", "?"))
         kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
-        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+        hop  = hop_depths.get(n.get("id"), "?")
+        print(f"{hop!s:>5}  {kind:12}  {fqn[:60]:<60}  {loc}")
     print(f"\n{len(rows)} descendant(s) found")
 
 
@@ -181,7 +281,7 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
             {
                 "id": "ancestor", "entity": "Definition",
                 "filters": _base_filters(pid, branch),
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
@@ -195,10 +295,10 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
         n for n in _nodes(result, "Definition")
         if n.get("fqn") != args.name
     ]
+    hop_depths = _node_hop_depths(_edges(result))
 
     prefix = getattr(args, "filter_prefix", None) or ""
-    if prefix:
-        rows = [n for n in rows if (n.get("file_path") or "").startswith(prefix)]
+    rows = _filter_by_prefix(rows, prefix)
 
     print(f"ANCESTORS — of {args.name!r} (depth ≤ {depth})"
           + (f"  [filter: {prefix}]" if prefix else ""))
@@ -206,13 +306,15 @@ def cmd_ancestors(args: argparse.Namespace) -> None:
     if not rows:
         print("(no ancestors found — class may not be indexed on this branch)")
         return
-    print(f"{'type':12}  {'fqn':<60}  location")
+    print(f"{'hop':>3}  {'type':12}  {'fqn':<60}  location")
     print("-" * 110)
-    for n in rows:
+    for n in sorted(rows, key=lambda x: (hop_depths.get(x.get("id"), 1),
+                                         x.get("file_path") or "")):
         fqn  = n.get("fqn", n.get("name", "?"))
         kind = n.get("definition_type", "?")
         loc  = f"{n.get('file_path', '')}:{n.get('start_line', '')}"
-        print(f"{kind:12}  {fqn[:60]:<60}  {loc}")
+        hop  = hop_depths.get(n.get("id"), "?")
+        print(f"{hop!s:>3}  {kind:12}  {fqn[:60]:<60}  {loc}")
     print(f"\n{len(rows)} ancestor(s) found")
 
 
@@ -230,27 +332,35 @@ def cmd_includes(args: argparse.Namespace) -> None:
     branch = args.branch
     depth  = max(1, min(getattr(args, "depth", 1), 3))
 
+    norm_prefix = args.prefix.rstrip("/") + "/"
     body = {"query": {
         "query_type": "traversal",
         "nodes": [
             {
                 "id": "base", "entity": "Definition",
                 "filters": {**_base_filters(pid, branch), "fqn": {"op": "eq", "value": args.base}},
-                "columns": ["fqn", "name"],
+                "columns": ["id", "fqn", "name"],
             },
             {
+                # _base_filters lets ClickHouse prune by the leading
+                # (project_id, branch) edge-table sort key; correctness already
+                # holds because Definition ids are hashed per project+branch.
                 "id": "descendant", "entity": "Definition",
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "filters": _base_filters(pid, branch),
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
             {
                 "id": "concern", "entity": "Definition",
-                "filters": {"file_path": {"op": "starts_with", "value": args.prefix.rstrip("/") + "/"}},
-                "columns": ["fqn", "name", "definition_type", "file_path", "start_line"],
+                "filters": {**_base_filters(pid, branch),
+                            "file_path": {"op": "starts_with", "value": norm_prefix}},
+                "columns": ["id", "fqn", "name", "definition_type", "file_path", "start_line"],
             },
         ],
         "relationships": [
             {"type": "EXTENDS", "from": "descendant", "to": "base",
              "min_hops": 1, "max_hops": depth},
+            # Direct includes only (single hop, intentional): we want the
+            # concerns each descendant mixes in itself, not transitively.
             {"type": "EXTENDS", "from": "descendant", "to": "concern"},
         ],
         "limit": 500,
@@ -258,22 +368,15 @@ def cmd_includes(args: argparse.Namespace) -> None:
 
     result = _query(body)
     all_nodes = _nodes(result, "Definition")
-    edges = result.get("result", {}).get("edges", [])
+    edges = _edges(result)
 
-    id_to_node = {n["id"]: n for n in all_nodes if "id" in n}
-    base_ids    = {n["id"] for n in all_nodes if n.get("fqn") == args.base or n.get("name") == args.base}
-    prefix      = args.prefix.rstrip("/") + "/"
-    concern_ids = {n["id"] for n in all_nodes if (n.get("file_path") or "").startswith(prefix) and "id" in n}
-    desc_ids    = {n["id"] for n in all_nodes if "id" in n and n["id"] not in base_ids and n["id"] not in concern_ids}
-
-    desc_to_concerns: dict[str, set[str]] = {did: set() for did in desc_ids}
-    for e in edges:
-        from_id, to_id = e.get("from_id"), e.get("to_id")
-        if from_id in desc_ids and to_id in concern_ids:
-            desc_to_concerns[from_id].add(to_id)
+    id_to_node, concern_ids, desc_to_concerns = _partition_includes(
+        all_nodes, edges, args.base, args.prefix
+    )
+    desc_ids = set(desc_to_concerns)
 
     print(f"INCLUDES — concerns for descendants of {args.base!r}")
-    print(f"  prefix: {prefix}  |  descendants: {len(desc_ids)}  |  total concerns: {len(concern_ids)}")
+    print(f"  prefix: {norm_prefix}  |  descendants: {len(desc_ids)}  |  total concerns: {len(concern_ids)}")
     print("=" * 78)
     if not desc_ids:
         print("(no descendants found — class may not be indexed on this branch)")

@@ -1,4 +1,6 @@
 target/
+__pycache__/
+*.pyc
 .DS_Store
 report.xml
 public
