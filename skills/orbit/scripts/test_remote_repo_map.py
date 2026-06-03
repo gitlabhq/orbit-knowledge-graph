@@ -41,23 +41,6 @@ def edge(from_id, to_id, depth=None):
     return e
 
 
-class NodeHopDepthsTest(unittest.TestCase):
-    def test_missing_depth_defaults_to_one(self):
-        self.assertEqual(rrm._node_hop_depths([edge("A", "B")]), {"A": 1, "B": 1})
-
-    def test_keeps_minimum_depth_per_id(self):
-        edges = [edge("A", "C", 3), edge("A", "C", 2)]
-        self.assertEqual(rrm._node_hop_depths(edges)["C"], 2)
-
-    def test_attributes_depth_to_both_endpoints(self):
-        # Direction is not assumed (selectivity reordering can swap from/to).
-        depths = rrm._node_hop_depths([edge("base", "grandchild", 2)])
-        self.assertEqual(depths, {"base": 2, "grandchild": 2})
-
-    def test_empty(self):
-        self.assertEqual(rrm._node_hop_depths([]), {})
-
-
 class FilterByPrefixTest(unittest.TestCase):
     def setUp(self):
         self.rows = [
@@ -78,122 +61,64 @@ class FilterByPrefixTest(unittest.TestCase):
         self.assertEqual([n["id"] for n in out], ["a", "b"])
 
 
-class PartitionIncludesTest(unittest.TestCase):
+class ConcernIdsUnderPrefixTest(unittest.TestCase):
     PREFIX = "app/models/concerns"
 
-    def test_basic_descendant_to_concern(self):
+    def test_selects_nodes_under_prefix(self):
         nodes = [
-            node("base", fqn="Noteable", file_path="app/models/concerns/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-            node("mr", fqn="MergeRequest", file_path="app/models/merge_request.rb"),
-            node("mentionable", fqn="Mentionable",
-                 file_path="app/models/concerns/mentionable.rb"),
-            node("spammable", fqn="Spammable",
-                 file_path="app/models/concerns/spammable.rb"),
+            node("mentionable", file_path="app/models/concerns/mentionable.rb"),
+            node("issue", file_path="app/models/issue.rb"),
+            node("noid_concern", file_path="app/models/concerns/x.rb"),
         ]
+        del nodes[2]["id"]  # node without id is skipped
+        self.assertEqual(rrm._concern_ids_under_prefix(nodes, self.PREFIX),
+                         {"mentionable"})
+
+    def test_empty_prefix_matches_nothing(self):
+        nodes = [node("a", file_path="app/models/x.rb")]
+        self.assertEqual(rrm._concern_ids_under_prefix(nodes, ""), set())
+        self.assertEqual(rrm._concern_ids_under_prefix(nodes, "   "), set())
+
+    def test_trailing_slash_normalised(self):
+        nodes = [node("a", file_path="app/models/concerns/x.rb")]
+        self.assertEqual(rrm._concern_ids_under_prefix(nodes, "app/models/concerns/"),
+                         {"a"})
+
+
+class MapDescendantConcernsTest(unittest.TestCase):
+    def test_basic_mapping(self):
+        desc_ids = {"issue", "mr"}
+        concern_ids = {"mentionable", "spammable"}
         edges = [
-            edge("issue", "base", 1), edge("mr", "base", 1),
             edge("issue", "mentionable"), edge("issue", "spammable"),
             edge("mr", "mentionable"),
         ]
-        _, concern_ids, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
-        self.assertEqual(concern_ids, {"mentionable", "spammable"})
-        self.assertEqual(set(d2c), {"issue", "mr"})
+        d2c = rrm._map_descendant_concerns(edges, desc_ids, concern_ids)
         self.assertEqual(d2c["issue"], {"mentionable", "spammable"})
         self.assertEqual(d2c["mr"], {"mentionable"})
 
-    def test_base_under_prefix_is_not_reported_as_concern(self):
-        # Regression: a base concern (lives under the prefix) must not show up
-        # as a concern of its own descendants.
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/concerns/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-            node("mentionable", fqn="Mentionable",
-                 file_path="app/models/concerns/mentionable.rb"),
-        ]
-        edges = [edge("issue", "base", 1), edge("issue", "mentionable")]
-        _, concern_ids, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
-        self.assertNotIn("base", concern_ids)
-        self.assertEqual(d2c["issue"], {"mentionable"})
-
-    def test_descendant_under_prefix_stays_a_concern(self):
-        # A concern that itself extends the base is classified as a concern,
-        # not as a descendant — no double counting.
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-            node("mentionable", fqn="Mentionable",
-                 file_path="app/models/concerns/mentionable.rb"),
-        ]
-        edges = [
-            edge("issue", "base", 1),
-            edge("mentionable", "base", 1),   # concern also extends base
-            edge("issue", "mentionable"),
-        ]
-        _, concern_ids, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
-        self.assertIn("mentionable", concern_ids)
-        self.assertNotIn("mentionable", d2c)   # not listed as a descendant row
-        self.assertEqual(set(d2c), {"issue"})
-
     def test_edge_orientation_is_ignored(self):
         # Selectivity reordering can flip from/to; mapping must still resolve.
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-            node("mentionable", fqn="Mentionable",
-                 file_path="app/models/concerns/mentionable.rb"),
-        ]
-        edges = [
-            edge("issue", "base", 1),
-            edge("mentionable", "issue"),   # reversed orientation
-        ]
-        _, _, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
+        d2c = rrm._map_descendant_concerns(
+            [edge("mentionable", "issue")], {"issue"}, {"mentionable"})
         self.assertEqual(d2c["issue"], {"mentionable"})
 
-    def test_no_descendants(self):
-        nodes = [node("base", fqn="Noteable", file_path="app/models/noteable.rb")]
-        _, concern_ids, d2c = rrm._partition_includes(nodes, [], "Noteable", self.PREFIX)
-        self.assertEqual(d2c, {})
-        self.assertEqual(concern_ids, set())
-
-    def test_empty_prefix_classifies_no_concerns(self):
-        # An empty prefix means every reachable node normalises to a "/" prefix,
-        # so nothing matches and there are no concern inclusions.
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-        ]
-        edges = [edge("issue", "base", 1)]
-        _, concern_ids, d2c = rrm._partition_includes(nodes, edges, "Noteable", "")
-        self.assertEqual(concern_ids, set())
-        self.assertEqual(set(d2c), {"issue"})
+    def test_unrelated_edges_ignored(self):
+        # Edges to non-concern or non-descendant nodes don't pollute the map.
+        d2c = rrm._map_descendant_concerns(
+            [edge("issue", "base"), edge("other", "mentionable")],
+            {"issue"}, {"mentionable"})
         self.assertEqual(d2c["issue"], set())
 
-    def test_descendant_shares_name_with_base_edge_case(self):
-        # Documented limitation: base is matched by fqn/name, so a node sharing
-        # the bare name with the base is treated as base. We assert the current
-        # behaviour so a future change to edge-based anchoring is a conscious one.
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/concerns/noteable.rb"),
-            node("dup", name="Noteable", file_path="app/models/other/noteable.rb"),
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-        ]
-        edges = [edge("issue", "base", 1)]
-        _, _, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
-        # both base-named nodes are treated as base, so neither appears as a desc
-        self.assertNotIn("dup", d2c)
-        self.assertEqual(set(d2c), {"issue"})
+    def test_self_edge_not_mapped(self):
+        # A node that is both a descendant and a concern is not mapped to itself.
+        d2c = rrm._map_descendant_concerns(
+            [edge("x", "x")], {"x"}, {"x"})
+        self.assertEqual(d2c["x"], set())
 
-    def test_nodes_without_id_are_skipped(self):
-        nodes = [
-            node("base", fqn="Noteable", file_path="app/models/noteable.rb"),
-            {"type": "Definition", "fqn": "NoId"},  # no id field
-            node("issue", fqn="Issue", file_path="app/models/issue.rb"),
-        ]
-        edges = [edge("issue", "base", 1)]
-        id_to_node, _, d2c = rrm._partition_includes(nodes, edges, "Noteable", self.PREFIX)
-        self.assertNotIn(None, id_to_node)
-        self.assertEqual(set(d2c), {"issue"})
+    def test_descendants_with_no_concerns_present_as_empty(self):
+        d2c = rrm._map_descendant_concerns([], {"issue", "mr"}, {"mentionable"})
+        self.assertEqual(d2c, {"issue": set(), "mr": set()})
 
 
 if __name__ == "__main__":

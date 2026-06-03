@@ -75,8 +75,10 @@ python3 ./scripts/remote_repo_map.py --project-id 77960826 --branch main api cra
 Walks the `EXTENDS` graph from a base type down to descendants. Depth is capped
 at 3 because Orbit Remote caps traversal depth server-side. The helper issues a
 single server-side multi-hop traversal (`min_hops`/`max_hops`) regardless of
-depth, and prints the hop depth, definition type, FQN, and `file_path:line` for
-each descendant. The hop depth is read back from the traversal edges.
+depth, and prints the definition type, FQN, and `file_path:line` for each
+descendant, ordered by file path. The result set is the same regardless of how
+the depth is reached, so results are not labelled per hop (the Orbit response
+does not expose a reliable per-node hop count for variable-length traversals).
 
 ### `ancestors NAME [--depth N] [--filter-prefix PREFIX]`
 
@@ -84,7 +86,7 @@ Walks the `EXTENDS` graph upward from a class to parents and ancestors. This is
 useful when you know a concrete class and need its inheritance chain. The helper
 accepts short names such as `Build` and FQNs such as `Ci::Build`; FQNs are
 resolved with the `fqn` filter. Like `extends`, it issues a single multi-hop
-traversal and prints the hop depth per ancestor.
+traversal.
 
 Pass `--filter-prefix` to keep only ancestors whose `file_path` starts with the
 prefix — for example `--filter-prefix app/models/concerns` to list only the
@@ -95,14 +97,15 @@ traversal result, so it costs no extra query.
 
 For every descendant of `BASE`, lists the concerns it directly includes from
 `PREFIX`, as a per-descendant breakdown. This answers "which concerns does each
-`Noteable` model mix in?" with a single 3-hop traversal
-(`BASE ← EXTENDS ← descendants ← EXTENDS → concerns_in_prefix`) instead of one
-`extends` call followed by an `ancestors` call per descendant.
+`Noteable` model mix in?" — replacing the old "one `extends` call followed by an
+`ancestors` call per descendant" pattern with exactly two queries: one to find
+the descendants of `BASE`, one to map those descendants to the concerns under
+`PREFIX` that they extend. `BASE` accepts a short name or an FQN.
 
 The descendant traversal honours `--depth` (1-3, default 1); the
-descendant→concern leg is intentionally a single hop, so only directly-included
-(not transitively-inherited) concerns are reported. A base that itself lives
-under `PREFIX` is treated as the base, not as a concern of its own descendants.
+descendant→concern leg is a single hop, so only directly-included (not
+transitively-inherited) concerns are reported. A base that itself lives under
+`PREFIX` is not reported as a concern of its own descendants.
 
 ### `class NAME`
 
@@ -133,10 +136,13 @@ source search or another API. Known limitations:
 - `EXTENDS` depth is capped at 3 server-side, and large inheritance trees can be
   incomplete.
 - `CALLS` edges are not fully indexed for every language/project combination.
-- `extends`, `ancestors`, and `includes` each issue a single server-side
-  multi-hop traversal, so they do not fan out into per-hop round trips. Results
-  are capped (`limit` 200 for `extends`/`ancestors`, 500 for `includes`); very
-  wide inheritance roots can be truncated to that cap.
+- `extends` and `ancestors` issue a single server-side multi-hop traversal;
+  `includes` issues two. None of them fan out into per-hop round trips. Each
+  query requests the maximum result cap (`limit` 1000). A traversal whose result
+  genuinely exceeds 1000 rows (a very wide base such as `ApplicationRecord` at
+  depth ≥ 2) is truncated, and because the server applies no stable ordering
+  before truncation, the truncated subset is non-deterministic between runs.
+  Narrow the base or depth for such roots, or treat the result as a sample.
 - A branch filter is required. The default is `master`; pass `--branch main` for
   projects that use `main`.
 
