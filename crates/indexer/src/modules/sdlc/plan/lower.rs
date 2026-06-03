@@ -7,7 +7,7 @@ use super::input::{
     ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
     StandaloneEdgePlan,
 };
-use super::{Plan, Plans, SOURCE_DATA_TABLE, Transformation};
+use super::{Plan, Plans, SOURCE_DATA_TABLE, TransformStage, Transformation};
 
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
@@ -86,7 +86,7 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pla
     }
 
     plan.name = input.name;
-    plan.transforms = transforms;
+    plan.stage = TransformStage::Sql(transforms);
     plan
 }
 
@@ -197,11 +197,11 @@ fn lower_standalone_edge_plan(
         &meta.sort_key,
     );
     plan.name = name;
-    plan.transforms = vec![Transformation {
+    plan.stage = TransformStage::Sql(vec![Transformation {
         sql,
         destination_table,
         dict_encode_columns: meta.dict_columns,
-    }];
+    }]);
     plan
 }
 
@@ -417,9 +417,10 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
         name: String::new(),
         extract_template,
         watermark_column: input.watermark,
-        sort_key: input.order_by,
+        sort_key: input.order_by.clone(),
+        advance_key: input.order_by,
         batch_size,
-        transforms: vec![],
+        stage: TransformStage::Sql(vec![]),
     }
 }
 
@@ -539,7 +540,7 @@ mod tests {
                 last: Utc::now(),
                 current: Utc::now(),
             })
-            .with(TraversalPathFilter { path })
+            .with(TraversalPathFilter::new(path))
             .to_sql()
     }
 
@@ -599,13 +600,13 @@ mod tests {
         let plans = build_plans(&ontology, 1_000_000);
 
         let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
-        assert!(note_plan.transforms.len() >= 2);
+        assert!(note_plan.sql_transforms().len() >= 2);
         assert_eq!(
-            note_plan.transforms[0].destination_table,
+            note_plan.sql_transforms()[0].destination_table,
             prefixed_table_name("gl_note", *SCHEMA_VERSION),
         );
         assert_eq!(
-            note_plan.transforms[1].destination_table,
+            note_plan.sql_transforms()[1].destination_table,
             prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         );
     }
@@ -617,7 +618,7 @@ mod tests {
 
         let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
         let sql = note_plan
-            .transforms
+            .sql_transforms()
             .iter()
             .map(|t| t.sql.clone())
             .find(|sql| sql.contains("'HAS_NOTE' AS relationship_kind"))
@@ -673,7 +674,7 @@ mod tests {
         );
 
         assert!(
-            plan.transforms[0].sql.contains("target_tags"),
+            plan.sql_transforms()[0].sql.contains("target_tags"),
             "transform should produce target_tags"
         );
     }

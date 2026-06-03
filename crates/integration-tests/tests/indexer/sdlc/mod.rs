@@ -93,8 +93,6 @@ async fn namespace_indexing() {
         system_notes::checkpoint_advances_after_draining_paged_window,
         system_notes::incremental_run_skips_already_processed_notes,
         system_notes::drops_unknown_action_and_unsupported_noteable_type,
-        system_notes::page_cap_persists_cursor_and_resumes,
-        system_notes::exact_page_cap_boundary_completes,
         system_notes::cross_project_mentions_uses_reconciled_route_not_stale_zero,
         work_items::processes_work_items_with_edges,
         work_items::processes_work_item_single_value_edges,

@@ -1,4 +1,4 @@
-//! Datalake extraction SQL templates for the system-notes handler.
+//! Datalake extraction SQL template for the system-notes handler.
 //!
 //! The handler reads `siphon_notes` joined to `siphon_system_note_metadata`
 //! on `note_id` (Mode A). Mode B (body-text fallback) is documented in ADR
@@ -6,58 +6,45 @@
 //! and the table is replicated via the parallel Siphon-side MR
 //! (`gitlab-org/analytics-section/siphon`).
 //!
-//! All SQL is exposed as `pub(super) const` so the unit tests in `mod.rs`
-//! can cross-check shape (named parameters, scoping filters, deleted
-//! tombstones) without a live ClickHouse.
+//! The template plugs into the shared SDLC [`crate::modules::sdlc::plan::Plan`]
+//! extract mechanism: the `{{filters}}` marker is filled by the chained
+//! [`crate::modules::sdlc::plan::Filter`]s the handler applies (watermark,
+//! traversal-path, the action IN-list, and the keyset cursor), and
+//! `{{batch_size}}` by the plan's page size. The handler therefore reuses the
+//! same `Producer`/`Extractor`/`Loader` paging the entity handlers use rather
+//! than driving its own loop.
+//!
+//! The SQL is exposed as `pub(super) const` so the unit tests in `mod.rs` can
+//! cross-check shape (named parameters, scoping filters, deleted tombstones)
+//! without a live ClickHouse.
 
 /// Mode A extraction: join `siphon_notes` to `siphon_system_note_metadata`
 /// on `note_id`, restricted to the system-note half of the table.
 ///
-/// Parameters:
-///   `{traversal_path:String}` — namespace scope prefix (e.g. `1/100/`).
-///   `{last_watermark:DateTime64(6,'UTC')}` — exclusive lower bound on the
-///       note's `created_at`. Drives incremental ingestion via the
-///       checkpoint store. Bound from `TIMESTAMP_FORMAT` (space-separated),
-///       which the typed `DateTime64` param parses. **System notes are
-///       immutable post-creation** (Rails writes them once, never edits),
-///       so `created_at` is the semantically correct watermark column —
-///       using `_siphon_replicated_at` (the default for mutable entities)
-///       would reprocess the same note on every Siphon-side compaction
-///       without any new edges to materialise.
-///   `{watermark:DateTime64(6,'UTC')}` — inclusive upper bound on
-///       `created_at`. Stamped from the dispatcher's wall clock at message
-///       publish time.
-///   `{batch_limit:UInt64}` — per-page row cap; the production handler
-///       paginates via `(created_at, id)` cursor (see `siphon_notes`
-///       primary key).
+/// Filters supplied by the handler through the shared `Plan`/`PreparedQuery`
+/// `.with(...)` chain, all landing in the `{{filters}}` marker:
+///   * watermark (`WatermarkFilter` on `sn.created_at`) — exclusive lower /
+///     inclusive upper bound. **System notes are immutable post-creation**
+///     (Rails writes them once, never edits), so `created_at` is the
+///     semantically correct watermark column — using `_siphon_replicated_at`
+///     (the default for mutable entities) would reprocess the same note on
+///     every Siphon-side compaction without any new edges to materialise.
+///   * traversal-path prefix (`TraversalPathFilter` on `sn.traversal_path`)
+///     — exploits the leading column of `siphon_notes`' primary key.
+///   * action IN-list (`ActionsFilter`) — pre-filters in-CH to the parser's
+///     handled subset (`HANDLED_CROSS_REFERENCE_ACTIONS` ∪
+///     `HANDLED_LIFECYCLE_ACTIONS`) before bodies cross the wire.
+///   * keyset cursor (`CursorFilter` over [`CURSOR_SORT_KEY`]) — the DNF
+///     predicate matching `ORDER BY sn.created_at, sn.id`, so each page
+///     resumes exactly after the previous one. Empty on the first page.
 ///
-/// Filter rationale:
+/// `{{batch_size}}` is the plan's page size.
+///
+/// Static filter rationale:
 ///   * `system = true` — explicit even though the metadata-table join
 ///     implies it; cheap and makes the query plan unambiguous.
 ///   * `_siphon_deleted = false` on both sides — never resolve against
 ///     tombstoned rows.
-///   * `startsWith(traversal_path, …)` — exploits the leading column of
-///     `siphon_notes`' primary key.
-///   * `action IN (…)` — pre-filters in-CH to the parser's handled subset
-///     before the body crosses the wire. Mirrors the
-///     `HANDLED_CROSS_REFERENCE_ACTIONS` ∪ `HANDLED_LIFECYCLE_ACTIONS`
-///     vendored list.
-///
-/// Keyset pagination: the handler pages within a `(last_watermark,
-/// watermark]` window by carrying the last seen `(created_at, id)` forward
-/// through the shared [`crate::modules::sdlc::plan::Cursor`]. The
-/// `{{cursor}}` placeholder is filled by
-/// [`crate::modules::sdlc::plan::CursorFilter`] with the sort key
-/// `["sn.created_at", "sn.id"]`, which emits the DNF keyset predicate
-/// matching `ORDER BY sn.created_at, sn.id`, so each page resumes exactly
-/// after the previous one with no row skipped or repeated. The first page
-/// supplies an empty cursor (the filter degenerates to a no-op). Using the
-/// shared cursor + filter avoids reimplementing the keyset machinery the
-/// SDLC entity pipeline already provides.
-///
-/// `{{cursor}}` expands to either an empty string (first page) or an
-/// `AND (...)` clause; it is substituted at query-build time, not by the
-/// ClickHouse parameter channel.
 pub(super) const SYSTEM_NOTES_EXTRACT_SQL: &str = "\
 SELECT \
     sn.id AS id, \
@@ -74,17 +61,9 @@ INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id \
 WHERE sn.system = true \
   AND sn._siphon_deleted = false \
   AND snm._siphon_deleted = false \
-  AND startsWith(sn.traversal_path, {traversal_path:String}) \
-  AND sn.created_at > {last_watermark:DateTime64(6,'UTC')} \
-  AND sn.created_at <= {watermark:DateTime64(6,'UTC')} \
-  {{cursor}} \
-  AND snm.action IN {actions:Array(String)} \
+  {{filters}} \
 ORDER BY sn.created_at, sn.id \
-LIMIT {batch_limit:UInt64}";
-
-/// Placeholder in [`SYSTEM_NOTES_EXTRACT_SQL`] replaced by the keyset
-/// predicate from `CursorFilter` (or an empty string on the first page).
-pub(super) const CURSOR_PLACEHOLDER: &str = "{{cursor}}";
+LIMIT {{batch_size}}";
 
 /// Sort key for the keyset cursor `WHERE` predicate. `CursorFilter` inlines
 /// the cursor values as **string literals**, and the shared `Cursor`
@@ -133,12 +112,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_sql_uses_named_parameters() {
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{traversal_path:String}"));
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{last_watermark:DateTime64(6,'UTC')}"));
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{watermark:DateTime64(6,'UTC')}"));
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{actions:Array(String)}"));
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{batch_limit:UInt64}"));
+    fn extract_sql_uses_shared_plan_markers() {
+        // The dynamic predicates (watermark, traversal-path, action IN-list,
+        // keyset cursor) and the page size are supplied by the shared
+        // `Plan`/`PreparedQuery` mechanism, so the template carries only the
+        // `{{filters}}` and `{{batch_size}}` markers it substitutes.
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("{{filters}}"));
+        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("LIMIT {{batch_size}}"));
+        // No hard-coded params remain in the template — they would double up
+        // with the filter-supplied ones.
+        assert!(!SYSTEM_NOTES_EXTRACT_SQL.contains("{traversal_path:"));
+        assert!(!SYSTEM_NOTES_EXTRACT_SQL.contains("{actions:"));
     }
 
     #[test]
@@ -157,13 +141,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_sql_uses_keyset_cursor_placeholder() {
-        // The keyset predicate is injected via the shared `CursorFilter`
-        // through the `{{cursor}}` placeholder rather than hard-coded params,
-        // so the handler reuses the SDLC pipeline's cursor machinery. The
-        // ORDER BY must still match the cursor sort key.
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains(CURSOR_PLACEHOLDER));
+    fn extract_sql_orders_by_keyset_columns() {
+        // The `ORDER BY` must match the keyset cursor sort key the shared
+        // `CursorFilter` fills into `{{filters}}`.
         assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("ORDER BY sn.created_at, sn.id"));
+    }
+
+    #[test]
+    fn cursor_sort_key_projects_timestamp_to_iso_string() {
         // The timestamp leg is projected to the ISO `…T…Z` string the shared
         // `Cursor` emits, so the keyset literal comparison is string-vs-string
         // (a raw `DateTime64` column rejects the ISO literal).
@@ -176,12 +161,8 @@ mod tests {
                 "sn.id"
             ]
         );
-    }
-
-    #[test]
-    fn extract_sql_uses_traversal_path_prefix_filter() {
-        // Exploits the leading column of siphon_notes.PRIMARY KEY for index
-        // skipping rather than a per-row equality.
-        assert!(SYSTEM_NOTES_EXTRACT_SQL.contains("startsWith(sn.traversal_path"));
+        // The advance key reads the SELECT-aliased bare columns off the result
+        // batch (the pipeline advances the cursor on these names).
+        assert_eq!(CURSOR_ADVANCE_KEY, ["created_at", "id"]);
     }
 }

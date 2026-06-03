@@ -20,7 +20,9 @@ use crate::observer::IndexingObserver;
 
 use super::datalake::{DatalakeQuery, ReadStats, ReadStatsFuture, RecordBatchStream};
 use super::metrics::SdlcMetrics;
-use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{
+    Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, TransformStage, Transformation,
+};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
@@ -29,9 +31,29 @@ const MAX_RETRIES: u32 = 3;
 /// Read-ahead window. 8 blocks reaches cloud-throughput parity; more only costs memory.
 const WRITE_CHANNEL_CAPACITY: usize = 8;
 
-struct TableBatch {
-    transform_index: usize,
-    batch: RecordBatch,
+/// Transforms a whole page into output batches, addressing destination tables
+/// by index into the [`Plan::output_tables`] list.
+///
+/// This is the page-wise counterpart to the block-wise SQL [`Transformer`].
+/// Unlike a SQL projection, a [`PageTransform`] may issue its own datalake
+/// queries while transforming (e.g. the system-notes handler resolves GFM
+/// references with batched IN-list lookups keyed off the whole page), so the
+/// producer hands it the full page rather than one block at a time. It still
+/// rides the same [`Extractor`] (retry/halving), [`Loader`]/[`PageWriter`]
+/// (open streaming inserts), [`Cursor`], and checkpoint cadence as the SQL
+/// path — only the transform step differs.
+#[async_trait::async_trait]
+pub(in crate::modules::sdlc) trait PageTransform: Send + Sync {
+    async fn transform_page(
+        &self,
+        datalake: &dyn DatalakeQuery,
+        page: &[RecordBatch],
+    ) -> Result<Vec<TableBatch>, HandlerError>;
+}
+
+pub(in crate::modules::sdlc) struct TableBatch {
+    pub transform_index: usize,
+    pub batch: RecordBatch,
 }
 
 // A page's `Batch`es always precede its `PageComplete`.
@@ -171,6 +193,16 @@ impl Pipeline {
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
         let (tx, rx) = mpsc::channel::<WriteCommand>(WRITE_CHANNEL_CAPACITY);
+        let transformer = match &plan.stage {
+            TransformStage::Sql(transforms) => TransformRuntime::Sql(SqlTransformer {
+                name: plan.name.clone(),
+                transforms: transforms.clone(),
+            }),
+            TransformStage::Rust { transform, .. } => TransformRuntime::Rust {
+                transform: Arc::clone(transform),
+                datalake: Arc::clone(&self.datalake),
+            },
+        };
         let producer = tokio::spawn(
             Producer {
                 extractor: Extractor {
@@ -178,13 +210,12 @@ impl Pipeline {
                     retry_config: self.retry_config.clone(),
                     params: base_query.params(),
                 },
-                transformer: Transformer {
-                    name: plan.name.clone(),
-                    transforms: plan.transforms.clone(),
-                },
+                transformer,
+                name: plan.name.clone(),
                 metrics: self.metrics.clone(),
                 base_query,
                 sort_key: plan.sort_key.clone(),
+                advance_key: plan.advance_key.clone(),
                 batch_size: plan.batch_size,
             }
             .run(cursor, tx),
@@ -272,14 +303,11 @@ impl Pipeline {
                     stats.read_rows += read_stats.read_rows;
                     stats.read_bytes += read_stats.read_bytes;
 
+                    let output_tables = plan.output_tables();
                     {
                         let mut observer = context.observer.lock().unwrap();
                         for (index, rows, bytes) in &written {
-                            observer.record_graph_write(
-                                &plan.transforms[*index].destination_table,
-                                *rows,
-                                *bytes,
-                            );
+                            observer.record_graph_write(output_tables[*index], *rows, *bytes);
                             stats.written_rows += rows;
                             stats.written_bytes += bytes;
                         }
@@ -356,14 +384,15 @@ impl Extractor {
     }
 }
 
-/// The extension point. Transforms are row-wise (`SELECT … FROM source_data`),
-/// so transforming one block is equivalent to transforming the whole page.
-struct Transformer {
+/// The block-wise transform: row-wise SQL (`SELECT … FROM source_data`), so
+/// transforming one block is equivalent to transforming the whole page. Peak
+/// memory tracks one block.
+struct SqlTransformer {
     name: String,
     transforms: Vec<Transformation>,
 }
 
-impl Transformer {
+impl SqlTransformer {
     async fn run(
         &self,
         session: &SessionContext,
@@ -433,13 +462,27 @@ impl Transformer {
     }
 }
 
+/// The transform step the producer drives, resolved from [`TransformStage`].
+/// `Sql` transforms each block as it streams (constant memory); `Rust` buffers
+/// the page's blocks and transforms once, since its resolution queries batch
+/// references across the whole page.
+enum TransformRuntime {
+    Sql(SqlTransformer),
+    Rust {
+        transform: Arc<dyn PageTransform>,
+        datalake: Arc<dyn DatalakeQuery>,
+    },
+}
+
 /// Owned by the spawned task, so all fields are owned rather than borrowed.
 struct Producer {
     extractor: Extractor,
-    transformer: Transformer,
+    transformer: TransformRuntime,
+    name: String,
     metrics: SdlcMetrics,
     base_query: PreparedQuery,
     sort_key: Vec<String>,
+    advance_key: Vec<String>,
     batch_size: u64,
 }
 
@@ -470,6 +513,11 @@ impl Producer {
             let mut page_bytes: u64 = 0;
             let mut transform_duration = Duration::ZERO;
 
+            // The `Rust` stage transforms the whole page at once, so buffer its
+            // blocks; the `Sql` stage transforms block-by-block and keeps this
+            // empty (constant memory).
+            let mut page_blocks: Vec<RecordBatch> = Vec::new();
+
             while let Some(block) = stream.next().await {
                 let block = block.map_err(|err| {
                     HandlerError::Processing(format!("datalake stream failed: {err}"))
@@ -480,10 +528,37 @@ impl Producer {
 
                 page_rows += block.num_rows() as u64;
                 page_bytes += block.get_array_memory_size() as u64;
-                page_cursor = page_cursor.advance(&block, &self.sort_key)?;
+                page_cursor = page_cursor.advance(&block, &self.advance_key)?;
 
+                match &self.transformer {
+                    TransformRuntime::Sql(transformer) => {
+                        let transform_start = Instant::now();
+                        let outputs = transformer.run(&session, &block).await?;
+                        transform_duration += transform_start.elapsed();
+
+                        for output in outputs {
+                            if tx.send(WriteCommand::Batch(output)).await.is_err() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    TransformRuntime::Rust { .. } => page_blocks.push(block),
+                }
+            }
+
+            // The Rust stage transforms the buffered page in one pass once all
+            // its blocks are in hand (its resolution queries key off the whole
+            // page).
+            if let TransformRuntime::Rust {
+                transform,
+                datalake,
+            } = &self.transformer
+                && !page_blocks.is_empty()
+            {
                 let transform_start = Instant::now();
-                let outputs = self.transformer.run(&session, &block).await?;
+                let outputs = transform
+                    .transform_page(datalake.as_ref(), &page_blocks)
+                    .await?;
                 transform_duration += transform_start.elapsed();
 
                 for output in outputs {
@@ -498,7 +573,7 @@ impl Producer {
 
             if page_rows > 0 {
                 self.metrics.record_datalake_query(
-                    &self.transformer.name,
+                    &self.name,
                     extract_start.elapsed().as_secs_f64(),
                     page_bytes,
                 );
@@ -542,9 +617,9 @@ struct Loader<'a> {
 impl<'a> Loader<'a> {
     fn new(destination: &'a dyn Destination, plan: &'a Plan) -> Self {
         let writers = plan
-            .transforms
-            .iter()
-            .map(|t| PageWriter::new(destination, &t.destination_table))
+            .output_tables()
+            .into_iter()
+            .map(|table| PageWriter::new(destination, table))
             .collect();
         Self { writers }
     }
@@ -662,12 +737,13 @@ mod tests {
                 .to_string(),
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key: vec!["id".to_string()],
+            advance_key: vec!["id".to_string()],
             batch_size,
-            transforms: vec![Transformation {
+            stage: TransformStage::Sql(vec![Transformation {
                 sql: format!("SELECT id, name FROM {SOURCE_DATA_TABLE}"),
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
-            }],
+            }]),
         }
     }
 

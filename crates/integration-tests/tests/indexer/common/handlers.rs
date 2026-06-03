@@ -110,24 +110,17 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        indexer::analytics::IndexingAnalytics::disabled(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
     registry
         .find_by_name("sdlc.system_notes")
         .expect("system-notes handler must be registered")
-}
-
-/// The system-notes handler with a tuned page cap, for exercising the
-/// `MAX_PAGES_PER_RUN` cap-exit / resume path without seeding millions of
-/// rows. With `create_test_indexer_config`'s `datalake_batch_size = 1`, a
-/// `max_pages` of N stops after N single-row pages.
-pub fn system_notes_handler_capped(ctx: &TestContext, max_pages: usize) -> Arc<dyn Handler> {
-    let config = create_test_indexer_config(&ctx.config);
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let handler = indexer::modules::sdlc::build_system_notes_handler(&config, &ontology)
-        .with_max_pages(max_pages);
-    Arc::new(handler)
 }
 
 pub async fn entity_handler_with_partitions(

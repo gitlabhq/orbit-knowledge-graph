@@ -19,10 +19,9 @@
 //!
 //! ## How it is wired into the engine
 //!
-//! The handler ([`handler::SystemNotesHandler`]) is a standalone
+//! The handler ([`handler::SystemNotesHandler`]) is a thin
 //! [`crate::handler::Handler`] registered through the engine's
-//! [`crate::handler::HandlerRegistry`], exactly like
-//! `crates/indexer/src/modules/namespace_deletion/`. It rides the existing
+//! [`crate::handler::HandlerRegistry`]. It rides the existing
 //! [`crate::topic::NamespaceIndexingRequest`] subscription: the dispatcher
 //! already publishes one namespace indexing message per namespace, NATS
 //! fans it out to every subscriber, and this handler is one more
@@ -30,14 +29,28 @@
 //! checkpoint key (`{scope}.SystemNote`) so its watermark advances
 //! independently of the ontology entity handlers.
 //!
-//! ADR 014 sketches a future `EntityPipeline` custom-pipeline slot as the
-//! eventual home for this logic. That slot is not on `main` (it lives in
-//! the still-draft entity-handler stack), and it is not a prerequisite:
-//! the parse/resolve/emit/extract core here is pure and reusable, so
-//! migrating to the `EntityPipeline` slot later is a thin I/O-shell swap,
-//! not a rewrite. Until then this standalone handler is the as-built path.
+//! ## Reusing the shared SDLC pipeline (no bespoke paging loop)
 //!
-//! Custom-handler precedent in the existing codebase:
+//! `handle()` does **not** hand-roll its own paging / prefetch / checkpoint
+//! loop. It builds a [`crate::modules::sdlc::plan::Plan`] whose transform
+//! stage is the page-wise [`crate::modules::sdlc::pipeline::PageTransform`]
+//! ([`handler::SystemNotesTransform`]) and calls
+//! [`crate::modules::sdlc::pipeline::Pipeline::run_plan`] — the same
+//! orchestration the ontology entity handlers use. The shared pipeline owns
+//! windowed extraction, the keyset [`crate::modules::sdlc::plan::Cursor`] /
+//! [`crate::modules::sdlc::plan::CursorFilter`], retry/halving, the
+//! streaming inserts, and per-page checkpoint cadence.
+//!
+//! The seam that makes this possible is `PageTransform`: entity plans use a
+//! block-wise SQL transform (constant memory), while system-notes uses a
+//! page-wise Rust transform because its resolution batches references across
+//! the whole page (routes + MR + work-item `IN`-lists), so it buffers one
+//! page before transforming. Like the entity handlers, it drains the whole
+//! watermark window to completion, checkpointing after each page (crash-safe
+//! forward progress via per-page checkpoint + NATS redelivery); there is no
+//! bespoke per-message page cap.
+//!
+//! Custom-transform precedent in the existing codebase:
 //! `crates/indexer/src/modules/namespace_deletion/`.
 
 pub(crate) mod emit;
@@ -48,8 +61,6 @@ pub(crate) mod resolve;
 pub(crate) mod vendored;
 
 pub use handler::register_handlers;
-#[doc(hidden)]
-pub use handler::{SystemNotesHandler, build_handler};
 
 use std::collections::HashMap;
 

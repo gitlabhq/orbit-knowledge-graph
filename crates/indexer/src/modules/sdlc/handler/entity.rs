@@ -157,7 +157,7 @@ impl EntityHandler {
                 request
                     .traversal_path
                     .as_deref()
-                    .map(|path| TraversalPathFilter { path }),
+                    .map(TraversalPathFilter::new),
             );
 
         let should_partition = self.partition_strategy.is_some() && parent_checkpoint.is_none();

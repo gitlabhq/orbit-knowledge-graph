@@ -81,7 +81,7 @@ pub(in crate::modules::sdlc) trait Filter {
 }
 
 // `None` is a filter that contributes nothing. Lets call sites stay chainable:
-// `prepared.with(maybe_path.map(|p| TraversalPathFilter { path: p }))`.
+// `prepared.with(maybe_path.map(TraversalPathFilter::new))`.
 impl<F: Filter> Filter for Option<F> {
     fn condition(&self) -> String {
         self.as_ref().map(|f| f.condition()).unwrap_or_default()
@@ -121,17 +121,55 @@ impl Filter for WatermarkFilter<'_> {
 
 pub(in crate::modules::sdlc) struct TraversalPathFilter<'a> {
     pub path: &'a str,
+    /// Column to filter, defaulting to the bare `traversal_path`. Joins that
+    /// expose `traversal_path` on more than one side (e.g. the system-notes
+    /// `siphon_notes ⋈ siphon_system_note_metadata` extract) qualify it
+    /// (`sn.traversal_path`) to disambiguate.
+    pub column: &'a str,
+}
+
+impl<'a> TraversalPathFilter<'a> {
+    /// Filter the unqualified `traversal_path` column (the common single-table case).
+    pub fn new(path: &'a str) -> Self {
+        Self {
+            path,
+            column: "traversal_path",
+        }
+    }
 }
 
 impl Filter for TraversalPathFilter<'_> {
     fn condition(&self) -> String {
-        "startsWith(traversal_path, {traversal_path:String})".to_string()
+        format!("startsWith({}, {{traversal_path:String}})", self.column)
     }
 
     fn params(&self) -> Vec<(String, Value)> {
         vec![(
             "traversal_path".into(),
             Value::String(self.path.to_string()),
+        )]
+    }
+}
+
+/// Filters a column against an `Array(String)` IN-list bound through the
+/// parameter channel. Used by the system-notes handler to pre-filter
+/// `snm.action` to the parser's handled set in ClickHouse before bodies
+/// cross the wire.
+pub(in crate::modules::sdlc) struct InListFilter<'a> {
+    pub column: &'a str,
+    pub param: &'a str,
+    pub values: Vec<String>,
+}
+
+impl Filter for InListFilter<'_> {
+    fn condition(&self) -> String {
+        format!("{} IN {{{}:Array(String)}}", self.column, self.param)
+    }
+
+    fn params(&self) -> Vec<(String, Value)> {
+        vec![(
+            self.param.to_string(),
+            Value::Array(self.values.iter().cloned().map(Value::String).collect()),
         )]
     }
 }
@@ -193,14 +231,73 @@ impl Filter for CursorFilter<'_> {
 
 // `extract_template` carries `{{filters}}` (dynamic WHERE conditions) and
 // `{{batch_size}}` markers that `PreparedQuery::to_sql` substitutes.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
     pub extract_template: String,
     pub watermark_column: String,
+    /// Keyset columns the `CursorFilter` references in the `WHERE` clause and
+    /// that the `ORDER BY` sorts on. Usually plain column names matching the
+    /// SELECT aliases, but may be SQL expressions when the WHERE comparison
+    /// needs a projection (e.g. system-notes projects its `DateTime64`
+    /// `created_at` to an ISO string so the keyset literal comparison is
+    /// string-vs-string).
     pub sort_key: Vec<String>,
+    /// Columns the cursor *advances* off in the result batch. Defaults to
+    /// `sort_key`; differs only when the WHERE sort key is an expression
+    /// whose value lands under a different SELECT alias (system-notes: WHERE
+    /// on `formatDateTime(sn.created_at, …)`, advance on the aliased
+    /// `created_at`). The pipeline reads these column names out of the
+    /// extracted Arrow batch.
+    pub advance_key: Vec<String>,
     pub batch_size: u64,
-    pub transforms: Vec<Transformation>,
+    pub stage: TransformStage,
+}
+
+impl Plan {
+    /// The destination tables the pipeline writes, in the order the transform
+    /// stage addresses them by index. Drives the [`Loader`]'s per-table
+    /// `PageWriter`s and the consumer's per-table write accounting.
+    pub fn output_tables(&self) -> Vec<&str> {
+        match &self.stage {
+            TransformStage::Sql(transforms) => transforms
+                .iter()
+                .map(|t| t.destination_table.as_str())
+                .collect(),
+            TransformStage::Rust { output_tables, .. } => {
+                output_tables.iter().map(String::as_str).collect()
+            }
+        }
+    }
+
+    /// The SQL transforms for this plan, or empty for a Rust-stage plan.
+    /// Test-only accessor for the `lower` unit tests, which assert on the
+    /// generated transform SQL.
+    #[cfg(test)]
+    pub fn sql_transforms(&self) -> &[Transformation] {
+        match &self.stage {
+            TransformStage::Sql(transforms) => transforms,
+            TransformStage::Rust { .. } => &[],
+        }
+    }
+}
+
+/// Selects how a [`Plan`]'s extracted pages become output batches.
+///
+/// `Sql` is the block-wise DataFusion path the ontology entity handlers use:
+/// each Arrow block is registered as `source_data` and projected by SQL, so
+/// peak memory tracks one block. `Rust` is the page-wise custom-ETL path: the
+/// producer buffers a page's blocks and hands them to a [`super::pipeline::PageTransform`]
+/// that may run its own datalake queries (e.g. system-notes reference
+/// resolution). Both share the same extractor, loader, cursor, and checkpoint
+/// machinery; only the transform step differs.
+#[derive(Clone)]
+pub(in crate::modules::sdlc) enum TransformStage {
+    Sql(Vec<Transformation>),
+    Rust {
+        transform: std::sync::Arc<dyn super::pipeline::PageTransform>,
+        output_tables: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -322,9 +419,10 @@ mod tests {
                  LIMIT {{{{batch_size}}}}"
             ),
             watermark_column: "_siphon_replicated_at".to_string(),
-            sort_key,
+            sort_key: sort_key.clone(),
+            advance_key: sort_key,
             batch_size,
-            transforms: vec![],
+            stage: TransformStage::Sql(vec![]),
         }
     }
 
@@ -472,7 +570,7 @@ mod tests {
     #[test]
     fn traversal_path_filter_adds_starts_with_and_param() {
         let plan = test_plan(vec!["id"], 1000);
-        let prepared = plan.prepare().with(TraversalPathFilter { path: "1/2/" });
+        let prepared = plan.prepare().with(TraversalPathFilter::new("1/2/"));
         let sql = prepared.to_sql();
         assert!(
             sql.contains("startsWith(traversal_path, {traversal_path:String})"),
@@ -514,7 +612,7 @@ mod tests {
                 last: Utc::now(),
                 current: Utc::now(),
             })
-            .with(TraversalPathFilter { path: "1/2/" })
+            .with(TraversalPathFilter::new("1/2/"))
             .to_sql();
         // Both filter conditions appear, wrapped in parens and AND-joined.
         assert!(sql.contains(" AND ("), "sql: {sql}");
