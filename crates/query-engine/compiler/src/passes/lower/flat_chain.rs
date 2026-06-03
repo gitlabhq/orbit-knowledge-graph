@@ -17,6 +17,7 @@ use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
 /// Collect all edge predicates for a hop into a target vec.
+#[allow(clippy::too_many_arguments)]
 fn collect_edge_predicates(
     target: &mut Vec<Expr>,
     alias: &str,
