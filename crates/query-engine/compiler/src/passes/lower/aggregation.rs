@@ -104,26 +104,31 @@ fn build_aggregation(
 /// is provided (LIMIT BY dedup path).
 ///
 /// - `COUNT()` → `countIf(cond)`
-/// - `COUNT(col)` → `countIf(cond)` (rows already filtered by WHERE)
+/// - `COUNT(col)` → `COUNT(col)` (preserved: counts non-null values)
 /// - `SUM(col)` → `sumIf(col, cond)`
 /// - `AVG/MIN/MAX(col)` → `avgIf/minIf/maxIf(col, cond)`
 /// - `groupArray(col)` → `groupArrayIf(col, cond)`
 fn build_agg_expr(agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
     match if_cond {
-        Some(cond) => {
-            let func_name = agg.function.as_sql_if();
-            match agg.function {
-                AggFunction::Count => {
-                    // countIf(cond) — condition is the only argument
-                    Expr::func(func_name, vec![cond.clone()])
-                }
-                _ => {
-                    let target = agg.target.as_deref().unwrap_or("*");
-                    let prop = agg.property.as_deref().unwrap_or("id");
-                    Expr::func(func_name, vec![Expr::col(target, prop), cond.clone()])
+        Some(cond) => match agg.function {
+            AggFunction::Count => {
+                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
+                    // COUNT(col) counts non-null values — keep the column
+                    // argument, don't convert to countIf which would drop it.
+                    Expr::func("COUNT", vec![Expr::col(target, prop)])
+                } else {
+                    Expr::func(agg.function.as_sql_if(), vec![cond.clone()])
                 }
             }
-        }
+            _ => {
+                let target = agg.target.as_deref().unwrap_or("*");
+                let prop = agg.property.as_deref().unwrap_or("id");
+                Expr::func(
+                    agg.function.as_sql_if(),
+                    vec![Expr::col(target, prop), cond.clone()],
+                )
+            }
+        },
         None => match agg.function {
             AggFunction::Count => {
                 if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
