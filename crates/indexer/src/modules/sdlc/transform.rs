@@ -136,12 +136,12 @@ pub(in crate::modules::sdlc) struct TransformRegistry {
 }
 
 impl TransformRegistry {
-    /// A `DataFusion` plan always builds; a `Named` plan only when its transform
+    /// A `DataFusion` plan always builds; a `Rust` plan only when its transform
     /// has been registered (otherwise the handler is skipped).
     pub(in crate::modules::sdlc) fn is_registered(&self, transform: &TransformSpec) -> bool {
         match transform {
             TransformSpec::DataFusion(_) => true,
-            TransformSpec::Named(name) => self.factories.contains_key(name),
+            TransformSpec::Rust(name) => self.factories.contains_key(name),
         }
     }
 
@@ -154,7 +154,7 @@ impl TransformRegistry {
                 plan.name.clone(),
                 transforms.clone(),
             ))),
-            TransformSpec::Named(name) => self
+            TransformSpec::Rust(name) => self
                 .factories
                 .get(name)
                 .map(|factory| factory(plan))

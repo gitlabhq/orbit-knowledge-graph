@@ -204,13 +204,13 @@ pub(in crate::modules::sdlc) struct Plan {
 }
 
 /// How an extracted block becomes graph rows. `DataFusion` carries the
-/// declarative SQL projections the built-in transform runs; `Named` defers to a
-/// custom transform resolved from the registry (e.g. `system_notes`), which
-/// owns its own outputs and ignores SQL projections entirely.
+/// declarative SQL projections the built-in transform runs; `Rust` names a
+/// Rust-implemented transform resolved from the registry (e.g. `system_notes`),
+/// which owns its own outputs and ignores SQL projections entirely.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) enum TransformSpec {
     DataFusion(Vec<Transformation>),
-    Named(String),
+    Rust(String),
 }
 
 impl Plan {
@@ -218,7 +218,7 @@ impl Plan {
     pub(in crate::modules::sdlc) fn transformations(&self) -> &[Transformation] {
         match &self.transform {
             TransformSpec::DataFusion(transforms) => transforms,
-            TransformSpec::Named(_) => &[],
+            TransformSpec::Rust(_) => &[],
         }
     }
 }

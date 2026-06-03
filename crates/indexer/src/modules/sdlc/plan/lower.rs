@@ -79,7 +79,7 @@ pub(in crate::modules::sdlc) fn lower(
 fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {
     let mut plan = lower_extract_plan(input.extract, batch_size);
     plan.name = input.name;
-    plan.transform = TransformSpec::Named(input.transform);
+    plan.transform = TransformSpec::Rust(input.transform);
     plan
 }
 

@@ -166,7 +166,7 @@ mod tests {
             .expect("SystemNote derived entity should produce a namespaced plan");
 
         assert!(
-            matches!(&system_note.transform, plan::TransformSpec::Named(name) if name == "system_notes"),
+            matches!(&system_note.transform, plan::TransformSpec::Rust(name) if name == "system_notes"),
             "derived entities name a custom transform, not data_fusion: {:?}",
             system_note.transform
         );
