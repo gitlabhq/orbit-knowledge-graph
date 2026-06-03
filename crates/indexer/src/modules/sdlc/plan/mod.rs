@@ -201,6 +201,10 @@ pub(in crate::modules::sdlc) struct Plan {
     pub sort_key: Vec<String>,
     pub batch_size: u64,
     pub transforms: Vec<Transformation>,
+    /// Name of the transform that turns extracted blocks into graph rows,
+    /// resolved from the registry. `data_fusion` consumes `transforms`; a
+    /// custom name (e.g. `system_notes`) ignores them and emits its own.
+    pub transform: String,
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +329,7 @@ mod tests {
             sort_key,
             batch_size,
             transforms: vec![],
+            transform: "data_fusion".to_string(),
         }
     }
 

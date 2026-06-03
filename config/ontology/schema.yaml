@@ -279,6 +279,8 @@ domains:
       Group: nodes/core/group.yaml
       Project: nodes/core/project.yaml
       Note: nodes/core/note.yaml
+    derived:
+      SystemNote: derived/core/system_note.yaml
   code_review:
     description: "Entities related to code review and merge requests."
     nodes:

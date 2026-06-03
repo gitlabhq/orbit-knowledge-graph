@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::input::{
-    DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql, ExtractColumn,
-    ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
+    DenormalizedColumnProjection, DerivedEntityPlan, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql,
+    ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
     StandaloneEdgePlan,
 };
 use super::{Plan, Plans, SOURCE_DATA_TABLE, Transformation};
@@ -56,7 +56,31 @@ pub(in crate::modules::sdlc) fn lower(
         }
     }
 
+    for derived in inputs.derived_entity_plans {
+        let scope_default = match derived.scope {
+            EtlScope::Global => global_batch_size,
+            EtlScope::Namespaced => namespaced_batch_size,
+        };
+        let batch_size = batch_size_overrides
+            .get(&derived.name)
+            .copied()
+            .unwrap_or(scope_default);
+        let scope = derived.scope;
+        let plan = lower_derived_entity_plan(derived, batch_size);
+        match scope {
+            EtlScope::Global => global.push(plan),
+            EtlScope::Namespaced => namespaced.push(plan),
+        }
+    }
+
     Plans { global, namespaced }
+}
+
+fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {
+    let mut plan = lower_extract_plan(input.extract, batch_size);
+    plan.name = input.name;
+    plan.transform = input.transform;
+    plan
 }
 
 fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Plan {
@@ -420,6 +444,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
         sort_key: input.order_by,
         batch_size,
         transforms: vec![],
+        transform: "data_fusion".to_string(),
     }
 }
 

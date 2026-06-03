@@ -47,7 +47,7 @@ pub(crate) struct NodeYaml {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-enum EtlYaml {
+pub(crate) enum EtlYaml {
     #[serde(rename = "table")]
     Table {
         scope: EtlScope,
@@ -58,6 +58,8 @@ enum EtlYaml {
         deleted: Option<String>,
         #[serde(default)]
         order_by: Option<Vec<String>>,
+        #[serde(default)]
+        transform: Option<String>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
@@ -80,13 +82,25 @@ enum EtlYaml {
         #[serde(default)]
         table_alias: Option<String>,
         #[serde(default)]
+        transform: Option<String>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
 
+impl EtlYaml {
+    pub(crate) fn transform(&self) -> Option<&str> {
+        match self {
+            EtlYaml::Table { transform, .. } | EtlYaml::Query { transform, .. } => {
+                transform.as_deref()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum EdgeMappingYamlEntry {
+pub(crate) enum EdgeMappingYamlEntry {
     Single(EdgeMappingYaml),
     Multi(Vec<EdgeMappingYaml>),
 }
@@ -101,7 +115,7 @@ impl EdgeMappingYamlEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct EdgeMappingYaml {
+pub(crate) struct EdgeMappingYaml {
     #[serde(rename = "to")]
     target_literal: Option<String>,
     #[serde(rename = "to_column")]
@@ -479,7 +493,10 @@ fn convert_edge_mappings(
 }
 
 impl EtlYaml {
-    fn into_config(self, etl_settings: &EtlSettings) -> Result<EtlConfig, OntologyError> {
+    pub(crate) fn into_config(
+        self,
+        etl_settings: &EtlSettings,
+    ) -> Result<EtlConfig, OntologyError> {
         match self {
             EtlYaml::Table {
                 scope,
@@ -487,6 +504,7 @@ impl EtlYaml {
                 watermark,
                 deleted,
                 order_by,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Table {
                 scope,
@@ -507,6 +525,7 @@ impl EtlYaml {
                 order_by,
                 traversal_path_filter,
                 table_alias,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,

@@ -5,10 +5,7 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use datafusion::datasource::MemTable;
-use datafusion::prelude::*;
 use futures::StreamExt;
-use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -22,7 +19,8 @@ use super::datalake::{
     DatalakeError, DatalakeQuery, ReadStats, ReadStatsFuture, RecordBatchStream,
 };
 use super::metrics::SdlcMetrics;
-use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
+use super::transform::{BlockTransform, TableBatch, TransformRegistry};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
@@ -32,11 +30,6 @@ const MAX_RETRIES: u32 = 3;
 /// `EntityHandlerConfig::write_channel_capacity`. Higher values keep the writer
 /// fed (more throughput) at the cost of peak memory.
 const DEFAULT_WRITE_CHANNEL_CAPACITY: usize = 8;
-
-struct TableBatch {
-    transform_index: usize,
-    batch: RecordBatch,
-}
 
 // A page's `Batch`es always precede its `PageComplete`.
 enum WriteCommand {
@@ -81,6 +74,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     write_channel_capacity: usize,
+    registry: Arc<TransformRegistry>,
 }
 
 impl Pipeline {
@@ -96,12 +90,20 @@ impl Pipeline {
             metrics,
             retry_config,
             write_channel_capacity: DEFAULT_WRITE_CHANNEL_CAPACITY,
+            registry: Arc::new(TransformRegistry::default()),
         }
     }
 
     /// Override the read-ahead window (see `EntityHandlerConfig::write_channel_capacity`).
     pub fn with_write_channel_capacity(mut self, capacity: usize) -> Self {
         self.write_channel_capacity = capacity.max(1);
+        self
+    }
+
+    /// Override the default registry (which only knows `data_fusion`) with one
+    /// that also carries custom transforms.
+    pub fn with_registry(mut self, registry: Arc<TransformRegistry>) -> Self {
+        self.registry = registry;
         self
     }
 
@@ -182,6 +184,8 @@ impl Pipeline {
         position_key: &str,
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
+        let transform = self.registry.build(&plan.transform, plan)?;
+
         let (tx, rx) = mpsc::channel::<WriteCommand>(self.write_channel_capacity);
         let producer = tokio::spawn(
             Producer {
@@ -189,10 +193,7 @@ impl Pipeline {
                     datalake: Arc::clone(&self.datalake),
                     params: base_query.params(),
                 },
-                transformer: Transformer {
-                    name: plan.name.clone(),
-                    transforms: plan.transforms.clone(),
-                },
+                transform: Arc::clone(&transform),
                 metrics: self.metrics.clone(),
                 retry_config: self.retry_config.clone(),
                 base_query,
@@ -203,7 +204,7 @@ impl Pipeline {
         );
 
         let consumed = self
-            .consume(rx, context, plan, position_key, target_watermark)
+            .consume(rx, context, transform.as_ref(), position_key, target_watermark)
             .await;
 
         // Producer error wins: a write failure usually means it failed first and
@@ -264,11 +265,12 @@ impl Pipeline {
         &self,
         mut rx: mpsc::Receiver<WriteCommand>,
         context: &PipelineContext,
-        plan: &Plan,
+        transform: &dyn BlockTransform,
         position_key: &str,
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
-        let mut loader = Loader::new(context.destination.as_ref(), plan);
+        let outputs = transform.outputs();
+        let mut loader = Loader::new(context.destination.as_ref(), outputs);
         let mut stats = PipelineStats::default();
 
         while let Some(command) = rx.recv().await {
@@ -288,7 +290,7 @@ impl Pipeline {
                         let mut observer = context.observer.lock().unwrap();
                         for (index, rows, bytes) in &written {
                             observer.record_graph_write(
-                                &plan.transforms[*index].destination_table,
+                                &outputs[*index],
                                 *rows,
                                 *bytes,
                             );
@@ -349,87 +351,10 @@ enum PageError {
     ReceiverGone,
 }
 
-/// The extension point. Transforms are row-wise (`SELECT … FROM source_data`),
-/// so transforming one block is equivalent to transforming the whole page.
-struct Transformer {
-    name: String,
-    transforms: Vec<Transformation>,
-}
-
-impl Transformer {
-    async fn run(
-        &self,
-        session: &SessionContext,
-        block: &RecordBatch,
-    ) -> Result<Vec<TableBatch>, HandlerError> {
-        self.load_block(session, block)?;
-
-        let mut outputs = Vec::new();
-        for (transform_index, transform) in self.transforms.iter().enumerate() {
-            for batch in self.project(session, transform).await? {
-                if batch.num_rows() > 0 {
-                    outputs.push(TableBatch {
-                        transform_index,
-                        batch,
-                    });
-                }
-            }
-        }
-
-        let _ = session.deregister_table(SOURCE_DATA_TABLE);
-        Ok(outputs)
-    }
-
-    fn load_block(
-        &self,
-        session: &SessionContext,
-        block: &RecordBatch,
-    ) -> Result<(), HandlerError> {
-        let _ = session.deregister_table(SOURCE_DATA_TABLE);
-        let mem_table =
-            MemTable::try_new(block.schema(), vec![vec![block.clone()]]).map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to create mem table for {}: {err}",
-                    self.name
-                ))
-            })?;
-        session
-            .register_table(SOURCE_DATA_TABLE, Arc::new(mem_table))
-            .map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to register table for {}: {err}",
-                    self.name
-                ))
-            })?;
-        Ok(())
-    }
-
-    async fn project(
-        &self,
-        session: &SessionContext,
-        transform: &Transformation,
-    ) -> Result<Vec<RecordBatch>, HandlerError> {
-        let dataframe = session.sql(&transform.sql).await.map_err(|err| {
-            HandlerError::Processing(format!(
-                "failed to plan transform {} for {}: {err}",
-                self.name, transform.destination_table
-            ))
-        })?;
-        let mut batches = dataframe.collect().await.map_err(|err| {
-            HandlerError::Processing(format!(
-                "failed to transform {} for {}: {err}",
-                self.name, transform.destination_table
-            ))
-        })?;
-        prepare_batches(&mut batches, &transform.dict_encode_columns);
-        Ok(batches)
-    }
-}
-
 /// Owned by the spawned task, so all fields are owned rather than borrowed.
 struct Producer {
     extractor: Extractor,
-    transformer: Transformer,
+    transform: Arc<dyn BlockTransform>,
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
     base_query: PreparedQuery,
@@ -443,7 +368,6 @@ impl Producer {
         start_cursor: Cursor,
         tx: mpsc::Sender<WriteCommand>,
     ) -> Result<(), HandlerError> {
-        let session = SessionContext::new();
         let mut cursor = start_cursor;
 
         loop {
@@ -456,14 +380,14 @@ impl Producer {
                 })
                 .to_sql();
 
-            let page = match self.extract_page(&session, &page_sql, &cursor, &tx).await? {
+            let page = match self.extract_page(&page_sql, &cursor, &tx).await? {
                 Some(page) => page,
                 None => return Ok(()),
             };
 
             if page.rows > 0 {
                 self.metrics.record_datalake_query(
-                    &self.transformer.name,
+                    self.transform.name(),
                     page.extract_elapsed.as_secs_f64(),
                     page.bytes,
                 );
@@ -504,7 +428,6 @@ impl Producer {
     /// just the open). `None` means the consumer went away.
     async fn extract_page(
         &self,
-        session: &SessionContext,
         page_sql: &str,
         start_cursor: &Cursor,
         tx: &mpsc::Sender<WriteCommand>,
@@ -519,7 +442,7 @@ impl Producer {
             }
 
             match self
-                .stream_page(session, page_sql, start_cursor, tx, max_block_size)
+                .stream_page(page_sql, start_cursor, tx, max_block_size)
                 .await
             {
                 Ok(Some(page)) => return Ok(Some(page)),
@@ -550,7 +473,6 @@ impl Producer {
 
     async fn stream_page(
         &self,
-        session: &SessionContext,
         page_sql: &str,
         start_cursor: &Cursor,
         tx: &mpsc::Sender<WriteCommand>,
@@ -582,8 +504,8 @@ impl Producer {
 
             let transform_start = Instant::now();
             let outputs = self
-                .transformer
-                .run(session, &block)
+                .transform
+                .transform(&block)
                 .await
                 .map_err(PageError::Fatal)?;
             transform_duration += transform_start.elapsed();
@@ -614,17 +536,16 @@ struct Loader<'a> {
 }
 
 impl<'a> Loader<'a> {
-    fn new(destination: &'a dyn Destination, plan: &'a Plan) -> Self {
-        let writers = plan
-            .transforms
+    fn new(destination: &'a dyn Destination, outputs: &'a [String]) -> Self {
+        let writers = outputs
             .iter()
-            .map(|t| PageWriter::new(destination, &t.destination_table))
+            .map(|table| PageWriter::new(destination, table))
             .collect();
         Self { writers }
     }
 
     async fn write(&mut self, output: TableBatch) -> Result<(), HandlerError> {
-        self.writers[output.transform_index]
+        self.writers[output.output_index]
             .write_batch(&output.batch)
             .await
     }
@@ -737,8 +658,12 @@ mod tests {
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
+            transform: "data_fusion".to_string(),
             transforms: vec![Transformation {
-                sql: format!("SELECT id, name FROM {SOURCE_DATA_TABLE}"),
+                sql: format!(
+                    "SELECT id, name FROM {}",
+                    crate::modules::sdlc::plan::SOURCE_DATA_TABLE
+                ),
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
             }],

@@ -1,6 +1,7 @@
 use ontology::{
-    DataType, DenormDirection, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget,
-    EnumType, EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
+    DataType, DenormDirection, DerivedEntity, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig,
+    EdgeTarget, EnumType, EtlConfig, EtlScope, NodeEntity, Ontology,
+    constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,6 +32,17 @@ pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
 pub(in crate::modules::sdlc) struct PlanInput {
     pub node_plans: Vec<NodePlan>,
     pub standalone_edge_plans: Vec<StandaloneEdgePlan>,
+    pub derived_entity_plans: Vec<DerivedEntityPlan>,
+}
+
+/// An edge-producing derived entity whose transform is a Rust implementation
+/// resolved from the registry. Carries only the extract; it has no node
+/// columns and no declarative transform.
+pub(in crate::modules::sdlc) struct DerivedEntityPlan {
+    pub name: String,
+    pub scope: EtlScope,
+    pub transform: String,
+    pub extract: ExtractPlan,
 }
 
 pub(in crate::modules::sdlc) struct NodePlan {
@@ -153,6 +165,7 @@ pub(in crate::modules::sdlc) enum ExtractSource {
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
     let mut node_plans = Vec::new();
     let mut standalone_edge_plans = Vec::new();
+    let mut derived_entity_plans = Vec::new();
 
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
@@ -163,9 +176,26 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
         standalone_edge_plans.push(resolve_standalone_edge(relationship_kind, config, ontology));
     }
 
+    for derived in ontology.derived_entities() {
+        derived_entity_plans.push(resolve_derived_entity(derived));
+    }
+
     PlanInput {
         node_plans,
         standalone_edge_plans,
+        derived_entity_plans,
+    }
+}
+
+/// A derived entity has no node/edge destination of its own; the Rust transform
+/// owns its outputs. Only the extract is derived from the ontology.
+fn resolve_derived_entity(derived: &DerivedEntity) -> DerivedEntityPlan {
+    let extract = build_extract_plan(&derived.etl, Vec::new(), "");
+    DerivedEntityPlan {
+        name: derived.name.clone(),
+        scope: derived.etl.scope(),
+        transform: derived.transform.clone(),
+        extract,
     }
 }
 
