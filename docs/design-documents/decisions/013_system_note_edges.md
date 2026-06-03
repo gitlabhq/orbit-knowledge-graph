@@ -60,7 +60,8 @@ Explicit non-goals: `@`-mention edges (separate `*_user_mentions` tables, tracke
 ```plaintext
 crates/indexer/src/modules/sdlc/handler/system_notes/
   mod.rs            // process_batch / plan_for_batch pure core + ExtractedNote
-  handler.rs        // SystemNotesHandler: impl Handler + register_handlers (I/O shell)
+  handler.rs        // SystemNotesHandler (thin Handler: builds a Plan + calls
+                    //   Pipeline::run_plan) + SystemNotesTransform (PageTransform)
   extract.rs        // SQL for the JOIN(siphon_notes ⋈ siphon_system_note_metadata)
   parse.rs          // Regex + per-action dispatch (lifted verbatim from xtask POC)
   resolve.rs        // siphon_routes IN-list, (project_id, iid) IN-list, ResolvedIndex
@@ -73,13 +74,23 @@ crates/indexer/src/modules/sdlc/handler/system_notes/
 > is not on `main` — the merged ADR 014 work (!1341) shipped a no-op
 > scaffold, and the `EntityIndexingHandler`/`EntityPipeline` routing layer
 > lives in a still-draft MR stack (!1349 → !1360 → !1362). It is also not a
-> prerequisite. The handler instead ships as a standalone
+> prerequisite. The handler instead ships as a thin
 > [`crate::handler::Handler`] (`SystemNotesHandler`) registered through
 > `HandlerRegistry::register_handler`, riding the existing
-> `NamespaceIndexingRequest` subscription, exactly like
-> `modules/namespace_deletion/`. The parse/resolve/emit core is pure and
-> reusable, so migrating to the `EntityPipeline` slot once it lands is a
-> thin I/O-shell swap. The forward-compatibility analysis below is retained
+> `NamespaceIndexingRequest` subscription. **It does not hand-roll its own
+> paging loop**: it builds a `Plan` whose transform stage is a page-wise
+> `PageTransform` (the `SystemNotesTransform` parse/resolve/emit core) and
+> calls the shared `modules::sdlc::pipeline::Pipeline::run_plan`, the same
+> orchestration the ontology entity handlers use. The shared pipeline owns
+> windowed extraction, the keyset `Cursor`/`CursorFilter`, retry/halving,
+> the streaming inserts, and per-page checkpoint cadence. `PageTransform` is
+> the seam that lets a handler plug a Rust transform into that pipeline:
+> entity plans use a block-wise SQL transform (constant memory); system-notes
+> uses a page-wise Rust transform because its resolution batches references
+> across the whole page (routes + MR + work-item `IN`-lists), so it buffers
+> one page before transforming. Like the entity handlers, it drains the
+> whole watermark window to completion with per-page checkpoints (no bespoke
+> per-message page cap). The forward-compatibility analysis below is retained
 > as the eventual target shape, not the current one.
 
 Under ADR 014's entity-level SDLC dispatch (scaffolded in [!1341][adr014-mr]), each entity-kind dispatched by `EntityDispatcher` flows through a single shared `EntityIndexingHandler`, which routes by `entity_kind` to a per-kind pipeline. ADR 014 introduces `SimpleEntityPipeline` as the default plan-driven pipeline and names SystemNotes specifically as the motivating example for the **`EntityPipeline`** custom-pipeline extension point:
@@ -181,7 +192,7 @@ Three-layer defence:
 4. Add the CI drift check `scripts/check-system-note-actions.sh` + lefthook hook (model: `scripts/check-goon-format-version.sh`).
 5. Add new edge YAML: `config/ontology/edges/{mentions.yaml, adds_commit.yaml, merged_at_commit.yaml, reopened.yaml}`. `RELATED_TO`, `CLOSED`, `MERGED` get a documented comment that the system-notes handler is an additional emitter; no YAML schema change.
 6. Register the new edge kinds in `config/ontology/schema.yaml`.
-7. Implement the handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting the parser and resolver from the POC at `crates/xtask/src/system_notes_bench/`. **As built, it is a standalone `Handler` (`SystemNotesHandler` in `handler.rs`)**, not an `EntityPipeline` — that extension point is not on `main` (see the implementation note above). `register_handlers` calls `HandlerRegistry::register_handler` from `modules/sdlc/mod.rs::register_handlers`, alongside the ontology entity handlers. It rides the existing `NamespaceIndexingRequest` subscription and keeps its own checkpoint key (`ns.{id}.SystemNote`). When the ADR 014 `EntityPipeline` slot lands, the pure `process_batch`/`plan_for_batch` core moves over unchanged; only the `handler.rs` I/O shell is replaced.
+7. Implement the handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting the parser and resolver from the POC at `crates/xtask/src/system_notes_bench/`. **As built, it is a thin `Handler` (`SystemNotesHandler` in `handler.rs`) that reuses the shared SDLC `Pipeline`** via the `PageTransform` seam — not an `EntityPipeline` (that extension point is not on `main`; see the implementation note above), and not a hand-rolled paging loop. `handle()` builds a `Plan` whose transform stage is `SystemNotesTransform` (a page-wise `PageTransform`) and calls `Pipeline::run_plan`, which owns windowed extraction, the keyset `Cursor`/`CursorFilter`, retry/halving, streaming inserts, and per-page checkpointing. `register_handlers` calls `HandlerRegistry::register_handler` from `modules/sdlc/mod.rs::register_handlers`, alongside the ontology entity handlers. It rides the existing `NamespaceIndexingRequest` subscription and keeps its own checkpoint key (`ns.{id}.SystemNote`). When the ADR 014 `EntityPipeline` slot lands, the `SystemNotesTransform` core moves over unchanged; only the `handler.rs` plan-building shell is replaced.
 
     Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
 8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
