@@ -69,10 +69,12 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let use_limit_by = is_aggregation && !dedup_edges && !is_multi_hop;
 
         if use_limit_by {
-            let sort_key = plan
-                .table_sort_keys
-                .get(&hop.edge_table)
-                .expect("normalize must populate table_sort_keys for all edge tables");
+            let Some(sort_key) = plan.table_sort_keys.get(&hop.edge_table) else {
+                return Err(QueryError::Lowering(format!(
+                    "no sort key for edge table '{}'; cannot emit LIMIT BY dedup",
+                    hop.edge_table
+                )));
+            };
             let mut inner_preds = Vec::new();
             collect_edge_predicates(
                 &mut inner_preds,
