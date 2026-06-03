@@ -26,7 +26,7 @@ use regex::Regex;
 
 use serde_json::Value;
 
-use crate::ast::{ChType, Expr, Node, Query, TableRef};
+use crate::ast::{Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
@@ -110,8 +110,8 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
             }
             let lcp = lowest_common_prefix(&collapsed);
             let lcp_filter = starts_with_expr(alias, &lcp);
-            let collapsed_refs: Vec<&str> = collapsed.iter().map(String::as_str).collect();
-            Expr::and(lcp_filter, path_array_filter(alias, &collapsed_refs))
+            let or_filter = path_or_filter(alias, &collapsed);
+            Expr::and(lcp_filter, or_filter)
         }
     }
 }
@@ -226,26 +226,18 @@ fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
     )
 }
 
-fn path_array_filter(alias: &str, paths: &[&str]) -> Expr {
-    let lambda_param = "_gkg_path";
-    Expr::func(
-        "arrayExists",
-        vec![
-            Expr::lambda(
-                lambda_param,
-                starts_with_value_expr(alias, Expr::ident(lambda_param)),
-            ),
-            Expr::param(
-                ChType::String.to_array(),
-                serde_json::Value::Array(
-                    paths
-                        .iter()
-                        .map(|path| serde_json::Value::String((*path).to_string()))
-                        .collect(),
-                ),
-            ),
-        ],
-    )
+/// OR chain of `startsWith(alias.traversal_path, path)` for each path.
+///
+/// Unlike the previous `arrayExists(lambda, array)` form, each
+/// `startsWith` is visible to ClickHouse's PK index analyser, enabling
+/// granule pruning per path prefix. This matters inside `dedup_edge_scan`
+/// subqueries where `argMax GROUP BY` must materialise every matching row:
+/// PK range pruning reduces the scan from the entire LCP namespace to
+/// only the user's authorized paths.
+fn path_or_filter(alias: &str, paths: &[String]) -> Expr {
+    let mut iter = paths.iter().map(|p| starts_with_expr(alias, p));
+    let first = iter.next().expect("paths is non-empty (caller checks)");
+    iter.fold(first, |a, b| Expr::binary(crate::ast::Op::Or, a, b))
 }
 
 pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
