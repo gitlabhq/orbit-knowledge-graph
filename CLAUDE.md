@@ -141,21 +141,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 Always use the templates in `.gitlab/merge_request_templates/` and `.gitlab/issue_templates/`, and read the TEMPLATE CONVENTION block at the top of each one before writing the description.
 
-Comments (MR/issue threads, review replies) have no template, so the same anti-slop convention applies by hand:
-
-- **Lead with the verdict, keep the visible body short.** State the answer, decision, or ask first, in a few human sentences. No file-by-file walkthroughs, hypothesis chains, or log/profiler dumps in the visible body.
-- **Long-form agent reasoning goes in a collapsed block**, mirroring the templates. Only include it when it actually helps the reader; otherwise omit it entirely:
-
-  ```
-  <details>
-  <summary><b>Agent context</b> — extended reasoning, walkthroughs, raw output</summary>
-
-  ...long-form analysis here...
-
-  </details>
-  ```
-
-- **Sound human, not generated.** Drop AI tells and meta-preamble. For comments posted as a specific person, calibrate to their voice (e.g. the `write-as-dgruzd` skill).
+Comments (MR/issue threads, review replies) have no template, so apply the convention by hand: lead with the verdict in a few human sentences, push long-form reasoning into a collapsed `<details><summary>Agent context</summary>` block (only when it helps), and drop AI tells. For comments posted as a person, match their voice (e.g. the `write-as-dgruzd` skill).
 
 ## Design docs
 
