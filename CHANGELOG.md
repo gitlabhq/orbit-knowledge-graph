@@ -1,3 +1,25 @@
+## [0.68.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.67.0...v0.68.0) (2026-06-03)
+
+### Features
+
+* **indexer:** capture per-entity resource stats for indexing cost attribution ([57251da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/57251da160e89f8c969223b30b50217c5bbcde18)) by Jean-Gabriel Doyon
+* **indexer:** emit gkg_indexing_completed analytics events for cost attribution ([eb35df8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eb35df81f91c4d99697b3de1c993c3cc30a69fab)) by Jean-Gabriel Doyon
+* **ontology:** extend LWP ordering with sort key + _version for dedup ([7e75e4b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7e75e4beaeb99421d4294612efbd339eae63f84a)) by Michael Usachenko
+
+### Fixes
+
+* **compiler:** final on single-hop edge aggs + denorm columns in table_columns ([a2beac7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2beac7c15b0310b2c39e0f99a4c855fa7ab0fd6)) by Michael Usachenko
+* **indexer:** scope stale code cleanup to older versions and log before it ([ac5e026](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ac5e0268deddf51f5a6ac6424533ba5efe6d380d)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **sdlc:** stream pages through the indexing pipeline (~49% lower peak memory) ([8ab385e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8ab385ee22de82857df59eb15e7b65cb3cb18a9d)) by Jean-Gabriel Doyon
+
+### Other
+
+* **agents:** reuse existing infra + no shipped dead code guidance ([5bffbc2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5bffbc25ec26cc95ff14137f2c85c6f1fd61da27)) by Dmitry Gruzd
+* **duo:** add SOX billing-boundary review instructions ([9a50abf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9a50abf27ada9591d04005289b890ff0fdc147c9)) by Sharmad Nachnolkar
+
 ## [0.67.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.66.0...v0.67.0) (2026-06-01)
 
 ### Features
