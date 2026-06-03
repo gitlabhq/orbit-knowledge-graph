@@ -444,7 +444,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
         sort_key: input.order_by,
         batch_size,
         transforms: vec![],
-        transform: "data_fusion".to_string(),
+        transform: ontology::DEFAULT_TRANSFORM.to_string(),
     }
 }
 

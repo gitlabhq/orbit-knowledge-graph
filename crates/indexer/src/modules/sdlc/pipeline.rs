@@ -658,7 +658,7 @@ mod tests {
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,
-            transform: "data_fusion".to_string(),
+            transform: ontology::DEFAULT_TRANSFORM.to_string(),
             transforms: vec![Transformation {
                 sql: format!(
                     "SELECT id, name FROM {}",

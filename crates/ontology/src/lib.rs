@@ -35,7 +35,7 @@ pub use entities::{
     NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
     StorageIndex, StorageProjection, VirtualSource,
 };
-pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use std::collections::BTreeMap;
 use std::fmt;

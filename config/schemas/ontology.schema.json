@@ -605,7 +605,7 @@
           "additionalProperties": { "type": "string" }
         }
       },
-      "required": ["description", "nodes"],
+      "required": ["description"],
       "additionalProperties": false
     },
 

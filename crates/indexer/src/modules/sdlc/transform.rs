@@ -11,11 +11,11 @@ use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use gkg_utils::arrow::prepare_batches;
 
+use ontology::DEFAULT_TRANSFORM;
+
 use crate::handler::HandlerError;
 
 use super::plan::{Plan, SOURCE_DATA_TABLE, Transformation};
-
-pub(in crate::modules::sdlc) const DEFAULT_TRANSFORM: &str = "data_fusion";
 
 /// A transformed batch tagged with the [`BlockTransform::outputs`] entry it
 /// writes to.

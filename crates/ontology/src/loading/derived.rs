@@ -2,10 +2,9 @@ use serde::Deserialize;
 
 use crate::OntologyError;
 use crate::entities::DerivedEntity;
+use crate::etl::DEFAULT_TRANSFORM;
 use crate::loading::EtlSettings;
 use crate::loading::node::EtlYaml;
-
-const DEFAULT_TRANSFORM: &str = "data_fusion";
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DerivedYaml {

@@ -8,7 +8,7 @@ use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
     RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
 };
-use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use super::EtlSettings;
 
@@ -390,6 +390,15 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
+        match self.etl.as_ref().and_then(|e| e.transform()) {
+            Some(transform) if transform != DEFAULT_TRANSFORM => {
+                return Err(OntologyError::Validation(format!(
+                    "node '{name}' sets etl.transform '{transform}'; custom transforms are only for derived entities"
+                )));
+            }
+            _ => {}
+        }
+
         let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
 
         let has_traversal_path = fields
@@ -726,6 +735,32 @@ mod tests {
         assert!(
             err.contains("must be database-backed"),
             "error should say virtual deps not allowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_custom_etl_transform() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: siphon_test
+              transform: system_notes
+            "#,
+        );
+        let err = result.expect_err("custom transform on a node should be rejected");
+        assert!(
+            err.to_string()
+                .contains("custom transforms are only for derived entities"),
+            "got: {err}"
         );
     }
 
