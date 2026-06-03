@@ -72,6 +72,7 @@ properties:
     source: definition_type
     nullable: false
     description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
+    selectivity: low
 
   start_line:
     type: int64

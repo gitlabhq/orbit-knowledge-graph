@@ -60,6 +60,7 @@ properties:
     source: import_type
     nullable: false
     description: "Import kind (e.g., module, symbol, wildcard)."
+    selectivity: low
 
   import_path:
     type: string

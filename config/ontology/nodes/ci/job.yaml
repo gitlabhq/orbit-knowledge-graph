@@ -181,6 +181,7 @@ properties:
     source: type
     nullable: false
     description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
+    selectivity: low
 
   runner_id:
     type: int64
