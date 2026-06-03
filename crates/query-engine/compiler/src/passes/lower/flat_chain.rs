@@ -63,15 +63,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
-        // Single-hop aggregation with a known sort key: use LIMIT BY dedup
-        // with -If combinators instead of FINAL.
-        let use_limit_by = is_aggregation
-            && !dedup_edges
-            && !is_multi_hop
-            && plan.table_sort_keys.contains_key(&hop.edge_table);
+        // Single-hop aggregation: use LIMIT BY dedup with -If combinators
+        // instead of FINAL.
+        let use_limit_by = is_aggregation && !dedup_edges && !is_multi_hop;
 
         if use_limit_by {
-            let sort_key = &plan.table_sort_keys[&hop.edge_table];
+            let sort_key = plan
+                .table_sort_keys
+                .get(&hop.edge_table)
+                .expect("normalize must populate table_sort_keys for all edge tables");
             let mut inner_preds = Vec::new();
             collect_edge_predicates(
                 &mut inner_preds,
@@ -100,8 +100,6 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 union
             } else if dedup_edges {
                 dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
-            } else if is_aggregation {
-                TableRef::scan_final(&hop.edge_table, &alias)
             } else {
                 TableRef::scan(&hop.edge_table, &alias)
             };
