@@ -39,7 +39,7 @@ pub async fn register_handlers(
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
         datalake_client,
-        datalake::DEFAULT_STREAM_BLOCK_SIZE,
+        entity_handler_config.stream_block_size,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
@@ -55,12 +55,15 @@ pub async fn register_handlers(
         &entity_handler_config.batch_size_overrides,
     );
 
-    let pipeline = Arc::new(Pipeline::new(
-        Arc::clone(&datalake),
-        Arc::clone(&checkpoint_store),
-        metrics.clone(),
-        config.engine.datalake_retry.clone(),
-    ));
+    let pipeline = Arc::new(
+        Pipeline::new(
+            Arc::clone(&datalake),
+            Arc::clone(&checkpoint_store),
+            metrics.clone(),
+            config.engine.datalake_retry.clone(),
+        )
+        .with_write_channel_capacity(entity_handler_config.write_channel_capacity),
+    );
 
     let mut global_subscription = GlobalIndexingRequest::subscription();
     if let Some(topic_config) = config.engine.topics.get(GLOBAL_HANDLER_TOPIC) {
