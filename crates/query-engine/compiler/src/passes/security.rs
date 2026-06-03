@@ -78,8 +78,11 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
             let min_role = ontology
                 .min_access_level_for_table(table)
                 .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
-            let eligible_paths = ctx.paths_at_least(min_role);
-            build_path_filter(alias, &eligible_paths)
+            let broad = build_path_filter(alias, &ctx.paths_at_least(min_role));
+            match ctx.scope_prefixes.get(alias) {
+                Some(prefix) => Expr::and(broad, starts_with_expr(alias, prefix)),
+                None => broad,
+            }
         });
         q.where_clause = Expr::and_all(
             security_conds
@@ -907,6 +910,47 @@ mod tests {
         } else {
             panic!("expected Join");
         }
+    }
+
+    #[test]
+    fn scope_prefix_ands_tight_filter_on_scoped_alias_only() {
+        let mut prefixes = std::collections::HashMap::new();
+        prefixes.insert("p".to_string(), "1/24/23/".to_string());
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes(prefixes);
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("p", "id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::scan("gl_work_item", "wi"),
+                Expr::eq(Expr::col("p", "id"), Expr::col("wi", "project_id")),
+            ),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let where_clause = q.where_clause.as_ref().unwrap();
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause, "p"),
+            vec!["1/".to_string(), "1/24/23/".to_string()],
+            "scoped alias keeps broad authz AND the tight prefix"
+        );
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause, "wi"),
+            vec!["1/".to_string()],
+            "neighbor alias gets broad authz only, never the tight prefix"
+        );
     }
 
     #[test]

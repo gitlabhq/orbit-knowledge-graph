@@ -131,6 +131,10 @@ query:
     graph_query_cache_enabled: false
     graph_query_cache_ttl: 60
 
+path_resolver:
+  cache_ttl_secs: 60
+  cache_capacity: 10000
+
 metrics:
   otel:
     enabled: false

@@ -29,11 +29,12 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    AuxiliaryColumn, AuxiliaryTable, DataType, DenormDirection, DenormalizedProperty,
-    DerivedEntity, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
-    EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field, FieldSelectivity, FieldSource,
-    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
-    StorageProjection, VirtualSource,
+    AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
+    DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
+    EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
+    EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
+    RedactionConfig, RequiredRole, StorageColumn, StorageIndex, StorageProjection,
+    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -123,11 +124,13 @@ pub struct Ontology {
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
     /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
     pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
+    pub(crate) auxiliary_dictionaries: Vec<AuxiliaryDictionary>,
     /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
+    pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
 }
 
 impl Default for Ontology {
@@ -177,8 +180,10 @@ impl Ontology {
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
             auxiliary_tables: Vec::new(),
+            auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
             derived_entities: BTreeMap::new(),
+            traversal_path_lookups: Vec::new(),
         }
     }
 
@@ -539,6 +544,18 @@ impl Ontology {
             aux.name = format!("{prefix}{}", aux.name);
         }
 
+        for dict in &mut self.auxiliary_dictionaries {
+            dict.name = format!("{prefix}{}", dict.name);
+            dict.source_table = format!("{prefix}{}", dict.source_table);
+        }
+
+        for lookup in &mut self.traversal_path_lookups {
+            lookup.source_table = format!("{prefix}{}", lookup.source_table);
+            if let Some(dict) = lookup.dictionary.as_mut() {
+                *dict = format!("{prefix}{dict}");
+            }
+        }
+
         self
     }
 
@@ -861,6 +878,27 @@ impl Ontology {
     #[must_use]
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.auxiliary_tables
+    }
+
+    #[must_use]
+    pub fn auxiliary_dictionaries(&self) -> &[AuxiliaryDictionary] {
+        &self.auxiliary_dictionaries
+    }
+
+    #[must_use]
+    pub fn traversal_path_lookups(&self) -> &[TraversalPathLookup] {
+        &self.traversal_path_lookups
+    }
+
+    #[must_use]
+    pub fn traversal_path_lookup(
+        &self,
+        entity: &str,
+        kind: TraversalPathKind,
+    ) -> Option<&TraversalPathLookup> {
+        self.traversal_path_lookups
+            .iter()
+            .find(|l| l.entity == entity && l.kind == kind)
     }
 
     /// Returns all denormalized property declarations.
@@ -2420,6 +2458,29 @@ properties:
                 "auxiliary table '{}' should be prefixed",
                 aux.name
             );
+        }
+
+        for dict in prefixed.auxiliary_dictionaries() {
+            assert!(
+                dict.name.starts_with("v1_") && dict.source_table.starts_with("v1_"),
+                "dictionary '{}' over '{}' should be prefixed",
+                dict.name,
+                dict.source_table
+            );
+        }
+
+        for lookup in prefixed.traversal_path_lookups() {
+            assert!(
+                lookup.source_table.starts_with("v1_"),
+                "lookup source_table '{}' should be prefixed",
+                lookup.source_table
+            );
+            if let Some(dict) = &lookup.dictionary {
+                assert!(
+                    dict.starts_with("v1_"),
+                    "lookup dictionary '{dict}' should be prefixed"
+                );
+            }
         }
     }
 

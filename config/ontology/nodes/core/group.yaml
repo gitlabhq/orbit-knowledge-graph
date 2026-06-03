@@ -22,12 +22,21 @@ properties:
     source: id
     nullable: false
     description: "Unique ID."
+    traversal_path_lookup:
+      kind: id
+      dictionary: gl_group_traversal_paths_dict
+      source_table: gl_group
+      key_column: id
 
   full_path:
     type: string
     source: full_path
     nullable: false
     description: "Full path (e.g. gitlab-org/quality)."
+    traversal_path_lookup:
+      kind: full_path
+      source_table: gl_group
+      key_column: full_path
 
   name:
     type: string

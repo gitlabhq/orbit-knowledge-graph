@@ -109,6 +109,11 @@ impl KnowledgeGraphServiceImpl {
         self
     }
 
+    pub fn with_path_resolver(mut self, resolver: Arc<crate::pipeline::PathResolver>) -> Self {
+        self.pipeline = self.pipeline.with_path_resolver(resolver);
+        self
+    }
+
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.pipeline = self.pipeline.with_billing(tracker);
         self

@@ -14,6 +14,7 @@ use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
+use gkg_server::pipeline::PathResolver;
 use gkg_server::schema_watcher::SchemaWatcher;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
@@ -169,6 +170,16 @@ async fn run_webserver(
     info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
+
+    let path_resolver = Arc::new(
+        PathResolver::new(
+            Arc::new(config.graph.build_client()),
+            &ontology,
+            &config.path_resolver,
+        )
+        .await,
+    );
+
     let http_server = HttpServer::bind(
         config.bind_address,
         graph_client,
@@ -190,7 +201,8 @@ async fn run_webserver(
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry));
+    .with_resolver_registry(Arc::new(resolver_registry))
+    .with_path_resolver(path_resolver);
 
     info!("initializing NATS connection");
     let nats = Arc::new(

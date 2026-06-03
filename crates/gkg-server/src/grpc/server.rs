@@ -62,6 +62,11 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_path_resolver(mut self, resolver: Arc<crate::pipeline::PathResolver>) -> Self {
+        self.service = self.service.with_path_resolver(resolver);
+        self
+    }
+
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
         self
