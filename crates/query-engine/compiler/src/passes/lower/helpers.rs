@@ -369,8 +369,10 @@ pub(super) fn dedup_edge_scan(
 /// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
 /// single-hop edge aggregations, with WHERE predicates injected.
 ///
-/// The predicates appear in the inner WHERE (for PK index pruning) and
-/// are also stored by the caller for duplication into `-If` combinators.
+/// Projects only the columns needed by the outer query: sort key columns
+/// (for ORDER BY / LIMIT BY), `_version` (for dedup ordering), and any
+/// columns referenced in the predicates (for the `-If` combinator).
+/// This avoids reading `source_tags` / `target_tags` when unused.
 pub(super) fn limit_by_edge_scan(
     edge_table: &str,
     alias: &str,
@@ -385,8 +387,26 @@ pub(super) fn limit_by_edge_scan(
 
     let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
 
+    // Build minimal projection: sort key + _version + predicate-referenced
+    // columns. This avoids reading expensive Array columns (source_tags,
+    // target_tags) when the outer query doesn't reference them.
+    let mut needed: HashSet<&str> = HashSet::new();
+    for col in sort_key {
+        needed.insert(col.as_str());
+    }
+    needed.insert(VERSION_COLUMN);
+    for pred in &where_predicates {
+        collect_columns_for_alias(pred, alias, &mut needed);
+    }
+    let mut select_cols: Vec<&str> = needed.into_iter().collect();
+    select_cols.sort_unstable();
+    let select = select_cols
+        .iter()
+        .map(|col| SelectExpr::col(alias, *col))
+        .collect();
+
     let query = Query {
-        select: vec![SelectExpr::star()],
+        select,
         from: TableRef::scan(edge_table, alias),
         where_clause: Expr::conjoin(where_predicates),
         order_by,
@@ -394,6 +414,31 @@ pub(super) fn limit_by_edge_scan(
         ..Default::default()
     };
     TableRef::subquery(query, alias)
+}
+
+/// Walk an expression tree and collect column names referenced with the
+/// given table alias.
+fn collect_columns_for_alias<'a>(expr: &'a Expr, alias: &str, out: &mut HashSet<&'a str>) {
+    match expr {
+        Expr::Column { table, column } if table == alias => {
+            out.insert(column.as_str());
+        }
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                collect_columns_for_alias(arg, alias, out);
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            collect_columns_for_alias(left, alias, out);
+            collect_columns_for_alias(right, alias, out);
+        }
+        Expr::UnaryOp { expr, .. } => collect_columns_for_alias(expr, alias, out),
+        Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
+            collect_columns_for_alias(expr, alias, out);
+        }
+        Expr::Lambda { body, .. } => collect_columns_for_alias(body, alias, out),
+        _ => {}
+    }
 }
 
 /// Emit denorm tag filters computed from `plan.denorm_columns`.
