@@ -98,7 +98,7 @@ has no matches.
 - `cursor.offset + cursor.page_size > limit`.
 
 **Fix:** validate against the live DSL schema, which is authoritative and
-always current. Fetch it from `/api/v4/orbit/schema/dsl`:
+always current. Fetch it with `glab orbit remote dsl`:
 
 ```bash
 glab orbit remote dsl
