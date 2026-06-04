@@ -10,7 +10,7 @@ use crate::error::{QueryError, Result};
 use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
+    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_scan,
     node_id_pin_predicates, push_edge_predicates,
 };
 use crate::passes::plan::*;
@@ -97,9 +97,10 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
 
-            from = Some(limit_by_edge_scan(
+            from = Some(limit_by_scan(
                 &hop.edge_table,
                 &alias,
+                vec![SelectExpr::star()],
                 sort_key,
                 inner_preds,
             ));
