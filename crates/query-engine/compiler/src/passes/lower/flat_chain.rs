@@ -115,16 +115,24 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut ctes,
                 &mut narrowed_nodes,
             );
-            for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-                let Some(np) = plan.nodes.get(node_alias) else {
-                    continue;
-                };
-                let elevated_skip =
-                    matches!(np.hydration, HydrationStrategy::Skip) && np.needs_elevated_filter;
-                let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
-                if (is_filter_only || elevated_skip) && filter_only_done.insert(node_alias.clone())
+            // For multi-hop dedup queries, FilterOnly nodes still use
+            // CTEs so their IN-subqueries can be pushed inside the edge
+            // dedup scan for PK pruning. Single-hop queries handle
+            // FilterOnly via JOIN in the node processing loop below.
+            if dedup_edges {
+                for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)]
                 {
-                    narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                    let Some(np) = plan.nodes.get(node_alias) else {
+                        continue;
+                    };
+                    let elevated_skip =
+                        matches!(np.hydration, HydrationStrategy::Skip) && np.needs_elevated_filter;
+                    let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
+                    if (is_filter_only || elevated_skip)
+                        && filter_only_done.insert(node_alias.clone())
+                    {
+                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                    }
                 }
             }
 
@@ -279,15 +287,45 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(nw);
                 }
                 HydrationStrategy::FilterOnly => {
-                    if !filter_only_done.contains(node_alias) {
-                        where_parts
-                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                    if filter_only_done.insert(node_alias.clone()) {
+                        let table = np.table.as_deref().ok_or_else(|| {
+                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
+                        })?;
+                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                        })?;
+                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                            from,
+                            np,
+                            edge_alias,
+                            edge_col,
+                            false,
+                            None,
+                            node_sort_key,
+                        )?;
+                        from = new_from;
+                        where_parts.extend(nw);
                     }
                 }
                 HydrationStrategy::Skip => {
-                    if np.needs_elevated_filter && !filter_only_done.contains(node_alias) {
-                        where_parts
-                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                    if np.needs_elevated_filter && filter_only_done.insert(node_alias.clone()) {
+                        let table = np.table.as_deref().ok_or_else(|| {
+                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
+                        })?;
+                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                        })?;
+                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                            from,
+                            np,
+                            edge_alias,
+                            edge_col,
+                            false,
+                            None,
+                            node_sort_key,
+                        )?;
+                        from = new_from;
+                        where_parts.extend(nw);
                     }
                 }
             }

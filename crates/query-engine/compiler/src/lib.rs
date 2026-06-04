@@ -1197,21 +1197,21 @@ mod tests {
     }
 
     #[test]
-    fn denorm_partial_filters_keeps_filter_cte() {
+    fn denorm_partial_filters_joins_for_non_denorm() {
         let sql = denorm_traversal_sql(
             r#""state": {"op": "eq", "value": "merged"}, "source_branch": {"op": "eq", "value": "main"}"#,
         );
         assert!(
-            sql.contains("_filter_mr"),
-            "partial denorm must keep a filter CTE for non-denormalized filters, got:\n{sql}"
+            sql.contains("INNER JOIN"),
+            "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
         );
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denormalized state filter must be pushed to edge tags, got:\n{sql}"
         );
         assert!(
-            sql.contains("main"),
-            "filter CTE must retain non-denormalized source_branch filter, got:\n{sql}"
+            sql.contains("source_branch") && sql.contains("main"),
+            "JOIN must retain non-denormalized source_branch filter, got:\n{sql}"
         );
     }
 
@@ -1608,7 +1608,7 @@ mod tests {
     }
 
     #[test]
-    fn filtered_redaction_joins_push_filters_into_final_subquery() {
+    fn filtered_redaction_joins_push_filters_into_subquery() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1622,14 +1622,14 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f WHERE")
                 && sql.contains("endsWith(f.path, '.rb')"),
-            "filtered File redaction join should push filters into the FINAL subquery, got:\n{sql}"
+            "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d WHERE")
                 && sql.contains("startsWith(d.name, 'process')"),
-            "filtered Definition redaction join should push filters into the FINAL subquery, got:\n{sql}"
+            "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
     }
 
