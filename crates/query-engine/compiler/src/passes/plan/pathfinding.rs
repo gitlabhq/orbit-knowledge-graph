@@ -50,6 +50,7 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
         node_edge_mappings: HashMap::new(),
         denorm_columns: input.compiler.denormalized_columns.clone(),
         table_columns: input.compiler.table_columns.clone(),
+        table_sort_keys: input.compiler.table_sort_keys.clone(),
         body: PlanBody::PathFinding(PathFindingBody {
             start: start_alias,
             end: end_alias,

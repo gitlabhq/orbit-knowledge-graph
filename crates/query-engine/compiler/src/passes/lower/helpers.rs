@@ -366,6 +366,36 @@ pub(super) fn dedup_edge_scan(
     TableRef::subquery(query, alias)
 }
 
+/// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
+/// single-hop edge aggregations, with WHERE predicates injected.
+///
+/// The predicates appear in the inner WHERE (for PK index pruning) and
+/// are also stored by the caller for duplication into `-If` combinators.
+pub(super) fn limit_by_edge_scan(
+    edge_table: &str,
+    alias: &str,
+    sort_key: &[String],
+    where_predicates: Vec<Expr>,
+) -> TableRef {
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+
+    let query = Query {
+        select: vec![SelectExpr::star()],
+        from: TableRef::scan(edge_table, alias),
+        where_clause: Expr::conjoin(where_predicates),
+        order_by,
+        limit_by: Some((1, limit_by_cols)),
+        ..Default::default()
+    };
+    TableRef::subquery(query, alias)
+}
+
 /// Emit denorm tag filters computed from `plan.denorm_columns`.
 ///
 /// Each node is tagged at most once (tracked by `tagged_nodes`).
