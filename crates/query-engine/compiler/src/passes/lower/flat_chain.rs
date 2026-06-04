@@ -9,9 +9,9 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
-    push_edge_predicates,
+    NarrowSource, build_multi_hop_union, dedup_edge_scan_with_where, emit_denorm_tags,
+    emit_filter_narrowing, emit_filter_subquery, emit_node_ids_on_edge,
+    emit_node_join_with_narrowing, limit_by_edge_scan, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -104,13 +104,16 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             ));
         } else if dedup_edges && !is_multi_hop {
             // Multi-hop same-table: LIMIT BY with predicates pushed inside
-            // each hop's subquery. Replaces argMax GROUP BY HAVING.
-            let Some(sort_key) = plan.table_sort_keys.get(&hop.edge_table) else {
-                return Err(QueryError::Lowering(format!(
-                    "no sort key for edge table '{}'; cannot emit LIMIT BY dedup",
-                    hop.edge_table
-                )));
-            };
+            // when the sort key matches the identity columns (gl_edge).
+            // When they differ (gl_code_edge has project_id/branch in the
+            // sort key but not in the identity), LIMIT BY forces a real
+            // sort and argMax GROUP BY is faster.
+            let identity: HashSet<&str> = EDGE_RESERVED_COLUMNS.iter().copied().collect();
+            let sort_key = plan.table_sort_keys.get(&hop.edge_table);
+            let sort_key_matches_identity = sort_key.is_some_and(|sk| {
+                let sk_set: HashSet<&str> = sk.iter().map(|s| s.as_str()).collect();
+                sk_set == identity
+            });
 
             let mut inner_preds = Vec::new();
             collect_edge_predicates(
@@ -125,7 +128,19 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut narrowed_nodes,
             );
 
-            let edge_source = limit_by_edge_scan(&hop.edge_table, &alias, sort_key, inner_preds);
+            let edge_source = if sort_key_matches_identity {
+                limit_by_edge_scan(&hop.edge_table, &alias, sort_key.unwrap(), inner_preds)
+            } else {
+                // argMax dedup with predicates pushed inside the subquery.
+                let table_columns = &plan.table_columns;
+                let Some(cols) = table_columns.get(&hop.edge_table) else {
+                    return Err(QueryError::Lowering(format!(
+                        "no columns for edge table '{}'",
+                        hop.edge_table
+                    )));
+                };
+                dedup_edge_scan_with_where(&hop.edge_table, &alias, cols, inner_preds)
+            };
 
             if let Some(prev_from) = from.take() {
                 let jc = hop

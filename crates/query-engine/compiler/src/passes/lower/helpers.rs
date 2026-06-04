@@ -317,11 +317,79 @@ pub(super) fn push_edge_predicates(
     }
 }
 
-/// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
-/// single-hop edge aggregations, with WHERE predicates injected.
+/// argMax GROUP BY dedup with predicates in the WHERE clause.
 ///
-/// The predicates appear in the inner WHERE (for PK index pruning) and
-/// are also stored by the caller for duplication into `-If` combinators.
+/// Used for edge tables where the sort key differs from the identity
+/// columns (e.g. `gl_code_edge` with `project_id`/`branch` in the
+/// sort key). LIMIT BY forces a real sort in that case; argMax GROUP BY
+/// is a streaming hash aggregation that doesn't need sorted input.
+pub(super) fn dedup_edge_scan_with_where(
+    edge_table: &str,
+    alias: &str,
+    cols: &HashSet<String>,
+    where_predicates: Vec<Expr>,
+) -> TableRef {
+    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .filter(|c| cols.contains(*c))
+        .collect();
+
+    let mut projected: Vec<&str> = cols
+        .iter()
+        .map(String::as_str)
+        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
+        .collect();
+    projected.sort_unstable();
+
+    let mut select = Vec::with_capacity(identity.len() + projected.len());
+    for col in &identity {
+        select.push(SelectExpr::col(alias, *col));
+    }
+    for col in projected {
+        select.push(SelectExpr::new(
+            Expr::func(
+                "argMax",
+                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
+            ),
+            col,
+        ));
+    }
+
+    let group_by = identity
+        .iter()
+        .map(|c| Expr::col(alias, *c))
+        .collect::<Vec<_>>();
+
+    let having = Expr::eq(
+        Expr::func(
+            "argMax",
+            vec![
+                Expr::col(alias, DELETED_COLUMN),
+                Expr::col(alias, VERSION_COLUMN),
+            ],
+        ),
+        Expr::lit(false),
+    );
+
+    let query = Query {
+        select,
+        from: TableRef::scan(edge_table, alias),
+        where_clause: Expr::conjoin(where_predicates),
+        group_by,
+        having: Some(having),
+        ..Default::default()
+    };
+    TableRef::subquery(query, alias)
+}
+
+/// Build a `LIMIT 1 BY (identity) ORDER BY (sort_key, _version DESC)`
+/// subquery for edge dedup.
+///
+/// ORDER BY uses the full sort key (for InOrder PK reads). LIMIT BY
+/// uses only the identity columns (EDGE_RESERVED_COLUMNS) for dedup.
+/// These differ on `gl_code_edge` where the sort key includes
+/// `project_id` and `branch` that are not part of edge identity.
 pub(super) fn limit_by_edge_scan(
     edge_table: &str,
     alias: &str,
@@ -334,7 +402,13 @@ pub(super) fn limit_by_edge_scan(
         .collect();
     order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
 
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+    // LIMIT BY uses identity columns only, not the full sort key.
+    let identity: HashSet<&str> = EDGE_RESERVED_COLUMNS.iter().copied().collect();
+    let limit_by_cols: Vec<Expr> = sort_key
+        .iter()
+        .filter(|col| identity.contains(col.as_str()))
+        .map(|col| Expr::col(alias, col))
+        .collect();
 
     let query = Query {
         select: vec![SelectExpr::star()],
