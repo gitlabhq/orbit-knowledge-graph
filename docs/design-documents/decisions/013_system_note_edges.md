@@ -328,8 +328,23 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
 1. **`system_note_metadata` Siphon replication slip.** Longest lead-time item. The Siphon-side MR is filed in parallel with this ADR; if it slips past the implementation MR review, the handler ships in Mode B and flips to Mode A when replication lands. The mode switch is a single config change with no schema impact.
 2. **Parser drift against Rails' `ICON_TYPES` and body templates.** `ICON_TYPES` has grown across releases (now 61 values; prior captures show ~50) and Rails has moved system-note phrasing more than once. Mitigation: vendored constant + CI drift check + `log_and_drop` on unknown actions + regex anchored on the GFM-reference token rather than on the verb phrase (so phrasing changes do not break extraction). E2E validation against a real 75k-note GDK corpus seeded with unknown actions confirmed the `log_and_drop` path silently absorbs unrecognised values without breaking the pass (see [POC results](#poc-results)).
 3. **Custom-handler maintenance cost.** This is the first cross-reference-oriented handler departing from the ontology-first convention. Mitigation: confine the deviation to the *materialization logic* only (edge **kinds** still declare in YAML) and document the rationale in `AGENTS.md` so future ADRs do not treat this as precedent for arbitrary custom handlers.
-4. **`siphon_routes.path` IN-list scan cost.** No skip index on `path` today (only a `pg_pkey_ordered` projection on `id`). The GDK E2E pass showed 8 ms at batch=1,000 against 93 routes, but that does not stress the path-index dimension; the staging run at production scale still needs to confirm. If it fails the threshold, a `set(N)` or `bloom_filter` skip index on `path` is the prepared mitigation, and Adam's guidance (skip indexes over projections) aligns with the Siphon team's review preferences.
+4. **Full-table-scan cost on resolver second-hop lookups.** `siphon_routes`, `merge_requests`, and `work_items` are `ORDER BY (traversal_path, ...)`, but the resolver's filter columns (`path`, `source_id`, `(target_project_id, iid)`, `(project_id, iid)`) are not usable PK prefixes — without a `traversal_path` leg, every lookup is a full scan of the shared Siphon datalake. **Mitigation (implemented):** all four resolver queries carry `startsWith(traversal_path, {root_prefix:String})` where `root_prefix` is the source note's top-level namespace prefix (`<org>/<top_level_ns>/`). This turns each full scan into a primary-index range scan bounded to one top-level namespace partition. The trade-off is that v1 resolves only **same-top-level-namespace references**; a cross-top-level reference (`other-group/proj#5`) lives outside the prefix and is silently not resolved (under-counts, never a wrong edge). Cross-top-level resolution is deferred to the graph-DB dictionary lever (see [Future optimization](#future-optimization-graph-db-side-lookup-dictionaries)), which also resolves the cross-namespace edge-visibility (authz) question. The `cross_top_level_reference_is_not_resolved` integration test guards this as a deliberate limitation.
 5. **Acceptance threshold vagueness.** [`gitlab-org/orbit/knowledge-graph#499`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499) says "a material increase in edge density (numeric target to be set after initial measurement)". This ADR proposes ≥3× MR<->WorkItem and ≥10× MR<->MR as concrete numeric forms. If review prefers different thresholds, the POC harness (`xtask system-notes-bench`) can re-run cheaply.
+
+## Coverage and known limitations
+
+v1 resolves only references whose target lives under the **same top-level namespace** as the source note. Every resolver query (`siphon_routes`, `merge_requests`, `work_items`) is bounded by `startsWith(traversal_path, {root_prefix:String})` to avoid full-scanning the shared Siphon datalake tables. This means:
+
+- **Same-project references** (`#123`, `!456`): always resolved.
+- **Same-top-level cross-project references** (`sibling-group/project!42`): resolved, because the target's route falls under the same top-level namespace prefix.
+- **Cross-top-level references** (`other-org/project#5`): intentionally **not** resolved. The target's route lives outside the `root_prefix`, so it never appears in the bounded scan. This produces under-counts (missing edges), never wrong edges.
+- **Commit references** (`deadbeef`): parsed but not resolved (no `Commit` node type yet).
+
+Cross-top-level resolution is deferred to the graph-DB dictionary lever ([§ Future optimization](#future-optimization-graph-db-side-lookup-dictionaries)), which replaces the `siphon_routes` IN-list with a constant-time dictionary lookup that naturally spans all namespaces. That lever also resolves the cross-namespace edge-visibility (authz) question — a cross-top-level edge might reference a project the querying user cannot see, and the dictionary can enforce that at read time.
+
+### Implementation shape (post-ADR 015)
+
+The system-notes handler is implemented as a `BlockTransform` (ADR 015) rather than the `EntityPipeline` described in the original decision section. ADR 015 refined ADR 014's extension point: the seam is the **transform stage**, not a custom pipeline. The `SystemNotesTransform` implements `BlockTransform` and is registered via `TransformRegistry::register("system_notes", factory)`. The extract plan is declared as a derived entity in `config/ontology/derived/core/system_note.yaml` and rides the shared `Pipeline` for paging, checkpointing, and streaming writes.
 
 ## References
 
@@ -344,6 +359,6 @@ Neither is needed for v1: the measured 3-query plan resolves in 8 ms at batch=1,
 - Siphon repo: `gitlab-org/analytics-section/siphon`
 - ADR precedent: [009 (Code Indexer Service)](009_code_indexer_service.md) for implementation-plan shape; [012 (GOON Format)](012_goon_format.md) for benchmark-driven decision rationale and the vendored-constant + CI drift-check pattern
 - Custom-handler precedent in code: `crates/indexer/src/modules/code/`, `crates/indexer/src/modules/namespace_deletion/`
-- Schema version file: `config/SCHEMA_VERSION` (44 → 45 with this work)
+- Schema version file: `config/SCHEMA_VERSION` (50 → 51 with this work)
 - Routes-join precedent: `config/ontology/nodes/core/project.yaml:115-121`, `config/ontology/nodes/core/group.yaml:101-107`
 - Note filter today: `config/ontology/nodes/core/note.yaml` (`where: "system = false"`)

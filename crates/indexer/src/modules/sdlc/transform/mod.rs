@@ -2,6 +2,8 @@
 //! (the default). Other transforms are registered by name and resolved from the
 //! ontology's `etl.transform` field (e.g. `system_notes`).
 
+pub(in crate::modules::sdlc) mod system_notes;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -125,7 +127,8 @@ impl BlockTransform for DataFusionTransform {
     }
 }
 
-type TransformFactory = Box<dyn Fn(&Plan) -> Arc<dyn BlockTransform> + Send + Sync>;
+pub(in crate::modules::sdlc) type TransformFactory =
+    Box<dyn Fn(&Plan) -> Arc<dyn BlockTransform> + Send + Sync>;
 
 /// Holds the pluggable custom transforms, keyed by name. The built-in
 /// `data_fusion` projection is not stored here; it is the default arm of
@@ -136,6 +139,18 @@ pub(in crate::modules::sdlc) struct TransformRegistry {
 }
 
 impl TransformRegistry {
+    /// Register a named Rust transform factory. Called from each transform
+    /// module's `register()` during handler setup, before the registry is
+    /// frozen behind an `Arc`. `data_fusion` is not stored here — it is the
+    /// default arm of [`TransformSpec`] and built inline by [`TransformRegistry::build`].
+    pub(in crate::modules::sdlc) fn register(
+        &mut self,
+        name: impl Into<String>,
+        factory: TransformFactory,
+    ) {
+        self.factories.insert(name.into(), factory);
+    }
+
     /// A `DataFusion` plan always builds; a `Rust` plan only when its transform
     /// has been registered (otherwise the handler is skipped).
     pub(in crate::modules::sdlc) fn is_registered(&self, transform: &TransformSpec) -> bool {

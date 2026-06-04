@@ -56,7 +56,9 @@ pub async fn register_handlers(
         &entity_handler_config.batch_size_overrides,
     );
 
-    let transform_registry = Arc::new(transform::TransformRegistry::default());
+    let mut transform_registry = transform::TransformRegistry::default();
+    transform::system_notes::register(&mut transform_registry, Arc::clone(&datalake));
+    let transform_registry = Arc::new(transform_registry);
 
     let pipeline = Arc::new(
         Pipeline::new(

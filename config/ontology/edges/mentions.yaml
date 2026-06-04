@@ -1,0 +1,18 @@
+description: Cross-entity mention from system notes (ADR 013)
+
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "MergeRequest mentions another MergeRequest."
+
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "MergeRequest mentions a work item."
+
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Work item mentions a MergeRequest."
+
+  - from_node: { type: WorkItem, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "Work item mentions another work item."
