@@ -109,7 +109,13 @@ impl GrpcServer {
         }
 
         builder
-            .layer(labkit::grpc::GrpcMetricsLayer::new())
+            .layer(labkit::grpc::GrpcMetricsLayer::with_duration_buckets(
+                [
+                    labkit::otel::DEFAULT_DURATION_BUCKETS_SECONDS,
+                    &[15.0, 30.0, 60.0],
+                ]
+                .concat(),
+            ))
             .layer(labkit::grpc::GrpcTraceLayer::new())
             .layer(labkit::grpc::GrpcCorrelationLayer::new())
             .add_service(KnowledgeGraphServiceServer::new(self.service))

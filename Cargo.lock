@@ -6673,7 +6673,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=e8bc31e#e8bc31e797461217d7b21c695ea0650bfca24dbd"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1033624#1033624dab579093e61ef358ae40bc81a517e6f0"
 dependencies = [
  "axum",
  "futures-util",
@@ -6704,7 +6704,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=e8bc31e#e8bc31e797461217d7b21c695ea0650bfca24dbd"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1033624#1033624dab579093e61ef358ae40bc81a517e6f0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6722,7 +6722,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=e8bc31e#e8bc31e797461217d7b21c695ea0650bfca24dbd"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1033624#1033624dab579093e61ef358ae40bc81a517e6f0"
 
 [[package]]
 name = "lance"
@@ -9506,7 +9506,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "once_cell",
@@ -9526,7 +9526,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -9547,7 +9547,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -9560,7 +9560,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
