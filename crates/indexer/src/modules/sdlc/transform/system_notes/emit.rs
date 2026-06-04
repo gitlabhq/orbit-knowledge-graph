@@ -13,8 +13,6 @@
 //! to keep the call sites grep-friendly and to make the unit tests below
 //! cheap.
 
-use chrono::{DateTime, Utc};
-
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
 
@@ -82,10 +80,6 @@ pub struct EmittedEdge {
     pub source_kind: &'static str,
     pub target_id: i64,
     pub target_kind: &'static str,
-    /// Micros precision: `gl_edge._version` is `DateTime64(6,'UTC')`.
-    /// Stamped from the note's `created_at` so re-ingestion produces the
-    /// same `_version` and ReplacingMergeTree dedupes correctly.
-    pub version_micros: i64,
 }
 
 /// A parsed system-note row that needs edge emission. The handler
@@ -105,7 +99,6 @@ pub struct NoteRow {
     pub noteable_id: i64,
     pub noteable_kind: NoteableKind,
     pub action: Action,
-    pub created_at: DateTime<Utc>,
     pub references: Vec<Reference>,
 }
 
@@ -120,8 +113,6 @@ where
 {
     let mut edges = Vec::new();
     for row in rows {
-        let version_micros = row.created_at.timestamp_micros();
-
         match row.action {
             // Lifecycle: User → Noteable.
             Action::Closed | Action::Reopened | Action::Merged => {
@@ -154,7 +145,6 @@ where
                     source_kind: "User",
                     target_id: row.noteable_id,
                     target_kind: row.noteable_kind.as_str(),
-                    version_micros,
                 });
             }
 
@@ -195,7 +185,6 @@ where
                         source_kind: row.noteable_kind.as_str(),
                         target_id: resolved.id,
                         target_kind: target_kind.as_str(),
-                        version_micros,
                     });
                 }
             }
@@ -209,7 +198,6 @@ mod tests {
     use super::*;
     use crate::modules::sdlc::transform::system_notes::parse;
     use crate::modules::sdlc::transform::system_notes::resolve::ResolvedTarget;
-    use chrono::TimeZone;
 
     fn row_for(
         action: Action,
@@ -224,7 +212,6 @@ mod tests {
             noteable_id,
             noteable_kind,
             action,
-            created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
             references: parse::extract(action, body),
         }
     }
@@ -364,21 +351,5 @@ mod tests {
             edges.is_empty(),
             "self-loop MR !100 → MR !100 should be filtered"
         );
-    }
-
-    #[test]
-    fn version_micros_comes_from_created_at() {
-        let row = row_for(
-            Action::CrossReference,
-            "mentioned in !1",
-            NoteableKind::MergeRequest,
-            10,
-        );
-        let edges = build_edges(&[row], always_resolve(1, "1/2/"));
-        let expected = Utc
-            .with_ymd_and_hms(2026, 5, 1, 0, 0, 0)
-            .unwrap()
-            .timestamp_micros();
-        assert_eq!(edges[0].version_micros, expected);
     }
 }

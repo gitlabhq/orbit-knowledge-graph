@@ -20,11 +20,10 @@ pub(crate) mod vendored;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{Array, Int64Array, StringArray, TimestampMicrosecondArray};
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use arrow::array::{Array, Int64Array, StringArray};
+use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
 use serde_json::json;
 use tracing::warn;
 
@@ -52,7 +51,6 @@ struct ExtractedNote {
     noteable_type: String,
     author_id: Option<i64>,
     project_id: Option<i64>,
-    created_at: DateTime<Utc>,
     traversal_path: String,
     action: String,
 }
@@ -155,18 +153,9 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
     let project_id_col = col::<Int64Array>(block, "project_id")?;
     let traversal_path_col = col::<StringArray>(block, "traversal_path")?;
     let action_col = col::<StringArray>(block, "action")?;
-    let created_at_col = col::<TimestampMicrosecondArray>(block, "created_at")?;
 
     let mut notes = Vec::with_capacity(num_rows);
     for i in 0..num_rows {
-        let created_at = if created_at_col.is_null(i) {
-            Utc::now()
-        } else {
-            let micros = created_at_col.value(i);
-            Utc.timestamp_micros(micros)
-                .single()
-                .unwrap_or_else(Utc::now)
-        };
         notes.push(ExtractedNote {
             note: note_col.value(i).to_string(),
             noteable_id: noteable_id_col.value(i),
@@ -181,7 +170,6 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
             } else {
                 Some(project_id_col.value(i))
             },
-            created_at,
             traversal_path: traversal_path_col.value(i).to_string(),
             action: action_col.value(i).to_string(),
         });
@@ -242,7 +230,6 @@ where
             noteable_id: n.noteable_id,
             noteable_kind,
             action,
-            created_at: n.created_at,
             references,
         });
     }
@@ -428,7 +415,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
     let mut source_kinds = Vec::with_capacity(len);
     let mut target_ids = Vec::with_capacity(len);
     let mut target_kinds = Vec::with_capacity(len);
-    let mut versions = Vec::with_capacity(len);
     let mut deleted = Vec::with_capacity(len);
 
     for e in edges {
@@ -438,10 +424,13 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
         source_kinds.push(e.source_kind);
         target_ids.push(e.target_id);
         target_kinds.push(e.target_kind);
-        versions.push(e.version_micros);
         deleted.push(false);
     }
 
+    // `_version` is omitted: `gl_edge._version` is `DEFAULT now64(6)`, and an
+    // `INSERT ... FORMAT ArrowStream` maps columns by name, so the server stamps
+    // it. The edge dedups on the ReplacingMergeTree sort key (not `_version`),
+    // so a Rust-side timestamp bought nothing.
     let schema = Arc::new(Schema::new(vec![
         Field::new("traversal_path", DataType::Utf8, false),
         Field::new("relationship_kind", DataType::Utf8, false),
@@ -449,11 +438,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
         Field::new("source_kind", DataType::Utf8, false),
         Field::new("target_id", DataType::Int64, false),
         Field::new("target_kind", DataType::Utf8, false),
-        Field::new(
-            "_version",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            false,
-        ),
         Field::new("_deleted", DataType::Boolean, false),
     ]));
 
@@ -466,7 +450,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
             Arc::new(StringArray::from(source_kinds)),
             Arc::new(Int64Array::from(target_ids)),
             Arc::new(StringArray::from(target_kinds)),
-            Arc::new(TimestampMicrosecondArray::from(versions).with_timezone("UTC")),
             Arc::new(arrow::array::BooleanArray::from(deleted)),
         ],
     )
@@ -476,7 +459,6 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {
         ExtractedNote {
@@ -485,7 +467,6 @@ mod tests {
             noteable_type: noteable_type.to_string(),
             author_id: Some(7),
             project_id: Some(100),
-            created_at: Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap(),
             traversal_path: "1/100/".to_string(),
             action: action.to_string(),
         }
