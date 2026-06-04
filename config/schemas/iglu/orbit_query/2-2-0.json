@@ -33,6 +33,7 @@
       "maxItems": 100,
       "uniqueItems": true,
       "items": {
+        "description": "A namespace ID.",
         "type": "integer",
         "minimum": 0,
         "maximum": 2147483647
@@ -76,45 +77,48 @@
     "node_count": {
       "description": "Number of node clauses in the query.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 100
     },
     "relationship_count": {
       "description": "Number of relationship clauses in the query.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 100
     },
     "entity_types": {
       "description": "Distinct entity types referenced by node clauses.",
       "type": ["array", "null"],
       "maxItems": 100,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 64 }
+      "items": { "description": "An ontology entity type name.", "type": "string", "maxLength": 64 }
     },
     "relationship_types": {
       "description": "Distinct relationship types referenced.",
       "type": ["array", "null"],
       "maxItems": 100,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 64 }
+      "items": { "description": "An ontology relationship type name.", "type": "string", "maxLength": 64 }
     },
     "filter_count": {
       "description": "Total number of filter predicates.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 1000
     },
     "filter_fields": {
       "description": "Distinct field names used in filters.",
       "type": ["array", "null"],
       "maxItems": 1000,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 64 }
+      "items": { "description": "A filter field name.", "type": "string", "maxLength": 64 }
     },
     "filter_ops": {
       "description": "Distinct filter operators used (eq, gt, contains, etc.).",
       "type": ["array", "null"],
       "maxItems": 14,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 32 }
+      "items": { "description": "A filter operator name.", "type": "string", "maxLength": 32 }
     },
     "is_search": {
       "description": "True when the query is a single-node search (no relationships).",
@@ -131,24 +135,27 @@
     "limit": {
       "description": "Row limit requested by the query.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "max_hops": {
       "description": "Maximum hop count across all relationship clauses.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 100
     },
     "agg_functions": {
       "description": "Distinct aggregation functions used (count, sum, avg, etc.).",
       "type": ["array", "null"],
       "maxItems": 6,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 16 }
+      "items": { "description": "An aggregation function name.", "type": "string", "maxLength": 16 }
     },
     "group_by_count": {
       "description": "Number of group-by keys in an aggregation query.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 100
     },
     "hydration_plan": {
       "description": "Hydration strategy: none, static, or dynamic.",
@@ -163,7 +170,8 @@
     "path_max_depth": {
       "description": "Maximum depth for path-finding queries.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 100
     },
     "has_variable_hops": {
       "description": "Whether any relationship uses variable-length hops.",
@@ -178,7 +186,7 @@
       "type": ["array", "null"],
       "maxItems": 1000,
       "uniqueItems": true,
-      "items": { "type": "string", "maxLength": 64 }
+      "items": { "description": "A column name.", "type": "string", "maxLength": 64 }
     },
     "column_selection_mode": {
       "description": "How columns were selected: all, list, or default (none specified).",
@@ -193,52 +201,62 @@
     "duration_ms": {
       "description": "Total wall-clock time for the pipeline execution.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "compile_ms": {
       "description": "Time spent compiling the query to SQL.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "execute_ms": {
       "description": "Time spent executing the query against ClickHouse.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "authorization_ms": {
       "description": "Time spent on authorization (redaction service).",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "hydration_ms": {
       "description": "Time spent on hydration queries.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "row_count": {
       "description": "Number of rows returned to the caller.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "redacted_count": {
       "description": "Number of rows removed by authorization.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "ch_read_rows": {
       "description": "Total rows read from ClickHouse across all queries.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "ch_read_bytes": {
       "description": "Total bytes read from ClickHouse across all queries.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "ch_memory_usage": {
       "description": "Peak memory usage reported by ClickHouse.",
       "type": ["integer", "null"],
-      "minimum": 0
+      "minimum": 0,
+      "maximum": 9223372036854775807
     },
     "graph_schema_version": {
       "description": "Graph DDL schema version (config/SCHEMA_VERSION).",
