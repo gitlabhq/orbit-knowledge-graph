@@ -38,6 +38,7 @@ members = [
   "crates/integration-tests",
   "crates/duckdb-client",
   "crates/fuzz",
+  "crates/packfile-bench",
 ]
 
 [workspace.dependencies]

@@ -1,0 +1,26 @@
+[package]
+name = "packfile-bench"
+version.workspace = true
+edition = "2021"
+
+[[bin]]
+name = "packfile-bench"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+flate2.workspace = true
+rayon.workspace = true
+sha2.workspace = true
+tar.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+# gitoxide sub-crates for in-process packfile parsing
+gix-hash = { version = "0.25", features = ["sha1"] }
+gix-object = "0.61"
+gix-features = { version = "0.48", features = ["zlib"] }
+gix-pack = { version = "0.71", features = ["streaming-input", "pack-cache-lru-dynamic"] }
+
+[lints]
+workspace = true
