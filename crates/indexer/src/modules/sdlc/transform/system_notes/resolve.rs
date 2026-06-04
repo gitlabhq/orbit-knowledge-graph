@@ -14,51 +14,25 @@
 //!
 //! Both queries are parameterized with named placeholders (`{name:Type}`) so
 //! they can be bound via [`ArrowQuery::param`] without string interpolation.
-//! The SQL strings are exposed as constants and as `fn build_*_sql()` helpers
-//! so they can be unit-tested for shape correctness even without a live
-//! ClickHouse.
 
 use std::collections::{HashMap, HashSet};
 
 use super::parse::{RefKind, Reference};
 
-/// SQL template for the routes-table batch lookup.
+/// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
+/// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
+/// owning route is always a project.
 ///
-/// Parameters:
-///   `{paths:Array(String)}` — full_paths to look up.
+/// `argMax(..., _siphon_replicated_at)` rather than `FINAL`: the reconciler
+/// re-inserts a route under a new `traversal_path`, so the stale `0/` and
+/// reconciled `1/22/94/` rows have different sort keys and `FINAL` won't
+/// collapse them — picking the stale row would land the edge in the wrong
+/// namespace. (Mirrors the SDLC entity ETL in `plan/input.rs`; also cheaper.)
 ///
-/// Returns `(source_id, path, traversal_path)`. Only `Project` routes are
-/// returned: a referenced entity's *owning route* is always a project, and
-/// both consumers (`pairs_with_project_id`, `ResolvedIndex::build`) drop
-/// non-project rows anyway, so filtering `source_type = 'Project'` at the
-/// query keeps `Namespace`/`User`/etc. rows off the wire entirely.
-///
-/// `siphon_routes` is a `ReplacingMergeTree` whose sort key *includes*
-/// `traversal_path`. The traversal-path reconciler re-inserts a row with the
-/// reconciled `traversal_path` rather than updating in place, so a route's
-/// stale (`0/`) row and reconciled (`1/22/94/`) row have **different sort
-/// keys** and never collapse under `FINAL`. Deduplicating by the stable PG
-/// primary key (`id`) with `argMax(..., _siphon_replicated_at)` is therefore
-/// both correct and cheaper than `FINAL`; it mirrors the SDLC entity ETL
-/// (`plan/input.rs`). Without it a cross-project reference can resolve to a
-/// stale `0/` route and the edge lands in the wrong namespace partition.
-/// `_siphon_deleted` is taken from the latest version and filtered after the
-/// aggregation so a live route isn't dropped by an older tombstone (or kept
-/// by a stale live row).
-///
-/// **Bounded to the source note's top-level namespace.** `siphon_routes` is
-/// `ORDER BY (traversal_path, source_type, source_id, id)`, so the
-/// `path`/`source_id` filters alone can't prune the primary index and the
-/// lookup degrades to a full scan of the shared Siphon datalake. The
-/// `startsWith(traversal_path, {root_prefix:String})` leg restricts the scan
-/// to the source's top-level namespace partition (`{org}/{top_level_ns}/`),
-/// turning the full scan into a primary-index range scan. The trade-off is
-/// that v1 resolves only **same-top-level-namespace** references; a
-/// cross-top-level reference (`other-group/proj#5`) lives outside the prefix
-/// and is silently not resolved (under-counts, never a wrong edge). See ADR
-/// 013 "Coverage and known limitations" — cross-top-level resolution is
-/// deferred to the graph-DB dictionary lever, which also resolves the
-/// cross-namespace edge-visibility (authz) question.
+/// `startsWith(traversal_path, {root_prefix})` bounds the scan to the source's
+/// top-level namespace (the leading sort-key column) so it's a range scan, not
+/// a full datalake scan. v1 therefore resolves only same-top-level references;
+/// cross-top-level is deferred to the dictionary lever (ADR 013).
 pub const ROUTES_SQL: &str = "\
 SELECT \
     source_id, \
@@ -79,25 +53,11 @@ FROM ( \
 ) \
 WHERE _siphon_deleted = false";
 
-/// SQL template for the reverse routes lookup: project `source_id` → path.
-///
-/// Used to turn each source note's owning `project_id` into the default
-/// project path for unqualified GFM references on that row. Keyed on
-/// `source_id` (the project id) rather than `path`, so it complements
-/// [`ROUTES_SQL`] (which is keyed on `path`).
-///
-/// Deduplicated by PG primary key the same way as [`ROUTES_SQL`] — see that
-/// constant for why `FINAL` is insufficient here. Bounded to the source's
-/// top-level namespace by `startsWith(traversal_path, {root_prefix:String})`
-/// for the same primary-index-pruning reason; the source notes' own projects
-/// always live within their top-level namespace, so this leg never drops a
-/// row we need.
-///
-/// Parameters:
-///   `{root_prefix:String}` — the source top-level namespace prefix.
-///   `{source_ids:Array(Int64)}` — project ids to resolve.
-///
-/// Returns `(source_id, path)`.
+/// Reverse routes lookup (project `source_id` -> path), to give each note a
+/// default project path for its unqualified refs. Keyed on `source_id` so it
+/// complements [`ROUTES_SQL`]; same `argMax` dedup and `root_prefix` bounding.
+/// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
+/// `(source_id, path)`.
 pub const PROJECT_PATHS_SQL: &str = "\
 SELECT \
     source_id, \
@@ -116,32 +76,13 @@ FROM ( \
 ) \
 WHERE _siphon_deleted = false";
 
-/// SQL template for the merge-request entity batch lookup.
+/// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
+/// `root_prefix` bounding as [`ROUTES_SQL`].
 ///
-/// Parameters:
-///   `{project_ids:Array(Int64)}` + `{iids:Array(Int64)}` — parallel arrays
-///   of `(target_project_id, iid)` to look up, zipped server-side into the
-///   tuple IN-list. Two `Array(Int64)` params are used instead of a single
-///   `Array(Tuple(...))` because the JSON parameter channel serializes a
-///   tuple as a nested array (`[200,5]`), which ClickHouse rejects for
-///   `Array(Tuple(Int64, Int64))`; `arrayZip` rebuilds the tuples from the
-///   two flat arrays. The arrays must be the same length and index-aligned.
-///
-/// **Bounded to the source note's top-level namespace.** `merge_requests` is
-/// `ORDER BY (traversal_path, id)`, so a `(target_project_id, iid)` filter
-/// can't prune the primary index — without a `traversal_path` leg this is a
-/// full scan of one of the largest tables in the shared Siphon datalake. The
-/// `startsWith(traversal_path, {root_prefix:String})` leg restricts it to the
-/// source's top-level namespace partition (primary-index range scan). v1 thus
-/// resolves only same-top-level-namespace MR references; cross-top-level
-/// targets are deferred (see [`ROUTES_SQL`] and ADR 013).
-///
-/// `merge_requests` is a `ReplacingMergeTree`, so it is deduplicated by PG
-/// primary key (`id`) with `argMax(..., _siphon_replicated_at)` — same
-/// rationale as [`ROUTES_SQL`]: avoid returning a stale row version (and
-/// avoid `FINAL`'s full-merge cost on a large table).
-///
-/// Returns `(id, target_project_id, iid)`.
+/// `{project_ids:Array(Int64)}` and `{iids:Array(Int64)}` are passed as two
+/// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
+/// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
+/// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
 pub const MERGE_REQUESTS_SQL: &str = "\
 SELECT \
     id, \
@@ -160,13 +101,8 @@ FROM ( \
 ) \
 WHERE _siphon_deleted = false";
 
-/// SQL template for the work-item entity batch lookup.
-///
-/// Parameters identical to [`MERGE_REQUESTS_SQL`] but keyed on `project_id`.
-/// Deduplicated by PG primary key the same way, and bounded to the source's
-/// top-level namespace by `startsWith(traversal_path, {root_prefix:String})`
-/// for the same primary-index-pruning reason (`work_items` is
-/// `ORDER BY (traversal_path, id)`). Returns `(id, project_id, iid)`.
+/// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
+/// `(id, project_id, iid)`.
 pub const WORK_ITEMS_SQL: &str = "\
 SELECT \
     id, \
@@ -275,13 +211,8 @@ impl ResolutionPlan {
                     }
                 }
             }
+            // No `Commit` node yet (ADR 013), so commit refs add no lookup work.
             RefKind::Commit => {
-                // Commit references resolve to nothing today (no `Commit`
-                // node type yet, see ADR 013), so they add no routes/IID
-                // lookup work: `ResolvedIndex::resolve` returns `None` for
-                // `RefKind::Commit` and `emit::build_edges` drops them. The
-                // `project_is_empty` binding is unused on this branch but
-                // kept for the shared match shape.
                 let _ = project_is_empty;
             }
         }
@@ -369,37 +300,23 @@ mod tests {
 
     #[test]
     fn resolver_sql_is_bounded_to_source_top_level_namespace() {
-        // v1 resolves only within the source note's top-level namespace: each
-        // resolver query carries a `startsWith(traversal_path, {root_prefix})`
-        // leg so the leading-PK `traversal_path` column prunes the scan to one
-        // top-level namespace partition instead of scanning the whole shared
-        // Siphon datalake table. Cross-top-level references fall outside the
-        // prefix and are intentionally not resolved (deferred — see ADR 013).
-        //
-        // ROUTES_SQL aliases `argMax(traversal_path, …) AS traversal_path`, so
-        // its bound must reference the raw `siphon_routes.traversal_path`
-        // column to avoid `ILLEGAL_AGGREGATION`; the other three don't project
-        // `traversal_path`, so the bare column is unambiguous.
         for sql in [PROJECT_PATHS_SQL, MERGE_REQUESTS_SQL, WORK_ITEMS_SQL] {
             assert!(
                 sql.contains("startsWith(traversal_path, {root_prefix:String})"),
                 "resolver query must be bounded by the source top-level prefix: {sql}"
             );
         }
+        // Raw-column bound: ROUTES_SQL aliases `argMax(...) AS traversal_path`,
+        // so a bare `traversal_path` would bind the aggregate (ILLEGAL_AGGREGATION).
         assert!(
             ROUTES_SQL.contains("startsWith(siphon_routes.traversal_path, {root_prefix:String})"),
-            "routes query must bound on the raw column to avoid ILLEGAL_AGGREGATION: {ROUTES_SQL}"
+            "routes query must bound on the raw column: {ROUTES_SQL}"
         );
     }
 
     #[test]
     fn resolver_sql_dedups_replacing_merge_tree_by_pg_pkey() {
-        // These read ReplacingMergeTree siphon tables whose stale and
-        // reconciled rows can coexist (and, for routes, never collapse under
-        // FINAL because traversal_path is in the sort key). Each must
-        // deduplicate by the PG primary key with argMax, picking the latest
-        // replicated version, and filter `_siphon_deleted` after the
-        // aggregation. Regression guard for the cross-project `0/` bug.
+        // Regression guard for the cross-project `0/` bug (see ROUTES_SQL docs).
         for sql in [
             ROUTES_SQL,
             PROJECT_PATHS_SQL,
@@ -416,11 +333,9 @@ mod tests {
                 "deleted filter must run after the argMax aggregation in: {sql}"
             );
         }
-        // Routes' volatile reconcile column must take the latest version so
-        // a stale `0/` row can't win over the reconciled traversal_path.
         assert!(
             ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
-            "routes must take the latest traversal_path"
+            "routes must take the latest traversal_path so a stale 0/ can't win"
         );
     }
 
@@ -433,10 +348,6 @@ mod tests {
 
     #[test]
     fn routes_sql_filters_to_project_routes_at_query_time() {
-        // The only routable owner of a referenced entity is a project, and
-        // both consumers drop non-project rows, so the query filters
-        // `source_type = 'Project'` rather than fetching every route kind and
-        // discarding in Rust.
         assert!(ROUTES_SQL.contains("source_type = 'Project'"));
         assert!(
             !ROUTES_SQL.contains("'Namespace'"),

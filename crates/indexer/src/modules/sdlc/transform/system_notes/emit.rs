@@ -128,15 +128,9 @@ where
                 let Some(author_id) = row.author_id else {
                     continue;
                 };
-                // Lifecycle edges target only the kinds their edge YAML
-                // declares. `closed.yaml` / `reopened.yaml` declare
-                // `User → MergeRequest` and `User → WorkItem`; `merged.yaml`
-                // declares only `User → MergeRequest`. A `Commit` noteable
-                // (no `Commit` node exists yet) or a `merged` action on a
-                // non-MR noteable — whether from a Rails bug or a manual DB
-                // edit — would otherwise land an undeclared edge variant in
-                // `gl_edge`. Drop those to keep the emitter honest about the
-                // edge-YAML contract.
+                // Drop targets the edge YAML doesn't declare: `merged` only on
+                // MergeRequest, `closed`/`reopened` on MR or WorkItem. Keeps the
+                // emitter honest if Rails or a manual edit sends an odd noteable.
                 let declared_target = match row.action {
                     Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
                     _ => matches!(
@@ -188,11 +182,8 @@ where
                     let Some(resolved) = resolve(r, row.default_project.as_str()) else {
                         continue;
                     };
-                    // Skip self-loops: a note attached to MR !100 that says
-                    // "mentioned in !100" (the cross-ref came from a *child*
-                    // commit / note within the same MR) would otherwise be
-                    // emitted as MR(100) → MR(100). The graph reader doesn't
-                    // need it and it pollutes degree counts.
+                    // Skip self-loops (MR !100 "mentioned in !100"): pollutes
+                    // degree counts and the reader doesn't need them.
                     let target_kind = NoteableKind::from(r.kind);
                     if target_kind == row.noteable_kind && resolved.id == row.noteable_id {
                         continue;

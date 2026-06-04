@@ -28,6 +28,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde_json::json;
 use tracing::warn;
 
+use gkg_utils::arrow::ArrowUtils;
+
 use crate::handler::HandlerError;
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::transform::{
@@ -83,7 +85,7 @@ impl BlockTransform for SystemNotesTransform {
     }
 
     async fn transform(&self, block: &RecordBatch) -> Result<Vec<TableBatch>, HandlerError> {
-        let notes = extract_notes(block)?;
+        let notes = batch_to_notes(block)?;
         if notes.is_empty() {
             return Ok(Vec::new());
         }
@@ -135,44 +137,25 @@ pub(in crate::modules::sdlc) fn register(
 // Extract block → ExtractedNote
 // ---------------------------------------------------------------------------
 
-fn col_string<'a>(block: &'a RecordBatch, name: &str) -> Result<&'a StringArray, HandlerError> {
-    block
-        .column_by_name(name)
-        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+fn col<'a, A: 'static>(block: &'a RecordBatch, name: &str) -> Result<&'a A, HandlerError> {
+    ArrowUtils::get_column_by_name::<A>(block, name)
         .ok_or_else(|| HandlerError::Processing(format!("missing or wrong-type column: {name}")))
 }
 
-fn col_i64<'a>(block: &'a RecordBatch, name: &str) -> Result<&'a Int64Array, HandlerError> {
-    block
-        .column_by_name(name)
-        .and_then(|c| c.as_any().downcast_ref::<Int64Array>())
-        .ok_or_else(|| HandlerError::Processing(format!("missing or wrong-type column: {name}")))
-}
-
-fn col_ts<'a>(
-    block: &'a RecordBatch,
-    name: &str,
-) -> Result<&'a TimestampMicrosecondArray, HandlerError> {
-    block
-        .column_by_name(name)
-        .and_then(|c| c.as_any().downcast_ref::<TimestampMicrosecondArray>())
-        .ok_or_else(|| HandlerError::Processing(format!("missing or wrong-type column: {name}")))
-}
-
-fn extract_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerError> {
+fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerError> {
     let num_rows = block.num_rows();
     if num_rows == 0 {
         return Ok(Vec::new());
     }
 
-    let note_col = col_string(block, "note")?;
-    let noteable_id_col = col_i64(block, "noteable_id")?;
-    let noteable_type_col = col_string(block, "noteable_type")?;
-    let author_id_col = col_i64(block, "author_id")?;
-    let project_id_col = col_i64(block, "project_id")?;
-    let traversal_path_col = col_string(block, "traversal_path")?;
-    let action_col = col_string(block, "action")?;
-    let created_at_col = col_ts(block, "created_at")?;
+    let note_col = col::<StringArray>(block, "note")?;
+    let noteable_id_col = col::<Int64Array>(block, "noteable_id")?;
+    let noteable_type_col = col::<StringArray>(block, "noteable_type")?;
+    let author_id_col = col::<Int64Array>(block, "author_id")?;
+    let project_id_col = col::<Int64Array>(block, "project_id")?;
+    let traversal_path_col = col::<StringArray>(block, "traversal_path")?;
+    let action_col = col::<StringArray>(block, "action")?;
+    let created_at_col = col::<TimestampMicrosecondArray>(block, "created_at")?;
 
     let mut notes = Vec::with_capacity(num_rows);
     for i in 0..num_rows {
@@ -318,8 +301,8 @@ async fn resolve_default_projects(
 
     let mut lookup = DefaultProjectLookup::new();
     for batch in &batches {
-        let source_id_col = col_i64(batch, "source_id")?;
-        let path_col = col_string(batch, "path")?;
+        let source_id_col = col::<Int64Array>(batch, "source_id")?;
+        let path_col = col::<StringArray>(batch, "path")?;
         for i in 0..batch.num_rows() {
             lookup.insert(source_id_col.value(i), path_col.value(i).to_string());
         }
@@ -377,9 +360,9 @@ async fn query_routes(
 
     let mut rows = Vec::new();
     for batch in &batches {
-        let source_id_col = col_i64(batch, "source_id")?;
-        let path_col = col_string(batch, "path")?;
-        let tp_col = col_string(batch, "traversal_path")?;
+        let source_id_col = col::<Int64Array>(batch, "source_id")?;
+        let path_col = col::<StringArray>(batch, "path")?;
+        let tp_col = col::<StringArray>(batch, "traversal_path")?;
         for i in 0..batch.num_rows() {
             rows.push(RouteRow {
                 source_id: source_id_col.value(i),
@@ -414,14 +397,14 @@ async fn query_entities(
 
     let mut rows = Vec::new();
     for batch in &batches {
-        let id_col = col_i64(batch, "id")?;
-        let iid_col = col_i64(batch, "iid")?;
+        let id_col = col::<Int64Array>(batch, "id")?;
+        let iid_col = col::<Int64Array>(batch, "iid")?;
         let project_col_name = if batch.schema().field_with_name("target_project_id").is_ok() {
             "target_project_id"
         } else {
             "project_id"
         };
-        let project_col = col_i64(batch, project_col_name)?;
+        let project_col = col::<Int64Array>(batch, project_col_name)?;
         for i in 0..batch.num_rows() {
             rows.push(EntityRow {
                 id: id_col.value(i),

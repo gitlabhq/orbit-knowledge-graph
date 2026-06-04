@@ -1,6 +1,0 @@
-description: Merge commit for an auto-merged merge request, extracted from system notes (ADR 013)
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Commit, id: id }
-    description: "MergeRequest was merged at a specific commit."
