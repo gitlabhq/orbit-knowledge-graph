@@ -2,13 +2,13 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit CLI（orbit）バイナリを使用して、ローカルのコードグラフを構築・クエリします。GitLabアカウントやネットワーク接続は不要です。
+description: Orbit CLI（orbit）バイナリを使用してローカルコードグラフをビルドおよびクエリします。GitLabアカウントやネットワーク接続は不要です。
 title: Orbit CLIでOrbit Localを使用する（`orbit`）
 ---
 
 {{< details >}}
 
-- 階層: Free、Premium、Ultimate
+- プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
 - ステータス: 実験
 
@@ -16,16 +16,14 @@ title: Orbit CLIでOrbit Localを使用する（`orbit`）
 
 {{< history >}}
 
-- GitLab 19.0で[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
+- GitLab 19.0で[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
 
 {{< /history >}}
 
-Orbit CLI（`orbit`）は、任意のローカルリポジトリのコードグラフを構築し、
-ローカルのDuckDBファイルに対してクエリを実行します。GitLabへの接続は不要です。
+Orbit CLI（`orbit`）は、任意のローカルリポジトリのコードグラフをビルドし、ローカルのDuckDBファイルに対してクエリを実行します。GitLabへの接続は不要です。
 
 > [!note]
-> Orbit Localは実験的な機能です。パッケージ化されたバイナリが提供されるまでは、
-> ソースからビルドする必要があります。パッケージ化されたインストールパスは`glab orbit local`になる予定です。
+> Orbit Localは実験的な機能です。パッケージ化されたバイナリが提供されるまでは、ソースからビルドする必要があります。パッケージインストールのパスは`glab orbit local`になる予定です。
 
 ## 前提条件 {#prerequisites}
 
@@ -44,8 +42,7 @@ mise install
 mise run build:cli
 ```
 
-コンパイルされたバイナリは`target/release/orbit`に生成されます。`PATH`に追加するか、
-直接実行してください。
+コンパイル済みバイナリは`target/release/orbit`に生成されます。`PATH`に追加するか、直接実行してください。
 
 ## リポジトリのインデックス作成 {#index-a-repository}
 
@@ -53,10 +50,9 @@ mise run build:cli
 orbit index /path/to/your/repo
 ```
 
-Orbitはリポジトリを解析し、DuckDBグラフを`~/.orbit/graph.duckdb`に書き込みます。
-複数のリポジトリをインデックス化できます。各リポジトリは、マニフェストテーブル内でプロジェクトIDとブランチによってスコープが設定されます。
+Orbitはリポジトリを解析し、DuckDBグラフを`~/.orbit/graph.duckdb`に書き込みます。複数のリポジトリをインデックスすることも可能です。各リポジトリは、マニフェストテーブル内でプロジェクトIDとブランチによってスコープが管理されます。
 
-| フラグ | 用途 |
+| フラグ | 説明 |
 |------|---------|
 | `--threads` | ワーカースレッド数。`0`（デフォルト）はCPUコア数から自動検出します。 |
 | `--stats` | JSON出力に詳細な統計情報を含めます。 |
@@ -69,8 +65,7 @@ orbit schema
 orbit schema --raw
 ```
 
-`orbit schema`はローカルのDuckDBから`information_schema.columns`を読み取り、
-すべてのテーブルとカラムを出力します。JSON出力には`--raw`を指定してください。
+`orbit schema`はローカルのDuckDBから`information_schema.columns`を読み取り、すべてのテーブルとカラムを出力します。JSON出力には`--raw`を指定してください。
 
 ## ローカルグラフに対するSQLの実行 {#run-sql-against-the-local-graph}
 
@@ -81,10 +76,10 @@ echo 'SELECT 1+1' | orbit sql -
 orbit sql --file query.sql
 ```
 
-| フラグ | 用途 |
+| フラグ | 説明 |
 |------|---------|
 | `-F`、`--format` | `table`（デフォルト）、`json`、`ndjson`、または`csv`。 |
-| `-f`、`--file` | ファイルからSQLを読み込みます。 |
+| `-f`、`--file` | ファイルからSQLを読み取ります。 |
 | `--db` | DuckDBのパスを上書きします。デフォルトは`~/.orbit/graph.duckdb`です。 |
 
 ## ストレージ {#storage}
@@ -93,7 +88,7 @@ orbit sql --file query.sql
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLab Creditsを消費しません。すべての処理はローカルで行われます。
+Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで実行されます。
 
 ## 次のステップ {#what-to-try-next}
 

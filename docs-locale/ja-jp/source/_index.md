@@ -8,42 +8,40 @@ title: Orbit
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
-- Status: 実験
+- プラン: Premium、Ultimate
+- 提供形態: GitLab.com
+- ステータス: 実験
 
 {{< /details >}}
 
 {{< history >}}
 
-- 機能フラグ `knowledge_graph` を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました（[機能フラグあり](https://docs.gitlab.com/administration/feature_flags/)）。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階です。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴をご参照ください。
+> 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-OrbitはGitLabインスタンスにインデックスを作成し、SDLC全体をクエリ可能なナレッジグラフとして公開します。
+OrbitはGitLabインスタンスのインデックスを作成し、SDLC全体をクエリ可能なナレッジグラフとして公開します。
 グループで有効にすると、Orbitはプロジェクト、ユーザー、マージリクエスト、パイプライン、
-作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマップし、それらの関係性をプロパティグラフとして構築します。
+作業アイテム、セキュリティの検出結果、ソースコード自体をすべてマッピングし、それらの関係性を示すプロパティグラフを構築します。
 
-グラフをクエリすることで、インスタンス単体では直接回答できない質問に答えられます。
+グラフをクエリすることで、インスタンスだけでは直接回答できない質問に答えられます。
 
-- このサービスを変更すると何が影響を受けるか？
+- このサービスを変更すると何が壊れるか？
 - 過去90日間でこのファイルに変更を加えたマージリクエストはどれか？
 - このグループで最もコードレビューを行ったのは誰か？
 - 未解決のクリティカルな脆弱性はどこにあり、どのパイプラインが原因か？
 - このライブラリに依存しているプロジェクトはどれか？
 
-*Orbitはリアルタイムまたはトランザクション用途ではなく、特定時点のSDLCインサイトを目的とした分析システムです。結果は最後のインデックスサイクル時点のデータの状態を反映しています。*
+*Orbitはリアルタイムやトランザクション用途ではなく、特定時点のSDLCインサイトを目的とした分析システムです。結果は最後のインデックスサイクル時点のデータの状態を反映しています。*
 
 ## Orbit Remote {#orbit-remote}
 
-GitLab.comでは、Orbit RemoteはGitLabインフラストラクチャ上で独立したサービスとして動作します。トップレベルグループで有効にすると、
-SDLC全体とコード（グループ、プロジェクト、ユーザー、マージリクエスト、
-パイプライン、脆弱性、ソースコード）が自動的にインデックス化され、マネージドClickHouseグラフに格納されます。
+GitLab.comでは、Orbit RemoteはGitLabインフラストラクチャ上で独立したサービスとして動作します。トップレベルグループで有効にすると、グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、脆弱性、ソースコードなど、SDLC全体とコードのインデックスが自動的に作成され、マネージドClickHouseグラフに格納されます。
 
 ```mermaid
 flowchart LR
@@ -65,15 +63,13 @@ flowchart LR
     Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
-Orbit Remoteは独立したサービスとして動作し、GitLabインスタンスへの負荷を最小限に抑えます。
+Orbit RemoteはGitLabインスタンスとは独立したサービスとして動作し、インスタンスへの負荷を最小限に抑えます。
 
-[Orbit Remoteを始める](remote/getting-started.md)
+[Orbit Remoteを使ってみる](remote/getting-started.md)
 
 ## Orbit Local {#orbit-local}
 
-Orbit Localはお使いのマシン上で完全に動作します。Orbit CLI（`orbit`）はローカルリポジトリを解析し、
-定義とクロスファイル参照を抽出して、グラフをローカルのDuckDBファイルに書き込みます。
-GitLabインスタンスやネットワーク接続は不要です。
+Orbit Localはお使いのマシン上で完全に動作します。Orbit CLI（`orbit`）はローカルリポジトリを解析し、定義とクロスファイル参照を抽出して、グラフをローカルのDuckDBファイルに書き込みます。GitLabインスタンスやネットワーク接続は不要です。
 
 ```mermaid
 flowchart LR
@@ -85,20 +81,17 @@ flowchart LR
     DB --> Query[CLI query]
 ```
 
-Orbit Localはコードのみをインデックス化します。マージリクエスト、パイプライン、作業アイテムなどのSDLCデータには
-Orbit Remoteが必要です。
+Orbit Localはコードのみをインデックス化します。マージリクエスト、パイプライン、作業アイテムなどのSDLCデータにはOrbit Remoteが必要です。
 
-[Orbit Localを始める](local/getting-started.md)
+[Orbit Localを使ってみる](local/getting-started.md)
 
 ## Orbitがインデックス化する対象 {#what-orbit-indexes}
 
 Orbitは2つのカテゴリのデータをインデックス化します。
 
-- GitLabインスタンスのSDLCオブジェクト：グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、ジョブ、
-  作業アイテム、マイルストーン、ラベル、セキュリティの検出結果。
+- GitLabインスタンスのSDLCオブジェクト: グループ、プロジェクト、ユーザー、マージリクエスト、パイプライン、ジョブ、作業アイテム、マイルストーン、ラベル、セキュリティの検出結果
 
-- リポジトリのソースコード：ファイル、ディレクトリ、関数とクラスの定義、
-  クロスファイルのインポート参照。コードはデフォルトブランチのみからインデックス化されます。
+- リポジトリのソースコード: ファイル、ディレクトリ、関数とクラスの定義、クロスファイルのインポート参照。コードはデフォルトブランチのみからインデックス化されます。
 
 OrbitはRuby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++のコードをインデックス化します。
 
@@ -108,3 +101,4 @@ OrbitはRuby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#
 
 - [Orbit Remoteを有効にして最初のクエリを実行する](remote/getting-started.md)
 - [Orbit Localでローカルコードグラフを構築する](local/getting-started.md)
+- [OrbitスキルでAIコーディングエージェントを設定する](ai_coding_agents.md)

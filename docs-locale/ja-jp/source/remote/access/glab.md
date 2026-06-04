@@ -8,21 +8,21 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
-- Status: Experiment
+- プラン: Premium、Ultimate
+- 提供形態: GitLab.com
+- ステータス: 実験
 
 {{< /details >}}
 
 {{< history >}}
 
-- 機能フラグ`knowledge_graph`を使用して、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました（[機能フラグあり](https://docs.gitlab.com/administration/feature_flags/)）。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴をご参照ください。
+> 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 <!-- -->
@@ -35,11 +35,11 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 - `glab orbit remote`: Orbit Remote REST APIを呼び出す型付きサブコマンドです。
   `glab` 1.94以降で利用可能です。
-- `glab orbit setup`: OrbitスキルとMCP設定をAIエージェントに一括インストールするコマンドです。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定](mcp.md#connect-your-mcp-client)してください。
+- `glab orbit setup`: AIエージェント向けにOrbitスキルとMCP設定を一括インストールするコマンドです。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 ## 前提条件 {#prerequisites}
 
-- Orbitが[グループで有効化](../getting-started.md)されていること。
+- Orbitが[グループで有効化されている](../getting-started.md)こと。
 - `glab`がインストールされ、認証済みであること:
 
   ```shell
@@ -52,7 +52,7 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 `glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、1つのコマンドでOrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
 
-リリースまでの間は、[MCPクライアントを手動で設定](mcp.md#connect-your-mcp-client)してください。
+リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 ## コマンドラインからOrbitにクエリを実行する {#query-orbit-from-the-command-line}
 
@@ -114,4 +114,4 @@ glab orbit remote graph-status --project-id 2
 
 ## 課金 {#billing}
 
-`glab orbit remote query`はMCPクエリと同様にGitLab Creditsを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは無料です。
+`glab orbit remote query`はMCPクエリと同様にGitLabクレジットを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは無料です。

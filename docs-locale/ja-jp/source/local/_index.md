@@ -2,15 +2,15 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit Local - ご自身のマシン上でコードグラフを構築・クエリできます。GitLabインスタンスは不要です。
+description: Orbit Local - ローカルマシン上でコードグラフを構築・クエリできます。GitLabインスタンスは不要です。
 title: Orbit Local
 ---
 
 {{< details >}}
 
-- Tier: Free, Premium, Ultimate
-- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: 実験
+- プラン: Free、Premium、Ultimate
+- 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
+- ステータス: 実験
 
 {{< /details >}}
 
@@ -20,10 +20,10 @@ title: Orbit Local
 
 {{< /history >}}
 
-Orbit Localはお使いのマシン上で完全に動作します。任意のローカルリポジトリのコードグラフを構築し、Orbit Remoteと同じクエリ言語を使用してクエリできます。GitLabアカウントもネットワーク接続も不要です。
+Orbit Localはすべてローカルマシン上で動作します。任意のローカルリポジトリのコードグラフを構築し、Orbit Remoteと同じクエリ言語を使用してクエリできます。GitLabアカウントもネットワーク接続も不要です。
 
-- インデックス対象：ファイル、定義、クロスファイル参照を含むコードのみ
-- ストレージ：DuckDB（`~/.orbit/graph.duckdb`のローカルファイル）
+- インデックス対象: コードのみ（ファイル、定義、クロスファイル参照を含む）
+- ストレージ: DuckDB（`~/.orbit/graph.duckdb`のローカルファイル）
 
 [Orbit Localを始める](getting-started.md)
 
@@ -46,4 +46,4 @@ Orbit Localはお使いのマシン上で完全に動作します。任意のロ
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLab Creditsを消費しません。すべての処理はローカルで行われます。
+Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。

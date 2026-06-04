@@ -8,26 +8,26 @@ title: スキーマリファレンス
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
-- Status: Experiment
+- プラン: Premium、Ultimate
+- 提供形態: GitLab.com
+- ステータス: 実験
 
 {{< /details >}}
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴をご参照ください。
+> 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitは6つのドメインにわたる24のノードタイプをインデックス化します。クエリのエンティティ名としてこれらを使用してください。
+Orbitは6つのドメインにわたる24のノードタイプをインデックス化します。クエリでエンティティ名として使用してください。
 
-ライブスキーマをいつでも取得するには：
+ライブスキーマをいつでも取得するには:
 
 ```shell
 curl --header "Authorization: Bearer <your_token>" \
@@ -88,9 +88,9 @@ curl --header "Authorization: Bearer <your_token>" \
 | `VulnerabilityOccurrence` | 脆弱性の特定の発生箇所（Railsでは`Vulnerabilities::Finding`） | `id`, `uuid`, `severity`, `report_type`, `detection_method`, `cve`, `location` |
 | `VulnerabilityScanner` | セキュリティスキャナー | `id`, `external_id`, `name`, `vendor` |
 
-## 注記 {#notes}
+## 注意事項 {#notes}
 
-- 定義IDはプロジェクトおよびブランチごとにスコープされたコンテンツハッシュ整数です。異なるプロジェクトにある同じシンボルの2つの定義は、関数名とファイルパスが同一であっても異なるIDを持ちます。
-- すべてのエンティティIDは、基礎となる値が整数であっても、クエリレスポンスでは文字列として返されます。これにより、`Number.MAX_SAFE_INTEGER`を超える値に対するJavaScriptクライアントでの精度損失を防ぎます。
+- 定義IDは、プロジェクトおよびブランチごとにスコープされたコンテンツハッシュ整数です。異なるプロジェクトに存在する同一シンボルの2つの定義は、関数名とファイルパスが同一であっても異なるIDを持ちます。
+- すべてのエンティティIDは、基となる値が整数であっても、クエリレスポンスでは文字列として返されます。これにより、`Number.MAX_SAFE_INTEGER`を超える値に対するJavaScriptクライアントでの精度損失を防ぎます。
 - `Definition`および`File`ノードの`content`フィールドには、定義またはファイルの完全なソーステキストが含まれます。これらのフィールドは、GitLabへの個別のAPIコールを行わずにファイルコンテンツをハイドレートする必要があるエージェントツールで利用できます。
-- すべてのノードには、認可フィルタリングに使用される`traversal_path`プロパティが含まれています。クエリ結果は、リクエストを行うユーザーがアクセスできるエンティティに自動的にスコープされます。
+- すべてのノードには、認可フィルタリングに使用される`traversal_path`プロパティが含まれます。クエリ結果は、リクエストを行うユーザーがアクセスできるエンティティに自動的にスコープされます。

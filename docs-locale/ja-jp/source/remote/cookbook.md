@@ -2,36 +2,36 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: ブラスト半径分析、オンボーディング、依存関係マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストでご利用いただけます。
+description: ブラスト半径分析、オンボーディング、依存関係マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストで利用できます。
 title: Cookbook
 ---
 
 {{< details >}}
 
-- Tier: Premium, Ultimate
-- Offering: GitLab.com
-- Status: Experiment
+- プラン: Premium、Ultimate
+- 提供形態: GitLab.com
+- ステータス: 実験
 
 {{< /details >}}
 
 {{< history >}}
 
-- [導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) GitLab 18.10で`knowledge_graph`という名前の[機能フラグ付き](https://docs.gitlab.com/administration/feature_flags/)で導入されました。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
 
 {{< /history >}}
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴をご参照ください。
+> 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-最も一般的なOrbitのユースケース向けにすぐに使えるクエリです。すべての例はREST API形式を使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
+一般的なOrbitのユースケースに対応した、すぐに使えるクエリ集です。すべての例はREST APIフォーマットを使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
 
 ## ブラスト半径分析 {#blast-radius-analysis}
 
-回答：「これを変更すると何が壊れるか？」
+「これを変更すると何が壊れるか？」という問いに答えます。
 
-### 特定のモジュールをインポートしているすべてのファイルを検索する {#find-all-files-that-import-a-specific-module}
+### 特定のモジュールをインポートしているファイルをすべて検索する {#find-all-files-that-import-a-specific-module}
 
 `payments-service`をトレースしたいモジュールまたはライブラリに置き換えてください。
 
@@ -74,9 +74,9 @@ title: Cookbook
 
 ## オンボーディングとコードベースの探索 {#onboarding-and-codebase-exploration}
 
-回答：「このコードベースを理解するのを手伝ってください。」
+「このコードベースを理解するのを助けてほしい」という問いに答えます。
 
-### プロジェクトへの最もアクティブなコントリビューターを検索する {#find-the-most-active-contributors-to-a-project}
+### プロジェクトで最もアクティブなコントリビューターを検索する {#find-the-most-active-contributors-to-a-project}
 
 ```json
 {
@@ -109,7 +109,7 @@ title: Cookbook
 
 ## 依存関係マッピング {#dependency-mapping}
 
-回答：「サービス同士はどのように接続されているか？」
+「サービス間はどのように接続されているか？」という問いに答えます。
 
 ### インポートされた定義をマッピングする {#map-imported-definitions}
 
@@ -141,7 +141,7 @@ title: Cookbook
 
 ## パイプラインの健全性 {#pipeline-health}
 
-回答：「CI/CDの問題はどこにあるか？」
+「CI/CDの問題はどこにあるか？」という問いに答えます。
 
 ### 失敗したパイプラインが最も多いプロジェクトを検索する {#find-projects-with-the-most-failed-pipelines}
 
@@ -181,7 +181,7 @@ title: Cookbook
 
 ## 脆弱性トレーシング {#vulnerability-tracing}
 
-回答：「セキュリティリスクはどこにあり、どのように発生したか？」
+「セキュリティリスクはどこにあり、どのように発生したか？」という問いに答えます。
 
 ### グループ内のすべてのクリティカルおよび高重大度の脆弱性を検索する {#find-all-critical-and-high-vulnerabilities-in-a-group}
 

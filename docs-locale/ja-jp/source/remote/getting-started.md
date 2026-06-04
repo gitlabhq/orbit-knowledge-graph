@@ -8,9 +8,9 @@ title: Orbit Remoteを使ってみる
 
 {{< details >}}
 
-- 階層：Premium、Ultimate
-- 提供形態：GitLab.com
-- ステータス：実験
+- プラン: Premium、Ultimate
+- 提供形態: GitLab.com
+- ステータス: 実験
 
 {{< /details >}}
 
@@ -22,7 +22,7 @@ title: Orbit Remoteを使ってみる
 
 > [!flag]
 > この機能の利用可否は機能フラグによって制御されています。
-> 詳細については、履歴をご参照ください。
+> 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
 ## 前提条件 {#prerequisites}
@@ -31,25 +31,25 @@ title: Orbit Remoteを使ってみる
 
 Orbitはトップレベルグループのみをインデックス作成します。サブグループとプロジェクトは自動的にインデックス作成を継承します。
 
-## ステップ1：Orbitを有効にする {#step-1-enable-orbit}
+## ステップ1: Orbitを有効にする {#step-1-enable-orbit}
 
-1. 左サイドバーで**自分の作業**を展開します。
+1. 左サイドバーで、**自分の作業**を展開します。
 1. **Orbit** > **設定**を選択します。
 1. **インデックス**リストでトップレベルグループを見つけます。
 1. **有効にする**を切り替えます。
 
-Orbitはすぐにインデックス作成を開始します。小規模なグループでは初期インデックス作成に数分かかり、数千のプロジェクトを持つグループでは最大30分かかります。
+Orbitはすぐにインデックス作成を開始します。初回のインデックス作成は、小規模なグループでは数分、数千のプロジェクトを持つグループでは最大30分かかります。
 
-インデックス作成のステータスはいつでも確認できます：
+インデックス作成のステータスはいつでも確認できます。
 
 ```shell
 curl --header "Authorization: Bearer <your_token>" \
   "https://gitlab.com/api/v4/orbit/status"
 ```
 
-## ステップ2：最初のクエリを実行する {#step-2-run-your-first-query}
+## ステップ2: 最初のクエリを実行する {#step-2-run-your-first-query}
 
-Orbit Remoteは同じグラフを3つのインターフェースで公開しています。クエリを実行するユーザーに合ったものをお選びください：
+Orbit Remoteは3つのインターフェースを通じて同じグラフを公開しています。クエリを実行するユーザーに合ったものを選択してください。
 
 | 方法 | 最適な用途 | セットアップ | 課金 |
 |---|---|---|---|
@@ -63,12 +63,22 @@ OrbitはGitLab Duo Agent Platformに組み込まれています。GitLab Duo Age
 
 たとえば、`deploy_user`メソッドの名前変更を依頼する作業アイテムを登録すると、Developer FlowはOrbitを使用してそのメソッドを呼び出しているすべてのサービスを特定し、それぞれを更新するMRを作成します。
 
-GitLab Duoのクエリは無料で、GitLab Creditsを消費しません。
+GitLab DuoのクエリはGitLab Creditsを消費しません。
 
 ### MCP（Claude Code、Codex、その他のエージェント） {#mcp-claude-code-codex-other-agents}
 
-セットアップについては[MCPを使用したOrbitの利用](access/mcp.md)をご参照ください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが利用できます。
-<!-- markdownlint-disable-next-line MD044 -->
+セットアップについては、[MCPを使用したOrbitの利用](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
+
+### AIエージェント向けOrbitスキルのインストール {#install-the-orbit-skill-for-ai-agents}
+
+OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、最初の試みで正しいOrbitクエリを作成できるようにします。
+
+```shell
+glab skills install --global orbit
+```
+
+プロジェクトスコープのインストール、更新手順、スキルの内容については、[Orbitスキルを使用したAIコーディングエージェントのセットアップ](../ai_coding_agents.md)を参照してください。
+
 ### REST API {#rest-api}
 
 `your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
@@ -97,7 +107,7 @@ curl --request POST \
 
 ## 次に試すこと {#what-to-try-next}
 
-- [Orbitがインデックス作成する対象](indexing.md) - クエリを作成する前にカバレッジを理解する
+- [Orbitがインデックス作成する内容](indexing.md) - クエリを作成する前にカバレッジを理解する
 - [スキーマリファレンス](schema.md) - 24種類のノードタイプとそのプロパティを確認する
-- [Cookbook](cookbook.md) - 一般的なユースケース向けのコピー＆ペーストクエリ
+- [Cookbook](cookbook.md) - 一般的なユースケース向けのコピー&ペーストクエリ
 - [Orbit Localを使ってみる](../local/getting-started.md) - ローカルリポジトリをオフラインでクエリする
