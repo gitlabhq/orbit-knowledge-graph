@@ -346,9 +346,15 @@ fn neighbors_query() {
         rendered.contains("_gkg_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
-    // Edge-only: no JOIN, edge scan with IN subquery for center node IDs.
     assert!(rendered.contains("gl_edge"));
-    assert!(rendered.contains("UNION ALL"));
+    // A pinned default-PK center on a single edge table fuses both directions into
+    // one scan: arrayJoin over the matched-arm tuples, no UNION ALL. The multi-table
+    // and non-denorm-filter neighbors tests still exercise the UNION ALL path.
+    assert!(
+        rendered.contains("arrayJoin") && rendered.contains("arrayFilter"),
+        "pinned default-PK both should fuse to a single arrayJoin scan"
+    );
+    assert!(!rendered.contains("UNION ALL"));
 }
 
 #[test]

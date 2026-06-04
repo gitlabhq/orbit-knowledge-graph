@@ -130,6 +130,32 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     resp.assert_edge_exists("MergeRequest", 2000, "Project", 1000, "IN_PROJECT");
 }
 
+pub(super) async fn neighbors_both_fused_scan_returns_complete_bidirectional_set(
+    ctx: &TestContext,
+) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "g", "entity": "Group", "node_ids": [100]},
+            "neighbors": {"node": "g", "direction": "both", "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 50
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(7);
+    resp.assert_referential_integrity();
+    resp.assert_node_ids("Group", &[100, 200]);
+    resp.assert_node_ids("User", &[1, 2, 6]);
+    resp.assert_node_ids("Project", &[1000, 1002]);
+
+    // Incoming arm: User → Group 100. Outgoing arm: Group 100 → target.
+    resp.assert_edge_set("MEMBER_OF", &[(1, 100), (2, 100), (6, 100)]);
+    resp.assert_edge_set("CONTAINS", &[(100, 200), (100, 1000), (100, 1002)]);
+}
+
 pub(super) async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);

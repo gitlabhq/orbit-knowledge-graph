@@ -130,6 +130,7 @@ async fn data_correctness() {
         neighbors::neighbors_incoming_returns_correct_sources,
         neighbors::neighbors_rel_types_filter_works,
         neighbors::neighbors_both_direction_returns_all_connected,
+        neighbors::neighbors_both_fused_scan_returns_complete_bidirectional_set,
         neighbors::neighbors_mixed_entity_types,
         neighbors::neighbors_redaction_removes_unauthorized_targets,
         neighbors::neighbors_dynamic_columns_all_returns_properties,
