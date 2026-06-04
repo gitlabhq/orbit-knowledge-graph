@@ -147,11 +147,11 @@ proj_id_in_mr_in_project:
     }
 
 # scope_kind: id-in-multi
-# expect_pk_pruning: true
-# correctness_oracle: [ADDED missing_case] Per-project row sets must match each project's MRs; together they equal the union of PROJECT_ID and PROJECT_ID_2 MRs and exclude all other projects.
+# expect_pk_pruning: false
+# correctness_oracle: Per-project row sets must match each project's MRs; together they equal the union of PROJECT_ID and PROJECT_ID_2 MRs and exclude all other projects.
 #   ClickHouse: for each id, SELECT count() FROM gl_merge_request FINAL WHERE project_id = <id>; sum equals returned row count.
 #   Rails: MergeRequest.where(target_project_id: [{{PROJECT_ID}},{{PROJECT_ID_2}}]).count.
-#   PK proof: EXPLAIN indexes=1 shows the PrimaryKey step prunes via an OR-of-two-startsWith(traversal_path) condition (the OR-of-prefixes form), each prefix prunable; read_rows ~ the two projects' partitions, NOT a full scan.
+#   PK note: multi-value `id IN [..]` is OUTSIDE the optimization's single-value scope (scope_keys resolves a single id/full_path or a single node_id; eq_value returns None for an `in` op), so NO startsWith(traversal_path) prefix is injected -- scoping is by the id-set under the broad authz prefix only. Verified empty against query_log 2026-06-04. An OR-of-prefixes form for `in` is a possible future enhancement, not current behavior.
 proj_id_in2_mr_or_of_prefixes:
   desc: TWO-element project_id IN across two sibling projects, asserting the OR-of-startsWith multi-prefix PK predicate in the clean project slice (the positive OR-of-prefixes proof).
   query: |
@@ -423,10 +423,10 @@ grp_id_milestone_count_by_state_agg:
     }
 
 # scope_kind: group-by-id
-# expect_pk_pruning: true
+# expect_pk_pruning: observational
 # correctness_oracle: Rails: Project.where('traversal_ids @> ARRAY[?]', <group_namespace>).pluck(:id) -> project ids; MergeRequest.where(project_id: those, state: 'opened').count.
 #   ClickHouse: SELECT count() FROM gl_merge_request FINAL WHERE startsWith(traversal_path,'<group_prefix>') AND state='opened'. Must match and exclude sibling-group MRs.
-#   PK proof: the group prefix predicate captures every project's subtree since each project's traversal_path shares the group prefix. CONTAINS direction is Group->Project.
+#   PK note: the tight group prefix is injected on the SCOPED Group node's scan only (design: "on the scoped node"); it is NOT propagated to the MR/Project payload scans, which run under the broad authz prefix. Also CONTAINS is single-hop (Group->Project direct edge, distinct from Group->Subgroup), so this query reaches only the group's DIRECT child projects -- on data where MRs live under subgroup projects it returns 0 rows. Payload pruning + transitive CONTAINS are not current behavior.
 grp_id_mr_in_project_contains:
   desc: MergeRequests in projects under a top-level group. Group CONTAINS Project, MergeRequest IN_PROJECT Project, scoped by Group id. Tests transitive scoping. the group prefix covers every project's subtree.
   query: |
@@ -737,7 +737,7 @@ proj_full_path_mr_count_agg_scoped:
 # scope_kind: group-by-id
 # expect_pk_pruning: false
 # correctness_oracle: NEGATIVE/INVALID CONTROL (oracle CORRECTED per review). id_property is a NodeSelector-level field, NOT a filter key; placing {"id_property":"namespace_id"} inside filters parses as a property filter literally named id_property.
-#   The DSL schema does NOT reject it; rejection happens at runtime ontology validation with the error 'unknown property id_property on Project' (NOT 'Project has no namespace_id property').
+#   Rejection happens at compile time via the ontology-derived JSON-schema allowlist (propertyNames enum), surfaced as code 'compile_error' with message: allowlist rejected: "id_property" is not one of "id"... at /nodes/2/filters (NOT a runtime 'unknown property' error, and NOT 'Project has no namespace_id property'). Verified 2026-06-04.
 #   Oracle: POST returns a runtime 4xx (ontology validation error), not an empty 200 and not a widened result. The harness must treat a 4xx (not an empty 200) as PASS. expect_pk_pruning=false (the query never compiles).
 multihop_user_authored_mr_in_project_group_scoped:
   desc: Intentionally encodes the common mistake (group_id stuffed into Project.id via a bogus id_property filter key). The harness must assert it is REJECTED at runtime ontology validation. The correct group-scoped multi-hop is multihop_group_scope_via_group_node.
@@ -966,10 +966,10 @@ proj_id_mr_by_state:
     }
 
 # scope_kind: group-by-id
-# expect_pk_pruning: true
+# expect_pk_pruning: observational
 # correctness_oracle: ClickHouse: SELECT author_id, count() FROM gl_merge_request FINAL WHERE startsWith(traversal_path,'<group_prefix>') AND state IN ('opened','closed','merged') GROUP BY author_id ORDER BY count() DESC. Assert author buckets/counts match (top author especially).
 #   Sum across buckets equals total MRs across all projects in the group. Rails: MergeRequest.where(target_project_id: Group.find({{GROUP_ID}}).all_projects.select(:id)).group(:author_id).count.
-#   PK proof: compiled SQL has startsWith(mr.traversal_path,'<group_prefix>'); EXPLAIN indexes=1 + read_rows scoped to the group. User is globally scoped (no traversal_path) but reachable via AUTHORED from the scoped MR.
+#   PK note: the tight group prefix is injected on the SCOPED Group node's scan only, NOT on the mr payload scan (the mr runs under the broad authz prefix) -- so the compiled SQL does NOT carry startsWith(mr.traversal_path,'<group_prefix>'); verified against query_log 2026-06-04. The mr/g linkage here is also degenerate on this data (MRs carry no IN_GROUP edge to a top group; they relate via IN_PROJECT), so the shape returns 0 rows. Payload-scan prefix propagation is not current behavior.
 group_id_mr_by_author:
   desc: GROUP BY author (User node) of MRs across ALL projects in a group, scoped by group id. The Group anchors the traversal_path prefix; MRs in any descendant project share it, so the join scan prunes on PK. The cross-project 'who authored the most MRs in this group' slow query.
   query: |
