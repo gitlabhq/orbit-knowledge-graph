@@ -36,8 +36,12 @@ _Avoid_: vertex
 A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`). Defined in the **Ontology** with one or more source→target **Node** type variants. Stored in physical edge tables.
 _Avoid_: interaction, link
 
+**Derived Entity**:
+A third **Ontology** shape alongside **Node** and **Relationship**: a **Datalake** extract with no node table, whose rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and named via `etl.transform`; it stays dormant until that transform is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
+_Avoid_: storageless node, derived node
+
 **Ontology**:
-The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
+The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
 _Avoid_: schema (too generic), data model (refers to the broader design)
 
 **WorkItem**:
