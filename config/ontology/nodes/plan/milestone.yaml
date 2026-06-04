@@ -46,6 +46,7 @@ properties:
     source: state
     nullable: false
     description: "State (active, closed)."
+    selectivity: low
 
   due_date:
     type: date

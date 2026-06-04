@@ -6,6 +6,7 @@ pub(crate) mod observer;
 mod partitioning;
 mod pipeline;
 mod plan;
+mod transform;
 
 use std::sync::Arc;
 
@@ -55,6 +56,8 @@ pub async fn register_handlers(
         &entity_handler_config.batch_size_overrides,
     );
 
+    let transform_registry = Arc::new(transform::TransformRegistry::default());
+
     let pipeline = Arc::new(
         Pipeline::new(
             Arc::clone(&datalake),
@@ -62,7 +65,8 @@ pub async fn register_handlers(
             metrics.clone(),
             config.engine.datalake_retry.clone(),
         )
-        .with_write_channel_capacity(entity_handler_config.write_channel_capacity),
+        .with_write_channel_capacity(entity_handler_config.write_channel_capacity)
+        .with_registry(Arc::clone(&transform_registry)),
     );
 
     let mut global_subscription = GlobalIndexingRequest::subscription();
@@ -77,6 +81,10 @@ pub async fn register_handlers(
     let mut global_count = 0;
     let mut namespaced_count = 0;
     for plan in plans.global {
+        if !transform_registry.is_registered(&plan.transform) {
+            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
+            continue;
+        }
         let strategy = partition_strategies.get(&plan.name).cloned();
         registry.register_handler(Box::new(EntityHandler::new(
             plan,
@@ -92,6 +100,10 @@ pub async fn register_handlers(
         global_count += 1;
     }
     for plan in plans.namespaced {
+        if !transform_registry.is_registered(&plan.transform) {
+            info!(entity = %plan.name, transform = ?plan.transform, "skipping handler: transform not registered");
+            continue;
+        }
         let strategy = partition_strategies.get(&plan.name).cloned();
         registry.register_handler(Box::new(EntityHandler::new(
             plan,
@@ -140,5 +152,34 @@ mod tests {
         let names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"Group"));
         assert!(names.contains(&"Project"));
+    }
+
+    #[test]
+    fn build_plans_wires_system_note_derived_entity_as_extract_only_plan() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = plan::build_plans(&ontology, 1000, 1000, &Default::default());
+
+        let system_note = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "SystemNote")
+            .expect("SystemNote derived entity should produce a namespaced plan");
+
+        assert!(
+            matches!(&system_note.transform, plan::TransformSpec::Rust(name) if name == "system_notes"),
+            "derived entities name a custom transform, not data_fusion: {:?}",
+            system_note.transform
+        );
+        let template = &system_note.extract_template;
+        assert!(
+            template
+                .contains("INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id"),
+            "extract should inner-join the metadata table: {template}"
+        );
+        assert!(template.contains("sn.system = true"));
+        assert!(template.contains("snm._siphon_deleted = false"));
+        assert!(template.contains("snm.action AS action"));
+        assert!(template.contains("ORDER BY traversal_path, id"));
+        assert_eq!(system_note.watermark_column, "sn._siphon_replicated_at");
     }
 }

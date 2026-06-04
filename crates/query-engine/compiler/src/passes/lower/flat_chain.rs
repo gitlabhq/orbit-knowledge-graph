@@ -10,7 +10,8 @@ use crate::error::{QueryError, Result};
 use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan, push_edge_predicates,
+    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
+    node_id_pin_predicates, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -56,6 +57,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut from: Option<TableRef> = None;
     let mut tagged_nodes: HashSet<String> = HashSet::new();
     let mut narrowed_nodes: HashSet<String> = HashSet::new();
+    let mut filter_only_done: HashSet<String> = HashSet::new();
     let mut edge_if_predicates: Option<Expr> = None;
 
     for (i, hop) in plan.hops.iter().enumerate() {
@@ -102,13 +104,61 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 inner_preds,
             ));
         } else {
+            let mut narrow_in: Vec<Expr> = Vec::new();
+            emit_filter_narrowing(
+                &mut narrow_in,
+                hop,
+                &plan.nodes,
+                &alias,
+                start_col,
+                end_col,
+                &mut ctes,
+                &mut narrowed_nodes,
+            );
+            // For multi-hop dedup queries, FilterOnly nodes still use
+            // CTEs so their IN-subqueries can be pushed inside the edge
+            // dedup scan for PK pruning. Single-hop queries handle
+            // FilterOnly via JOIN in the node processing loop below.
+            if dedup_edges {
+                for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)]
+                {
+                    let Some(np) = plan.nodes.get(node_alias) else {
+                        continue;
+                    };
+                    let elevated_skip =
+                        matches!(np.hydration, HydrationStrategy::Skip) && np.needs_elevated_filter;
+                    let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
+                    if (is_filter_only || elevated_skip)
+                        && filter_only_done.insert(node_alias.clone())
+                    {
+                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                    }
+                }
+            }
+
+            let edge_pk_leading: Vec<&str> = plan
+                .table_sort_keys
+                .get(&hop.edge_table)
+                .map(|k| k.iter().take(4).map(String::as_str).collect())
+                .unwrap_or_default();
+            let push_narrow_inner =
+                edge_pk_leading.contains(&start_col) || edge_pk_leading.contains(&end_col);
+
             let edge_source = if is_multi_hop {
                 let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
                 where_parts.extend(union_wheres);
+                where_parts.extend(narrow_in);
                 union
             } else if dedup_edges {
-                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
+                let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
+                if push_narrow_inner {
+                    inner.extend(narrow_in);
+                } else {
+                    where_parts.extend(narrow_in);
+                }
+                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
             } else {
+                where_parts.extend(narrow_in);
                 TableRef::scan(&hop.edge_table, &alias)
             };
 
@@ -154,24 +204,17 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 end_col,
                 &mut tagged_nodes,
             );
-            emit_node_ids_on_edge(
-                &mut where_parts,
-                &alias,
-                hop,
-                &plan.nodes,
-                start_col,
-                end_col,
-            );
-            emit_filter_narrowing(
-                &mut where_parts,
-                hop,
-                &plan.nodes,
-                &alias,
-                start_col,
-                end_col,
-                &mut ctes,
-                &mut narrowed_nodes,
-            );
+            let used_dedup = dedup_edges && !is_multi_hop;
+            if !used_dedup {
+                emit_node_ids_on_edge(
+                    &mut where_parts,
+                    &alias,
+                    hop,
+                    &plan.nodes,
+                    start_col,
+                    end_col,
+                );
+            }
         }
 
         edge_aliases.push(alias);
@@ -244,29 +287,28 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(nw);
                 }
                 HydrationStrategy::FilterOnly => {
-                    let table = np.table.as_deref().ok_or_else(|| {
-                        QueryError::Lowering(format!("node '{}' has no table", np.alias))
-                    })?;
-                    let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
-                        QueryError::Lowering(format!("no sort key for node table '{table}'"))
-                    })?;
-                    let (new_from, _selects, nw) = emit_node_join_with_narrowing(
-                        from,
-                        np,
-                        edge_alias,
-                        edge_col,
-                        false,
-                        None,
-                        node_sort_key,
-                    )?;
-                    from = new_from;
-                    where_parts.extend(nw);
+                    if filter_only_done.insert(node_alias.clone()) {
+                        let table = np.table.as_deref().ok_or_else(|| {
+                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
+                        })?;
+                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                        })?;
+                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                            from,
+                            np,
+                            edge_alias,
+                            edge_col,
+                            false,
+                            None,
+                            node_sort_key,
+                        )?;
+                        from = new_from;
+                        where_parts.extend(nw);
+                    }
                 }
                 HydrationStrategy::Skip => {
-                    // Elevated-access nodes need a JOIN so the security
-                    // pass can see the node's table and inject the
-                    // role-gated startsWith filter.
-                    if np.needs_elevated_filter {
+                    if np.needs_elevated_filter && filter_only_done.insert(node_alias.clone()) {
                         let table = np.table.as_deref().ok_or_else(|| {
                             QueryError::Lowering(format!("node '{}' has no table", np.alias))
                         })?;

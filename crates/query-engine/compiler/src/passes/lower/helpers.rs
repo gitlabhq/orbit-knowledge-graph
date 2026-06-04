@@ -321,6 +321,7 @@ pub(super) fn dedup_edge_scan(
     edge_table: &str,
     alias: &str,
     table_columns: &HashMap<String, HashSet<String>>,
+    inner_predicates: Vec<Expr>,
 ) -> TableRef {
     let Some(cols) = table_columns.get(edge_table) else {
         return TableRef::scan_final(edge_table, alias);
@@ -369,9 +370,12 @@ pub(super) fn dedup_edge_scan(
         Expr::lit(false),
     );
 
+    let where_clause = Expr::conjoin(inner_predicates);
+
     let query = Query {
         select,
         from: TableRef::scan(edge_table, alias),
+        where_clause,
         group_by,
         having: Some(having),
         ..Default::default()
@@ -445,6 +449,30 @@ pub(super) fn emit_denorm_tags(
             }
         }
     }
+}
+
+pub(super) fn node_id_pin_predicates(
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+) -> Vec<Expr> {
+    let (start_col, end_col) = hop.direction.edge_columns();
+    let mut out = Vec::new();
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        let Some(np) = nodes.get(node_alias) else {
+            continue;
+        };
+        if let Some(ref range) = np.id_range {
+            out.push(Expr::and(
+                Expr::binary(Op::Ge, Expr::col(alias, id_col), Expr::int(range.start)),
+                Expr::binary(Op::Le, Expr::col(alias, id_col), Expr::int(range.end)),
+            ));
+        }
+        if !np.node_ids.is_empty() {
+            out.push(id_list_predicate(alias, id_col, &np.node_ids));
+        }
+    }
+    out
 }
 
 pub(super) fn emit_node_ids_on_edge(

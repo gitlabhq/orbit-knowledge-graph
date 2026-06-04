@@ -29,12 +29,13 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    AuxiliaryColumn, AuxiliaryTable, DataType, DenormDirection, DenormalizedProperty, DomainInfo,
-    EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
-    RedactionConfig, RequiredRole, StorageColumn, StorageIndex, StorageProjection, VirtualSource,
+    AuxiliaryColumn, AuxiliaryTable, DataType, DenormDirection, DenormalizedProperty,
+    DerivedEntity, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
+    EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field, FieldSelectivity, FieldSource,
+    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
+    StorageProjection, VirtualSource,
 };
-pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -124,6 +125,9 @@ pub struct Ontology {
     pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
     /// Node properties denormalized onto edge tables for query optimization.
     pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
+    /// Edge-producing entities derived by a Rust transform (keyed by name).
+    /// These have no node table; they extract from the datalake and emit edges.
+    pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
 }
 
 impl Default for Ontology {
@@ -174,6 +178,7 @@ impl Ontology {
             local_edge_columns: Vec::new(),
             auxiliary_tables: Vec::new(),
             denormalized_properties: Vec::new(),
+            derived_entities: BTreeMap::new(),
         }
     }
 
@@ -707,6 +712,11 @@ impl Ontology {
     /// Iterator over all node names.
     pub fn node_names(&self) -> impl Iterator<Item = &str> {
         self.nodes.keys().map(|s| s.as_str())
+    }
+
+    /// Iterator over all edge-producing derived entities (Rust-transformed).
+    pub fn derived_entities(&self) -> impl Iterator<Item = &DerivedEntity> {
+        self.derived_entities.values()
     }
 
     /// Iterator over all edges (flattened).
@@ -2456,5 +2466,22 @@ properties:
             reviewer.fk_column, None,
             "REVIEWER should not declare fk_column (many-to-many)"
         );
+    }
+
+    #[test]
+    fn system_note_derived_entity_loaded_from_domain() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let derived = ontology
+            .derived_entities()
+            .find(|d| d.name == "SystemNote")
+            .expect("SystemNote derived entity should load from the core domain");
+
+        assert_eq!(derived.transform, "system_notes");
+        assert_eq!(derived.etl.scope(), crate::EtlScope::Namespaced);
+        assert!(
+            matches!(derived.etl, crate::EtlConfig::Query { .. }),
+            "SystemNote extract is a JOIN (query ETL)"
+        );
+        assert!(derived.emits.contains(&"MENTIONS".to_string()));
     }
 }

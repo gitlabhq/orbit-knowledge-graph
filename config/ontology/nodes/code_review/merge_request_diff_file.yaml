@@ -94,12 +94,14 @@ properties:
     source: a_mode
     nullable: false
     description: "Git mode bits before the change (e.g. 100644)."
+    selectivity: low
 
   b_mode:
     type: string
     source: b_mode
     nullable: false
     description: "Git mode bits after the change (e.g. 100755)."
+    selectivity: low
 
   traversal_path:
     type: string

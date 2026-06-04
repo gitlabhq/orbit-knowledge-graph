@@ -1,0 +1,26 @@
+name: SystemNote
+description: >-
+  Rails-authored system notes, parsed for cross-entity edges. A Rust transform
+  parses each note body and resolves GFM references into edges.
+
+emits: [MENTIONS, ADDS_COMMIT, MERGED_AT_COMMIT, REOPENED]
+
+etl:
+  type: query
+  transform: system_notes
+  scope: namespaced
+  source: siphon_notes
+  from: >-
+    siphon_notes AS sn
+    INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id
+  select: >-
+    sn.id AS id, sn.note AS note, sn.noteable_id AS noteable_id,
+    sn.noteable_type AS noteable_type, sn.author_id AS author_id,
+    sn.project_id AS project_id, sn.created_at AS created_at,
+    sn.traversal_path AS traversal_path, snm.action AS action
+  where: "sn.system = true AND sn._siphon_deleted = false AND snm._siphon_deleted = false"
+  traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
+  watermark: sn._siphon_replicated_at
+  deleted: sn._siphon_deleted
+  table_alias: sn
+  order_by: [traversal_path, id]

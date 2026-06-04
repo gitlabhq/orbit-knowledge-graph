@@ -1,3 +1,4 @@
+mod derived;
 mod edge;
 mod node;
 mod schema;
@@ -9,6 +10,7 @@ use std::path::Path;
 use crate::entities::{DomainInfo, EdgeColumn};
 use crate::{Ontology, OntologyError};
 
+use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
 pub(crate) use node::NodeYaml;
 use schema::SchemaYaml;
@@ -220,6 +222,21 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             ontology.nodes.insert(node_name.clone(), entity);
             node_names.push(node_name.clone());
+        }
+
+        for (derived_name, derived_path) in &domain.derived {
+            if ontology.derived_entities.contains_key(derived_name) {
+                return Err(OntologyError::Validation(format!(
+                    "duplicate derived entity definition: '{derived_name}'"
+                )));
+            }
+
+            let content = reader.read(derived_path)?;
+            let derived_def: DerivedYaml = parse_yaml(&content, derived_path)?;
+            let derived = derived_def.into_derived(derived_name.clone(), &etl_settings)?;
+            ontology
+                .derived_entities
+                .insert(derived_name.clone(), derived);
         }
 
         node_names.sort();

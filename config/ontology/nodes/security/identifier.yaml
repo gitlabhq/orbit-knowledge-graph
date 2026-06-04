@@ -29,6 +29,7 @@ properties:
     source: external_type
     nullable: false
     description: "Identifier type (e.g. cve, cwe, gemnasium)."
+    selectivity: low
 
   external_id:
     type: string

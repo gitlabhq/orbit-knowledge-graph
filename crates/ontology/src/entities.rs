@@ -313,6 +313,16 @@ pub struct EdgeSourceEtlConfig {
     pub to: EdgeEndpoint,
 }
 
+/// An entity extracted from the datalake and turned into edges by a named
+/// transform, with no node table of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedEntity {
+    pub name: String,
+    pub emits: Vec<String>,
+    pub transform: String,
+    pub etl: EtlConfig,
+}
+
 /// Configuration for an edge endpoint (source or target).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeEndpoint {

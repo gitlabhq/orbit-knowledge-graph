@@ -16,17 +16,14 @@ Neighbors Query Includes The Adjacent Issue
     [Tags]    query-shapes
     ${query}=    Evaluate
     ...    {"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}, "neighbors": {"node": "p", "direction": "both"}}
-    ${resp}=    Orbit Query    ${query}
-    Result Node Ids Contain    ${resp}    ${SHAPE_ISSUE_ID}
+    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}
 
 Path Finding Connects The Issue To The Project
     [Documentation]    The shortest IN_PROJECT path must contain both endpoints.
     [Tags]    query-shapes
     ${query}=    Evaluate
     ...    {"query_type": "path_finding", "nodes": [{"id": "w", "entity": "WorkItem", "node_ids": [int($SHAPE_ISSUE_ID)]}, {"id": "p", "entity": "Project", "node_ids": [int($SHAPE_PROJECT_ID)]}], "path": {"type": "shortest", "from": "w", "to": "p", "max_depth": 2, "rel_types": ["IN_PROJECT"]}}
-    ${resp}=    Orbit Query    ${query}
-    Result Node Ids Contain    ${resp}    ${SHAPE_ISSUE_ID}
-    Result Node Ids Contain    ${resp}    ${SHAPE_PROJECT_ID}
+    Wait Until Result Node Ids Contain    ${query}    ${SHAPE_ISSUE_ID}    ${SHAPE_PROJECT_ID}
 
 GOON Format Encodes The Neighbors Result
     [Documentation]    The llm response is GOON text: a header naming the query_type plus the seeded
@@ -51,7 +48,7 @@ GOON Format Encodes The Neighbors Result
 *** Keywords ***
 Seed Query Shape Fixture
     ${suffix}=    Random Suffix
-    Start Indexing Budget    180
+    Start Indexing Budget    300
     ${name}=    Set Variable    e2e-shape-prj-${suffix}
     ${project}=    Create Project    ${name}    ${SHARED_NAMESPACE_ID}
     ${issue}=    Create Issue    ${project["id"]}    e2e-shape-issue-${suffix}

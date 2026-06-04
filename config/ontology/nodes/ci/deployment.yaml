@@ -72,6 +72,7 @@ properties:
     source: deployable_type
     nullable: false
     description: "Polymorphic type (typically CommitStatus, the STI base class for Ci::Build)."
+    selectivity: low
 
   deployable_id:
     type: int64

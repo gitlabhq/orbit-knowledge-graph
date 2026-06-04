@@ -200,7 +200,27 @@ pub(in crate::modules::sdlc) struct Plan {
     pub watermark_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
-    pub transforms: Vec<Transformation>,
+    pub transform: TransformSpec,
+}
+
+/// How an extracted block becomes graph rows. `DataFusion` carries the
+/// declarative SQL projections the built-in transform runs; `Rust` names a
+/// Rust-implemented transform resolved from the registry (e.g. `system_notes`),
+/// which owns its own outputs and ignores SQL projections entirely.
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) enum TransformSpec {
+    DataFusion(Vec<Transformation>),
+    Rust(String),
+}
+
+impl Plan {
+    #[cfg(test)]
+    pub(in crate::modules::sdlc) fn transformations(&self) -> &[Transformation] {
+        match &self.transform {
+            TransformSpec::DataFusion(transforms) => transforms,
+            TransformSpec::Rust(_) => &[],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -324,7 +344,7 @@ mod tests {
             watermark_column: "_siphon_replicated_at".to_string(),
             sort_key,
             batch_size,
-            transforms: vec![],
+            transform: TransformSpec::DataFusion(vec![]),
         }
     }
 

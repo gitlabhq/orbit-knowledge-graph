@@ -81,7 +81,7 @@ properties:
     description: "Target environment name (e.g. production, staging)."
 
   when:
-    type: string
+    type: enum
     source: when
     nullable: false
     description: "Run condition."
@@ -313,7 +313,7 @@ storage:
     - {name: allow_failure, type: "Bool", default: "false"}
     - {name: coverage, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: environment, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: "`when`", type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: "`when`", type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: retried, type: "Nullable(Bool)"}
     - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

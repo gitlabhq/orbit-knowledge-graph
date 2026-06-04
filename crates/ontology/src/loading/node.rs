@@ -8,7 +8,7 @@ use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
     RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
 };
-use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use super::EtlSettings;
 
@@ -47,7 +47,7 @@ pub(crate) struct NodeYaml {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-enum EtlYaml {
+pub(crate) enum EtlYaml {
     #[serde(rename = "table")]
     Table {
         scope: EtlScope,
@@ -58,6 +58,8 @@ enum EtlYaml {
         deleted: Option<String>,
         #[serde(default)]
         order_by: Option<Vec<String>>,
+        #[serde(default)]
+        transform: Option<String>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
@@ -80,13 +82,25 @@ enum EtlYaml {
         #[serde(default)]
         table_alias: Option<String>,
         #[serde(default)]
+        transform: Option<String>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
 
+impl EtlYaml {
+    pub(crate) fn transform(&self) -> Option<&str> {
+        match self {
+            EtlYaml::Table { transform, .. } | EtlYaml::Query { transform, .. } => {
+                transform.as_deref()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum EdgeMappingYamlEntry {
+pub(crate) enum EdgeMappingYamlEntry {
     Single(EdgeMappingYaml),
     Multi(Vec<EdgeMappingYaml>),
 }
@@ -101,7 +115,7 @@ impl EdgeMappingYamlEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct EdgeMappingYaml {
+pub(crate) struct EdgeMappingYaml {
     #[serde(rename = "to")]
     target_literal: Option<String>,
     #[serde(rename = "to_column")]
@@ -376,6 +390,15 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
+        match self.etl.as_ref().and_then(|e| e.transform()) {
+            Some(transform) if transform != DEFAULT_TRANSFORM => {
+                return Err(OntologyError::Validation(format!(
+                    "node '{name}' sets etl.transform '{transform}'; custom transforms are only for derived entities"
+                )));
+            }
+            _ => {}
+        }
+
         let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
 
         let has_traversal_path = fields
@@ -479,7 +502,10 @@ fn convert_edge_mappings(
 }
 
 impl EtlYaml {
-    fn into_config(self, etl_settings: &EtlSettings) -> Result<EtlConfig, OntologyError> {
+    pub(crate) fn into_config(
+        self,
+        etl_settings: &EtlSettings,
+    ) -> Result<EtlConfig, OntologyError> {
         match self {
             EtlYaml::Table {
                 scope,
@@ -487,6 +513,7 @@ impl EtlYaml {
                 watermark,
                 deleted,
                 order_by,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Table {
                 scope,
@@ -507,6 +534,7 @@ impl EtlYaml {
                 order_by,
                 traversal_path_filter,
                 table_alias,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
@@ -707,6 +735,32 @@ mod tests {
         assert!(
             err.contains("must be database-backed"),
             "error should say virtual deps not allowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_custom_etl_transform() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: siphon_test
+              transform: system_notes
+            "#,
+        );
+        let err = result.expect_err("custom transform on a node should be rejected");
+        assert!(
+            err.to_string()
+                .contains("custom transforms are only for derived entities"),
+            "got: {err}"
         );
     }
 

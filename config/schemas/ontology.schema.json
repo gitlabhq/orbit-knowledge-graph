@@ -7,7 +7,8 @@
   "oneOf": [
     { "$ref": "#/definitions/mainSchema" },
     { "$ref": "#/definitions/nodeSchema" },
-    { "$ref": "#/definitions/edgeSchema" }
+    { "$ref": "#/definitions/edgeSchema" },
+    { "$ref": "#/definitions/derivedSchema" }
   ],
 
   "definitions": {
@@ -231,6 +232,11 @@
               "items": { "type": "string" },
               "minItems": 1
             },
+            "transform": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
+            },
             "edges": {
               "type": "object",
               "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges (for example an outgoing FK plus its inverse).",
@@ -291,6 +297,11 @@
             "table_alias": {
               "type": "string",
               "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+            },
+            "transform": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
             },
             "edges": {
               "type": "object",
@@ -587,9 +598,14 @@
           "type": "object",
           "description": "Map of node names to their YAML file paths.",
           "additionalProperties": { "type": "string" }
+        },
+        "derived": {
+          "type": "object",
+          "description": "Map of edge-producing derived-entity names to their YAML file paths.",
+          "additionalProperties": { "type": "string" }
         }
       },
-      "required": ["description", "nodes"],
+      "required": ["description"],
       "additionalProperties": false
     },
 
@@ -816,6 +832,29 @@
         }
       },
       "required": ["description", "variants"],
+      "additionalProperties": false
+    },
+
+    "derivedSchema": {
+      "type": "object",
+      "description": "Edge-producing derived entity. The extract (with `transform: rust`) is declared in `etl`; the registered Rust transform parses and emits edges. Produces no node table.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Entity kind. Must match the key under a domain's `derived`."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the derived entity."
+        },
+        "emits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Edge relationship kinds this entity is expected to emit (informational)."
+        },
+        "etl": { "$ref": "#/definitions/etlConfig" }
+      },
+      "required": ["etl"],
       "additionalProperties": false
     },
 
