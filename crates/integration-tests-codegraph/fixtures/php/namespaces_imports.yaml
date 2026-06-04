@@ -1,0 +1,402 @@
+name: "PHP namespaces & imports — deep namespaces, grouped/aliased use, use function/const, leading-backslash FQNs"
+
+fixtures:
+  - path: src/Deep/A/B/C/Thing.php
+    content: |
+      <?php
+      namespace Vendor\Pkg\Deep\Inner;
+
+      class Thing {
+          public function ping(): void {}
+          public static function make(): Thing {
+              return new Thing();
+          }
+      }
+
+  - path: src/Util/helpers.php
+    content: |
+      <?php
+      namespace Vendor\Util;
+
+      function format(string $v): string {
+          return $v;
+      }
+
+      function helper(): void {}
+
+  - path: src/Util/Config.php
+    content: |
+      <?php
+      namespace Vendor\Util;
+
+      const MAX_VALUE = 100;
+      const MIN_VALUE = 0;
+
+  - path: src/Sub/A.php
+    content: |
+      <?php
+      namespace Vendor\Sub;
+
+      class A {
+          public function greet(): void {}
+      }
+
+  - path: src/Sub/B.php
+    content: |
+      <?php
+      namespace Vendor\Sub;
+
+      class B {
+          public function shout(): void {}
+      }
+
+  - path: src/Sub/D.php
+    content: |
+      <?php
+      namespace Vendor\Sub;
+
+      class D {
+          public function whisper(): void {}
+      }
+
+  - path: src/X/Foo.php
+    content: |
+      <?php
+      namespace Vendor\X;
+
+      class Foo {
+          public function fromX(): void {}
+      }
+
+  - path: src/Y/Foo.php
+    content: |
+      <?php
+      namespace Vendor\Y;
+
+      class Foo {
+          public function fromY(): void {}
+      }
+
+  - path: src/Other/Bare.php
+    content: |
+      <?php
+      namespace Vendor\Other;
+
+      class Bare {
+          public static function call(): void {}
+          public function run(): void {}
+      }
+
+  - path: src/Base/BaseService.php
+    content: |
+      <?php
+      namespace Vendor\Base;
+
+      class BaseService {
+          public function boot(): void {}
+      }
+
+  - path: src/App/DeepCaller.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      use Vendor\Pkg\Deep\Inner\Thing;
+
+      class DeepCaller {
+          public function go(): void {
+              $t = new Thing();
+              $t->ping();
+              Thing::make();
+          }
+      }
+
+  - path: src/App/GroupedUser.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      use Vendor\Sub\{A, B as RenamedB, D};
+
+      class GroupedUser {
+          public function run(): void {
+              $a = new A();
+              $a->greet();
+              $b = new RenamedB();
+              $b->shout();
+              $d = new D();
+              $d->whisper();
+          }
+      }
+
+  - path: src/App/FunctionConstUser.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      use function Vendor\Util\format;
+      use function Vendor\Util\helper as h;
+      use const Vendor\Util\MAX_VALUE;
+      use const Vendor\Util\MIN_VALUE as MIN_V;
+
+      class FunctionConstUser {
+          public function run(): int {
+              h();
+              $s = format('x');
+              return MAX_VALUE + MIN_V;
+          }
+      }
+
+  - path: src/App/MultiAlias.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      use Vendor\X\Foo as XFoo;
+      use Vendor\Y\Foo as YFoo;
+
+      class MultiAlias {
+          public function run(): void {
+              $x = new XFoo();
+              $x->fromX();
+              $y = new YFoo();
+              $y->fromY();
+          }
+      }
+
+  - path: src/App/LeadingBackslash.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      class LeadingBackslash {
+          public function go(\Vendor\Other\Bare $bare): void {
+              \Vendor\Other\Bare::call();
+              $x = new \Vendor\Other\Bare();
+              $x->run();
+              $bare->run();
+          }
+      }
+
+  - path: src/App/FqnNoImport.php
+    content: |
+      <?php
+      namespace App\Consumer;
+
+      class FqnNoImport {
+          public function go(): void {
+              \Vendor\Other\Bare::call();
+              $b = new \Vendor\Other\Bare();
+              $b->run();
+          }
+      }
+
+  - path: src/App/DeepExtends.php
+    content: |
+      <?php
+      namespace App\Consumer\Sub\Nested;
+
+      use Vendor\Base\BaseService;
+
+      class DeepExtends extends BaseService {
+          public function start(): void {
+              $this->boot();
+          }
+      }
+
+tests:
+  # ── Definitions: nested/deep namespaces produce correct FQNs ────
+  - name: "Deep namespace nests the class FQN correctly"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Vendor\Pkg\Deep\Inner\Thing'
+        AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Methods inside a deep namespace inherit the full prefix"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['Vendor\Pkg\Deep\Inner\Thing\ping',
+                      'Vendor\Pkg\Deep\Inner\Thing\make']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  - name: "Top-level functions in a namespace get the namespace prefix"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.fqn IN ['Vendor\Util\format', 'Vendor\Util\helper']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+
+  - name: "Namespaced constants get the namespace prefix"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND d.fqn IN ['Vendor\Util\MAX_VALUE', 'Vendor\Util\MIN_VALUE']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+
+  # ── Grouped use ─────────────────────────────────────────────────
+  - name: "Grouped use: unaliased entry resolves (A)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
+        AND callee.fqn = 'Vendor\Sub\A\greet'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Grouped use: aliased entry resolves (B as RenamedB -> Vendor\\Sub\\B\\shout)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
+        AND callee.fqn = 'Vendor\Sub\B\shout'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Grouped use: third entry resolves (D)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\GroupedUser\run'
+        AND callee.fqn = 'Vendor\Sub\D\whisper'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── use function / use const ────────────────────────────────────
+  - name: "use function: bare call resolves to namespaced function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
+        AND callee.fqn = 'Vendor\Util\format'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # KNOWN GAP (investigate): an aliased `use function X as h;` call `h()` does
+  # not resolve, while the non-aliased `use function Y; Y();` form does. Likely
+  # a function-vs-class import disambiguation issue for aliased function
+  # imports. Flip to `row_count: 1` once aliased function imports resolve.
+  - name: "Known gap: aliased use-function h() -> Vendor\\Util\\helper"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
+        AND callee.fqn = 'Vendor\Util\helper'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { empty: true }
+
+  # ── Multiple use aliases for same-named classes ─────────────────
+  - name: "Two aliases for same-named class disambiguate to different FQNs"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\MultiAlias\run'
+        AND callee.fqn IN ['Vendor\X\Foo\fromX', 'Vendor\Y\Foo\fromY']
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { unique: callee }
+
+  # ── Leading-backslash fully-qualified references ────────────────
+  - name: "Leading-backslash static call resolves: \\Vendor\\Other\\Bare::call()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
+        AND callee.fqn = 'Vendor\Other\Bare\call'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Leading-backslash typed-parameter resolves: \\Vendor\\Other\\Bare $bare ; $bare->run()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\LeadingBackslash\go'
+        AND callee.fqn = 'Vendor\Other\Bare\run'
+        AND e.edge_kind = 'Calls'
+      RETURN count(*) AS n
+    assert:
+      - { count_gte: { field: n, value: 1 } }
+
+  # ── FQN reference without import ────────────────────────────────
+  - name: "Static call by fully-qualified name without use: \\Vendor\\Other\\Bare::call()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
+        AND callee.fqn = 'Vendor\Other\Bare\call'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # KNOWN GAP: `$b = new \Vendor\Other\Bare(); $b->run()` does not resolve —
+  # constructor type-tracking for an absolute-FQN `new` does not flow the type
+  # to the local. The fully-qualified STATIC call `\Vendor\Other\Bare::call()`
+  # and the typed-parameter form DO resolve. Flip to `row_count: 1` when
+  # `new`-via-local type tracking lands for absolute names.
+  - name: "Known gap: new \\Vendor\\Other\\Bare via local -> $b->run()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
+        AND callee.fqn = 'Vendor\Other\Bare\run'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { empty: true }
+
+  # ── Cross-file: deep-namespace inheritance + call ───────────────
+  - name: "Deep-namespace child extends imported base across files"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Consumer\Sub\Nested\DeepExtends'
+        AND parent.fqn = 'Vendor\Base\BaseService'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Deep-namespace child resolves inherited \\$this->boot() to parent method"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\Sub\Nested\DeepExtends\start'
+        AND callee.fqn = 'Vendor\Base\BaseService\boot'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Cross-file static call across deep namespaces via use ───────
+  - name: "Deep-namespace static call via use: DeepCaller::go -> Thing::make"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
+        AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\make'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Deep-namespace instance call via use: DeepCaller::go -> Thing::ping"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Consumer\DeepCaller\go'
+        AND callee.fqn = 'Vendor\Pkg\Deep\Inner\Thing\ping'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }

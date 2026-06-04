@@ -114,6 +114,7 @@ struct ScopeMatch {
     def_kind: DefKind,
     range: crate::utils::Range,
     creates_scope: bool,
+    hoist_to_type_scope: bool,
     metadata: Option<Box<DefinitionMetadata>>,
 }
 
@@ -141,6 +142,7 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
+            hoist_to_type_scope: rule.hoist_to_type_scope,
             metadata: rule.extract_metadata(node, &resolve),
         })
     }
@@ -829,6 +831,18 @@ impl LanguageSpec {
                         .collect::<Vec<_>>(),
                     sep,
                 )
+            } else if m.hoist_to_type_scope
+                && let Some(type_fqn) = state.enclosing_def_stack.iter().rev().find_map(|&idx| {
+                    let d = &state.defs[idx as usize];
+                    d.kind
+                        .is_type_container()
+                        .then(|| d.fqn.as_str().to_string())
+                })
+            {
+                // Anchor to the enclosing type, not the lexical sub-scope
+                // (e.g. a PHP promoted property declared in the constructor's
+                // parameter list is a member of the class).
+                Fqn::from_parts(&[type_fqn.as_str(), m.name.as_str()], sep)
             } else {
                 Fqn::from_scope(&state.scope_stack, &m.name, sep)
             };

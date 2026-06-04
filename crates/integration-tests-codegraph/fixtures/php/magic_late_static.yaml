@@ -1,0 +1,380 @@
+name: "PHP magic methods and late static binding"
+
+fixtures:
+  - path: src/Container.php
+    content: |
+      <?php
+      namespace App;
+
+      class Container {
+          private array $items;
+
+          public function __construct(array $items = []) {
+              $this->items = $items;
+          }
+
+          public function __call(string $name, array $args) {
+              return $this->items[$name] ?? null;
+          }
+
+          public function __get(string $name) {
+              return $this->items[$name] ?? null;
+          }
+
+          public function __toString(): string {
+              return implode(',', $this->items);
+          }
+
+          public function __invoke($key) {
+              return $this->items[$key] ?? null;
+          }
+
+          public function open(): void {
+              $this->__construct([]);
+          }
+
+          public function dump(): string {
+              return $this->__toString();
+          }
+      }
+
+  - path: src/Model.php
+    content: |
+      <?php
+      namespace App;
+
+      abstract class Model {
+          public function __construct(array $data = []) {}
+
+          public static function create(array $data): static {
+              return new static($data);
+          }
+
+          public static function find(int $id): static {
+              $instance = new static([]);
+              return $instance;
+          }
+
+          public function refresh(): static {
+              return $this;
+          }
+
+          abstract public function tableName(): string;
+      }
+
+  - path: src/User.php
+    content: |
+      <?php
+      namespace App;
+
+      class User extends Model {
+          public function tableName(): string {
+              return 'users';
+          }
+
+          public function greet(): string {
+              return 'hello';
+          }
+      }
+
+  - path: src/Account.php
+    content: |
+      <?php
+      namespace App;
+
+      class Account extends Model {
+          public function tableName(): string {
+              return 'accounts';
+          }
+
+          public function close(): void {}
+      }
+
+  - path: src/Query.php
+    content: |
+      <?php
+      namespace App;
+
+      class Query {
+          public static function from(string $table): static {
+              return new static();
+          }
+
+          public function where(string $clause): static {
+              return $this;
+          }
+
+          public function get(): array {
+              return [];
+          }
+      }
+
+  - path: src/Repo.php
+    content: |
+      <?php
+      namespace App;
+
+      class Repo extends Query {
+          public function fetch(): array {
+              return static::from('users')->where('id=1')->get();
+          }
+
+          public function fetchSelf(): array {
+              return self::from('users')->get();
+          }
+      }
+
+  - path: src/Handler.php
+    content: |
+      <?php
+      namespace App;
+
+      class Handler {
+          public function __invoke(string $payload): string {
+              return $payload;
+          }
+
+          public function process(): string {
+              return $this->__invoke('direct');
+          }
+      }
+
+  - path: src/Service.php
+    content: |
+      <?php
+      namespace App;
+
+      class Service {
+          private Handler $handler;
+          private Container $container;
+
+          public function __construct(Handler $handler, Container $container) {
+              $this->handler = $handler;
+              $this->container = $container;
+          }
+
+          public function callToString(): string {
+              return $this->container->__toString();
+          }
+
+          public function callInvokeMethod(): string {
+              return $this->handler->__invoke('hello');
+          }
+
+          public function castContainer(): string {
+              return (string) $this->container;
+          }
+      }
+
+  - path: src/Bootstrap.php
+    content: |
+      <?php
+      namespace App;
+
+      function boot(): User {
+          $user = User::create(['name' => 'a']);
+          $user->greet();
+          return $user;
+      }
+
+      function lookup(int $id): User {
+          return User::find($id);
+      }
+
+      function accountOf(): Account {
+          return Account::create([]);
+      }
+
+tests:
+  - name: "Magic methods indexed as Method definitions under their class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method' AND d.fqn IN [
+        'App\Container\__construct',
+        'App\Container\__call',
+        'App\Container\__get',
+        'App\Container\__toString',
+        'App\Container\__invoke',
+        'App\Handler\__invoke',
+        'App\Model\__construct'
+      ]
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 7 }
+      - { no_nulls: fqn }
+      - { unique: fqn }
+
+  - name: "Container class definition exists with namespace FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Container' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Model is indexed as a Class (abstract still Class)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Model' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "User extends Model — Extends edge present"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\User' AND parent.fqn = 'App\Model'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Account extends Model — Extends edge present"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Account' AND parent.fqn = 'App\Model'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Repo extends Query — Extends edge present"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Repo' AND parent.fqn = 'App\Query'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Explicit $this->__construct() resolves to Calls edge"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Container\open'
+        AND b.fqn = 'App\Container\__construct'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Explicit $this->__toString() resolves to Calls edge"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Container\dump'
+        AND b.fqn = 'App\Container\__toString'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Explicit $this->__invoke() resolves to Calls edge"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Handler\process'
+        AND b.fqn = 'App\Handler\__invoke'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Typed-property __toString call resolves cross-class"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Service\callToString'
+        AND b.fqn = 'App\Container\__toString'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Typed-property __invoke explicit method call resolves cross-class"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Service\callInvokeMethod'
+        AND b.fqn = 'App\Handler\__invoke'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Subclass calling inherited static create() resolves via Extends to Model::create"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\boot'
+        AND b.fqn = 'App\Model\create'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Subclass calling inherited static find() resolves to Model::find"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\lookup'
+        AND b.fqn = 'App\Model\find'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Different subclass also resolves inherited create() to Model::create"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\accountOf'
+        AND b.fqn = 'App\Model\create'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "static::from() inside Repo resolves to inherited Query::from"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Repo\fetch'
+        AND b.fqn = 'App\Query\from'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "self::from() inside Repo also resolves to inherited Query::from"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Repo\fetchSelf'
+        AND b.fqn = 'App\Query\from'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Service::__construct property assignments do not emit spurious method calls"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Service\__construct'
+        AND e.edge_kind = 'Calls'
+        AND b.definition_type = 'Method'
+      RETURN b.fqn AS b
+    assert:
+      - { empty: true }
+
+  - name: "Model::create method indexed under abstract base"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Model\create' AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Query::from, Query::where, Query::get all indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method' AND d.fqn IN [
+        'App\Query\from',
+        'App\Query\where',
+        'App\Query\get'
+      ]
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+

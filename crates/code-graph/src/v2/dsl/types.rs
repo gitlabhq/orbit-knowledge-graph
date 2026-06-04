@@ -42,6 +42,11 @@ pub struct ScopeRule {
     name: Extract,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
+    /// When set on a `no_scope` definition, the FQN is anchored to the
+    /// nearest enclosing type-container scope instead of the immediate
+    /// lexical scope. PHP constructor-promoted properties live inside the
+    /// constructor's parameter list but are members of the class.
+    pub(crate) hoist_to_type_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
 
@@ -87,6 +92,15 @@ impl ScopeRule {
         self
     }
 
+    /// Anchor this definition's FQN to the nearest enclosing type
+    /// container (class/interface/trait/enum) rather than the immediate
+    /// lexical scope. For members declared inside a sub-scope, such as
+    /// PHP constructor-promoted properties.
+    pub fn hoist_to_type_scope(mut self) -> Self {
+        self.hoist_to_type_scope = true;
+        self
+    }
+
     pub fn def_kind(mut self, kind: DefKind) -> Self {
         self.def_kind = kind;
         self
@@ -126,6 +140,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
+        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }
@@ -140,6 +155,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
+        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }
@@ -159,6 +175,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
+        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }

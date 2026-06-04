@@ -4,14 +4,14 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, child_of_kind, default_name, field, text};
+use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -107,6 +107,15 @@ impl DslLanguage for PhpDsl {
                         .child_of_kind("name"),
                 )
                 .metadata(metadata().type_annotation(field("type").descendant("name"))),
+            // Constructor property promotion (PHP 8.0): a promoted param is
+            // declared in the constructor's parameter list but is a member of
+            // the class, so hoist its FQN to the enclosing type scope.
+            scope("property_promotion_parameter", "Property")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .hoist_to_type_scope()
+                .name_from(field("name").child_of_kind("name"))
+                .metadata(metadata().type_annotation(field("type").descendant("name"))),
             scope("const_declaration", "Constant")
                 .def_kind(DefKind::Property)
                 .no_scope()
@@ -123,14 +132,28 @@ impl DslLanguage for PhpDsl {
             reference("member_call_expression")
                 .name_from(field("name"))
                 .receiver("object"),
+            // $obj?->method() (PHP 8.0 nullsafe)
+            reference("nullsafe_member_call_expression")
+                .name_from(field("name"))
+                .receiver("object"),
             // Foo::method(), self::method(), parent::method(), static::method()
             reference("scoped_call_expression")
                 .name_from(field("name"))
                 .receiver_via(field("scope")),
+            // Foo::CONST, self::VERSION, EnumType::Case used as a value.
+            // The scope and const name are positional `name` children (no
+            // tree-sitter fields): first named child is the scope, last is
+            // the constant/case name.
+            reference("class_constant_access_expression")
+                .name_from(Extract::terminal(Emit::Text).nth(Child, Named, -1))
+                .receiver_via(Extract::one(Child, Named)),
             // foo()
             reference("function_call_expression").name_from(field("function")),
             // new Foo()
             reference("object_creation_expression")
+                .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
+            // Attribute application: #[Route], #[ORM\Entity] (PHP 8.0)
+            reference("attribute")
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
             // Bare type references in parameter/return/property types,
             // `instanceof`, and catch clauses.
@@ -148,16 +171,27 @@ impl DslLanguage for PhpDsl {
             // `$this`/`$repo` are `variable_name`; `self`/`parent`/`static`
             // are `relative_scope`. Both reach SSA via their text, where
             // self_names/super_name bind them to the enclosing type.
-            ident_kinds: &["name", "variable_name", "relative_scope"],
+            // `qualified_name` (`App\Models\User`) is a single class FQN, not
+            // an `Outer::Inner` nesting, so it is one identifier, not a
+            // qualified-type chain split.
+            ident_kinds: &["name", "variable_name", "relative_scope", "qualified_name"],
             this_kinds: &[],
             super_kinds: &[],
-            field_access: vec![FieldAccessEntry {
-                kind: "member_access_expression",
-                object: field("object"),
-                member: field("name"),
-            }],
+            field_access: vec![
+                FieldAccessEntry {
+                    kind: "member_access_expression",
+                    object: field("object"),
+                    member: field("name"),
+                },
+                // $a?->b chains (PHP 8.0 nullsafe property access)
+                FieldAccessEntry {
+                    kind: "nullsafe_member_access_expression",
+                    object: field("object"),
+                    member: field("name"),
+                },
+            ],
             constructor: &[],
-            qualified_type_kinds: &["qualified_name"],
+            qualified_type_kinds: &[],
         })
     }
 
@@ -176,7 +210,23 @@ impl DslLanguage for PhpDsl {
                 .instance_attrs(&["$this->"]),
             binding("simple_parameter", BindingKind::Parameter)
                 .name_from(&["name"])
-                .typed(vec![field("type").descendant("name")], PHP_PRIMITIVE_TYPES)
+                .typed(
+                    vec![
+                        field("type").child_of_kind("qualified_name"),
+                        field("type").descendant("name"),
+                    ],
+                    PHP_PRIMITIVE_TYPES,
+                )
+                .no_value(),
+            binding("property_promotion_parameter", BindingKind::Parameter)
+                .name_from(&["name"])
+                .typed(
+                    vec![
+                        field("type").child_of_kind("qualified_name"),
+                        field("type").descendant("name"),
+                    ],
+                    PHP_PRIMITIVE_TYPES,
+                )
                 .no_value(),
         ]
     }
@@ -294,6 +344,23 @@ fn push_use_clause(clause: &N<'_>, group_prefix: Option<&str>, imports: &mut Vec
     });
 }
 
+/// Resolve a bare class name to its FQN. Used for chain bases that are
+/// type names with no SSA value, e.g. an unimported `Logger::make()` or a
+/// fully-qualified `\Vendor\Bare::call()` (the leading `\` is already
+/// stripped by `resolve_type_name`).
+fn php_resolve_ident_type(graph: &CodeGraph, name: &str) -> Option<String> {
+    let lookup = name.trim_start_matches('\\');
+    for &node in &graph.resolve_scope_nodes(lookup) {
+        if let Some(did) = graph.graph[node].def_id() {
+            let gdef = &graph.defs[did.0 as usize];
+            if gdef.kind.is_type_container() {
+                return Some(graph.str(gdef.fqn).to_string());
+            }
+        }
+    }
+    None
+}
+
 // ── Resolution rules ────────────────────────────────────────────
 
 pub struct PhpRules;
@@ -325,6 +392,7 @@ impl HasRules for PhpRules {
         )
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            resolve_ident_type: Some(php_resolve_ident_type),
             ..Default::default()
         })
     }

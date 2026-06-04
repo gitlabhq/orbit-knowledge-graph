@@ -1,0 +1,385 @@
+name: "PHP 8.0–8.2 — constructor property promotion, readonly properties, readonly classes"
+
+fixtures:
+  - path: src/Infra/Logger.php
+    content: |
+      <?php
+      namespace App\Infra;
+
+      class Logger {
+          public function log(string $msg): void {}
+          public function warn(string $msg): void {}
+      }
+
+  - path: src/Infra/Mailer.php
+    content: |
+      <?php
+      namespace App\Infra;
+
+      class Mailer {
+          public function send(string $to, string $body): void {}
+          public static function deliver(string $to): void {}
+      }
+
+  - path: src/Domain/Money.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      readonly class Money {
+          public function __construct(
+              public int $amount,
+              public string $currency,
+          ) {}
+
+          public function add(Money $other): Money {
+              return new Money($this->amount + $other->amount, $this->currency);
+          }
+
+          public function scale(int $factor): Money {
+              return new Money($this->amount * $factor, $this->currency);
+          }
+      }
+
+  - path: src/Domain/Service.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      use App\Infra\Logger;
+      use App\Infra\Mailer;
+
+      class Service {
+          public function __construct(
+              public Logger $logger,
+              private readonly Mailer $mailer,
+              protected readonly string $name = 'default',
+              public readonly int $retries = 3,
+          ) {}
+
+          public function run(string $to): void {
+              $this->logger->log($this->name);
+              $this->mailer->send($to, $this->name);
+          }
+
+          public function escalate(string $to): void {
+              $this->logger->warn($this->name);
+              Mailer::deliver($to);
+          }
+      }
+
+  - path: src/Domain/Order.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      use App\Infra\Logger;
+
+      final readonly class Order {
+          public function __construct(
+              public string $id,
+              public Money $total,
+              private Logger $logger,
+          ) {}
+
+          public function commit(): Money {
+              $this->logger->log($this->id);
+              $bigger = $this->total->add(new Money(1, $this->total->currency));
+              return $bigger->scale(2);
+          }
+      }
+
+  - path: src/Geometry/Point.php
+    content: |
+      <?php
+      namespace App\Geometry;
+
+      readonly class Point {
+          public function __construct(
+              public float $x,
+              public float $y,
+          ) {}
+
+          public function magnitude(): float {
+              return $this->x * $this->x + $this->y * $this->y;
+          }
+      }
+
+  - path: src/Geometry/Vector.php
+    content: |
+      <?php
+      namespace App\Geometry;
+
+      final readonly class Vector extends Point {
+          public function __construct(
+              public float $x,
+              public float $y,
+              public float $z = 0.0,
+          ) {
+              parent::__construct($x, $y);
+          }
+
+          public function magnitude(): float {
+              return parent::magnitude() + $this->z * $this->z;
+          }
+      }
+
+  - path: src/Domain/Identity.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      class Identity {
+          public readonly int $id;
+          public readonly string $tag;
+          private readonly ?string $secret;
+
+          public function __construct(int $id, string $tag) {
+              $this->id = $id;
+              $this->tag = $tag;
+              $this->secret = null;
+          }
+
+          public function describe(): string {
+              return $this->tag;
+          }
+      }
+
+  - path: src/Domain/Base.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      abstract class Base {
+          public function __construct(
+              protected readonly string $kind,
+          ) {}
+
+          abstract public function describe(): string;
+
+          public function kind(): string {
+              return $this->kind;
+          }
+      }
+
+  - path: src/Domain/Concrete.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      final class Concrete extends Base {
+          public function __construct(
+              string $kind,
+              public readonly int $count,
+          ) {
+              parent::__construct($kind);
+          }
+
+          public function describe(): string {
+              return $this->kind;
+          }
+      }
+
+tests:
+  - name: "Readonly class Money indexed as Class with full FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Domain\Money' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Final readonly class Order indexed as Class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Domain\Order' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Final readonly Vector extends readonly Point"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Geometry\Vector'
+        AND parent.fqn = 'App\Geometry\Point'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Concrete extends abstract Base"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Domain\Concrete'
+        AND parent.fqn = 'App\Domain\Base'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Methods on readonly class Money carry class-scoped FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['App\Domain\Money\__construct',
+                      'App\Domain\Money\add',
+                      'App\Domain\Money\scale']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "Promoted parameters of Service become Property definitions on the class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+        AND d.fqn IN ['App\Domain\Service\logger',
+                      'App\Domain\Service\mailer',
+                      'App\Domain\Service\name',
+                      'App\Domain\Service\retries']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "Promoted parameters of readonly Money become Property definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+        AND d.fqn IN ['App\Domain\Money\amount',
+                      'App\Domain\Money\currency']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  - name: "Explicit readonly properties of Identity become Property definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+        AND d.fqn IN ['App\Domain\Identity\id',
+                      'App\Domain\Identity\tag',
+                      'App\Domain\Identity\secret']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "Service.run -> Logger.log via promoted typed property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Service\run'
+        AND callee.fqn = 'App\Infra\Logger\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Service.run -> Mailer.send via promoted readonly property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Service\run'
+        AND callee.fqn = 'App\Infra\Mailer\send'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Service.escalate -> Logger.warn via promoted property (second method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Service\escalate'
+        AND callee.fqn = 'App\Infra\Logger\warn'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Service.escalate -> Mailer.deliver via static call (unrelated to promotion)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Service\escalate'
+        AND callee.fqn = 'App\Infra\Mailer\deliver'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Order.commit -> Logger.log via private promoted Logger"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Order\commit'
+        AND callee.fqn = 'App\Infra\Logger\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Order.commit -> Money.add via promoted Money property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Order\commit'
+        AND callee.fqn = 'App\Domain\Money\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Vector.__construct -> Point.__construct via parent::"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Geometry\Vector\__construct'
+        AND callee.fqn = 'App\Geometry\Point\__construct'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Vector.magnitude -> Point.magnitude via parent::"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Geometry\Vector\magnitude'
+        AND callee.fqn = 'App\Geometry\Point\magnitude'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Concrete.__construct -> Base.__construct via parent:: in promoted ctor"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Concrete\__construct'
+        AND callee.fqn = 'App\Domain\Base\__construct'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Concrete.describe reads protected promoted property of parent (App\\Domain\\Base\\kind)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property' AND d.fqn = 'App\Domain\Base\kind'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Point.__construct and methods present on readonly class with promoted floats"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['App\Geometry\Point\__construct',
+                      'App\Geometry\Point\magnitude',
+                      'App\Geometry\Vector\__construct',
+                      'App\Geometry\Vector\magnitude']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "All ten PHP files indexed"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 10 }
+      - { unique: path }

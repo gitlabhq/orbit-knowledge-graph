@@ -1,0 +1,273 @@
+name: "PHP enums (8.1-8.4) — pure, backed, interfaces, traits, const, cases()/from()/tryFrom(), typed params"
+
+fixtures:
+  - path: src/Status.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      interface HasLabel {
+          public function label(): string;
+      }
+
+      enum Status: string implements HasLabel {
+          const DEFAULT = 'active';
+
+          case Active = 'active';
+          case Inactive = 'inactive';
+          case Archived = 'archived';
+
+          public function label(): string {
+              return self::format($this->value);
+          }
+
+          public static function format(string $v): string {
+              return $v;
+          }
+
+          public static function defaultStatus(): self {
+              return self::Active;
+          }
+      }
+
+  - path: src/Priority.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      enum Priority: int {
+          const MAX = 10;
+
+          case Low = 1;
+          case Medium = 5;
+          case High = 10;
+
+          public function describe(): string {
+              return 'priority:' . $this->value;
+          }
+
+          public function isMax(): bool {
+              return $this->value === self::MAX;
+          }
+      }
+
+  - path: src/Direction.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      enum Direction {
+          case North;
+          case South;
+          case East;
+          case West;
+
+          public function opposite(): self {
+              return match ($this) {
+                  Direction::North => Direction::South,
+                  Direction::South => Direction::North,
+                  Direction::East => Direction::West,
+                  Direction::West => Direction::East,
+              };
+          }
+
+          public function rotate(): self {
+              return $this->opposite();
+          }
+      }
+
+  - path: src/Describable.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      trait Describable {
+          public function shortDescribe(): string {
+              return 'short';
+          }
+      }
+
+  - path: src/Tier.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      enum Tier: string {
+          use Describable;
+
+          case Free = 'free';
+          case Pro = 'pro';
+          case Enterprise = 'enterprise';
+
+          public function announce(): string {
+              return $this->shortDescribe();
+          }
+      }
+
+  - path: src/Web/Controller.php
+    content: |
+      <?php
+      namespace App\Web;
+
+      use App\Domain\Status;
+      use App\Domain\Priority;
+      use App\Domain\Direction;
+
+      class Controller {
+          public function showStatus(Status $status): string {
+              return $status->label();
+          }
+
+          public function defaultLabel(): string {
+              return Status::defaultStatus()->label();
+          }
+
+          public function priorityFromInt(int $v): ?Priority {
+              return Priority::tryFrom($v);
+          }
+
+          public function priorityStrict(int $v): Priority {
+              return Priority::from($v);
+          }
+
+          public function allDirections(): array {
+              return Direction::cases();
+          }
+
+          public function priorityMax(): int {
+              return Priority::MAX;
+          }
+
+          public function defaultStatusConstant(): string {
+              return Status::DEFAULT;
+          }
+      }
+
+tests:
+  # ── Enum and case definitions ──────────────────────────────────
+  - name: "All enums indexed with Enum definition_type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Enum'
+        AND d.fqn IN ['App\Domain\Status', 'App\Domain\Priority',
+                      'App\Domain\Direction', 'App\Domain\Tier']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "Backed string enum cases get EnumCase + namespace-qualified FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumCase'
+        AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Inactive', 'App\Domain\Status\Archived']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "Backed int enum cases get EnumCase definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumCase'
+        AND d.fqn IN ['App\Domain\Priority\Low', 'App\Domain\Priority\Medium', 'App\Domain\Priority\High']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+
+  - name: "Pure enum cases (no backing) are still indexed as EnumCase"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumCase'
+        AND d.fqn IN ['App\Domain\Direction\North', 'App\Domain\Direction\South',
+                      'App\Domain\Direction\East', 'App\Domain\Direction\West']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+
+  - name: "Enum methods scoped under the enum FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['App\Domain\Status\label', 'App\Domain\Status\format',
+                      'App\Domain\Status\defaultStatus', 'App\Domain\Priority\describe',
+                      'App\Domain\Direction\opposite', 'App\Domain\Tier\announce']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { unique: fqn }
+
+  - name: "Const declared inside an enum is indexed as Constant under the enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND d.fqn IN ['App\Domain\Status\DEFAULT', 'App\Domain\Priority\MAX']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+
+  # ── Inheritance edges ─────────────────────────────────────────
+  - name: "Enum implementing an interface produces an Extends edge"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Domain\Status' AND p.fqn = 'App\Domain\HasLabel'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Enum using a trait produces an Extends edge to the trait"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Domain\Tier' AND p.fqn = 'App\Domain\Describable'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Calls inside enum methods (self::, $this->, match) ────────
+  - name: "Enum method self:: static call: Status.label -> Status.format"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Domain\Status\label' AND b.fqn = 'App\Domain\Status\format'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "$this->opposite() inside Direction.rotate resolves to Direction.opposite"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Domain\Direction\rotate' AND b.fqn = 'App\Domain\Direction\opposite'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait method inherited by enum: Tier.announce -> Describable.shortDescribe"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Domain\Tier\announce' AND b.fqn = 'App\Domain\Describable\shortDescribe'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  # ── Cross-file enum usage from typed parameter ────────────────
+  - name: "Typed enum parameter dispatch: Controller.showStatus -> Status.label"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Web\Controller\showStatus' AND b.fqn = 'App\Domain\Status\label'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file static enum method call: Controller.defaultLabel -> Status.defaultStatus"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Web\Controller\defaultLabel' AND b.fqn = 'App\Domain\Status\defaultStatus'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS a
+    assert:
+      - { row_count: 1 }
