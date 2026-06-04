@@ -192,6 +192,15 @@ impl DslLanguage for PhpDsl {
             ],
             constructor: &[],
             qualified_type_kinds: &[],
+            // PHP `new Foo()` / `new \App\Query\Builder()` — the class is the
+            // first positional `name` / `qualified_name` child (no field).
+            // Mirrors the `object_creation_expression` reference rule.
+            positional_constructor: vec![PositionalConstructor {
+                kind: "object_creation_expression",
+                type_extract: Extract::one(Child, AnyKind(&["name", "qualified_name"])),
+            }],
+            // `(new Foo())->bar()` / `($x)->bar()` — walk through the parens.
+            transparent_kinds: &["parenthesized_expression"],
         })
     }
 
@@ -207,6 +216,22 @@ impl DslLanguage for PhpDsl {
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right")
+                .typed(
+                    vec![
+                        // $x = new \Vendor\Foo\Bar(...): qualified class name.
+                        // resolve_type_name strips the leading `\` so the FQN
+                        // matches the indexed class.
+                        field("right")
+                            .where_(Kind("object_creation_expression"))
+                            .child_of_kind("qualified_name"),
+                        // $x = new Foo(...): bare class name resolves via
+                        // import_map (use Foo;) or module_prefix (same namespace).
+                        field("right")
+                            .where_(Kind("object_creation_expression"))
+                            .child_of_kind("name"),
+                    ],
+                    PHP_PRIMITIVE_TYPES,
+                )
                 .instance_attrs(&["$this->"]),
             binding("simple_parameter", BindingKind::Parameter)
                 .name_from(&["name"])
@@ -264,6 +289,10 @@ impl DslLanguage for PhpDsl {
         types::SsaConfig {
             self_names: &["$this", "self", "static"],
             super_name: Some("parent"),
+            // `function foo(): self|static` exposes the declaring class so
+            // chains like `$this->foo()->bar()` continue; `parent` rewrites
+            // to the first declared super.
+            rewrite_self_in_return_type: true,
             ..Default::default()
         }
     }

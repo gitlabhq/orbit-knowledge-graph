@@ -336,6 +336,34 @@ impl LanguageSpec {
                 break;
             }
 
+            // Positional constructor (e.g. PHP `object_creation_expression`,
+            // whose class is the first named child rather than a tree-sitter
+            // field). Walks the user-supplied Extract to read the class name,
+            // resolves it via the import_map/module_prefix, and emits a single
+            // `New` step.
+            let mut matched_pctor = false;
+            for pctor in &cc.positional_constructor {
+                if kind_ref == pctor.kind {
+                    if let Some(name) = pctor.type_extract.apply(&current) {
+                        let resolved = resolve_type_name(&name, import_map, module_prefix, sep);
+                        trace!(
+                            tracer,
+                            ChainStepMatched {
+                                node_kind: kind_ref.to_string(),
+                                category: "New(positional)".to_string(),
+                                text: resolved.clone(),
+                            }
+                        );
+                        chain.push(ExpressionStep::New(resolved.into()));
+                    }
+                    matched_pctor = true;
+                    break;
+                }
+            }
+            if matched_pctor {
+                break;
+            }
+
             // ── Recursive cases (defer step, advance inward) ──
 
             // Field access (obj.field) — defer the Field step, advance to obj
@@ -362,6 +390,20 @@ impl LanguageSpec {
             }
             if matched_fa {
                 continue;
+            }
+
+            // Transparent wrappers — advance through to the inner expression.
+            // For PHP `parenthesized_expression`, which wraps `(new Foo())`
+            // and has no tree-sitter field. Pick the first NAMED child to
+            // skip the literal `(` / `)` tokens.
+            if cc.transparent_kinds.contains(&kind_ref) {
+                // Bind on its own line so the `children()` borrow of `current`
+                // drops before the reassignment below.
+                let inner = current.children().find(|c| c.is_named());
+                if let Some(inner) = inner {
+                    current = inner;
+                    continue;
+                }
             }
 
             // Call expression — defer the Call step, advance to receiver
@@ -798,7 +840,7 @@ impl LanguageSpec {
         }
 
         // Scope matching → push def + optional SSA self/super writes
-        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+        if let Some(mut m) = self.evaluate_scope(node, nk, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
@@ -848,6 +890,44 @@ impl LanguageSpec {
             };
 
             let is_type_scope = m.def_kind.is_type_container();
+
+            // Opt-in: rewrite a self/static/parent return-type marker to the
+            // declaring class (or its first super), so chain hops on the call
+            // result can continue. The `resolve` closure in `evaluate_scope`
+            // namespace-prefixes any bare name, so the stored value is either
+            // equal to a self_name (no module prefix) or ends with
+            // `{sep}{self_name}` (module-prefixed). At this point
+            // `enclosing_def_stack` holds only PARENT defs (the current scope
+            // is pushed later), so the nearest type container is the declarer.
+            if self.ssa_config.rewrite_self_in_return_type
+                && let Some(meta) = m.metadata.as_mut()
+                && let Some(rt) = meta.return_type.as_ref()
+            {
+                let last_seg = rt.rsplit_once(sep).map_or(rt.as_str(), |(_, s)| s);
+                let is_self = self.ssa_config.self_names.contains(&last_seg);
+                let is_super = self.ssa_config.super_name.is_some_and(|n| n == last_seg);
+                if is_self || is_super {
+                    let enclosing_type = state.enclosing_def_stack.iter().rev().find_map(|&idx| {
+                        let d = &state.defs[idx as usize];
+                        d.kind
+                            .is_type_container()
+                            .then(|| (idx, d.fqn.as_str().to_string()))
+                    });
+                    if let Some((enclosing_idx, enclosing_fqn)) = enclosing_type {
+                        if is_self {
+                            meta.return_type = Some(enclosing_fqn);
+                        } else if is_super
+                            && let Some(parent_fqn) = state.defs[enclosing_idx as usize]
+                                .metadata
+                                .as_ref()
+                                .and_then(|em| em.super_types.first())
+                                .cloned()
+                        {
+                            meta.return_type = Some(parent_fqn);
+                        }
+                    }
+                }
+            }
 
             let def_name = m.name.clone();
             trace!(

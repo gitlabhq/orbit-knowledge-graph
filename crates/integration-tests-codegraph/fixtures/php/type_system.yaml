@@ -313,11 +313,9 @@ tests:
   # Builder.step(): self — calling ->step() on $this yields a
   # Builder, so the chain $this->step()->finish() should resolve
   # to Builder.finish.
-  # KNOWN GAP: a `self`/`static` return type is not yet rewritten to the
-  # declaring class, so `$this->step()->finish()` (where step(): self) cannot
-  # continue the chain. Flip to `row_count: 1` when self/static return-type
-  # rewrite lands. The direct `$this->step()` call below still resolves.
-  - name: "Known gap: self return-type chain FluentBuilder.go -> Builder.finish"
+  # `step(): self` declared on Builder is rewritten to the declaring class, so
+  # the chain `$this->step()->finish()` continues to Builder.finish.
+  - name: "self return-type chain FluentBuilder.go -> Builder.finish"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Service\FluentBuilder\go'
@@ -325,7 +323,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
-      - { empty: true }
+      - { row_count: 1 }
 
   - name: "FluentBuilder extends Builder"
     query: |

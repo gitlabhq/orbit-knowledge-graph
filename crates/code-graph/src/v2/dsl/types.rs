@@ -196,9 +196,21 @@ pub struct FieldAccessEntry {
     pub member: Extract,
 }
 
+/// Constructor entries whose class identifier is a positional child rather
+/// than a tree-sitter field. PHP's `object_creation_expression` exposes the
+/// class name as the first named child (`name` / `qualified_name`), not
+/// behind a field, so `constructor: &[(kind, type_field)]` cannot match it.
+/// The Extract is applied to the constructor node and must return the bare
+/// (possibly absolute) class name; the engine then runs `resolve_type_name`.
+pub struct PositionalConstructor {
+    pub kind: &'static str,
+    pub type_extract: Extract,
+}
+
 /// Per-language configuration for expression chain extraction.
 /// Tells the engine how to recognize identifiers, this/super,
 /// field access, and constructors in the tree-sitter AST.
+#[derive(Default)]
 pub struct ChainConfig {
     /// Node kinds that are bare identifiers (e.g. `["identifier"]` for Java).
     pub ident_kinds: &'static [&'static str],
@@ -216,6 +228,13 @@ pub struct ChainConfig {
     /// into chain steps (Ident for the base, Field for nested parts,
     /// New for the final segment) instead of treating it as a single name.
     pub qualified_type_kinds: &'static [&'static str],
+    /// Constructor matchers whose class name is positional (no field). Empty
+    /// by default. Used by PHP for `object_creation_expression`.
+    pub positional_constructor: Vec<PositionalConstructor>,
+    /// Node kinds that wrap a single expression child and should be walked
+    /// through during chain extraction (e.g. PHP `parenthesized_expression`).
+    /// Empty by default; preserves existing behavior for all other languages.
+    pub transparent_kinds: &'static [&'static str],
 }
 
 impl Rule for ReferenceRule {
@@ -774,6 +793,13 @@ pub struct SsaConfig {
     /// `Receiver.new(args)`, the SSA value is `Type(Receiver)` instead
     /// of `Alias(new)`. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
+    /// Opt-in: when a scope def's `return_type` metadata resolves to one
+    /// of `self_names` or `super_name`, rewrite it to the enclosing type's
+    /// FQN (or the enclosing type's first super FQN for `super_name`).
+    /// PHP `function step(): self { ... }` declared on `Builder` should
+    /// expose `Builder` so a chain hop on the call result can continue.
+    /// Off by default; existing languages keep current behavior.
+    pub rewrite_self_in_return_type: bool,
 }
 
 // ── Hooks ───────────────────────────────────────────────────────

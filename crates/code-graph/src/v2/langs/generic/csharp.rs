@@ -164,6 +164,7 @@ impl DslLanguage for CSharpDsl {
             }],
             constructor: &[("object_creation_expression", "type")],
             qualified_type_kinds: &["qualified_name"],
+            ..Default::default()
         })
     }
 

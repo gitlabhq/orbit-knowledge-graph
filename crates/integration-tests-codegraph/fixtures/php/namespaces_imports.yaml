@@ -286,11 +286,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP (investigate): an aliased `use function X as h;` call `h()` does
-  # not resolve, while the non-aliased `use function Y; Y();` form does. Likely
-  # a function-vs-class import disambiguation issue for aliased function
-  # imports. Flip to `row_count: 1` once aliased function imports resolve.
-  - name: "Known gap: aliased use-function h() -> Vendor\\Util\\helper"
+  - name: "use function: aliased call resolves (h -> Vendor\\Util\\helper)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FunctionConstUser\run'
@@ -298,7 +294,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
-      - { empty: true }
+      - { row_count: 1 }
 
   # ── Multiple use aliases for same-named classes ─────────────────
   - name: "Two aliases for same-named class disambiguate to different FQNs"
@@ -344,12 +340,7 @@ tests:
     assert:
       - { row_count: 1 }
 
-  # KNOWN GAP: `$b = new \Vendor\Other\Bare(); $b->run()` does not resolve —
-  # constructor type-tracking for an absolute-FQN `new` does not flow the type
-  # to the local. The fully-qualified STATIC call `\Vendor\Other\Bare::call()`
-  # and the typed-parameter form DO resolve. Flip to `row_count: 1` when
-  # `new`-via-local type tracking lands for absolute names.
-  - name: "Known gap: new \\Vendor\\Other\\Bare via local -> $b->run()"
+  - name: "new \\Vendor\\Other\\Bare via local -> $b->run() resolves"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'App\Consumer\FqnNoImport\go'
@@ -357,7 +348,7 @@ tests:
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS c
     assert:
-      - { empty: true }
+      - { row_count: 1 }
 
   # ── Cross-file: deep-namespace inheritance + call ───────────────
   - name: "Deep-namespace child extends imported base across files"

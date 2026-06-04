@@ -193,6 +193,7 @@ impl DslLanguage for JavaDsl {
             }],
             constructor: &[("object_creation_expression", "type")],
             qualified_type_kinds: &["scoped_type_identifier"],
+            ..Default::default()
         })
     }
 

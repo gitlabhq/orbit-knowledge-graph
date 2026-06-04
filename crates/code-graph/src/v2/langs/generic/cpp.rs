@@ -109,6 +109,7 @@ impl DslLanguage for CppDsl {
             }],
             constructor: &[],
             qualified_type_kinds: &["qualified_identifier"],
+            ..Default::default()
         })
     }
 
