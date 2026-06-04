@@ -192,11 +192,12 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             // Don't add traversal_path equality to FK JOINs: entities
             // at different depths have different TP prefixes (e.g.
             // WorkItem at '1/100/' vs Project at '1/100/1000/').
-            let node_sort_key = target_np
-                .table
-                .as_deref()
-                .and_then(|t| plan.table_sort_keys.get(t))
-                .map(|v| v.as_slice());
+            let target_table = target_np.table.as_deref().ok_or_else(|| {
+                QueryError::Lowering(format!("node '{}' has no table", target_np.alias))
+            })?;
+            let node_sort_key = plan.table_sort_keys.get(target_table).ok_or_else(|| {
+                QueryError::Lowering(format!("no sort key for node table '{target_table}'"))
+            })?;
             let (new_from, ns, nw) = emit_node_join_with_narrowing(
                 from,
                 target_np,

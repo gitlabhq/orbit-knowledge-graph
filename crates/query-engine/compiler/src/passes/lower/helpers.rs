@@ -85,7 +85,7 @@ pub(super) fn emit_node_join_with_narrowing(
     edge_col: &str,
     use_traversal_path_join: bool,
     narrow: Option<NarrowSource>,
-    sort_key: Option<&[String]>,
+    sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     emit_node_join_inner(
         from,
@@ -98,11 +98,7 @@ pub(super) fn emit_node_join_with_narrowing(
     )
 }
 
-/// JOIN a node's latest-row scan into the FROM tree.
-///
-/// When `sort_key` is provided, uses `LIMIT 1 BY` with PK-prefixed
-/// ORDER BY instead of FINAL for dedup. This avoids the ReplacingSorted
-/// merge which reads all columns.
+/// JOIN a node's latest-row LIMIT BY scan into the FROM tree.
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -110,7 +106,7 @@ fn emit_node_join_inner(
     edge_col: &str,
     use_traversal_path_join: bool,
     narrow: Option<NarrowSource>,
-    sort_key: Option<&[String]>,
+    sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = np
         .table
@@ -130,37 +126,25 @@ fn emit_node_join_inner(
         wheres.push(in_predicate);
     }
 
-    let node_scan = if let Some(sk) = sort_key.filter(|sk| !sk.is_empty()) {
-        let mut order_by: Vec<OrderExpr> = sk
-            .iter()
-            .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-            .collect();
-        order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
 
-        let limit_by_cols: Vec<Expr> = sk.iter().map(|col| Expr::col(alias, col)).collect();
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
 
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                order_by,
-                limit_by: Some((1, limit_by_cols)),
-                ..Default::default()
-            },
-            alias,
-        )
-    } else {
-        TableRef::subquery(
-            Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan_final(table, alias),
-                where_clause: Expr::conjoin(wheres),
-                ..Default::default()
-            },
-            alias,
-        )
-    };
+    let node_scan = TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(table, alias),
+            where_clause: Expr::conjoin(wheres),
+            order_by,
+            limit_by: Some((1, limit_by_cols)),
+            ..Default::default()
+        },
+        alias,
+    );
 
     let joined = TableRef::join(
         JoinType::Inner,
