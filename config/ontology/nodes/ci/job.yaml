@@ -81,7 +81,7 @@ properties:
     description: "Target environment name (e.g. production, staging)."
 
   when:
-    type: string
+    type: enum
     source: when
     nullable: false
     description: "Run condition."

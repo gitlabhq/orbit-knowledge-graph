@@ -52,6 +52,7 @@ properties:
     source: environment_type
     nullable: false
     description: "Category from name prefix before first '/' (e.g. 'review'); empty when no '/'."
+    selectivity: low
 
   state:
     type: enum
