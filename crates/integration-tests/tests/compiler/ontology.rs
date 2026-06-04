@@ -880,7 +880,7 @@ fn hydration_skips_security_context() {
     let rendered = result.base.render();
 
     assert!(
-        !rendered.contains("traversal_path"),
+        !rendered.contains("arrayExists"),
         "hydration should skip security filters"
     );
     assert!(

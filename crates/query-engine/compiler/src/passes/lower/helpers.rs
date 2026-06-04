@@ -383,14 +383,16 @@ pub(super) fn dedup_edge_scan(
     TableRef::subquery(query, alias)
 }
 
-/// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
-/// single-hop edge aggregations, with WHERE predicates injected.
-///
-/// The predicates appear in the inner WHERE (for PK index pruning) and
-/// are also stored by the caller for duplication into `-If` combinators.
-pub(super) fn limit_by_edge_scan(
-    edge_table: &str,
+/// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
+/// over a plain (non-`FINAL`) scan, with WHERE predicates injected for PK
+/// pruning. Reproduces `ReplacingMergeTree` latest-row semantics while keeping
+/// column pruning and projections eligible. `select` is the projection (e.g.
+/// `*` for edge aggregations, or the requested columns for hydration);
+/// `sort_key` is the dedup identity (the table's full ORDER BY key).
+pub(super) fn limit_by_scan(
+    table: &str,
     alias: &str,
+    select: Vec<SelectExpr>,
     sort_key: &[String],
     where_predicates: Vec<Expr>,
 ) -> TableRef {
@@ -403,8 +405,8 @@ pub(super) fn limit_by_edge_scan(
     let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
 
     let query = Query {
-        select: vec![SelectExpr::star()],
-        from: TableRef::scan(edge_table, alias),
+        select,
+        from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(where_predicates),
         order_by,
         limit_by: Some((1, limit_by_cols)),

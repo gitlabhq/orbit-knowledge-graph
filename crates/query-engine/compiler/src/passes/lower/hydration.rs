@@ -1,7 +1,8 @@
 //! Hydration emit: fetch node properties for a set of IDs.
 //!
-//! Produces a UNION ALL of per-entity latest-row scans with `FINAL` and
-//! `_deleted=false` filtering.
+//! Produces a UNION ALL of per-entity latest-row scans. Each arm dedups with
+//! `LIMIT 1 BY <sort_key>` over a plain scan (not `FINAL`), keeping column
+//! pruning and projections, then filters `_deleted = false`.
 //!
 //! When the base query provided traversal paths, each arm injects a
 //! `startsWith(traversal_path, tp)` predicate so ClickHouse can prune
@@ -13,7 +14,9 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use crate::passes::plan::HydrationNodePlan;
-use crate::passes::shared::dedup_subquery;
+use crate::passes::shared::deleted_false;
+
+use super::helpers::limit_by_scan;
 
 const ARRAY_EXISTS_PATH_THRESHOLD: usize = 256;
 
@@ -99,16 +102,17 @@ fn emit_arm(node: &HydrationNodePlan, is_dynamic: bool) -> Result<Query> {
         scan_where.push(id_filter);
     }
 
-    let (from, deleted) = dedup_subquery(
-        alias,
-        &node.table,
-        vec![
-            SelectExpr::col(alias, pk),
-            SelectExpr::col(alias, DELETED_COLUMN),
-            SelectExpr::star(),
-        ],
-        scan_where,
-    );
+    let mut inner_select = vec![
+        SelectExpr::col(alias, pk),
+        SelectExpr::col(alias, DELETED_COLUMN),
+    ];
+    for col in &node.columns {
+        if col != pk && col != DELETED_COLUMN {
+            inner_select.push(SelectExpr::col(alias, col));
+        }
+    }
+    let from = limit_by_scan(&node.table, alias, inner_select, &node.sort_key, scan_where);
+    let deleted = deleted_false(alias);
 
     Ok(Query {
         select: vec![
@@ -262,6 +266,7 @@ mod tests {
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
             traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
+            sort_key: vec!["id".to_string()],
         }
     }
 
@@ -375,6 +380,7 @@ mod tests {
             node_ids: vec![1],
             columns: vec!["title".into()],
             traversal_paths: paths.clone(),
+            sort_key: vec!["id".to_string()],
         };
 
         let node = emit_hydration(&[plan], 10, true).unwrap();
@@ -417,6 +423,7 @@ mod tests {
             node_ids: vec![1],
             columns: vec!["title".into()],
             traversal_paths: paths,
+            sort_key: vec!["id".to_string()],
         };
 
         let node = emit_hydration(&[plan], 10, false).unwrap();

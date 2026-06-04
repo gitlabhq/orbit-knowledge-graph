@@ -1634,7 +1634,7 @@ mod tests {
     }
 
     #[test]
-    fn hydration_uses_final_for_latest_rows() {
+    fn hydration_uses_limit_by_for_latest_rows() {
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: vec![InputNode {
@@ -1656,12 +1656,12 @@ mod tests {
             compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
-            sql.contains(" FINAL"),
-            "hydration should use FINAL for node-table reads, got:\n{sql}"
+            !sql.contains(" FINAL"),
+            "hydration should dedup via LIMIT BY, not FINAL, got:\n{sql}"
         );
         assert!(
-            !sql.contains("LIMIT 1 BY"),
-            "hydration should not use manual LIMIT BY dedup, got:\n{sql}"
+            sql.contains("LIMIT 1 BY"),
+            "hydration should dedup latest rows via LIMIT 1 BY, got:\n{sql}"
         );
     }
 
