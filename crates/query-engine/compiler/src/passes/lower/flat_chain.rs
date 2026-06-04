@@ -11,7 +11,7 @@ use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
-    push_edge_predicates,
+    node_id_pin_predicates, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -57,6 +57,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut from: Option<TableRef> = None;
     let mut tagged_nodes: HashSet<String> = HashSet::new();
     let mut narrowed_nodes: HashSet<String> = HashSet::new();
+    let mut filter_only_done: HashSet<String> = HashSet::new();
     let mut edge_if_predicates: Option<Expr> = None;
 
     for (i, hop) in plan.hops.iter().enumerate() {
@@ -103,13 +104,41 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 inner_preds,
             ));
         } else {
+            let mut narrow_in: Vec<Expr> = Vec::new();
+            emit_filter_narrowing(
+                &mut narrow_in,
+                hop,
+                &plan.nodes,
+                &alias,
+                start_col,
+                end_col,
+                &mut ctes,
+                &mut narrowed_nodes,
+            );
+            for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+                let Some(np) = plan.nodes.get(node_alias) else {
+                    continue;
+                };
+                let elevated_skip =
+                    matches!(np.hydration, HydrationStrategy::Skip) && np.needs_elevated_filter;
+                let is_filter_only = matches!(np.hydration, HydrationStrategy::FilterOnly);
+                if (is_filter_only || elevated_skip) && filter_only_done.insert(node_alias.clone())
+                {
+                    narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                }
+            }
+
             let edge_source = if is_multi_hop {
                 let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
                 where_parts.extend(union_wheres);
+                where_parts.extend(narrow_in);
                 union
             } else if dedup_edges {
-                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
+                let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
+                inner.extend(narrow_in);
+                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
             } else {
+                where_parts.extend(narrow_in);
                 TableRef::scan(&hop.edge_table, &alias)
             };
 
@@ -155,24 +184,17 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 end_col,
                 &mut tagged_nodes,
             );
-            emit_node_ids_on_edge(
-                &mut where_parts,
-                &alias,
-                hop,
-                &plan.nodes,
-                start_col,
-                end_col,
-            );
-            emit_filter_narrowing(
-                &mut where_parts,
-                hop,
-                &plan.nodes,
-                &alias,
-                start_col,
-                end_col,
-                &mut ctes,
-                &mut narrowed_nodes,
-            );
+            let used_dedup = dedup_edges && !is_multi_hop;
+            if !used_dedup {
+                emit_node_ids_on_edge(
+                    &mut where_parts,
+                    &alias,
+                    hop,
+                    &plan.nodes,
+                    start_col,
+                    end_col,
+                );
+            }
         }
 
         edge_aliases.push(alias);
@@ -245,15 +267,13 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(nw);
                 }
                 HydrationStrategy::FilterOnly => {
-                    where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                    if !filter_only_done.contains(node_alias) {
+                        where_parts
+                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                    }
                 }
                 HydrationStrategy::Skip => {
-                    // Elevated-access nodes always need a FilterOnly CTE so
-                    // the security pass can enforce the stricter
-                    // min_access_level. Without the CTE, SecurityPass never
-                    // sees the node's table and can't inject the role-gated
-                    // startsWith filter.
-                    if np.needs_elevated_filter {
+                    if np.needs_elevated_filter && !filter_only_done.contains(node_alias) {
                         where_parts
                             .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }

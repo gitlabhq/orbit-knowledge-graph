@@ -415,6 +415,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dedup_edge_scan_pushes_filter_cte_in_subquery_into_inner_where() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+        let (e0_inner, rest) = sql
+            .split_once(") AS e0 INNER JOIN")
+            .expect("e0 dedup subquery is closed before the join");
+        let (e1_inner, post_join) = rest
+            .split_once(") AS e1 ON")
+            .expect("e1 dedup subquery is closed before ON");
+        let outer = post_join
+            .split_once(" WHERE ")
+            .map(|(_, tail)| tail)
+            .unwrap_or("");
+
+        for clause in [
+            "e0.source_id = 490855697",
+            "e0.target_id IN (SELECT id FROM _filter_label)",
+        ] {
+            assert!(
+                e0_inner.contains(clause),
+                "expected `{clause}` inside e0 dedup inner WHERE, got:\n{e0_inner}"
+            );
+        }
+        for clause in [
+            "e1.source_id = 490855697",
+            "e1.target_id IN (SELECT id FROM _filter_project)",
+        ] {
+            assert!(
+                e1_inner.contains(clause),
+                "expected `{clause}` inside e1 dedup inner WHERE, got:\n{e1_inner}"
+            );
+        }
+        for kind in [
+            "e0.relationship_kind = 'HAS_LABEL'",
+            "e0.source_kind = 'MergeRequest'",
+            "e0.target_kind = 'Label'",
+            "e1.relationship_kind = 'IN_PROJECT'",
+            "e1.target_kind = 'Project'",
+        ] {
+            assert!(
+                outer.contains(kind),
+                "kind predicate `{kind}` must stay in outer WHERE so CH's PredicateRewriteVisitor handles it, got:\n{outer}"
+            );
+            assert!(
+                !e0_inner.contains(kind) && !e1_inner.contains(kind),
+                "kind predicate `{kind}` must not be duplicated into dedup inner WHERE"
+            );
+        }
+    }
+
     /// Regression for #801: when two or more hops self-join the edge table,
     /// each edge scan must deduplicate ReplacingMergeTree row versions before
     /// the join. Without it the self-join multiplies un-merged versions of
