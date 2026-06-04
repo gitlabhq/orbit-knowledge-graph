@@ -46,8 +46,7 @@ impl BillingObserver {
         }
     }
 
-    fn build_event(&self) -> Option<BillingEvent> {
-        let correlation_id = correlation_id_string();
+    fn build_event(&self, correlation_id: &str) -> Option<(BillingEvent, &'static str)> {
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
             tracing::warn!(
                 user_id = self.inputs.user_id,
@@ -114,7 +113,7 @@ impl BillingObserver {
         }));
 
         match builder.build() {
-            Ok(event) => Some(event),
+            Ok(event) => Some((event, realm)),
             Err(e) => {
                 tracing::error!(
                     error = %e,
@@ -153,33 +152,34 @@ impl PipelineObserver for BillingObserver {
     }
 
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
+        let correlation_id = correlation_id_string();
         if self.errored.get() {
             tracing::debug!(
                 user_id = self.inputs.user_id,
                 source_type = %self.inputs.source_type,
-                correlation_id = %correlation_id_string(),
+                correlation_id = %correlation_id,
                 "billing event skipped: pipeline reported an error"
             );
             return;
         }
         if let Some(ref tracker) = self.tracker
-            && let Some(event) = self.build_event()
+            && let Some((event, realm)) = self.build_event(&correlation_id)
         {
             let _span = tracing::info_span!(
                 "billing.track",
                 query_type = self.query_type,
                 user_id = self.inputs.user_id,
-                realm = ?self.inputs.realm,
+                realm = realm,
                 root_namespace_id = ?self.inputs.root_namespace_id,
                 deployment_type = ?self.inputs.deployment_type,
-                correlation_id = %correlation_id_string(),
+                correlation_id = %correlation_id,
             )
             .entered();
             match tracker.track(event) {
                 Ok(()) => {
                     tracing::debug!(
                         user_id = self.inputs.user_id,
-                        realm = ?self.inputs.realm,
+                        realm = realm,
                         source_type = %self.inputs.source_type,
                         query_type = self.query_type,
                         "billing event enqueued for delivery"
@@ -187,11 +187,10 @@ impl PipelineObserver for BillingObserver {
                     METRICS.emitted.add(1, &[]);
                 }
                 Err(e) => {
-                    let correlation_id = correlation_id_string();
                     tracing::error!(
                         error = %e,
                         user_id = self.inputs.user_id,
-                        realm = ?self.inputs.realm,
+                        realm = realm,
                         query_type = self.query_type,
                         source_type = %self.inputs.source_type,
                         root_namespace_id = ?self.inputs.root_namespace_id,
