@@ -30,6 +30,8 @@
     "queried_namespace_ids": {
       "description": "Namespace IDs associated with the query.",
       "type": ["array", "null"],
+      "maxItems": 100,
+      "uniqueItems": true,
       "items": {
         "type": "integer",
         "minimum": 0,
@@ -84,11 +86,15 @@
     "entity_types": {
       "description": "Distinct entity types referenced by node clauses.",
       "type": ["array", "null"],
+      "maxItems": 100,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 64 }
     },
     "relationship_types": {
       "description": "Distinct relationship types referenced.",
       "type": ["array", "null"],
+      "maxItems": 100,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 64 }
     },
     "filter_count": {
@@ -99,11 +105,15 @@
     "filter_fields": {
       "description": "Distinct field names used in filters.",
       "type": ["array", "null"],
+      "maxItems": 1000,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 64 }
     },
     "filter_ops": {
       "description": "Distinct filter operators used (eq, gt, contains, etc.).",
       "type": ["array", "null"],
+      "maxItems": 14,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 32 }
     },
     "is_search": {
@@ -131,6 +141,8 @@
     "agg_functions": {
       "description": "Distinct aggregation functions used (count, sum, avg, etc.).",
       "type": ["array", "null"],
+      "maxItems": 6,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 16 }
     },
     "group_by_count": {
@@ -164,6 +176,8 @@
     "requested_columns": {
       "description": "Distinct column names explicitly requested across all nodes.",
       "type": ["array", "null"],
+      "maxItems": 1000,
+      "uniqueItems": true,
       "items": { "type": "string", "maxLength": 64 }
     },
     "column_selection_mode": {
