@@ -10,6 +10,7 @@
 mod archive;
 pub mod filter;
 mod filtered;
+pub mod git;
 mod gix_extract;
 mod packfile;
 mod packfile_checkout;

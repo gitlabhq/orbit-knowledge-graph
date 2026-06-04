@@ -8,9 +8,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use flate2::read::GzDecoder;
-use sha2::{Digest, Sha256};
-
-use crate::{BenchError, BenchResult, Method, MethodOutput};
+use crate::{git, BenchError, BenchResult, Method, MethodOutput};
 
 pub struct ArchiveMethod;
 
@@ -103,7 +101,7 @@ fn extract_tar_gz(data: &[u8], output_dir: &Path) -> Result<BTreeMap<String, Str
             .read_to_end(&mut content)
             .map_err(|e| crate::BenchError::Extract(e.to_string()))?;
 
-        let hash = hex_sha256(&content);
+        let hash = git::hex_sha256(&content);
 
         // Write to disk
         let dest = output_dir.join(&stripped);
@@ -120,8 +118,4 @@ fn extract_tar_gz(data: &[u8], output_dir: &Path) -> Result<BTreeMap<String, Str
     Ok(file_hashes)
 }
 
-fn hex_sha256(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
-}
+

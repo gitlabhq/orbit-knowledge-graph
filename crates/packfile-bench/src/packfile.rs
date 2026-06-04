@@ -1,6 +1,5 @@
 //! Method B: git rev-list --objects | git pack-objects --stdout
-//! Then parse the packfile with git cat-file --batch (single process).
-//! This is what we'd do with the proposed GetTreePackfile RPC.
+//! Then extract via git ls-tree -r + git cat-file --batch (single process each).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -8,9 +7,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
-use sha2::{Digest, Sha256};
-
-use crate::{BenchError, BenchResult, Method, MethodOutput};
+use crate::{git, BenchError, BenchResult, Method, MethodOutput};
 
 pub struct PackCatfileMethod;
 
@@ -22,61 +19,11 @@ impl Method for PackCatfileMethod {
     }
 }
 
-/// Run the packfile method: execute rev-list | pack-objects, then parse and extract.
-pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<BenchResult, crate::BenchError> {
-    // First resolve the root tree OID (Gitaly would do this too)
-    let root_tree_oid = resolve_tree_oid(repo_path, commit)?;
+pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<BenchResult, BenchError> {
+    let (_pack_data, cmd_duration, root_tree_oid) =
+        git::generate_packfile_stdout(repo_path, commit, &[])?;
+    let output_bytes = _pack_data.len() as u64;
 
-    // Phase 1: Run git commands (simulates Gitaly server-side work)
-    let cmd_start = Instant::now();
-
-    let mut rev_list = Command::new("git")
-        .args(["rev-list", "--objects", "--stdin"])
-        .current_dir(repo_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| crate::BenchError::Git(format!("rev-list spawn: {e}")))?;
-
-    // Write the tree ref to rev-list's stdin, then close it
-    {
-        let stdin = rev_list.stdin.take().unwrap();
-        let mut stdin = stdin;
-        writeln!(stdin, "{}^{{tree}}", commit)
-            .map_err(|e| crate::BenchError::Git(format!("rev-list stdin write: {e}")))?;
-        drop(stdin); // close stdin so rev-list can finish
-    }
-
-    let pack_objects = Command::new("git")
-        .args(["pack-objects", "--stdout", "-q", "--delta-base-offset"])
-        .current_dir(repo_path)
-        .stdin(rev_list.stdout.take().unwrap())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| crate::BenchError::Git(format!("pack-objects spawn: {e}")))?;
-
-    let pack_output = pack_objects
-        .wait_with_output()
-        .map_err(|e| crate::BenchError::Git(format!("pack-objects wait: {e}")))?;
-
-    // Also wait for rev-list to avoid zombie
-    let _ = rev_list.wait();
-
-    if !pack_output.status.success() {
-        return Err(crate::BenchError::Git(format!(
-            "pack-objects failed: {}",
-            String::from_utf8_lossy(&pack_output.stderr)
-        )));
-    }
-
-    let cmd_duration = cmd_start.elapsed();
-    let output_bytes = pack_output.stdout.len() as u64;
-
-    // Phase 2: Extract files from the tree (simulates GKG client-side work)
-    // We use `git ls-tree -r` (single call) + `git cat-file --batch` (single process)
-    // to avoid per-file subprocess overhead.
     let extract_start = Instant::now();
     let file_hashes = extract_tree_fast(repo_path, &root_tree_oid, output_dir)?;
     let extract_duration = extract_start.elapsed();
@@ -92,137 +39,80 @@ pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<BenchRes
     })
 }
 
-fn resolve_tree_oid(repo_path: &Path, commit: &str) -> Result<String, crate::BenchError> {
-    let output = Command::new("git")
-        .args(["rev-parse", &format!("{commit}^{{tree}}")])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| crate::BenchError::Git(format!("rev-parse: {e}")))?;
-
-    if !output.status.success() {
-        return Err(crate::BenchError::Git(format!(
-            "rev-parse failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-/// Fast extraction: single `git ls-tree -r` to get all blob paths+OIDs,
-/// then single `git cat-file --batch` to read all blob contents.
+/// Single `git ls-tree -r` + single `git cat-file --batch` to extract all blobs.
 fn extract_tree_fast(
-    repo_path: &Path,
-    root_tree_oid: &str,
-    output_dir: &Path,
-) -> Result<BTreeMap<String, String>, crate::BenchError> {
-    // Step 1: Get full recursive tree listing in one call
+    repo_path: &Path, root_tree_oid: &str, output_dir: &Path,
+) -> Result<BTreeMap<String, String>, BenchError> {
     let ls_output = Command::new("git")
         .args(["ls-tree", "-r", root_tree_oid])
         .current_dir(repo_path)
         .output()
-        .map_err(|e| crate::BenchError::Extract(format!("ls-tree: {e}")))?;
+        .map_err(|e| BenchError::Extract(format!("ls-tree: {e}")))?;
 
     if !ls_output.status.success() {
-        return Err(crate::BenchError::Extract(format!(
-            "ls-tree -r failed: {}",
-            String::from_utf8_lossy(&ls_output.stderr)
-        )));
+        return Err(BenchError::Extract("ls-tree -r failed".into()));
     }
 
-    // Parse entries: "<mode> blob <oid>\t<path>"
     let listing = String::from_utf8_lossy(&ls_output.stdout);
-    let mut entries: Vec<(String, String)> = Vec::new(); // (oid, path)
+    let mut entries: Vec<(String, String)> = Vec::new();
 
     for line in listing.lines() {
-        let Some((meta, path)) = line.split_once('\t') else {
-            continue;
-        };
+        let Some((meta, path)) = line.split_once('\t') else { continue };
         let parts: Vec<&str> = meta.split_whitespace().collect();
-        if parts.len() < 3 || parts[1] != "blob" {
-            continue;
-        }
+        if parts.len() < 3 || parts[1] != "blob" { continue }
         entries.push((parts[2].to_string(), path.to_string()));
     }
 
-    // Step 2: Read all blobs via a single `git cat-file --batch` process
     let mut cat_file = Command::new("git")
         .args(["cat-file", "--batch"])
         .current_dir(repo_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| crate::BenchError::Extract(format!("cat-file --batch spawn: {e}")))?;
+        .map_err(|e| BenchError::Extract(format!("cat-file spawn: {e}")))?;
 
     let mut cat_stdin = cat_file.stdin.take().unwrap();
     let cat_stdout = cat_file.stdout.take().unwrap();
 
-    // Feed all OIDs to cat-file in a background thread, read results on main thread
     let oids: Vec<String> = entries.iter().map(|(oid, _)| oid.clone()).collect();
     let writer_thread = std::thread::spawn(move || {
         for oid in &oids {
-            if writeln!(cat_stdin, "{}", oid).is_err() {
-                break;
-            }
+            if writeln!(cat_stdin, "{}", oid).is_err() { break }
         }
-        drop(cat_stdin); // close stdin when done
+        drop(cat_stdin);
     });
 
     let mut reader = BufReader::new(cat_stdout);
     let mut file_hashes = BTreeMap::new();
 
     for (_oid, path) in &entries {
-        // Read header line: "<oid> <type> <size>\n"
         let mut header = String::new();
-        reader
-            .read_line(&mut header)
-            .map_err(|e| crate::BenchError::Extract(format!("cat-file header read: {e}")))?;
+        reader.read_line(&mut header)
+            .map_err(|e| BenchError::Extract(format!("cat-file header: {e}")))?;
 
         let header = header.trim();
-        if header.ends_with("missing") {
-            continue;
-        }
+        if header.ends_with("missing") { continue }
 
-        let size: usize = header
-            .rsplit_once(' ')
+        let size: usize = header.rsplit_once(' ')
             .and_then(|(_, s)| s.parse().ok())
-            .ok_or_else(|| {
-                crate::BenchError::Extract(format!("bad cat-file header: {header}"))
-            })?;
+            .ok_or_else(|| BenchError::Extract(format!("bad header: {header}")))?;
 
-        // Read exactly `size` bytes of content
         let mut content = vec![0u8; size];
-        reader
-            .read_exact(&mut content)
-            .map_err(|e| crate::BenchError::Extract(format!("cat-file content read: {e}")))?;
+        reader.read_exact(&mut content)
+            .map_err(|e| BenchError::Extract(format!("cat-file read: {e}")))?;
 
-        // Read trailing newline
-        let mut newline = [0u8; 1];
-        let _ = reader.read_exact(&mut newline);
+        let mut nl = [0u8; 1];
+        let _ = reader.read_exact(&mut nl);
 
-        let hash = hex_sha256(&content);
-
-        // Write to disk
         let dest = output_dir.join(path);
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| crate::BenchError::Extract(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| BenchError::Extract(e.to_string()))?;
         }
-        std::fs::write(&dest, &content)
-            .map_err(|e| crate::BenchError::Extract(e.to_string()))?;
+        std::fs::write(&dest, &content).map_err(|e| BenchError::Extract(e.to_string()))?;
 
-        file_hashes.insert(path.clone(), hash);
+        file_hashes.insert(path.clone(), git::hex_sha256(&content));
     }
 
-    writer_thread.join().expect("writer thread panicked");
+    writer_thread.join().expect("writer thread");
     let _ = cat_file.wait();
-
     Ok(file_hashes)
-}
-
-fn hex_sha256(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
 }

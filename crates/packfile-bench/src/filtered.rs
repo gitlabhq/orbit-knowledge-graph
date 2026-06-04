@@ -8,9 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use sha2::{Digest, Sha256};
-
-use crate::{format_bytes, BenchError, BenchResult, Method, MethodOutput};
+use crate::{format_bytes, git, BenchError, BenchResult, Method, MethodOutput};
 
 pub struct FilteredMethod;
 
@@ -42,51 +40,11 @@ pub struct FilteredResult {
 }
 
 pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<FilteredResult, crate::BenchError> {
-    let root_tree_oid = resolve_tree_oid(repo_path, commit)?;
+    let root_tree_oid = git::resolve_tree_oid(repo_path, commit)?;
 
     // Phase 1: Generate packfile (Gitaly side)
-    let cmd_start = Instant::now();
-
-    let mut rev_list = Command::new("git")
-        .args(["rev-list", "--objects", "--stdin"])
-        .current_dir(repo_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| crate::BenchError::Git(format!("rev-list spawn: {e}")))?;
-
-    {
-        let mut stdin = rev_list.stdin.take().unwrap();
-        writeln!(stdin, "{}^{{tree}}", commit)
-            .map_err(|e| crate::BenchError::Git(format!("rev-list stdin: {e}")))?;
-        drop(stdin);
-    }
-
-    let pack_objects = Command::new("git")
-        .args(["pack-objects", "--stdout", "-q", "--delta-base-offset"])
-        .current_dir(repo_path)
-        .stdin(rev_list.stdout.take().unwrap())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| crate::BenchError::Git(format!("pack-objects spawn: {e}")))?;
-
-    let pack_output = pack_objects
-        .wait_with_output()
-        .map_err(|e| crate::BenchError::Git(format!("pack-objects wait: {e}")))?;
-
-    let _ = rev_list.wait();
-
-    if !pack_output.status.success() {
-        return Err(crate::BenchError::Git(format!(
-            "pack-objects failed: {}",
-            String::from_utf8_lossy(&pack_output.stderr)
-        )));
-    }
-
-    let cmd_duration = cmd_start.elapsed();
-    let output_bytes = pack_output.stdout.len() as u64;
+    let (_pack_data, cmd_duration, _root) = git::generate_packfile_stdout(repo_path, commit, &[])?;
+    let output_bytes = _pack_data.len() as u64;
 
     // Phase 2: Filtered extraction
     let extract_start = Instant::now();
@@ -178,7 +136,7 @@ pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<Filtered
         let mut nl = [0u8; 1];
         let _ = reader.read_exact(&mut nl);
 
-        let hash = hex_sha256(&content);
+        let hash = git::hex_sha256(&content);
 
         let dest = output_dir.join(path);
         if let Some(parent) = dest.parent() {
@@ -217,20 +175,4 @@ pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<Filtered
     })
 }
 
-fn resolve_tree_oid(repo_path: &Path, commit: &str) -> Result<String, crate::BenchError> {
-    let output = Command::new("git")
-        .args(["rev-parse", &format!("{commit}^{{tree}}")])
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| crate::BenchError::Git(format!("rev-parse: {e}")))?;
-    if !output.status.success() {
-        return Err(crate::BenchError::Git("rev-parse failed".into()));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
 
-fn hex_sha256(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
-}

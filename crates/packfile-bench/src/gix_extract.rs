@@ -10,10 +10,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use gix_features::zlib;
-use sha2::{Digest, Sha256};
-
 use crate::filter::{self, MAX_FILE_SIZE};
-use crate::{format_bytes, BenchError, BenchResult, Method, MethodOutput};
+use crate::{format_bytes, git, BenchError, BenchResult, Method, MethodOutput};
 
 // ─── Shared result type ─────────────────────────────────────────────────────
 
@@ -80,40 +78,13 @@ impl Method for BundledIdxMethod {
 
 enum PackSource { Stdout, DiskWithIdx }
 
-/// Generate packfile via --stdout, return (bytes, duration, root_tree_oid).
-fn generate_packfile_stdout(
-    repo: &Path, commit: &str, extra_flags: &[&str],
-) -> Result<(Vec<u8>, Duration, String), BenchError> {
-    let root = resolve_tree_oid(repo, commit)?;
-    let t = Instant::now();
 
-    let mut rev_list = Command::new("git")
-        .args(["rev-list", "--objects", "--stdin"])
-        .current_dir(repo).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|e| BenchError::Git(format!("rev-list: {e}")))?;
-
-    { let mut s = rev_list.stdin.take().unwrap(); writeln!(s, "{commit}^{{tree}}").ok(); }
-
-    let mut args = vec!["pack-objects", "--stdout", "-q", "--delta-base-offset"];
-    args.extend_from_slice(extra_flags);
-
-    let out = Command::new("git").args(&args)
-        .current_dir(repo).stdin(rev_list.stdout.take().unwrap())
-        .stdout(Stdio::piped()).stderr(Stdio::piped())
-        .output().map_err(|e| BenchError::Git(format!("pack-objects: {e}")))?;
-    let _ = rev_list.wait();
-
-    if !out.status.success() {
-        return Err(BenchError::Git(format!("pack-objects: {}", String::from_utf8_lossy(&out.stderr))));
-    }
-    Ok((out.stdout, t.elapsed(), root))
-}
 
 /// Generate packfile to disk (produces .pack + .idx). Returns (pack_path, duration, root_tree_oid, transfer_bytes).
 fn generate_packfile_disk(
     repo: &Path, commit: &str, tmp: &Path,
 ) -> Result<(PathBuf, Duration, String, u64), BenchError> {
-    let root = resolve_tree_oid(repo, commit)?;
+    let root = git::resolve_tree_oid(repo, commit)?;
     let t = Instant::now();
     let prefix = tmp.join("out");
 
@@ -166,7 +137,7 @@ fn open_bundle_via_index_pack(data: &[u8]) -> Result<(gix_pack::Bundle, tempfile
 fn run_single_threaded(
     repo: &Path, commit: &str, output_dir: &Path, extra_flags: &[&str], label: &str,
 ) -> Result<GixResult, BenchError> {
-    let (pack_data, cmd_dur, root_str) = generate_packfile_stdout(repo, commit, extra_flags)?;
+    let (pack_data, cmd_dur, root_str) = git::generate_packfile_stdout(repo, commit, extra_flags)?;
     let bytes = pack_data.len() as u64;
     let ext_start = Instant::now();
     let (bundle, _tmp, idx_time) = open_bundle_via_index_pack(&pack_data)?;
@@ -206,7 +177,7 @@ fn run_rayon(
     // Phase 1: Generate pack + open bundle
     let (bundle, cmd_dur, bytes, root_str, idx_time, _tmp_guard) = match source {
         PackSource::Stdout => {
-            let (data, dur, root) = generate_packfile_stdout(repo, commit, &[])?;
+            let (data, dur, root) = git::generate_packfile_stdout(repo, commit, &[])?;
             let b = data.len() as u64;
             let (bundle, tmp, idx_t) = open_bundle_via_index_pack(&data)?;
             (bundle, dur, b, root, idx_t, Some(tmp))
@@ -322,7 +293,7 @@ fn walk_and_extract(
                 let dest = out_dir.join(&path);
                 if let Some(p) = dest.parent() { let _ = std::fs::create_dir_all(p); }
                 std::fs::write(&dest, blob.data).map_err(|e| BenchError::Extract(e.to_string()))?;
-                hashes.insert(path_str, hex_sha256(blob.data));
+                hashes.insert(path_str, git::hex_sha256(blob.data));
                 *written += 1;
             }
             EntryKind::Skip => { *skipped += 1; }
@@ -379,17 +350,6 @@ fn tree_entries(
         .collect()
 }
 
-fn resolve_tree_oid(repo: &Path, commit: &str) -> Result<String, BenchError> {
-    let o = Command::new("git").args(["rev-parse", &format!("{commit}^{{tree}}")])
-        .current_dir(repo).output().map_err(|e| BenchError::Git(format!("rev-parse: {e}")))?;
-    if !o.status.success() { return Err(BenchError::Git("rev-parse failed".into())); }
-    Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
 fn parse_oid(hex: &str) -> Result<gix_hash::ObjectId, BenchError> {
     gix_hash::ObjectId::from_hex(hex.as_bytes()).map_err(|e| BenchError::Extract(format!("parse oid: {e}")))
-}
-
-fn hex_sha256(data: &[u8]) -> String {
-    let mut h = Sha256::new(); h.update(data); format!("{:x}", h.finalize())
 }
