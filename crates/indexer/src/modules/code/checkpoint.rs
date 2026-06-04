@@ -89,7 +89,8 @@ impl ClickHouseCodeCheckpointStore {
         let last_commit = if last_commit_col.is_null(0) {
             None
         } else {
-            Some(last_commit_col.value(0).to_string())
+            let v = last_commit_col.value(0).to_string();
+            if v.is_empty() { None } else { Some(v) }
         };
         let indexed_at_micros = indexed_at_col.value(0);
         let indexed_at = Utc
