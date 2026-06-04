@@ -99,6 +99,14 @@ Filter placement rules for node `FINAL` scans:
 
 Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
+### Scope rewrite (traversal_path prefix injection)
+
+Project- and group-scoped queries (`traversal` and `aggregation` with a single `id` or `full_path` filter on `Project`/`Group`) are rewritten to add a tight `startsWith(traversal_path, '<prefix>')` predicate on the scoped node, so the leading primary-key segment prunes the scan rather than a structural-column filter alone. The prefix is the scoped entity's own `traversal_path`, resolved from its `id`/`full_path` through a ClickHouse `CACHE` dictionary over `gl_project`/`gl_group` (`PathResolver`, backed by a short-lived in-process cache; see `crates/gkg-server/src/pipeline/path_resolver.rs`). A resolution failure — a dictionary miss for a not-yet-indexed id, or the `'0/'` sentinel — yields no injection, so the query falls back to the plain `id`/`full_path` filter.
+
+The injected prefix is re-validated before use: it is only applied when it is a descendant of one of the caller's authorized traversal paths (`is_descendant`), and it is ANDed with the existing filters. It can therefore only narrow within already-authorized scope; it never widens access or replaces the authorization prefix.
+
+**Bounded staleness on namespace moves.** The prefix is resolved from a cache (dictionary `LIFETIME` plus the in-process TTL) over `gl_project`/`gl_group`, which the graph itself derives from PostgreSQL via CDC and re-indexing. When a project or group is transferred, its rows are re-stamped with the new `traversal_path`, but the cache can briefly keep resolving the pre-transfer prefix. During that window a scoped query can under-prune — return fewer rows than it should — because the stale `startsWith` no longer matches the re-stamped rows. The window self-heals once the cache refreshes; it only ever under-prunes (the surviving `id`/`full_path` filter and the authorization prefix mean it never returns extra or cross-tenant rows); and `is_descendant` limits exposure to callers already authorized over both the old and new locations. It is a performance optimization layered on the graph's existing eventual consistency, not a new correctness or security boundary.
+
 ## Request Flow (Deployed)
 
 1. Client (MCP or REST) submits a tool call or Cypher.

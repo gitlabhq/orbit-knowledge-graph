@@ -506,10 +506,129 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    ontology.auxiliary_dictionaries = schema
+        .settings
+        .auxiliary_dictionaries
+        .into_iter()
+        .map(|d| crate::entities::AuxiliaryDictionary {
+            name: d.name,
+            source_table: d.source_table,
+            key: d.key,
+            key_type: d.key_type,
+            attributes: d
+                .attributes
+                .into_iter()
+                .map(|c| crate::entities::AuxiliaryColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                    nullable: c.nullable,
+                    codec: c.codec,
+                    default: c.default,
+                })
+                .collect(),
+            layout: crate::entities::DictionaryLayout {
+                kind: d.layout.kind,
+                size_in_cells: d.layout.size_in_cells,
+            },
+            lifetime: crate::entities::DictionaryLifetime {
+                min: d.lifetime.min,
+                max: d.lifetime.max,
+            },
+        })
+        .collect();
+
+    ontology.traversal_path_lookups = ontology
+        .nodes
+        .values()
+        .flat_map(|node| {
+            node.fields.iter().filter_map(move |field| {
+                field.traversal_path_lookup.as_ref().map(|spec| {
+                    crate::entities::TraversalPathLookup {
+                        entity: node.name.clone(),
+                        kind: spec.kind,
+                        dictionary: spec.dictionary.clone(),
+                        source_table: spec.source_table.clone(),
+                        key_column: spec.key_column.clone(),
+                    }
+                })
+            })
+        })
+        .collect();
+
     // Validate storage columns match declared properties.
     validate_storage_columns(&ontology)?;
+    validate_auxiliary_dictionaries(&ontology)?;
+    validate_traversal_path_lookups(&ontology)?;
 
     Ok(ontology)
+}
+
+fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for lookup in ontology.traversal_path_lookups() {
+        let node = ontology
+            .nodes()
+            .find(|n| n.destination_table == lookup.source_table)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "traversal_path_lookup on '{}': source_table '{}' is not a known node table",
+                    lookup.entity, lookup.source_table
+                ))
+            })?;
+
+        if !node
+            .storage
+            .columns
+            .iter()
+            .any(|c| c.name.trim_matches('`') == lookup.key_column)
+        {
+            return Err(OntologyError::Validation(format!(
+                "traversal_path_lookup on '{}': key_column '{}' is not a storage column on '{}'",
+                lookup.entity, lookup.key_column, lookup.source_table
+            )));
+        }
+
+        if let Some(dict) = &lookup.dictionary
+            && !ontology
+                .auxiliary_dictionaries()
+                .iter()
+                .any(|d| &d.name == dict)
+        {
+            return Err(OntologyError::Validation(format!(
+                "traversal_path_lookup on '{}': dictionary '{}' is not a declared auxiliary dictionary",
+                lookup.entity, dict
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_auxiliary_dictionaries(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for dict in ontology.auxiliary_dictionaries() {
+        let node = ontology
+            .nodes()
+            .find(|n| n.destination_table == dict.source_table)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "dictionary '{}': source_table '{}' is not a known node table",
+                    dict.name, dict.source_table
+                ))
+            })?;
+
+        if !node
+            .storage
+            .columns
+            .iter()
+            .any(|c| c.name.trim_matches('`') == dict.key)
+        {
+            return Err(OntologyError::Validation(format!(
+                "dictionary '{}': key '{}' is not a storage column on '{}'",
+                dict.name, dict.key, dict.source_table
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 /// Checks that every node's storage columns correspond 1:1 with its

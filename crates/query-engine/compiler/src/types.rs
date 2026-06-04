@@ -3,6 +3,7 @@
 use crate::error::{QueryError, Result};
 use regex::Regex;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Matches paths like "1/", "1/2/", "123/456/789/"
@@ -105,6 +106,11 @@ pub struct SecurityContext {
     /// Whether the user is a GitLab team member (from the JWT
     /// `is_gitlab_team_member` claim). Only meaningful on SaaS.
     pub is_gitlab_team_member: bool,
+    /// Resolved tight traversal_path prefix per scoped DSL node, keyed by the
+    /// node's alias (= its DSL `id`). Additive scope metadata the security pass
+    /// ANDs onto that node's scan only; it never narrows `traversal_paths`,
+    /// which still drive the broad per-alias authz filter.
+    pub scope_prefixes: HashMap<String, String>,
 }
 
 impl SecurityContext {
@@ -141,6 +147,7 @@ impl SecurityContext {
             access_level: None,
             realm: None,
             is_gitlab_team_member: false,
+            scope_prefixes: HashMap::new(),
         })
     }
 
@@ -157,6 +164,11 @@ impl SecurityContext {
 
     pub fn with_team_member(mut self, is_gitlab_team_member: bool) -> Self {
         self.is_gitlab_team_member = is_gitlab_team_member;
+        self
+    }
+
+    pub fn with_scope_prefixes(mut self, scope_prefixes: HashMap<String, String>) -> Self {
+        self.scope_prefixes = scope_prefixes;
         self
     }
 
@@ -194,4 +206,8 @@ impl SecurityContext {
 
         Ok(())
     }
+}
+
+pub fn is_valid_traversal_path(path: &str) -> bool {
+    TRAVERSAL_PATH_REGEX.is_match(path)
 }

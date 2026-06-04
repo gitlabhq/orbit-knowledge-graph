@@ -105,6 +105,11 @@ compiler_pipeline_macros::define_compiler_ctx! {
             state: [input, query_plan, node, result_ctx, query_config, hydration_plan, output]
             phases: [restrict, plan, lower, enforce, settings, codegen]
         }
+        validate_normalize {
+            env: [ontology]
+            state: [json, input]
+            phases: [validate, normalize]
+        }
     }
 }
 

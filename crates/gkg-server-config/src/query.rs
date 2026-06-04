@@ -266,6 +266,31 @@ impl QuerySettings {
     }
 }
 
+fn default_path_cache_ttl_secs() -> u64 {
+    60
+}
+fn default_path_cache_capacity() -> u64 {
+    10_000
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PathResolverConfig {
+    #[serde(default = "default_path_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+    #[serde(default = "default_path_cache_capacity")]
+    pub cache_capacity: u64,
+}
+
+impl Default for PathResolverConfig {
+    fn default() -> Self {
+        Self {
+            cache_ttl_secs: default_path_cache_ttl_secs(),
+            cache_capacity: default_path_cache_capacity(),
+        }
+    }
+}
+
 static QUERY_SETTINGS: OnceLock<QuerySettings> = OnceLock::new();
 
 /// Initialize the global query settings. Called once at startup by the
@@ -377,6 +402,20 @@ aggregation:
             Some(120)
         );
         assert_eq!(settings.resolve("aggregation").query_cache_ttl, Some(60));
+    }
+
+    #[test]
+    fn path_resolver_config_defaults_and_yaml() {
+        assert_eq!(PathResolverConfig::default().cache_ttl_secs, 60);
+        assert_eq!(PathResolverConfig::default().cache_capacity, 10_000);
+        let cfg: PathResolverConfig =
+            serde_yaml::from_str("cache_ttl_secs: 120\ncache_capacity: 500").unwrap();
+        assert_eq!(cfg.cache_ttl_secs, 120);
+        assert_eq!(cfg.cache_capacity, 500);
+        assert_eq!(
+            serde_yaml::from_str::<PathResolverConfig>("{}").unwrap(),
+            PathResolverConfig::default()
+        );
     }
 
     #[test]

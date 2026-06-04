@@ -208,6 +208,13 @@
         "username": null
       }
     },
+    "path_resolver": {
+      "$ref": "#/$defs/PathResolverConfig",
+      "default": {
+        "cache_capacity": 10000,
+        "cache_ttl_secs": 60
+      }
+    },
     "query": {
       "$ref": "#/$defs/QuerySettings",
       "default": {
@@ -1095,6 +1102,24 @@
         "endpoint": {
           "type": "string",
           "default": ""
+        }
+      },
+      "additionalProperties": false
+    },
+    "PathResolverConfig": {
+      "type": "object",
+      "properties": {
+        "cache_capacity": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 10000,
+          "minimum": 0
+        },
+        "cache_ttl_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 60,
+          "minimum": 0
         }
       },
       "additionalProperties": false

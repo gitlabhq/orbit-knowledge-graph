@@ -329,7 +329,7 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
     };
 
     let tables = query_engine::compiler::generate_graph_tables(&ont);
-    let generated: Vec<String> = tables
+    let mut generated: Vec<String> = tables
         .iter()
         .map(|t| {
             let t = if prefix.is_empty() {
@@ -340,6 +340,19 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
             format!("{};\n", query_engine::compiler::emit_create_table(&t))
         })
         .collect();
+
+    let dicts = query_engine::compiler::generate_graph_dictionaries(&ont);
+    generated.extend(dicts.iter().map(|d| {
+        let d = if prefix.is_empty() {
+            d.clone()
+        } else {
+            d.clone().with_prefix(&prefix)
+        };
+        format!(
+            "{};\n",
+            query_engine::compiler::emit_create_dictionary(&d, "default")
+        )
+    }));
 
     let schema_version = include_str!("../../../config/SCHEMA_VERSION").trim();
 
@@ -374,7 +387,9 @@ fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, Stri
             ')' if !in_string => depth -= 1,
             ';' if !in_string && depth == 0 => {
                 let stmt = sql[start..=i].trim();
-                if let Some(name) = extract_create_table_name(stmt) {
+                if let Some(name) =
+                    extract_create_table_name(stmt).or_else(|| extract_create_dictionary_name(stmt))
+                {
                     tables.insert(name, strip_leading_comments(stmt).to_string());
                 }
                 start = i + 1;
@@ -408,6 +423,21 @@ fn strip_leading_comments(stmt: &str) -> &str {
 fn extract_create_table_name(stmt: &str) -> Option<String> {
     let upper = stmt.to_uppercase();
     let marker = "CREATE TABLE IF NOT EXISTS ";
+    let pos = upper.find(marker)?;
+    let after = &stmt[pos + marker.len()..];
+    let name = after
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn extract_create_dictionary_name(stmt: &str) -> Option<String> {
+    let upper = stmt.to_uppercase();
+    let marker = "CREATE DICTIONARY IF NOT EXISTS ";
     let pos = upper.find(marker)?;
     let after = &stmt[pos + marker.len()..];
     let name = after
