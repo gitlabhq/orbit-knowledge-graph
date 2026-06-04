@@ -14,8 +14,14 @@ pub fn emit_aggregation(
     agg_sort: Option<&InputAggSort>,
 ) -> Result<Node> {
     let output = plan.emit_edge_chain()?;
-    let (agg_select, group_by, order_by) =
-        build_aggregation(plan, aggregations, group_by_keys, agg_sort);
+    let if_cond = output.edge_if_predicates.clone();
+    let (agg_select, group_by, order_by) = build_aggregation(
+        plan,
+        aggregations,
+        group_by_keys,
+        agg_sort,
+        if_cond.as_ref(),
+    );
     let q = output.into_query(agg_select, group_by, order_by, plan.limit);
     Ok(Node::Query(Box::new(q)))
 }
@@ -31,6 +37,7 @@ fn build_aggregation(
     aggregations: &[InputAggregationMetric],
     group_by_keys: &[InputGroupByKey],
     agg_sort: Option<&InputAggSort>,
+    if_cond: Option<&Expr>,
 ) -> (Vec<SelectExpr>, Vec<Expr>, Vec<OrderExpr>) {
     let mut select = Vec::new();
     let mut group_by = Vec::new();
@@ -76,21 +83,7 @@ fn build_aggregation(
         let owned_default = default_alias(agg.function);
         let alias = agg.alias.as_deref().unwrap_or(&owned_default);
 
-        let agg_expr = match agg.function {
-            AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
-                    Expr::func("COUNT", vec![Expr::col(target, prop)])
-                } else {
-                    Expr::func("COUNT", vec![])
-                }
-            }
-            _ => {
-                let target = agg.target.as_deref().unwrap_or("*");
-                let prop = agg.property.as_deref().unwrap_or("id");
-                Expr::func(agg.function.as_sql(), vec![Expr::col(target, prop)])
-            }
-        };
-
+        let agg_expr = build_agg_expr(agg, if_cond);
         select.push(SelectExpr::new(agg_expr, alias));
     }
 
@@ -105,4 +98,50 @@ fn build_aggregation(
     }
 
     (select, group_by, order_by)
+}
+
+/// Build the aggregate expression, using `-If` combinators when `if_cond`
+/// is provided (LIMIT BY dedup path).
+///
+/// - `COUNT()` → `countIf(cond)`
+/// - `COUNT(col)` → `COUNT(col)` (preserved: counts non-null values)
+/// - `SUM(col)` → `sumIf(col, cond)`
+/// - `AVG/MIN/MAX(col)` → `avgIf/minIf/maxIf(col, cond)`
+/// - `groupArray(col)` → `groupArrayIf(col, cond)`
+fn build_agg_expr(agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
+    match if_cond {
+        Some(cond) => match agg.function {
+            AggFunction::Count => {
+                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
+                    // COUNT(col) counts non-null values — keep the column
+                    // argument, don't convert to countIf which would drop it.
+                    Expr::func("COUNT", vec![Expr::col(target, prop)])
+                } else {
+                    Expr::func(agg.function.as_sql_if(), vec![cond.clone()])
+                }
+            }
+            _ => {
+                let target = agg.target.as_deref().unwrap_or("*");
+                let prop = agg.property.as_deref().unwrap_or("id");
+                Expr::func(
+                    agg.function.as_sql_if(),
+                    vec![Expr::col(target, prop), cond.clone()],
+                )
+            }
+        },
+        None => match agg.function {
+            AggFunction::Count => {
+                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
+                    Expr::func("COUNT", vec![Expr::col(target, prop)])
+                } else {
+                    Expr::func("COUNT", vec![])
+                }
+            }
+            _ => {
+                let target = agg.target.as_deref().unwrap_or("*");
+                let prop = agg.property.as_deref().unwrap_or("id");
+                Expr::func(agg.function.as_sql(), vec![Expr::col(target, prop)])
+            }
+        },
+    }
 }

@@ -63,6 +63,7 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
         node_edge_mappings: HashMap::new(),
         denorm_columns: HashMap::new(),
         table_columns: HashMap::new(),
+        table_sort_keys: HashMap::new(),
         body: PlanBody::Hydration(hydration_nodes),
     })
 }

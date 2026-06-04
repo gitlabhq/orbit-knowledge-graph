@@ -36,6 +36,8 @@ pub struct Plan {
     /// push node-level filters (e.g. project_id, branch) down to edge
     /// scans when the edge table has those columns.
     pub table_columns: HashMap<String, HashSet<String>>,
+    /// ORDER BY columns per table. Used by the lowerer for LIMIT BY dedup.
+    pub table_sort_keys: HashMap<String, Vec<String>>,
     pub body: PlanBody,
 }
 

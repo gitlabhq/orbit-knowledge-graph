@@ -217,6 +217,7 @@ pub fn plan(input: &mut Input) -> Plan {
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         table_columns: input.compiler.table_columns.clone(),
+        table_sort_keys: input.compiler.table_sort_keys.clone(),
         body,
     }
 }

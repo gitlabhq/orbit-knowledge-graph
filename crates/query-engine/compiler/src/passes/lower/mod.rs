@@ -32,6 +32,10 @@ pub struct EmitOutput {
     pub where_parts: Vec<Expr>,
     pub select: Vec<SelectExpr>,
     pub ctes: Vec<Cte>,
+    /// Edge predicates for `-If` aggregate combinators. When set, the
+    /// aggregation pass emits `countIf(cond)` / `sumIf(col, cond)` / etc.
+    /// and the predicates are already in the LIMIT BY subquery's WHERE.
+    pub edge_if_predicates: Option<Expr>,
 }
 
 impl EmitOutput {

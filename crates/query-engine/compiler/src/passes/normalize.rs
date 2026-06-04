@@ -118,6 +118,23 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
 
+    // Populate table sort keys for LIMIT BY dedup.
+    input.compiler.table_sort_keys.clear();
+    for node in ontology.nodes() {
+        input
+            .compiler
+            .table_sort_keys
+            .insert(node.destination_table.clone(), node.sort_key.clone());
+    }
+    for table in ontology.edge_tables() {
+        if let Some(sort_key) = ontology.sort_key_for_table(table) {
+            input
+                .compiler
+                .table_sort_keys
+                .insert(table.to_string(), sort_key.to_vec());
+        }
+    }
+
     // Populate denormalized columns map for the optimizer.
     for dp in ontology.denormalized_properties() {
         let dir_prefix = match dp.direction {
