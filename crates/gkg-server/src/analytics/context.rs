@@ -98,22 +98,22 @@ fn apply_metrics(
     if let Some(input) = &metrics.input {
         let query_type: &str = input.query_type.into();
         q.query_type = query_type.parse().ok();
-        q.node_count = Some(input.nodes.len() as u64);
-        q.relationship_count = Some(input.relationships.len() as u64);
+        q.node_count = Some(input.nodes.len() as i64);
+        q.relationship_count = Some(input.relationships.len() as i64);
         q.is_search = Some(input.is_search());
         q.has_cursor = Some(input.cursor.is_some());
         q.has_order_by = Some(input.order_by.is_some());
-        q.limit = Some(input.limit as u64);
-        q.group_by_count = Some(input.aggregation.group_by.len() as u64);
+        q.limit = Some(input.limit as i64);
+        q.group_by_count = Some(input.aggregation.group_by.len() as i64);
         q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
-        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as u64);
+        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
 
         let mut entities = BTreeSet::new();
         let mut rel_types = BTreeSet::new();
         let mut fields = BTreeSet::new();
         let mut ops = BTreeSet::new();
-        let mut filter_count: u64 = 0;
-        let mut max_hops: u64 = 0;
+        let mut filter_count: i64 = 0;
+        let mut max_hops: i64 = 0;
         let mut variable_hops = false;
         let mut virtual_cols = false;
 
@@ -144,7 +144,7 @@ fn apply_metrics(
         }
         for rel in &input.relationships {
             rel_types.extend(rel.types.iter().cloned());
-            max_hops = max_hops.max(rel.max_hops as u64);
+            max_hops = max_hops.max(rel.max_hops as i64);
             variable_hops |= rel.min_hops != rel.max_hops;
             for (f, entries) in &rel.filters {
                 fields.insert(f.clone());
@@ -198,16 +198,16 @@ fn apply_metrics(
 
     let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
     q.hydration_plan = label.parse().ok();
-    q.duration_ms = Some(ExecMetrics::ms(total_elapsed));
-    q.compile_ms = metrics.compile_ms;
-    q.execute_ms = metrics.execute_ms;
-    q.authorization_ms = metrics.authorization_ms;
-    q.hydration_ms = metrics.hydration_ms;
-    q.row_count = Some(row_count as u64);
-    q.redacted_count = Some(redacted_count as u64);
-    q.ch_read_rows = Some(metrics.ch_read_rows);
-    q.ch_read_bytes = Some(metrics.ch_read_bytes);
-    q.ch_memory_usage = Some(metrics.ch_memory_usage);
+    q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
+    q.compile_ms = metrics.compile_ms.map(|v| v as i64);
+    q.execute_ms = metrics.execute_ms.map(|v| v as i64);
+    q.authorization_ms = metrics.authorization_ms.map(|v| v as i64);
+    q.hydration_ms = metrics.hydration_ms.map(|v| v as i64);
+    q.row_count = Some(row_count as i64);
+    q.redacted_count = Some(redacted_count as i64);
+    q.ch_read_rows = Some(metrics.ch_read_rows as i64);
+    q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
+    q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
 
     q.graph_schema_version = GRAPH_SCHEMA_VERSION.trim().parse().ok();
     q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
