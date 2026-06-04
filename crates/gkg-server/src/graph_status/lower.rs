@@ -29,7 +29,7 @@ fn build_total_known_projects_query(project_table: &str, traversal_path: &str) -
 
     let select = vec![
         SelectExpr::new(Expr::string("total_known"), "metric"),
-        SelectExpr::new(Expr::func("uniq", vec![Expr::col(alias, "id")]), "cnt"),
+        SelectExpr::new(Expr::func("uniqExact", vec![Expr::col(alias, "id")]), "cnt"),
     ];
 
     let from = TableRef::scan_final(project_table, alias);
@@ -55,7 +55,7 @@ fn build_indexed_projects_query(
     let select = vec![
         SelectExpr::new(Expr::string("indexed"), "metric"),
         SelectExpr::new(
-            Expr::func("uniq", vec![Expr::col(checkpoint_alias, "project_id")]),
+            Expr::func("uniqExact", vec![Expr::col(checkpoint_alias, "project_id")]),
             "cnt",
         ),
     ];
@@ -113,43 +113,21 @@ fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
         SelectExpr::new(Expr::func("count", vec![]), "cnt"),
     ];
 
-    let from = TableRef::subquery(build_deduplicated_node_query(node, traversal_path), alias);
-
-    Query {
-        select,
-        from,
-        where_clause: Some(Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0))),
-        ..Default::default()
-    }
-}
-
-fn build_deduplicated_node_query(node: &NodeTable, traversal_path: &str) -> Query {
-    let alias = "t";
-
-    let select = vec![
-        SelectExpr::new(Expr::col(alias, "id"), "id"),
-        SelectExpr::new(
-            Expr::func(
-                "argMax",
-                vec![Expr::col(alias, "_deleted"), Expr::col(alias, "_version")],
-            ),
-            "_deleted",
+    let where_clause = Expr::and(
+        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, "traversal_path"),
+                Expr::string(traversal_path),
+            ],
         ),
-    ];
-
-    let traversal_filter = Expr::func(
-        "startsWith",
-        vec![
-            Expr::col(alias, "traversal_path"),
-            Expr::string(traversal_path),
-        ],
     );
 
     Query {
         select,
-        from: TableRef::scan(&node.table, alias),
-        where_clause: Some(traversal_filter),
-        group_by: vec![Expr::col(alias, "id")],
+        from: TableRef::scan_final(&node.table, alias),
+        where_clause: Some(where_clause),
         ..Default::default()
     }
 }
@@ -226,30 +204,29 @@ mod tests {
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
-        let argmax_count = result.sql.matches("argMax(").count();
-        assert_eq!(
-            argmax_count,
-            input.nodes.len(),
-            "Each subquery should use argMax to select the latest row per id. SQL: {}",
+        assert!(
+            !result.sql.contains("argMax("),
+            "Entity counts should not use argMax. SQL: {}",
             result.sql
         );
         assert!(
-            result.sql.contains("GROUP BY t.id"),
-            "Each subquery should group by id. SQL: {}",
+            !result.sql.contains("GROUP BY"),
+            "Entity counts should not group by id. SQL: {}",
             result.sql
         );
     }
 
     #[test]
-    fn entity_counts_avoids_final_table_scans() {
+    fn entity_counts_uses_final_per_table() {
         let input = test_input();
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
         let final_count = result.sql.matches(" FINAL").count();
         assert_eq!(
-            final_count, 0,
-            "Entity counts should deduplicate after traversal filtering instead of using FINAL. SQL: {}",
+            final_count,
+            input.nodes.len(),
+            "Each entity count should scan its table with FINAL. SQL: {}",
             result.sql
         );
     }
@@ -307,9 +284,9 @@ mod tests {
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
         assert_eq!(
-            result.sql.matches("uniq(").count(),
+            result.sql.matches("uniqExact(").count(),
             2,
-            "Should have two uniq() calls. SQL: {}",
+            "Should have two uniqExact() calls. SQL: {}",
             result.sql
         );
     }
