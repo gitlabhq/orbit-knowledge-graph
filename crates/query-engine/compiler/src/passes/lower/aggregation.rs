@@ -113,9 +113,12 @@ fn build_agg_expr(agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr 
         Some(cond) => match agg.function {
             AggFunction::Count => {
                 if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
-                    // COUNT(col) counts non-null values — keep the column
-                    // argument, don't convert to countIf which would drop it.
-                    Expr::func("COUNT", vec![Expr::col(target, prop)])
+                    // countIf(col, cond) counts non-null values of col
+                    // where cond is true.
+                    Expr::func(
+                        agg.function.as_sql_if(),
+                        vec![Expr::col(target, prop), cond.clone()],
+                    )
                 } else {
                     Expr::func(agg.function.as_sql_if(), vec![cond.clone()])
                 }

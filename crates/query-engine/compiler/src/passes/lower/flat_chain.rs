@@ -75,6 +75,12 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     hop.edge_table
                 )));
             };
+            if sort_key.is_empty() {
+                return Err(QueryError::Lowering(format!(
+                    "sort key for edge table '{}' is empty; cannot emit LIMIT BY dedup",
+                    hop.edge_table
+                )));
+            }
             let mut inner_preds = Vec::new();
             collect_edge_predicates(
                 &mut inner_preds,
