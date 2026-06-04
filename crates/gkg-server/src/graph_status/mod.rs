@@ -29,6 +29,20 @@ pub struct GraphStatusService {
     indexing_status: Option<IndexingStatusStore>,
 }
 
+fn graph_status_query_config() -> QueryConfig {
+    QueryConfig {
+        use_query_cache: Some(true),
+        ..QueryConfig::default()
+    }
+}
+
+fn degraded<T: Default>(label: &str, traversal_path: &str, result: Result<T, Status>) -> T {
+    result.unwrap_or_else(|error| {
+        warn!(traversal_path, label, %error, "Graph status branch failed");
+        T::default()
+    })
+}
+
 impl GraphStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>, ontology: Arc<Ontology>) -> Self {
         Self {
@@ -53,6 +67,8 @@ impl GraphStatusService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
+        info!(traversal_path, "Graph status fetching");
+
         let input = GraphStatusInput::from_ontology(
             &self.ontology,
             traversal_path.to_string(),
@@ -75,7 +91,11 @@ impl GraphStatusService {
         let indexing_future = self.fetch_indexing_status(traversal_path);
 
         let (entity_counts, projects, indexing) =
-            tokio::try_join!(entity_counts_future, projects_future, indexing_future)?;
+            tokio::join!(entity_counts_future, projects_future, indexing_future);
+
+        let entity_counts = degraded("entity counts", traversal_path, entity_counts);
+        let projects = degraded("projects", traversal_path, projects);
+        let indexing = degraded("indexing", traversal_path, indexing);
 
         info!(
             entity_count = entity_counts.len(),
@@ -123,15 +143,13 @@ impl GraphStatusService {
         }
 
         let mut entity_progress: Vec<(String, Option<IndexingProgress>)> = Vec::new();
+        let mut read_errors = 0usize;
         while let Some((kind, result)) = futures.next().await {
             match result {
                 Ok(progress) => entity_progress.push((kind.to_string(), progress)),
                 Err(error) => {
+                    read_errors += 1;
                     warn!(%error, traversal_path, entity = kind, "failed to read entity indexing progress");
-                    return Ok(Some(IndexingStatus {
-                        state: IndexingState::Unknown.into(),
-                        ..Default::default()
-                    }));
                 }
             }
         }
@@ -139,13 +157,18 @@ impl GraphStatusService {
         let legacy_progress = match store.get(traversal_path).await {
             Ok(p) => p,
             Err(error) => {
+                read_errors += 1;
                 warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
-                return Ok(Some(IndexingStatus {
-                    state: IndexingState::Unknown.into(),
-                    ..Default::default()
-                }));
+                None
             }
         };
+
+        if entity_progress.is_empty() && read_errors > 0 {
+            return Ok(Some(IndexingStatus {
+                state: IndexingState::Unknown.into(),
+                ..Default::default()
+            }));
+        }
 
         Ok(Some(aggregate_indexing_status(
             entity_progress,
@@ -221,8 +244,8 @@ impl GraphStatusService {
         ast: &query_engine::compiler::Node,
         label: &str,
     ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
-        let parameterized = codegen(ast, ResultContext::new(), QueryConfig::default())
-            .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
+        let parameterized = codegen(ast, ResultContext::new(), graph_status_query_config())
+            .map_err(|e| Status::internal(format!("codegen error ({label}): {e}")))?;
 
         debug!(sql = %parameterized.sql, label, "Graph status query compiled");
 
@@ -234,7 +257,7 @@ impl GraphStatusService {
         query
             .fetch_arrow()
             .await
-            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))
+            .map_err(|e| Status::internal(format!("ClickHouse error ({label}): {e}")))
     }
 }
 

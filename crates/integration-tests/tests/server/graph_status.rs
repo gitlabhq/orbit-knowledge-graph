@@ -65,6 +65,43 @@ impl nats_client::KvServices for FailingKvServices {
     }
 }
 
+struct KvFailingOnKey {
+    inner: MockKvServices,
+    fail_key: String,
+}
+
+#[async_trait]
+impl nats_client::KvServices for KvFailingOnKey {
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        if key == self.fail_key {
+            return Err(NatsError::KvGet {
+                bucket: bucket.to_string(),
+                key: key.to_string(),
+                message: "connection refused".to_string(),
+            });
+        }
+        self.inner.kv_get(bucket, key).await
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        self.inner.kv_put(bucket, key, value, options).await
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        self.inner.kv_delete(bucket, key).await
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        self.inner.kv_keys(bucket).await
+    }
+}
+
 async fn setup(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type) VALUES
@@ -213,8 +250,12 @@ async fn graph_status() {
         indexing_status_per_entity_worst_state_wins,
         indexing_status_per_entity_missing_key_treated_as_not_indexed,
         indexing_status_falls_back_to_legacy_key_during_rollout,
+        indexing_status_survives_single_entity_read_failure,
         reporter_excludes_security_entity_counts,
         security_manager_includes_security_entity_counts,
+        definition_count_includes_distinct_sort_keys_excludes_tombstone,
+        projects_total_known_counts_distinct_ids,
+        get_status_degrades_when_entity_count_table_missing,
     );
 }
 
@@ -612,5 +653,146 @@ async fn security_manager_includes_security_entity_counts(ctx: &TestContext) {
         find_item(security, "Vulnerability"),
         1,
         "SecurityManager should see vulnerability counts"
+    );
+}
+
+fn seed_namespaced_entities(
+    mock_kv: &MockKvServices,
+    traversal_path: &str,
+    progress: &IndexingProgress,
+) {
+    let ontology = load_ontology();
+    for node in ontology
+        .nodes()
+        .filter(|n| n.etl.as_ref().map(|e| e.scope()) == Some(ontology::EtlScope::Namespaced))
+    {
+        seed_entity_progress(mock_kv, traversal_path, &node.name, progress);
+    }
+}
+
+async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(30);
+    let indexed = IndexingProgress {
+        last_started_at: started,
+        last_completed_at: Some(started + Duration::seconds(5)),
+        last_duration_ms: Some(5000),
+        last_error: None,
+    };
+    seed_namespaced_entities(&mock_kv, "1/100/", &indexed);
+
+    let store = IndexingStatusStore::new(Arc::new(KvFailingOnKey {
+        inner: mock_kv,
+        fail_key: "status.1.100.MergeRequest".to_string(),
+    }));
+    let client = Arc::new(ctx.create_client());
+    let ontology = Arc::new(load_ontology());
+    let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
+
+    let response = service
+        .get_status("1/100/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let indexing = status.indexing.expect("indexing should be present");
+    assert_ne!(indexing.state, IndexingState::Unknown as i32);
+    assert_eq!(indexing.state, IndexingState::Indexed as i32);
+}
+
+async fn definition_count_includes_distinct_sort_keys_excludes_tombstone(ctx: &TestContext) {
+    let db = ctx.fork("graph_status_definition_sort_keys").await;
+
+    db.execute(&format!(
+        "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char, _version, _deleted) VALUES
+         (9001, '1/100/1000/', 1000, 'main',    'sha-a', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
+         (9001, '1/100/1000/', 1000, 'feature', 'sha-b', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
+         (9002, '1/100/1000/', 1000, 'main',    'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
+         (9002, '1/100/1000/', 1000, 'main',    'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-06-01 00:00:00', true)",
+        t("gl_definition")
+    ))
+    .await;
+    db.optimize_all().await;
+
+    let service = build_service(&db);
+    let response = service
+        .get_status("1/100/1000/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+    let source_code = find_domain(&status.domains, "source_code");
+    assert_eq!(
+        find_item(source_code, "Definition"),
+        2,
+        "9001's two distinct-branch rows both count; 9002's tombstoned main row is excluded"
+    );
+}
+
+async fn projects_total_known_counts_distinct_ids(ctx: &TestContext) {
+    let db = ctx.fork("graph_status_projects_distinct_ids").await;
+
+    db.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path, _version, _deleted) VALUES
+         (9500, 'Dup Project', 'public', '1/100/9500/', '2024-01-01 00:00:00', false)",
+        t("gl_project")
+    ))
+    .await;
+    db.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path, _version, _deleted) VALUES
+         (9500, 'Dup Project Renamed', 'public', '1/100/9500/', '2024-06-01 00:00:00', false)",
+        t("gl_project")
+    ))
+    .await;
+
+    let service = build_service(&db);
+    let response = service
+        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let projects = extract_structured(response)
+        .projects
+        .expect("projects should be present");
+    assert_eq!(
+        projects.total_known, 4,
+        "duplicate-version project rows count as one distinct id"
+    );
+}
+
+async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) {
+    let db = ctx.fork("graph_status_degrade_missing_table").await;
+    db.execute(&format!("DROP TABLE {}", t("gl_merge_request")))
+        .await;
+
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(30);
+    seed_indexing_progress(
+        &mock_kv,
+        "1/",
+        &IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(started + Duration::seconds(5)),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        },
+    );
+    let service = build_service_with_indexing_status(&db, mock_kv);
+
+    let response = service
+        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("a failed entity-count branch must not fail the whole request");
+    let status = extract_structured(response);
+
+    let projects = status.projects.expect("projects should be present");
+    assert_eq!(projects.total_known, 3);
+
+    let indexing = status.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Indexed as i32);
+
+    let core = find_domain(&status.domains, "core");
+    assert_eq!(
+        find_item(core, "Project"),
+        0,
+        "entity counts degrade to empty when their query fails"
     );
 }
