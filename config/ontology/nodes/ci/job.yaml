@@ -102,7 +102,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: true
+    nullable: false
     description: "Failure reason."
     values:
       1: script_failure
@@ -315,7 +315,7 @@ storage:
     - {name: environment, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: "`when`", type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: retried, type: "Nullable(Bool)"}
-    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

@@ -1,4 +1,4 @@
-use arrow::array::{Array, BooleanArray, StringArray};
+use arrow::array::{BooleanArray, StringArray};
 
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
@@ -211,12 +211,12 @@ pub async fn processes_findings(ctx: &TestContext) {
     let descriptions = ArrowUtils::get_column_by_name::<StringArray>(batch, "description")
         .expect("description column");
     assert_eq!(descriptions.value(0), "A SQL injection vulnerability");
-    assert!(descriptions.is_null(1));
+    assert!(descriptions.value(1).is_empty());
 
     let solutions =
         ArrowUtils::get_column_by_name::<StringArray>(batch, "solution").expect("solution column");
     assert_eq!(solutions.value(0), "Use parameterized queries");
-    assert!(solutions.is_null(1));
+    assert!(solutions.value(1).is_empty());
 
     let severities =
         ArrowUtils::get_column_by_name::<StringArray>(batch, "severity").expect("severity column");
