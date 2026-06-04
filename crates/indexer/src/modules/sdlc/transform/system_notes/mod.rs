@@ -33,6 +33,7 @@ use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::transform::{
     BlockTransform, TableBatch, TransformFactory, TransformRegistry,
 };
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
@@ -63,10 +64,10 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
 }
 
 impl SystemNotesTransform {
-    fn new(datalake: Arc<dyn DatalakeQuery>) -> Self {
+    fn new(datalake: Arc<dyn DatalakeQuery>, edge_table: String) -> Self {
         Self {
             datalake,
-            outputs: vec!["gl_edge".to_string()],
+            outputs: vec![edge_table],
         }
     }
 }
@@ -114,9 +115,19 @@ impl BlockTransform for SystemNotesTransform {
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
+    edge_table: &str,
 ) {
-    let factory: TransformFactory =
-        Box::new(move |_plan| Arc::new(SystemNotesTransform::new(Arc::clone(&datalake))));
+    // Every write path targets the current schema version's table-set, so the
+    // hand-written transform must prefix its destination exactly like the
+    // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
+    // wrong (unprefixed) table.
+    let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+    let factory: TransformFactory = Box::new(move |_plan| {
+        Arc::new(SystemNotesTransform::new(
+            Arc::clone(&datalake),
+            edge_table.clone(),
+        ))
+    });
     registry.register("system_notes", factory);
 }
 

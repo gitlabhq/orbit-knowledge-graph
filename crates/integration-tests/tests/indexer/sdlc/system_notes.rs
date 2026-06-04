@@ -64,18 +64,21 @@ async fn seed_system_note(
     traversal_path: &str,
     created_at: &str,
 ) {
+    // The extract watermarks on `_siphon_replicated_at` (not `created_at`), so
+    // the seed's replicated-at must carry the per-note timestamp for the
+    // incremental/watermark assertions to discriminate.
     ctx.execute(&format!(
         "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, project_id, \
          system, internal, traversal_path, created_at, updated_at, _siphon_replicated_at) \
          VALUES ({id}, '{body}', '{noteable_type}', {noteable_id}, {author_id}, {project_id}, \
-         true, false, '{traversal_path}', '{created_at}', '{created_at}', '2024-01-20 12:00:00')"
+         true, false, '{traversal_path}', '{created_at}', '{created_at}', '{created_at}')"
     ))
     .await;
     ctx.execute(&format!(
         "INSERT INTO siphon_system_note_metadata (id, note_id, action, namespace_id, \
          traversal_path, created_at, updated_at, _siphon_replicated_at) \
          VALUES ({id}, {id}, '{action}', 100, '{traversal_path}', '{created_at}', '{created_at}', \
-         '2024-01-20 12:00:00')"
+         '{created_at}')"
     ))
     .await;
 }

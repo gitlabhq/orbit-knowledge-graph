@@ -223,6 +223,21 @@ CREATE TABLE IF NOT EXISTS siphon_notes
 PRIMARY KEY (traversal_path, noteable_type, noteable_id, id)
 ORDER BY (traversal_path, noteable_type, noteable_id, id);
 
+CREATE TABLE IF NOT EXISTS siphon_system_note_metadata
+(
+    `id` Int64,
+    `note_id` Int64,
+    `action` LowCardinality(String),
+    `namespace_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (note_id, id)
+ORDER BY (note_id, id);
+
 -- Siphon source tables for merge requests
 CREATE TABLE IF NOT EXISTS merge_requests
 (

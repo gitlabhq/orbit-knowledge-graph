@@ -57,7 +57,11 @@ pub async fn register_handlers(
     );
 
     let mut transform_registry = transform::TransformRegistry::default();
-    transform::system_notes::register(&mut transform_registry, Arc::clone(&datalake));
+    transform::system_notes::register(
+        &mut transform_registry,
+        Arc::clone(&datalake),
+        ontology.edge_table(),
+    );
     let transform_registry = Arc::new(transform_registry);
 
     let pipeline = Arc::new(
