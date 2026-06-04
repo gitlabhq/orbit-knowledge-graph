@@ -1,0 +1,234 @@
+name: "PHP hardcore — traits, interfaces, enums, static calls, aliased imports"
+
+fixtures:
+  - path: src/Contracts/Identifiable.php
+    content: |
+      <?php
+      namespace App\Contracts;
+
+      interface Identifiable {
+          public function id(): int;
+      }
+
+  - path: src/Concerns/Loggable.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Loggable {
+          public function log(string $msg): void {}
+      }
+
+  - path: src/Support/Logger.php
+    content: |
+      <?php
+      namespace App\Support;
+
+      class Logger {
+          public static function make(): Logger {
+              return new Logger();
+          }
+
+          public function write(string $line): void {}
+      }
+
+  - path: src/Models/Entity.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      abstract class Entity {
+          const KIND = 'entity';
+
+          public function refresh(): void {
+              $this->touch();
+          }
+
+          public function touch(): void {}
+      }
+
+  - path: src/Models/Product.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Contracts\Identifiable;
+      use App\Concerns\Loggable;
+
+      class Product extends Entity implements Identifiable {
+          use Loggable;
+
+          private int $id = 0;
+
+          public function id(): int {
+              return $this->id;
+          }
+
+          public function rename(string $name): void {
+              $this->log('renaming');
+              $this->touch();
+              self::describe();
+          }
+
+          public static function describe(): string {
+              return 'product';
+          }
+      }
+
+  - path: src/Enums/Status.php
+    content: |
+      <?php
+      namespace App\Enums;
+
+      enum Status: string {
+          case Active = 'active';
+          case Archived = 'archived';
+
+          public function label(): string {
+              return ucfirst($this->value);
+          }
+      }
+
+  - path: src/bootstrap.php
+    content: |
+      <?php
+      namespace App;
+
+      use App\Support\Logger as Log;
+      use App\Models\Product;
+
+      function boot(): void {
+          $logger = Log::make();
+          $logger->write('booting');
+          $product = new Product();
+          $product->rename('widget');
+      }
+
+tests:
+  # ── Definitions ────────────────────────────────────────────────
+  - name: "Trait, abstract class, class, and enum keep distinct definition types"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Concerns\Loggable', 'App\Models\Entity',
+                      'App\Models\Product', 'App\Enums\Status']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+      - { row: { fqn: 'App\Concerns\Loggable', type: Trait } }
+      - { row: { fqn: 'App\Models\Entity', type: Class } }
+      - { row: { fqn: 'App\Models\Product', type: Class } }
+      - { row: { fqn: 'App\Enums\Status', type: Enum } }
+
+  - name: "Interface is typed as Interface"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Contracts\Identifiable'
+      RETURN d.definition_type AS type
+    assert:
+      - { row: { type: Interface } }
+
+  - name: "Enum cases indexed under the enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumCase'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Enums\Status\Active' } }
+      - { row: { fqn: 'App\Enums\Status\Archived' } }
+
+  - name: "Class constant indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Models\Entity\KIND' } }
+
+  - name: "Enum method scoped under enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Enums\Status\label'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Inheritance (extends + implements + trait use) ─────────────
+  - name: "Product extends Entity"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Models\Entity'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Product implements Identifiable"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Contracts\Identifiable'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Product uses Loggable trait (modeled as Extends)"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Models\Product' AND p.fqn = 'App\Concerns\Loggable'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Calls ──────────────────────────────────────────────────────
+  - name: "Inherited method call: Entity.refresh -> Entity.touch via \\$this"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Entity\refresh'
+        AND callee.fqn = 'App\Models\Entity\touch'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait method call: Product.rename -> Loggable.log via \\$this"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Product\rename'
+        AND callee.fqn = 'App\Concerns\Loggable\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Inherited method via subclass: Product.rename -> Entity.touch"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Product\rename'
+        AND callee.fqn = 'App\Models\Entity\touch'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Self static call: Product.rename -> Product.describe via self::"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Product\rename'
+        AND callee.fqn = 'App\Models\Product\describe'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file static call via aliased import: boot -> Logger.make (use ... as Log)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\boot'
+        AND callee.fqn = 'App\Support\Logger\make'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }

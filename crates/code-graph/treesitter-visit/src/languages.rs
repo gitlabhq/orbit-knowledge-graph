@@ -21,6 +21,7 @@ pub enum SupportLang {
     CSharp,
     Kotlin,
     Rust,
+    Php,
 }
 
 impl fmt::Display for SupportLang {
@@ -99,6 +100,11 @@ impl LanguageExt for SupportLang {
             Self::Rust => tree_sitter_rust::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-rust"))]
             Self::Rust => panic!("tree-sitter-rust feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-php")]
+            Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            #[cfg(not(feature = "tree-sitter-php"))]
+            Self::Php => panic!("tree-sitter-php feature not enabled"),
         }
     }
 
@@ -144,6 +150,13 @@ mod tests {
     #[cfg(feature = "tree-sitter-ruby")]
     fn test_ruby_parsing() {
         let root = SupportLang::Ruby.ast_grep("def hello; end");
+        assert!(!root.source().is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-php")]
+    fn test_php_parsing() {
+        let root = SupportLang::Php.ast_grep("<?php function hello() {}");
         assert!(!root.source().is_empty());
     }
 }

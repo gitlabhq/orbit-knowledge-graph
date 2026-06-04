@@ -196,6 +196,13 @@ define_languages! {
         separator: "::",
         names: ["rust"],
     },
+    Php => {
+        support_lang: Php,
+        extensions: ["php", "phtml", "php3", "php4", "php5", "php7", "phps"],
+        exclude: [],
+        separator: "\\",
+        names: ["php"],
+    },
 }
 
 #[cfg(test)]
