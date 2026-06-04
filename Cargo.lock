@@ -6149,6 +6149,7 @@ dependencies = [
  "jsonschema",
  "labkit",
  "labkit-events",
+ "migration-framework",
  "nats-client",
  "ontology",
  "opentelemetry",
@@ -7599,6 +7600,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "migration-framework"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "ontology",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -1,0 +1,9 @@
+[package]
+name = "migration-framework"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+compiler = { path = "../query-engine/compiler" }
+ontology = { path = "../ontology" }
+thiserror = { workspace = true }

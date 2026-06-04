@@ -3,8 +3,8 @@
 //! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST.
 
 use crate::ast::ddl::{
-    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
-    ProjectionDef,
+    Codec, ColumnDef, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexDef,
+    IndexType, ProjectionDef,
 };
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
@@ -82,6 +82,38 @@ fn emit_index_type(it: &IndexType) -> String {
     }
 }
 
+/// Emits a single column fragment without indentation:
+/// `name type [DEFAULT expr] [CODEC(...)]`. Shared by `emit_create_table` and
+/// `ALTER TABLE ... ADD COLUMN` codegen so the type/codec spelling has one home.
+pub fn emit_column(col: &ColumnDef) -> String {
+    let mut parts = vec![format!(
+        "{} {}",
+        quote_ident(&col.name),
+        emit_column_type(&col.data_type)
+    )];
+    if let Some(default) = &col.default {
+        parts.push(format!("DEFAULT {default}"));
+    }
+    if let Some(codecs) = &col.codec {
+        let codec_list: Vec<String> = codecs.iter().map(emit_codec).collect();
+        parts.push(format!("CODEC({})", codec_list.join(", ")));
+    }
+    parts.join(" ")
+}
+
+/// Emits a secondary-index definition without the leading `INDEX` keyword:
+/// `name expr TYPE t GRANULARITY g`. `CREATE TABLE` prepends `INDEX`;
+/// `ALTER TABLE ... ADD INDEX` supplies the keyword itself.
+pub fn emit_index(idx: &IndexDef) -> String {
+    format!(
+        "{} {} TYPE {} GRANULARITY {}",
+        quote_ident(&idx.name),
+        quote_ident(&idx.expression),
+        emit_index_type(&idx.index_type),
+        idx.granularity
+    )
+}
+
 /// Emits a complete `CREATE TABLE IF NOT EXISTS` statement for ClickHouse.
 pub fn emit_create_table(table: &CreateTable) -> String {
     let mut parts = Vec::new();
@@ -90,33 +122,15 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     let mut body_items: Vec<String> = Vec::new();
 
     for col in &table.columns {
-        let mut col_parts = vec![format!(
-            "    {} {}",
-            quote_ident(&col.name),
-            emit_column_type(&col.data_type)
-        )];
-        if let Some(default) = &col.default {
-            col_parts.push(format!("DEFAULT {default}"));
-        }
-        if let Some(codecs) = &col.codec {
-            let codec_list: Vec<String> = codecs.iter().map(emit_codec).collect();
-            col_parts.push(format!("CODEC({})", codec_list.join(", ")));
-        }
-        body_items.push(col_parts.join(" "));
+        body_items.push(format!("    {}", emit_column(col)));
     }
 
     for idx in &table.indexes {
-        body_items.push(format!(
-            "    INDEX {} {} TYPE {} GRANULARITY {}",
-            quote_ident(&idx.name),
-            quote_ident(&idx.expression),
-            emit_index_type(&idx.index_type),
-            idx.granularity
-        ));
+        body_items.push(format!("    INDEX {}", emit_index(idx)));
     }
 
     for proj in &table.projections {
-        body_items.push(emit_projection(proj));
+        body_items.push(format!("    PROJECTION {}", emit_projection(proj)));
     }
 
     let engine_args = if table.engine.args.is_empty() {
@@ -296,7 +310,10 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
     )
 }
 
-fn emit_projection(proj: &ProjectionDef) -> String {
+/// Emits a projection definition without the leading `PROJECTION` keyword.
+/// `CREATE TABLE` prepends `PROJECTION`; `ALTER TABLE ... ADD PROJECTION`
+/// supplies the keyword itself.
+pub fn emit_projection(proj: &ProjectionDef) -> String {
     match proj {
         ProjectionDef::Reorder { name, order_by } => {
             assert!(
@@ -308,7 +325,7 @@ fn emit_projection(proj: &ProjectionDef) -> String {
             } else {
                 format!("({})", order_by.join(", "))
             };
-            format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
+            format!("{name} (SELECT * ORDER BY {order})")
         }
         ProjectionDef::Lightweight { name, order_by } => {
             assert!(
@@ -320,7 +337,7 @@ fn emit_projection(proj: &ProjectionDef) -> String {
             } else {
                 format!("({})", order_by.join(", "))
             };
-            format!("    PROJECTION {name} (SELECT _part_offset ORDER BY {order})")
+            format!("{name} (SELECT _part_offset ORDER BY {order})")
         }
         ProjectionDef::Aggregate {
             name,
@@ -328,7 +345,7 @@ fn emit_projection(proj: &ProjectionDef) -> String {
             group_by,
         } => {
             format!(
-                "    PROJECTION {name} (\n      SELECT {}\n      GROUP BY {}\n    )",
+                "{name} (\n      SELECT {}\n      GROUP BY {}\n    )",
                 select.join(", "),
                 group_by.join(", ")
             )

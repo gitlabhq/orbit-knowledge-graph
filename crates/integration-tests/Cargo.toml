@@ -19,6 +19,7 @@ jsonschema = { workspace = true }
 indexer = { path = "../indexer", features = ["testkit"] }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
+migration-framework = { path = "../migration-framework" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 arrow = { workspace = true }

@@ -1,6 +1,10 @@
 mod common;
 mod indexer;
 
+mod migration {
+    pub mod generation;
+}
+
 mod canary {
     pub mod setup_test;
 }

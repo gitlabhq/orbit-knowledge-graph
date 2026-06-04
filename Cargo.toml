@@ -25,6 +25,7 @@ members = [
   "crates/gkg-server-config",
   "crates/gkg-server",
   "crates/ontology",
+  "crates/migration-framework",
 
   "crates/health-check",
   "crates/siphon-proto",
