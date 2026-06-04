@@ -573,13 +573,15 @@ fn compute_node_edge_mappings(
     mappings
 }
 
-/// Resolve narrowing, elevated access, and FK join needs in a single pass.
 fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
-    // 1. Narrowing: Join nodes without own filters need narrowing when filter CTEs exist
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
     if has_filter_only {
+        let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
+        for hop in hops {
+            *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
+        }
         let needs: Vec<String> = nodes
             .values()
             .filter(|np| {
@@ -587,6 +589,11 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
                     && np.filters.is_empty()
                     && np.node_ids.is_empty()
                     && np.id_range.is_none()
+                    && convergent_targets
+                        .get(np.alias.as_str())
+                        .copied()
+                        .unwrap_or(0)
+                        < 2
             })
             .map(|np| np.alias.clone())
             .collect();
