@@ -317,68 +317,6 @@ pub(super) fn push_edge_predicates(
     }
 }
 
-pub(super) fn dedup_edge_scan(
-    edge_table: &str,
-    alias: &str,
-    table_columns: &HashMap<String, HashSet<String>>,
-) -> TableRef {
-    let Some(cols) = table_columns.get(edge_table) else {
-        return TableRef::scan_final(edge_table, alias);
-    };
-
-    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
-        .iter()
-        .copied()
-        .filter(|c| cols.contains(*c))
-        .collect();
-
-    let mut projected: Vec<&str> = cols
-        .iter()
-        .map(String::as_str)
-        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
-        .collect();
-    projected.sort_unstable();
-
-    let mut select = Vec::with_capacity(identity.len() + projected.len());
-    for col in &identity {
-        select.push(SelectExpr::col(alias, *col));
-    }
-    for col in projected {
-        select.push(SelectExpr::new(
-            Expr::func(
-                "argMax",
-                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
-            ),
-            col,
-        ));
-    }
-
-    let group_by = identity
-        .iter()
-        .map(|c| Expr::col(alias, *c))
-        .collect::<Vec<_>>();
-
-    let having = Expr::eq(
-        Expr::func(
-            "argMax",
-            vec![
-                Expr::col(alias, DELETED_COLUMN),
-                Expr::col(alias, VERSION_COLUMN),
-            ],
-        ),
-        Expr::lit(false),
-    );
-
-    let query = Query {
-        select,
-        from: TableRef::scan(edge_table, alias),
-        group_by,
-        having: Some(having),
-        ..Default::default()
-    };
-    TableRef::subquery(query, alias)
-}
-
 /// Build a `LIMIT 1 BY (PK) ORDER BY (PK, _version DESC)` subquery for
 /// single-hop edge aggregations, with WHERE predicates injected.
 ///
