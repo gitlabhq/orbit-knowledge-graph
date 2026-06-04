@@ -22,11 +22,13 @@ use crate::proto::{
 };
 
 use self::input::GraphStatusInput;
+use crate::schema_watcher::SchemaWatcher;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
     indexing_status: Option<IndexingStatusStore>,
+    schema_watcher: Option<Arc<SchemaWatcher>>,
 }
 
 fn graph_status_query_config() -> QueryConfig {
@@ -49,12 +51,25 @@ impl GraphStatusService {
             client,
             ontology,
             indexing_status: None,
+            schema_watcher: None,
         }
     }
 
     pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
         self.indexing_status = Some(store);
         self
+    }
+
+    pub fn with_schema_watcher(mut self, watcher: Arc<SchemaWatcher>) -> Self {
+        self.schema_watcher = Some(watcher);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_version(&self) -> Option<u32> {
+        self.schema_watcher
+            .as_ref()
+            .and_then(|w| w.active_version())
     }
 
     pub async fn get_status(
@@ -69,10 +84,21 @@ impl GraphStatusService {
 
         info!(traversal_path, "Graph status fetching");
 
+        use indexer::schema::version::{SCHEMA_VERSION, table_prefix};
+        let embedded_prefix = table_prefix(*SCHEMA_VERSION);
+        let target_prefix = self
+            .schema_watcher
+            .as_ref()
+            .and_then(|w| w.active_version())
+            .map(table_prefix)
+            .unwrap_or_else(|| embedded_prefix.clone());
+
         let input = GraphStatusInput::from_ontology(
             &self.ontology,
             traversal_path.to_string(),
             security_context,
+            &embedded_prefix,
+            &target_prefix,
         )?;
 
         let entity_counts_future = async {

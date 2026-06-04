@@ -126,6 +126,19 @@ impl KnowledgeGraphServiceImpl {
         self.graph_status = self.graph_status.with_indexing_status(store);
         self
     }
+
+    pub fn with_schema_watcher(
+        mut self,
+        watcher: Arc<crate::schema_watcher::SchemaWatcher>,
+    ) -> Self {
+        self.graph_status = self.graph_status.with_schema_watcher(watcher);
+        self
+    }
+
+    #[cfg(test)]
+    fn graph_status(&self) -> &GraphStatusService {
+        &self.graph_status
+    }
 }
 
 type ExecuteQueryStream =
@@ -697,6 +710,7 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
 mod tests {
     use super::*;
     use crate::proto::knowledge_graph_service_server::KnowledgeGraphService;
+    use crate::schema_watcher::SchemaState;
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
     use tonic::metadata::MetadataValue;
 
@@ -742,6 +756,15 @@ mod tests {
             MetadataValue::try_from(format!("Bearer {token}")).unwrap(),
         );
         request
+    }
+
+    #[test]
+    fn with_schema_watcher_threads_active_version_into_graph_status() {
+        let watcher =
+            crate::schema_watcher::SchemaWatcher::for_active_version(SchemaState::Ready, 999);
+        let service = test_service().with_schema_watcher(watcher);
+
+        assert_eq!(service.graph_status().active_version(), Some(999));
     }
 
     #[test]

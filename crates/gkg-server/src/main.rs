@@ -173,7 +173,7 @@ async fn run_webserver(
         config.bind_address,
         graph_client,
         Some(gitlab_client),
-        schema_watcher,
+        schema_watcher.clone(),
     )
     .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
@@ -190,7 +190,8 @@ async fn run_webserver(
         config.grpc.clone(),
         Arc::new(config.analytics.clone()),
     )
-    .with_resolver_registry(Arc::new(resolver_registry));
+    .with_resolver_registry(Arc::new(resolver_registry))
+    .with_schema_watcher(schema_watcher);
 
     info!("initializing NATS connection");
     let nats = Arc::new(

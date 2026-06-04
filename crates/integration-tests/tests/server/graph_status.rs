@@ -5,7 +5,10 @@ use bytes::Bytes;
 use chrono::{Duration, Utc};
 use nats_client::error::NatsError;
 use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
-use query_engine::compiler::{SecurityContext, TraversalPath};
+use ontology::Ontology;
+use query_engine::compiler::{
+    SecurityContext, TraversalPath, emit_create_table, generate_graph_tables_with_prefix,
+};
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 use gkg_server::graph_status::GraphStatusService;
@@ -13,6 +16,7 @@ use gkg_server::proto::{
     GetGraphStatusResponse, IndexingState, ResponseFormat, StructuredGraphStatus,
     get_graph_status_response,
 };
+use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
 use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
@@ -256,6 +260,7 @@ async fn graph_status() {
         definition_count_includes_distinct_sort_keys_excludes_tombstone,
         projects_total_known_counts_distinct_ids,
         get_status_degrades_when_entity_count_table_missing,
+        active_version_counts_read_from_active_prefix,
     );
 }
 
@@ -795,4 +800,53 @@ async fn get_status_degrades_when_entity_count_table_missing(ctx: &TestContext) 
         0,
         "entity counts degrade to empty when their query fails"
     );
+}
+
+async fn active_version_counts_read_from_active_prefix(ctx: &TestContext) {
+    const ACTIVE_VERSION: u32 = 999;
+    let db = ctx.fork("graph_status_active_version_prefix").await;
+
+    let embedded = Ontology::load_embedded().expect("ontology must load");
+    let prefix = indexer::schema::version::table_prefix(ACTIVE_VERSION);
+    for table in generate_graph_tables_with_prefix(&embedded, &prefix) {
+        db.execute(&emit_create_table(&table)).await;
+    }
+
+    db.execute(&format!(
+        "INSERT INTO {prefix}gl_project (id, name, visibility_level, traversal_path) VALUES
+         (7001, 'P1', 'public', '1/700/7001/'),
+         (7002, 'P2', 'public', '1/700/7002/'),
+         (7003, 'P3', 'public', '1/700/7003/'),
+         (7004, 'P4', 'public', '1/700/7004/'),
+         (7005, 'P5', 'public', '1/700/7005/'),
+         (7006, 'P6', 'public', '1/700/7006/'),
+         (7007, 'P7', 'public', '1/700/7007/')"
+    ))
+    .await;
+    db.execute(&format!(
+        "INSERT INTO {prefix}gl_definition (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
+         (7100, '1/700/7001/', 7001, 'main', 'sha', 'a.rb', 'A', 'A', 'Class', 1, 2, 0, 10, 0, 10)"
+    ))
+    .await;
+    db.optimize_all().await;
+
+    let client = Arc::new(db.create_client());
+    let ontology = Arc::new(load_ontology());
+    let watcher = SchemaWatcher::for_active_version(SchemaState::Ready, ACTIVE_VERSION);
+    let service = GraphStatusService::new(client, ontology).with_schema_watcher(watcher);
+
+    let response = service
+        .get_status("1/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+
+    let projects = status.projects.expect("projects should be present");
+    assert_eq!(
+        projects.total_known, 7,
+        "counts must come from the active v{ACTIVE_VERSION} tables, not the binary's own prefix"
+    );
+
+    let source_code = find_domain(&status.domains, "source_code");
+    assert_eq!(find_item(source_code, "Definition"), 1);
 }

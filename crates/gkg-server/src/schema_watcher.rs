@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
@@ -37,6 +37,7 @@ impl SchemaState {
 
 pub struct SchemaWatcher {
     state: Arc<AtomicU8>,
+    active: Arc<AtomicU32>,
 }
 
 impl SchemaWatcher {
@@ -47,6 +48,7 @@ impl SchemaWatcher {
         shutdown: CancellationToken,
     ) -> Arc<Self> {
         let state = Arc::new(AtomicU8::new(SchemaState::Pending as u8));
+        let active = Arc::new(AtomicU32::new(0));
         register_state_gauge(state.clone());
 
         tokio::spawn(watch_loop(
@@ -55,19 +57,36 @@ impl SchemaWatcher {
             poll_interval,
             shutdown,
             state.clone(),
+            active.clone(),
         ));
 
-        Arc::new(Self { state })
+        Arc::new(Self { state, active })
     }
 
     pub fn current(&self) -> SchemaState {
         SchemaState::from_raw(self.state.load(Ordering::Relaxed))
     }
 
+    pub fn active_version(&self) -> Option<u32> {
+        match self.active.load(Ordering::Relaxed) {
+            0 => None,
+            v => Some(v),
+        }
+    }
+
     #[cfg(any(test, feature = "testkit"))]
     pub fn for_state(state: SchemaState) -> Arc<Self> {
         Arc::new(Self {
             state: Arc::new(AtomicU8::new(state as u8)),
+            active: Arc::new(AtomicU32::new(0)),
+        })
+    }
+
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn for_active_version(state: SchemaState, active: u32) -> Arc<Self> {
+        Arc::new(Self {
+            state: Arc::new(AtomicU8::new(state as u8)),
+            active: Arc::new(AtomicU32::new(active)),
         })
     }
 }
@@ -78,6 +97,7 @@ async fn watch_loop(
     poll_interval: Duration,
     shutdown: CancellationToken,
     state: Arc<AtomicU8>,
+    active: Arc<AtomicU32>,
 ) {
     info!(
         embedded_version,
@@ -86,13 +106,14 @@ async fn watch_loop(
     );
 
     loop {
-        let (next, active) = poll_once(&graph, embedded_version, &state).await;
+        let (next, active_version) = poll_once(&graph, embedded_version, &state, &active).await;
         transition(&state, next);
+        active.store(active_version.unwrap_or(0), Ordering::Relaxed);
 
         if next == SchemaState::Outdated {
             error!(
                 embedded_version,
-                active_version = active,
+                active_version,
                 "active schema version exceeds binary version — \
                  binary too old, requesting shutdown"
             );
@@ -111,13 +132,21 @@ async fn poll_once(
     graph: &ArrowClickHouseClient,
     embedded_version: u32,
     state: &Arc<AtomicU8>,
+    active: &Arc<AtomicU32>,
 ) -> (SchemaState, Option<u32>) {
     match read_active_version(graph).await {
-        Ok(Some(active)) => (classify(active, embedded_version), Some(active)),
+        Ok(Some(version)) => (classify(version, embedded_version), Some(version)),
         Ok(None) => (SchemaState::Pending, None),
         Err(e) => {
             warn!(error = %e, "failed to read active schema version — keeping previous state");
-            (SchemaState::from_raw(state.load(Ordering::Relaxed)), None)
+            let previous = match active.load(Ordering::Relaxed) {
+                0 => None,
+                v => Some(v),
+            };
+            (
+                SchemaState::from_raw(state.load(Ordering::Relaxed)),
+                previous,
+            )
         }
     }
 }
@@ -201,5 +230,17 @@ mod tests {
             SchemaState::from_raw(state.load(Ordering::Relaxed)),
             SchemaState::Ready
         );
+    }
+
+    #[test]
+    fn active_version_unknown_is_none() {
+        let watcher = SchemaWatcher::for_state(SchemaState::Pending);
+        assert_eq!(watcher.active_version(), None);
+    }
+
+    #[test]
+    fn active_version_reports_set_value() {
+        let watcher = SchemaWatcher::for_active_version(SchemaState::Ready, 7);
+        assert_eq!(watcher.active_version(), Some(7));
     }
 }

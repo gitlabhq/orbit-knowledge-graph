@@ -85,6 +85,14 @@ impl GrpcServer {
         self
     }
 
+    pub fn with_schema_watcher(
+        mut self,
+        watcher: Arc<crate::schema_watcher::SchemaWatcher>,
+    ) -> Self {
+        self.service = self.service.with_schema_watcher(watcher);
+        self
+    }
+
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
