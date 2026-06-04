@@ -9,7 +9,7 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
+    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
     emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
     push_edge_predicates,
 };
@@ -102,13 +102,53 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 sort_key,
                 inner_preds,
             ));
+        } else if dedup_edges && !is_multi_hop {
+            // Multi-hop same-table: LIMIT BY with predicates pushed inside
+            // each hop's subquery. Replaces argMax GROUP BY HAVING.
+            let Some(sort_key) = plan.table_sort_keys.get(&hop.edge_table) else {
+                return Err(QueryError::Lowering(format!(
+                    "no sort key for edge table '{}'; cannot emit LIMIT BY dedup",
+                    hop.edge_table
+                )));
+            };
+
+            let mut inner_preds = Vec::new();
+            collect_edge_predicates(
+                &mut inner_preds,
+                &alias,
+                hop,
+                plan,
+                start_col,
+                end_col,
+                &mut ctes,
+                &mut tagged_nodes,
+                &mut narrowed_nodes,
+            );
+
+            let edge_source = limit_by_edge_scan(&hop.edge_table, &alias, sort_key, inner_preds);
+
+            if let Some(prev_from) = from.take() {
+                let jc = hop
+                    .join_prev
+                    .as_ref()
+                    .expect("non-first hop must have join_prev");
+                from = Some(TableRef::join(
+                    JoinType::Inner,
+                    prev_from,
+                    edge_source,
+                    Expr::eq(
+                        Expr::col(&jc.prev_alias, &jc.prev_col),
+                        Expr::col(&alias, &jc.curr_col),
+                    ),
+                ));
+            } else {
+                from = Some(edge_source);
+            }
         } else {
             let edge_source = if is_multi_hop {
                 let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
                 where_parts.extend(union_wheres);
                 union
-            } else if dedup_edges {
-                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns)
             } else {
                 TableRef::scan(&hop.edge_table, &alias)
             };
@@ -138,7 +178,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     hop,
                     &plan.nodes,
                     &plan.table_columns,
-                    dedup_edges,
+                    false,
                 );
             }
 
