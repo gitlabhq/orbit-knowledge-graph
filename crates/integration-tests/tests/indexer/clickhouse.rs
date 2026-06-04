@@ -251,6 +251,74 @@ async fn clickhouse_destination() {
     write_empty_batch_succeeds(&context).await;
 }
 
+/// The byte cap the datalake pins on retry (`preferred_block_size_bytes`)
+/// resolves the Arrow String 2GB overflow that a smaller row cap alone can't.
+/// Needs ~3GB of container memory to build the oversized block.
+#[tokio::test]
+async fn arrow_string_overflow_recovers_with_byte_cap() {
+    use futures::StreamExt;
+
+    let context = TestContext::new().await;
+    let client = context.create_client();
+
+    // index_granularity_bytes=0 makes the sort coalesce the page into one block.
+    context
+        .execute(
+            "CREATE TABLE wide_overflow (id UInt32, s String) \
+             ENGINE = MergeTree ORDER BY id SETTINGS index_granularity_bytes = 0",
+        )
+        .await;
+    // 2148 * 1MB exceeds the Arrow String 2GB offset cap.
+    context
+        .execute(
+            "INSERT INTO wide_overflow SELECT number, repeat('A', 1000000) \
+             FROM numbers(2148) SETTINGS max_memory_usage = 0",
+        )
+        .await;
+
+    let sql = "SELECT s FROM wide_overflow ORDER BY id LIMIT 2148";
+
+    // preferred_block_size_bytes=0 reproduces the incident profile; the default
+    // of 1MB would mask the bug.
+    let mut without_cap = client
+        .query(sql)
+        .with_setting("max_memory_usage", "0")
+        .with_setting("preferred_block_size_bytes", "0")
+        .fetch_arrow_streamed(8_000)
+        .await
+        .expect("query opens");
+    let mut overflowed = false;
+    while let Some(batch) = without_cap.next().await {
+        if let Err(err) = batch {
+            assert!(
+                err.to_string().contains("cannot contain more than"),
+                "expected the Arrow 2GB overflow, got: {err}"
+            );
+            overflowed = true;
+            break;
+        }
+    }
+    assert!(
+        overflowed,
+        "a reduced row cap alone must still overflow on a >2GB block"
+    );
+
+    let mut with_cap = client
+        .query(sql)
+        .with_setting("max_memory_usage", "0")
+        .with_setting("preferred_block_size_bytes", "1000000")
+        .fetch_arrow_streamed(8_000)
+        .await
+        .expect("query opens");
+    let mut rows = 0u64;
+    while let Some(batch) = with_cap.next().await {
+        rows += batch
+            .expect("the byte cap must keep each block under the Arrow limit")
+            .num_rows() as u64;
+    }
+    assert_eq!(rows, 2148);
+}
+
 #[tokio::test]
 async fn connection_failure_returns_error() {
     let config = ClickHouseConfiguration {

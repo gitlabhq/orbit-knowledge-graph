@@ -129,9 +129,7 @@ argument can be a bare name such as `execute` or a qualified target such as
 Output is plain text with `file_path:line` locators that can be passed directly
 to file-reading tools.
 
-Orbit Remote's Code Graph coverage is not exhaustive. Treat results as graph
-coverage, not as authoritative source of truth, unless you cross-check with
-source search or another API. Known limitations:
+Known limitations of Orbit Remote's Code Graph coverage:
 
 - `EXTENDS` depth is capped at 3 server-side, and large inheritance trees can be
   incomplete.
@@ -152,5 +150,3 @@ source search or another API. Known limitations:
   `overview` equivalent.
 - Keep path prefixes narrow for `api`.
 - Do not use this for local uncommitted or branch-local code; use Orbit Local.
-- Do not present graph-only inheritance or caller counts as complete without a
-  cross-check.
