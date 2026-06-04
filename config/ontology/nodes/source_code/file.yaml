@@ -66,12 +66,14 @@ properties:
     source: extension
     nullable: false
     description: "Extension (e.g., rb, py, java)."
+    selectivity: low
 
   language:
     type: string
     source: language
     nullable: false
     description: "Programming language (e.g., ruby, python, java)."
+    selectivity: low
 
   content:
     type: string

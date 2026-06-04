@@ -1,3 +1,24 @@
+## [0.69.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.68.0...v0.69.0) (2026-06-03)
+
+### Features
+
+* **orbit:** single-query extends/ancestors + new includes subcommand ([9590726](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/95907264a3213ca0d7ca495ac4f899d5b78bad8c)) by Abhinaba Ghosh
+
+### Fixes
+
+* **orbit:** address !1508 review feedback (partition pruning, tests, docs) ([96105e5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/96105e59f4184c3083aff2071e7554cda3285595)) by Dmitry Gruzd
+* **orbit:** validate agent command arguments against advertised schema ([6e00f33](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e00f33bae5b44f72ea03cabda78408b10677bbe)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** replace arrayExists with OR-of-startsWith for PK index pruning ([dd297ef](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dd297ef1653c66c2935bf67de1fd5d5ca06266f8)) by Michael Usachenko
+* **sdlc:** make ingestion read-ahead window and block size configurable ([1ad7f17](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1ad7f17318bf9c4e4c2bfd5fafaf5a52aaf40c5e)) by Jean-Gabriel Doyon
+
+### Other
+
+* **agents:** extend anti-slop convention to comments ([7fce040](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7fce0409afa955df46a01e1f92ed5954bee9292a)) by Dmitry Gruzd
+* **agents:** stop agents adding useless comments ([42901ce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/42901ce5ee90ee511ae9657e95568f9edd432400)) by Dmitry Gruzd
+
 ## [0.68.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.67.0...v0.68.0) (2026-06-03)
 
 ### Features

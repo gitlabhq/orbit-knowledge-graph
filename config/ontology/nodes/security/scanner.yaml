@@ -41,6 +41,7 @@ properties:
     source: vendor
     nullable: false
     description: "Scanner vendor (default: GitLab)."
+    selectivity: low
 
   created_at:
     type: timestamp

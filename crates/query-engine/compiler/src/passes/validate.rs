@@ -461,8 +461,15 @@ impl<'a> Validator<'a> {
             };
             for (prop, filters) in node.filters.iter_mut() {
                 let dt = self.ontology.get_field_type(&entity, prop);
+                let selectivity = self
+                    .ontology
+                    .get_node(&entity)
+                    .and_then(|n| n.fields.iter().find(|f| f.name == *prop))
+                    .map(|f| f.selectivity)
+                    .unwrap_or_default();
                 for filter in filters {
                     filter.data_type = dt;
+                    filter.selectivity = selectivity;
                 }
             }
         }

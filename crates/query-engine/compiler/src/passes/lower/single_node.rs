@@ -29,5 +29,6 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
         where_parts,
         select,
         ctes: vec![],
+        edge_if_predicates: None,
     })
 }

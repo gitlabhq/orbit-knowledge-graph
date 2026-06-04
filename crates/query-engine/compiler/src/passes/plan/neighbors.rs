@@ -70,6 +70,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
         table_columns: input.compiler.table_columns.clone(),
+        table_sort_keys: input.compiler.table_sort_keys.clone(),
         body: PlanBody::Neighbors {
             center: center_alias,
             direction: config.direction,

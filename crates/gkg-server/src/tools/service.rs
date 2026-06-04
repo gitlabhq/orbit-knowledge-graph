@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use jsonschema::Validator;
 use ontology::Ontology;
 use ontology::introspection::{
     IntrospectionScope, SchemaDomain, SchemaResponse, build_schema_response,
@@ -11,6 +13,7 @@ use toon_format::{EncodeOptions, encode};
 
 use super::registry::ToolDefinition;
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
+use super::{V2CommandRegistry, V2ToolRegistry};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -51,14 +54,97 @@ pub enum ToolPlan {
     },
 }
 
+struct CommandSchema {
+    validator: Validator,
+    /// Carried so a validation error can name the valid parameters.
+    property_names: Vec<String>,
+}
+
+// `jsonschema::Validator` is not `Debug`, so derive it manually to keep
+// `ToolService` (a public type) `Debug`.
+impl std::fmt::Debug for CommandSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CommandSchema")
+            .field("property_names", &self.property_names)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CommandSchema {
+    fn compile(definition: &ToolDefinition) -> Self {
+        let validator = jsonschema::validator_for(&definition.parameters)
+            .expect("advertised command schema must compile");
+
+        let property_names = definition.parameters["properties"]
+            .as_object()
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default();
+
+        Self {
+            validator,
+            property_names,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolService {
     ontology: Arc<Ontology>,
+    schemas: Arc<HashMap<String, CommandSchema>>,
 }
 
 impl ToolService {
     pub fn new(ontology: Arc<Ontology>) -> Self {
-        Self { ontology }
+        let definitions = V2CommandRegistry::get_all_commands(&ontology)
+            .into_iter()
+            .chain(V2ToolRegistry::get_all_tools(&ontology));
+
+        let mut schemas = HashMap::new();
+        for definition in definitions {
+            schemas
+                .entry(definition.name.clone())
+                .or_insert_with(|| CommandSchema::compile(&definition));
+        }
+
+        Self {
+            ontology,
+            schemas: Arc::new(schemas),
+        }
+    }
+
+    /// The error lists the valid parameter names so an agent that passed an
+    /// unknown one (e.g. a hallucinated `node_types`) can self-correct without
+    /// first calling `list_commands`.
+    fn validate_arguments(
+        &self,
+        command_name: &str,
+        arguments: &Value,
+    ) -> Result<(), ExecutorError> {
+        let Some(schema) = self.schemas.get(command_name) else {
+            return Ok(());
+        };
+
+        let errors: Vec<String> = schema
+            .validator
+            .iter_errors(arguments)
+            .map(|error| error.to_string())
+            .collect();
+
+        if errors.is_empty() {
+            return Ok(());
+        }
+
+        let valid_parameters = if schema.property_names.is_empty() {
+            "none".to_string()
+        } else {
+            schema.property_names.join(", ")
+        };
+
+        Err(ExecutorError::InvalidArguments(format!(
+            "`{command_name}` rejected the given parameters: {}. \
+             Valid parameters: {valid_parameters}. Call list_commands for the full schema.",
+            errors.join("; "),
+        )))
     }
 
     pub fn resolve(
@@ -68,6 +154,8 @@ impl ToolService {
     ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+
+        self.validate_arguments(tool_name, &arguments)?;
 
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
@@ -83,6 +171,8 @@ impl ToolService {
     ) -> Result<ToolPlan, ExecutorError> {
         let arguments: Value = serde_json::from_str(arguments_json)
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+
+        self.validate_arguments(command_name, &arguments)?;
 
         match command_name {
             "query_graph" => Err(ExecutorError::InterceptedCommand(command_name.to_string())),
@@ -413,10 +503,17 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let result = service.resolve("query_graph", r#"{"match":{}}"#);
-        assert!(result.is_err());
+        assert!(matches!(result, Err(ExecutorError::InvalidArguments(_))));
 
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("missing 'query' field"));
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("query"),
+            "error should name the required param: {err}"
+        );
+        assert!(
+            err.contains("list_commands"),
+            "error should point at discovery: {err}"
+        );
     }
 
     #[test]
@@ -598,24 +695,96 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_does_not_accept_include() {
-        // back-compat: get_graph_schema must keep its old shape. Passing
-        // unknown args (like include) is a hard error from the args struct.
+    fn get_graph_schema_rejects_unknown_parameter() {
+        // get_graph_schema declares additionalProperties: false, so an unknown
+        // parameter is a hard error instead of being silently dropped.
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
         let result = service.resolve(
             "get_graph_schema",
             r#"{"format": "raw", "include": ["dsl"]}"#,
         );
-        // The include key is silently dropped (serde-default semantics) but
-        // must not cause merging into the response.
-        match result.expect("Should resolve") {
-            ToolPlan::Immediate { result } => {
-                assert!(result.is_object());
-                assert!(result.get("dsl").is_none());
-                assert!(result.get("response_format").is_none());
-            }
-            _ => panic!("Expected Immediate plan"),
+
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("include"),
+            "error should name the bad param: {err}"
+        );
+        assert!(
+            err.contains("expand_nodes") && err.contains("format"),
+            "error should list valid params: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_command_rejects_hallucinated_parameter() {
+        // Regression: an agent invoked get_graph_schema with a non-existent
+        // `node_types` parameter and silently received the full schema.
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve_command("get_graph_schema", r#"{"node_types": ["Job"]}"#);
+
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("node_types"),
+            "error should name the bad param: {err}"
+        );
+        assert!(
+            err.contains("expand_nodes") && err.contains("format"),
+            "error should list valid params: {err}"
+        );
+        assert!(
+            err.contains("list_commands"),
+            "error should point at discovery: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_command_rejects_wrong_argument_type() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve_command("get_graph_schema", r#"{"expand_nodes": "User"}"#);
+
+        assert!(matches!(result, Err(ExecutorError::InvalidArguments(_))));
+    }
+
+    #[test]
+    fn valid_arguments_still_resolve() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+
+        for args in [
+            r#"{}"#,
+            r#"{"expand_nodes": ["User"]}"#,
+            r#"{"format": "raw"}"#,
+        ] {
+            assert!(
+                service.resolve_command("get_graph_schema", args).is_ok(),
+                "valid args should resolve: {args}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_advertised_schema_compiles() {
+        // Guards the `expect` in CommandSchema::compile: constructing the
+        // service compiles every advertised command and tool schema, so a
+        // malformed schema fails this test instead of panicking in production.
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+
+        for name in [
+            "query_graph",
+            "get_graph_schema",
+            "get_query_dsl",
+            "get_response_format",
+            "list_commands",
+            "invoke_command",
+        ] {
+            assert!(
+                service.schemas.contains_key(name),
+                "{name} should have a compiled schema"
+            );
         }
     }
 

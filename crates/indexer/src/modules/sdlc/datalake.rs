@@ -66,9 +66,9 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     }
 }
 
-/// Rows per Arrow block when streaming a page, decoupled from the page `LIMIT`
-/// so peak memory tracks one block rather than the whole page.
-pub(crate) const DEFAULT_STREAM_BLOCK_SIZE: u64 = 65_536;
+/// Byte cap for retry blocks, keeping a block's String column under the 2GB
+/// Arrow offset limit even for MB-wide rows. ClickHouse's own default.
+const RETRY_PREFERRED_BLOCK_SIZE_BYTES: &str = "1000000";
 
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
@@ -143,8 +143,16 @@ impl DatalakeQuery for Datalake {
         max_block_size: Option<u64>,
     ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), DatalakeError> {
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
-        let (stream, summary) = self
-            .build_query(sql, params)
+        let mut query = self.build_query(sql, params);
+        if max_block_size.is_some() {
+            // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
+            // blocks so the retry is safe regardless of row width.
+            query = query.with_setting(
+                "preferred_block_size_bytes",
+                RETRY_PREFERRED_BLOCK_SIZE_BYTES,
+            );
+        }
+        let (stream, summary) = query
             .fetch_arrow_streamed_with_summary(block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;

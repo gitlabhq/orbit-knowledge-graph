@@ -18,7 +18,9 @@ use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeQuery, ReadStats, ReadStatsFuture, RecordBatchStream};
+use super::datalake::{
+    DatalakeError, DatalakeQuery, ReadStats, ReadStatsFuture, RecordBatchStream,
+};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
@@ -26,8 +28,10 @@ use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
 
-/// Read-ahead window. 8 blocks reaches cloud-throughput parity; more only costs memory.
-const WRITE_CHANNEL_CAPACITY: usize = 8;
+/// Default read-ahead window when not overridden via
+/// `EntityHandlerConfig::write_channel_capacity`. Higher values keep the writer
+/// fed (more throughput) at the cost of peak memory.
+const DEFAULT_WRITE_CHANNEL_CAPACITY: usize = 8;
 
 struct TableBatch {
     transform_index: usize,
@@ -76,6 +80,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
     retry_config: DatalakeRetryConfig,
+    write_channel_capacity: usize,
 }
 
 impl Pipeline {
@@ -90,7 +95,14 @@ impl Pipeline {
             checkpoint_store,
             metrics,
             retry_config,
+            write_channel_capacity: DEFAULT_WRITE_CHANNEL_CAPACITY,
         }
+    }
+
+    /// Override the read-ahead window (see `EntityHandlerConfig::write_channel_capacity`).
+    pub fn with_write_channel_capacity(mut self, capacity: usize) -> Self {
+        self.write_channel_capacity = capacity.max(1);
+        self
     }
 
     pub async fn run_plan(
@@ -170,12 +182,11 @@ impl Pipeline {
         position_key: &str,
         target_watermark: DateTime<Utc>,
     ) -> Result<PipelineStats, HandlerError> {
-        let (tx, rx) = mpsc::channel::<WriteCommand>(WRITE_CHANNEL_CAPACITY);
+        let (tx, rx) = mpsc::channel::<WriteCommand>(self.write_channel_capacity);
         let producer = tokio::spawn(
             Producer {
                 extractor: Extractor {
                     datalake: Arc::clone(&self.datalake),
-                    retry_config: self.retry_config.clone(),
                     params: base_query.params(),
                 },
                 transformer: Transformer {
@@ -183,6 +194,7 @@ impl Pipeline {
                     transforms: plan.transforms.clone(),
                 },
                 metrics: self.metrics.clone(),
+                retry_config: self.retry_config.clone(),
                 base_query,
                 sort_key: plan.sort_key.clone(),
                 batch_size: plan.batch_size,
@@ -307,53 +319,34 @@ impl Pipeline {
 
 struct Extractor {
     datalake: Arc<dyn DatalakeQuery>,
-    retry_config: DatalakeRetryConfig,
     params: Value,
 }
 
 impl Extractor {
-    // On transient failure, retry with `max_block_size` seeded then halved down to
-    // the floor, so an oversized-block Arrow overflow can self-correct.
-    async fn open_page(
+    async fn open(
         &self,
         sql: &str,
-    ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), HandlerError> {
-        let mut last_error = None;
-        let mut current_block_size: Option<u64> = None;
-
-        for attempt in 0..=MAX_RETRIES {
-            if attempt > 0 {
-                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
-                tokio::time::sleep(backoff).await;
-            }
-
-            match self
-                .datalake
-                .query_arrow_with_summary(sql, self.params.clone(), current_block_size)
-                .await
-            {
-                Ok(stream_and_stats) => return Ok(stream_and_stats),
-                Err(err) => {
-                    warn!(
-                        attempt,
-                        max_retries = MAX_RETRIES,
-                        max_block_size = ?current_block_size,
-                        %err,
-                        "datalake query failed, retrying"
-                    );
-                    last_error = Some(HandlerError::Processing(format!(
-                        "datalake query failed: {err}"
-                    )));
-                    current_block_size = Some(match current_block_size {
-                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
-                        None => self.retry_config.halving_initial_block_size,
-                    });
-                }
-            }
-        }
-
-        Err(last_error.unwrap())
+        max_block_size: Option<u64>,
+    ) -> Result<(RecordBatchStream<'_>, ReadStatsFuture), DatalakeError> {
+        self.datalake
+            .query_arrow_with_summary(sql, self.params.clone(), max_block_size)
+            .await
     }
+}
+
+struct PageStats {
+    cursor: Cursor,
+    rows: u64,
+    bytes: u64,
+    read_stats: ReadStats,
+    extract_elapsed: Duration,
+    transform_duration: Duration,
+}
+
+enum PageError {
+    Datalake(DatalakeError),
+    Fatal(HandlerError),
+    ReceiverGone,
 }
 
 /// The extension point. Transforms are row-wise (`SELECT … FROM source_data`),
@@ -438,6 +431,7 @@ struct Producer {
     extractor: Extractor,
     transformer: Transformer,
     metrics: SdlcMetrics,
+    retry_config: DatalakeRetryConfig,
     base_query: PreparedQuery,
     sort_key: Vec<String>,
     batch_size: u64,
@@ -462,61 +456,32 @@ impl Producer {
                 })
                 .to_sql();
 
-            let extract_start = Instant::now();
-            let (mut stream, read_stats) = self.extractor.open_page(&page_sql).await?;
+            let page = match self.extract_page(&session, &page_sql, &cursor, &tx).await? {
+                Some(page) => page,
+                None => return Ok(()),
+            };
 
-            let mut page_cursor = cursor.clone();
-            let mut page_rows: u64 = 0;
-            let mut page_bytes: u64 = 0;
-            let mut transform_duration = Duration::ZERO;
-
-            while let Some(block) = stream.next().await {
-                let block = block.map_err(|err| {
-                    HandlerError::Processing(format!("datalake stream failed: {err}"))
-                })?;
-                if block.num_rows() == 0 {
-                    continue;
-                }
-
-                page_rows += block.num_rows() as u64;
-                page_bytes += block.get_array_memory_size() as u64;
-                page_cursor = page_cursor.advance(&block, &self.sort_key)?;
-
-                let transform_start = Instant::now();
-                let outputs = self.transformer.run(&session, &block).await?;
-                transform_duration += transform_start.elapsed();
-
-                for output in outputs {
-                    if tx.send(WriteCommand::Batch(output)).await.is_err() {
-                        return Ok(());
-                    }
-                }
-            }
-
-            // The summary arrives only after the page's body is fully read.
-            let read_stats = read_stats.await;
-
-            if page_rows > 0 {
+            if page.rows > 0 {
                 self.metrics.record_datalake_query(
                     &self.transformer.name,
-                    extract_start.elapsed().as_secs_f64(),
-                    page_bytes,
+                    page.extract_elapsed.as_secs_f64(),
+                    page.bytes,
                 );
                 self.metrics
-                    .record_transform_duration(transform_duration.as_secs_f64());
+                    .record_transform_duration(page.transform_duration.as_secs_f64());
                 info!(
-                    rows = page_rows,
-                    duration_ms = extract_start.elapsed().as_millis() as u64,
+                    rows = page.rows,
+                    duration_ms = page.extract_elapsed.as_millis() as u64,
                     "page extracted"
                 );
             }
 
             if tx
                 .send(WriteCommand::PageComplete {
-                    cursor: page_cursor.clone(),
-                    extracted_rows: page_rows,
-                    extracted_bytes: page_bytes,
-                    read_stats,
+                    cursor: page.cursor.clone(),
+                    extracted_rows: page.rows,
+                    extracted_bytes: page.bytes,
+                    read_stats: page.read_stats,
                 })
                 .await
                 .is_err()
@@ -525,13 +490,122 @@ impl Producer {
             }
 
             // A short page is the last; an empty page means nothing past the cursor.
-            if page_rows < self.batch_size {
+            if page.rows < self.batch_size {
                 break;
             }
-            cursor = page_cursor;
+            cursor = page.cursor;
         }
 
         Ok(())
+    }
+
+    /// Streams one page, shrinking the block size on a datalake failure (the
+    /// Arrow 2GB overflow surfaces mid-stream, so the retry wraps the drain, not
+    /// just the open). `None` means the consumer went away.
+    async fn extract_page(
+        &self,
+        session: &SessionContext,
+        page_sql: &str,
+        start_cursor: &Cursor,
+        tx: &mpsc::Sender<WriteCommand>,
+    ) -> Result<Option<PageStats>, HandlerError> {
+        let mut last_error: Option<HandlerError> = None;
+        let mut max_block_size: Option<u64> = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(100 * 2u64.pow(attempt - 1));
+                tokio::time::sleep(backoff).await;
+            }
+
+            match self
+                .stream_page(session, page_sql, start_cursor, tx, max_block_size)
+                .await
+            {
+                Ok(Some(page)) => return Ok(Some(page)),
+                Ok(None) => return Ok(None),
+                Err(PageError::Fatal(err)) => return Err(err),
+                Err(PageError::ReceiverGone) => return Ok(None),
+                Err(PageError::Datalake(err)) => {
+                    warn!(
+                        attempt,
+                        max_retries = MAX_RETRIES,
+                        max_block_size = ?max_block_size,
+                        %err,
+                        "datalake page failed, retrying with smaller block size"
+                    );
+                    last_error = Some(HandlerError::Processing(format!(
+                        "datalake stream failed: {err}"
+                    )));
+                    max_block_size = Some(match max_block_size {
+                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
+                        None => self.retry_config.halving_initial_block_size,
+                    });
+                }
+            }
+        }
+
+        Err(last_error.expect("loop runs once and only exits here after a failure"))
+    }
+
+    async fn stream_page(
+        &self,
+        session: &SessionContext,
+        page_sql: &str,
+        start_cursor: &Cursor,
+        tx: &mpsc::Sender<WriteCommand>,
+        max_block_size: Option<u64>,
+    ) -> Result<Option<PageStats>, PageError> {
+        let extract_start = Instant::now();
+        let (mut stream, read_stats) = self
+            .extractor
+            .open(page_sql, max_block_size)
+            .await
+            .map_err(PageError::Datalake)?;
+
+        let mut page_cursor = start_cursor.clone();
+        let mut page_rows: u64 = 0;
+        let mut page_bytes: u64 = 0;
+        let mut transform_duration = Duration::ZERO;
+
+        while let Some(block) = stream.next().await {
+            let block = block.map_err(PageError::Datalake)?;
+            if block.num_rows() == 0 {
+                continue;
+            }
+
+            page_rows += block.num_rows() as u64;
+            page_bytes += block.get_array_memory_size() as u64;
+            page_cursor = page_cursor
+                .advance(&block, &self.sort_key)
+                .map_err(PageError::Fatal)?;
+
+            let transform_start = Instant::now();
+            let outputs = self
+                .transformer
+                .run(session, &block)
+                .await
+                .map_err(PageError::Fatal)?;
+            transform_duration += transform_start.elapsed();
+
+            for output in outputs {
+                if tx.send(WriteCommand::Batch(output)).await.is_err() {
+                    return Err(PageError::ReceiverGone);
+                }
+            }
+        }
+
+        // The summary arrives only after the page's body is fully read.
+        let read_stats = read_stats.await;
+
+        Ok(Some(PageStats {
+            cursor: page_cursor,
+            rows: page_rows,
+            bytes: page_bytes,
+            read_stats,
+            extract_elapsed: extract_start.elapsed(),
+            transform_duration,
+        }))
     }
 }
 
@@ -1094,6 +1168,90 @@ mod tests {
             observed,
             vec![None, Some(4_096), Some(2_048), Some(2_048)],
             "halving should clamp at the configured floor; observed: {observed:?}"
+        );
+    }
+
+    struct StreamFailingDatalake {
+        calls: Mutex<Vec<Option<u64>>>,
+        recover_at_block_size: u64,
+    }
+
+    impl StreamFailingDatalake {
+        fn observed_block_sizes(&self) -> Vec<Option<u64>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl DatalakeQuery for StreamFailingDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: Value,
+            max_block_size: Option<u64>,
+        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+            self.calls.lock().unwrap().push(max_block_size);
+
+            let small_enough =
+                matches!(max_block_size, Some(size) if size <= self.recover_at_block_size);
+            let blocks: Vec<Result<RecordBatch, DatalakeError>> = if small_enough {
+                vec![Ok(test_batch_range(1, 5))]
+            } else {
+                vec![Err(DatalakeError::Query(
+                    "Code: 1002. DB::Exception: Error with a Arrow column \"String\": \
+                     Capacity error: array cannot contain more than 2147483646 bytes"
+                        .to_string(),
+                ))]
+            };
+            Ok(Box::pin(futures::stream::iter(blocks)))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn mid_stream_overflow_recovers_via_block_size_halving() {
+        let datalake = Arc::new(StreamFailingDatalake {
+            calls: Mutex::new(Vec::new()),
+            recover_at_block_size: 8_000,
+        });
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            DatalakeRetryConfig {
+                halving_initial_block_size: 8_000,
+                halving_min_block_size: 1_024,
+            },
+        );
+
+        let plan = simple_plan("Test");
+        let result = pipeline
+            .run_plan(
+                &noop_context(),
+                &plan,
+                base_query(&plan),
+                &position_key(&plan),
+                test_watermark(),
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "mid-stream overflow should self-correct: {result:?}"
+        );
+        assert_eq!(
+            datalake.observed_block_sizes(),
+            vec![None, Some(8_000)],
+            "first attempt streams at the default and fails mid-drain; the retry \
+             must shrink the block rather than abort"
         );
     }
 

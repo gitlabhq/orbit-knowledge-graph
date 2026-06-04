@@ -68,6 +68,12 @@ appConfigDefaults:
     url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
     stream_name: "e2e_siphon_event_stream"
     oversize_bucket_name: "e2e_siphon_oversize_bucket"
+    # siphon 0.0.99-beta: must equal oversize_bucket_name. The producer only
+    # creates that bucket; the queue just opens object_storage_config.bucket_name.
+    object_storage_config:
+      identifier: "nats-object-storage"
+      type: "nats"
+      bucket_name: "e2e_siphon_oversize_bucket"
   clickhouse:
     host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
     port: 9000
