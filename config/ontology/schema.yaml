@@ -273,7 +273,7 @@ settings:
       key_type: int64
       attributes:
         - {name: traversal_path, type: string}
-      layout: {kind: cache, size_in_cells: 5000000}
+      layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
     - name: gl_group_traversal_paths_dict
       source_table: gl_group
@@ -281,7 +281,7 @@ settings:
       key_type: int64
       attributes:
         - {name: traversal_path, type: string}
-      layout: {kind: cache, size_in_cells: 3000000}
+      layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
   etl:
     default_watermark: _siphon_replicated_at

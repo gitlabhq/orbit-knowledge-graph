@@ -674,7 +674,7 @@ mod tests {
                 sql.contains("HAVING argMax(_deleted, _version) = false"),
                 "tombstone dedup: {sql}"
             );
-            assert!(sql.contains("LAYOUT(CACHE("), "CACHE layout: {sql}");
+            assert!(sql.contains("LAYOUT(HASHED())"), "HASHED layout: {sql}");
             assert!(sql.contains("LIFETIME(MIN 60 MAX 300)"), "{sql}");
         }
     }
