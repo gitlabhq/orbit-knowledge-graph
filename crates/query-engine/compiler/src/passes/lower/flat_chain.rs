@@ -10,8 +10,7 @@ use crate::error::{QueryError, Result};
 use super::EmitOutput;
 use super::helpers::{
     NarrowSource, build_multi_hop_union, dedup_edge_scan, emit_denorm_tags, emit_filter_narrowing,
-    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan,
-    push_edge_predicates,
+    emit_node_ids_on_edge, emit_node_join_with_narrowing, limit_by_edge_scan, push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -245,17 +244,46 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(nw);
                 }
                 HydrationStrategy::FilterOnly => {
-                    where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                    let table = np.table.as_deref().ok_or_else(|| {
+                        QueryError::Lowering(format!("node '{}' has no table", np.alias))
+                    })?;
+                    let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                        QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                    })?;
+                    let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                        from,
+                        np,
+                        edge_alias,
+                        edge_col,
+                        false,
+                        None,
+                        node_sort_key,
+                    )?;
+                    from = new_from;
+                    where_parts.extend(nw);
                 }
                 HydrationStrategy::Skip => {
-                    // Elevated-access nodes always need a FilterOnly CTE so
-                    // the security pass can enforce the stricter
-                    // min_access_level. Without the CTE, SecurityPass never
-                    // sees the node's table and can't inject the role-gated
-                    // startsWith filter.
+                    // Elevated-access nodes need a JOIN so the security
+                    // pass can see the node's table and inject the
+                    // role-gated startsWith filter.
                     if np.needs_elevated_filter {
-                        where_parts
-                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                        let table = np.table.as_deref().ok_or_else(|| {
+                            QueryError::Lowering(format!("node '{}' has no table", np.alias))
+                        })?;
+                        let node_sort_key = plan.table_sort_keys.get(table).ok_or_else(|| {
+                            QueryError::Lowering(format!("no sort key for node table '{table}'"))
+                        })?;
+                        let (new_from, _selects, nw) = emit_node_join_with_narrowing(
+                            from,
+                            np,
+                            edge_alias,
+                            edge_col,
+                            false,
+                            None,
+                            node_sort_key,
+                        )?;
+                        from = new_from;
+                        where_parts.extend(nw);
                     }
                 }
             }
