@@ -1550,7 +1550,7 @@ mod tests {
     }
 
     #[test]
-    fn flat_chain_edge_narrowing_deduplicates_frontier() {
+    fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1570,14 +1570,40 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(
-                "_narrow_p AS (SELECT DISTINCT e0n.target_id AS id FROM gl_edge AS e0n WHERE"
-            ),
-            "edge-derived narrowing frontiers should deduplicate high fan-out IDs, got:\n{sql}"
+            !sql.contains("_narrow_p"),
+            "single FilterOnly node should not emit _narrow_p cascade CTE; the IN-CTE push on the same hop already narrows the join, got:\n{sql}"
         );
         assert!(
-            sql.contains("p.id IN (SELECT id FROM _narrow_p)"),
-            "joined node FINAL scan should use the edge-derived frontier, got:\n{sql}"
+            sql.contains("e1.source_id IN (SELECT id FROM _filter_g)"),
+            "FilterOnly IN-CTE should land inside the dedup CTE inner WHERE, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn cascade_narrowing_skipped_for_convergent_join_target() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
+                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "n", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "n"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("_narrow_p"),
+            "p is the join target of two hops (IN_PROJECT and CONTAINS), so the cross-hop joins narrow it without a cascade CTE; got:\n{sql}"
         );
     }
 

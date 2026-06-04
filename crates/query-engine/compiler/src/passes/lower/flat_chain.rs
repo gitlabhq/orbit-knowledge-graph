@@ -128,6 +128,14 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 }
             }
 
+            let edge_pk_leading: Vec<&str> = plan
+                .table_sort_keys
+                .get(&hop.edge_table)
+                .map(|k| k.iter().take(4).map(String::as_str).collect())
+                .unwrap_or_default();
+            let push_narrow_inner =
+                edge_pk_leading.contains(&start_col) || edge_pk_leading.contains(&end_col);
+
             let edge_source = if is_multi_hop {
                 let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
                 where_parts.extend(union_wheres);
@@ -135,7 +143,11 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 union
             } else if dedup_edges {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
-                inner.extend(narrow_in);
+                if push_narrow_inner {
+                    inner.extend(narrow_in);
+                } else {
+                    where_parts.extend(narrow_in);
+                }
                 dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
             } else {
                 where_parts.extend(narrow_in);
