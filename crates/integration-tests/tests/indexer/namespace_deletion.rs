@@ -222,6 +222,176 @@ async fn assert_sibling_code_checkpoints_retained(context: &TestContext) {
     );
 }
 
+const ROOT_PATH: &str = "1/300/";
+const MOVED_OLD_PATH: &str = "1/300/9/";
+const LIVE_CURRENT_PATH: &str = "1/300/7/";
+
+#[tokio::test]
+async fn reconcile_tombstones_old_path_rows_left_by_a_move() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+
+    seed_moved_and_live_graph_rows(&context).await;
+    seed_current_routes(&context).await;
+
+    reconcile_root(&context, &ontology, ROOT_PATH).await;
+
+    assert_active_row_count(&context, &t("gl_project"), MOVED_OLD_PATH, 0).await;
+    assert_active_row_count(&context, &t("gl_edge"), MOVED_OLD_PATH, 0).await;
+    assert_active_row_count(&context, &t("gl_project"), LIVE_CURRENT_PATH, 1).await;
+    assert_active_row_count(&context, &t("gl_edge"), LIVE_CURRENT_PATH, 1).await;
+}
+
+#[tokio::test]
+async fn reconcile_is_a_noop_when_root_has_no_current_routes() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+
+    seed_moved_and_live_graph_rows(&context).await;
+
+    reconcile_root(&context, &ontology, ROOT_PATH).await;
+
+    assert_active_row_count(&context, &t("gl_project"), LIVE_CURRENT_PATH, 1).await;
+    assert_active_row_count(&context, &t("gl_project"), MOVED_OLD_PATH, 1).await;
+}
+
+const TRANSFERRED_OLD_PATH: &str = "1/300/100/";
+const TRANSFERRED_NEW_PATH: &str = "1/300/200/";
+const TRANSFERRED_PROJECT_ID: i64 = 1;
+const CONTROL_PROJECT_ID: i64 = 2;
+
+#[tokio::test]
+async fn reconcile_tombstones_old_path_after_move() {
+    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL]).await;
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+
+    seed_duplicated_across_old_and_new_path(&context).await;
+    seed_routes_after_transfer(&context).await;
+
+    assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 2).await;
+
+    reconcile_root(&context, &ontology, ROOT_PATH).await;
+
+    assert_active_row_count(&context, &t("gl_project"), TRANSFERRED_OLD_PATH, 0).await;
+    assert_active_row_count(&context, &t("gl_edge"), TRANSFERRED_OLD_PATH, 0).await;
+    assert_active_row_count(&context, &t("gl_project"), TRANSFERRED_NEW_PATH, 2).await;
+    assert_active_row_count(&context, &t("gl_edge"), TRANSFERRED_NEW_PATH, 2).await;
+    assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
+    assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
+
+    reconcile_root(&context, &ontology, ROOT_PATH).await;
+
+    assert_active_id_count(&context, TRANSFERRED_PROJECT_ID, 1).await;
+    assert_active_id_count(&context, CONTROL_PROJECT_ID, 1).await;
+}
+
+async fn seed_duplicated_across_old_and_new_path(context: &TestContext) {
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) VALUES \
+             ('{TRANSFERRED_OLD_PATH}', {TRANSFERRED_PROJECT_ID}, '2024-01-01 00:00:00.000000', false), \
+             ('{TRANSFERRED_NEW_PATH}', {TRANSFERRED_PROJECT_ID}, '2024-02-01 00:00:00.000000', false), \
+             ('{TRANSFERRED_NEW_PATH}', {CONTROL_PROJECT_ID}, '2024-01-01 00:00:00.000000', false)",
+            t("gl_project")
+        ))
+        .await;
+
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) VALUES \
+             ('{TRANSFERRED_OLD_PATH}', {TRANSFERRED_PROJECT_ID}, 'Project', 'has_member', 11, 'User', '2024-01-01 00:00:00.000000', false), \
+             ('{TRANSFERRED_NEW_PATH}', {TRANSFERRED_PROJECT_ID}, 'Project', 'has_member', 11, 'User', '2024-02-01 00:00:00.000000', false), \
+             ('{TRANSFERRED_NEW_PATH}', {CONTROL_PROJECT_ID}, 'Project', 'has_member', 22, 'User', '2024-01-01 00:00:00.000000', false)",
+            t("gl_edge")
+        ))
+        .await;
+}
+
+async fn seed_routes_after_transfer(context: &TestContext) {
+    context
+        .execute(&format!(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             ({TRANSFERRED_PROJECT_ID}, '{TRANSFERRED_NEW_PATH}', false), \
+             ({CONTROL_PROJECT_ID}, '{TRANSFERRED_NEW_PATH}', false)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             (300, '{ROOT_PATH}', false)"
+        ))
+        .await;
+}
+
+async fn assert_active_id_count(context: &TestContext, id: i64, expected: usize) {
+    let result = context
+        .query(&format!(
+            "SELECT 1 FROM {} FINAL WHERE id = {id} AND _deleted = false",
+            t("gl_project")
+        ))
+        .await;
+
+    let actual = result.first().map_or(0, |batch| batch.num_rows());
+
+    assert_eq!(
+        actual, expected,
+        "gl_project: expected {expected} active rows for id {id}, got {actual}"
+    );
+}
+
+async fn seed_moved_and_live_graph_rows(context: &TestContext) {
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, id, _version, _deleted) VALUES \
+             ('{MOVED_OLD_PATH}', 9, '2024-01-01 00:00:00.000000', false), \
+             ('{LIVE_CURRENT_PATH}', 7, '2024-01-01 00:00:00.000000', false)",
+            t("gl_project")
+        ))
+        .await;
+
+    context
+        .execute(&format!(
+            "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted) VALUES \
+             ('{MOVED_OLD_PATH}', 9, 'Project', 'has_member', 90, 'User', '2024-01-01 00:00:00.000000', false), \
+             ('{LIVE_CURRENT_PATH}', 7, 'Project', 'has_member', 70, 'User', '2024-01-01 00:00:00.000000', false)",
+            t("gl_edge")
+        ))
+        .await;
+}
+
+async fn seed_current_routes(context: &TestContext) {
+    context
+        .execute(&format!(
+            "INSERT INTO project_namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             (7, '{LIVE_CURRENT_PATH}', false)"
+        ))
+        .await;
+    context
+        .execute(&format!(
+            "INSERT INTO namespace_traversal_paths (id, traversal_path, deleted) VALUES \
+             (300, '{ROOT_PATH}', false)"
+        ))
+        .await;
+}
+
+async fn reconcile_root(context: &TestContext, ontology: &ontology::Ontology, root: &str) {
+    let graph = Arc::new(context.config.build_client());
+    let datalake = Arc::new(context.config.build_client());
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
+        datalake, graph, ontology,
+    ));
+
+    let outcomes = store.reconcile_moved_entities(root).await;
+    for outcome in &outcomes {
+        assert!(
+            outcome.error.is_none(),
+            "{}: reconcile failed: {:?}",
+            outcome.table,
+            outcome.error
+        );
+    }
+}
+
 async fn assert_active_row_count(
     context: &TestContext,
     table: &str,

@@ -20,6 +20,21 @@ FROM siphon_knowledge_graph_enabled_namespaces
 WHERE root_namespace_id = {namespace_id:Int64}
 "#;
 
+const ENABLED_NAMESPACE_ROOTS_QUERY: &str = r#"
+SELECT traversal_path
+FROM siphon_knowledge_graph_enabled_namespaces
+WHERE _siphon_deleted = false
+  AND traversal_path != ''
+"#;
+
+const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
+SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
+WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
+UNION DISTINCT
+SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
+WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
+"#;
+
 // Reads `traversal_path` directly from the enabled-namespaces table
 // (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
 // reconstructing the path with CONCAT.
@@ -151,6 +166,13 @@ pub trait NamespaceDeletionStore: Send + Sync {
 
     async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome>;
 
+    async fn enabled_namespace_roots(&self) -> Result<Vec<String>, NamespaceDeletionStoreError>;
+
+    async fn reconcile_moved_entities(
+        &self,
+        root_traversal_path: &str,
+    ) -> Vec<TableDeletionOutcome>;
+
     async fn delete_namespace_checkpoints(
         &self,
         traversal_path: &str,
@@ -185,6 +207,7 @@ pub struct ClickHouseNamespaceDeletionStore {
     datalake: Arc<ArrowClickHouseClient>,
     graph: Arc<ArrowClickHouseClient>,
     deletion_statements: Vec<DeletionStatement>,
+    reconcile_statements: Vec<DeletionStatement>,
 }
 
 impl ClickHouseNamespaceDeletionStore {
@@ -193,12 +216,59 @@ impl ClickHouseNamespaceDeletionStore {
         graph: Arc<ArrowClickHouseClient>,
         ontology: &ontology::Ontology,
     ) -> Self {
-        let deletion_statements = lower::build_deletion_statements(ontology);
         Self {
             datalake,
             graph,
-            deletion_statements,
+            deletion_statements: lower::build_deletion_statements(ontology),
+            reconcile_statements: lower::build_reconcile_statements(ontology),
         }
+    }
+
+    async fn tombstone(
+        &self,
+        statements: &[DeletionStatement],
+        traversal_path: &str,
+        current_paths: Option<&[String]>,
+    ) -> Vec<TableDeletionOutcome> {
+        let mut outcomes = Vec::with_capacity(statements.len());
+
+        for statement in statements {
+            let started_at = Instant::now();
+
+            let mut query = self
+                .graph
+                .insert_query(&statement.sql)
+                .param("traversal_path", traversal_path);
+            if let Some(current_paths) = current_paths {
+                query = query.param("current_paths", current_paths);
+            }
+
+            let error = query.execute().await.err().map(|e| e.to_string());
+
+            outcomes.push(TableDeletionOutcome {
+                table: statement.table.clone(),
+                duration_seconds: started_at.elapsed().as_secs_f64(),
+                error,
+            });
+        }
+
+        outcomes
+    }
+
+    async fn current_routes_under_root(
+        &self,
+        root_traversal_path: &str,
+    ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+        let batches = self
+            .datalake
+            .query(CURRENT_ROUTES_UNDER_ROOT)
+            .param("traversal_path", root_traversal_path)
+            .fetch_arrow()
+            .await
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+
+        String::extract_column(&batches, 0)
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
     }
 }
 
@@ -245,28 +315,43 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     }
 
     async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome> {
-        let mut outcomes = Vec::with_capacity(self.deletion_statements.len());
+        self.tombstone(&self.deletion_statements, traversal_path, None)
+            .await
+    }
 
-        for statement in &self.deletion_statements {
-            let started_at = Instant::now();
+    async fn enabled_namespace_roots(&self) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+        let batches = self
+            .datalake
+            .query(ENABLED_NAMESPACE_ROOTS_QUERY)
+            .fetch_arrow()
+            .await
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
-            let error = self
-                .graph
-                .insert_query(&statement.sql)
-                .param("traversal_path", traversal_path)
-                .execute()
-                .await
-                .err()
-                .map(|e| e.to_string());
+        String::extract_column(&batches, 0)
+            .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
+    }
 
-            outcomes.push(TableDeletionOutcome {
-                table: statement.table.clone(),
-                duration_seconds: started_at.elapsed().as_secs_f64(),
-                error,
-            });
-        }
+    async fn reconcile_moved_entities(
+        &self,
+        root_traversal_path: &str,
+    ) -> Vec<TableDeletionOutcome> {
+        let current_paths = match self.current_routes_under_root(root_traversal_path).await {
+            Ok(paths) => paths,
+            Err(error) => {
+                return vec![TableDeletionOutcome {
+                    table: "current_routes".to_string(),
+                    duration_seconds: 0.0,
+                    error: Some(error.to_string()),
+                }];
+            }
+        };
 
-        outcomes
+        self.tombstone(
+            &self.reconcile_statements,
+            root_traversal_path,
+            Some(&current_paths),
+        )
+        .await
     }
 
     async fn mark_deletion_complete(
@@ -385,12 +470,14 @@ pub mod test_utils {
 
     pub struct MockNamespaceDeletionStore {
         delete_calls: Mutex<Vec<String>>,
+        reconcile_calls: Mutex<Vec<String>>,
         delete_checkpoint_calls: Mutex<Vec<i64>>,
         mark_complete_calls: Mutex<Vec<(i64, String)>>,
         schedule_calls: Mutex<Vec<(i64, String, String)>>,
         deletion_outcomes: Vec<TableDeletionOutcome>,
         newly_deleted: Vec<DeletedNamespaceEntry>,
         due_deletions: Vec<NamespaceScheduleEntry>,
+        enabled_roots: Vec<String>,
         namespace_still_deleted: bool,
         fail_mark_complete: bool,
         fail_schedule: bool,
@@ -416,12 +503,14 @@ pub mod test_utils {
         pub fn new() -> Self {
             Self {
                 delete_calls: Mutex::new(Vec::new()),
+                reconcile_calls: Mutex::new(Vec::new()),
                 delete_checkpoint_calls: Mutex::new(Vec::new()),
                 mark_complete_calls: Mutex::new(Vec::new()),
                 schedule_calls: Mutex::new(Vec::new()),
                 deletion_outcomes: vec![ok_outcome("gl_project")],
                 newly_deleted: Vec::<DeletedNamespaceEntry>::new(),
                 due_deletions: Vec::new(),
+                enabled_roots: Vec::new(),
                 namespace_still_deleted: true,
                 fail_mark_complete: false,
                 fail_schedule: false,
@@ -458,8 +547,17 @@ pub mod test_utils {
             self
         }
 
+        pub fn with_enabled_roots(mut self, roots: Vec<String>) -> Self {
+            self.enabled_roots = roots;
+            self
+        }
+
         pub fn delete_calls(&self) -> Vec<String> {
             self.delete_calls.lock().clone()
+        }
+
+        pub fn reconcile_calls(&self) -> Vec<String> {
+            self.reconcile_calls.lock().clone()
         }
 
         pub fn mark_complete_calls(&self) -> Vec<(i64, String)> {
@@ -486,6 +584,22 @@ pub mod test_utils {
 
         async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome> {
             self.delete_calls.lock().push(traversal_path.to_string());
+            self.deletion_outcomes.clone()
+        }
+
+        async fn enabled_namespace_roots(
+            &self,
+        ) -> Result<Vec<String>, NamespaceDeletionStoreError> {
+            Ok(self.enabled_roots.clone())
+        }
+
+        async fn reconcile_moved_entities(
+            &self,
+            root_traversal_path: &str,
+        ) -> Vec<TableDeletionOutcome> {
+            self.reconcile_calls
+                .lock()
+                .push(root_traversal_path.to_string());
             self.deletion_outcomes.clone()
         }
 
