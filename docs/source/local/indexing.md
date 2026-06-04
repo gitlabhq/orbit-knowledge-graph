@@ -50,24 +50,28 @@ default branch - whatever you have checked out is what gets indexed.
 
 ### Supported languages
 
-Orbit Local supports the same 11 languages as Orbit Remote, with full
-cross-file reference resolution.
+Orbit Local supports the same 11 languages as Orbit Remote, with the same
+definition extraction and cross-file reference resolution.
 
-| Language | Definitions | Cross-file references |
-|----------|-------------|----------------------|
-| Ruby | Yes | Yes |
-| Java | Yes | Yes |
-| Kotlin | Yes | Yes |
-| Python | Yes | Yes |
-| TypeScript | Yes | Yes |
-| JavaScript | Yes | Yes |
-| Rust | Yes | Yes |
-| Go | Yes | Yes |
-| C# | Yes | Yes |
-| C | Yes | Yes |
-| C++ | Yes | Yes |
+| Language | File extensions | Definitions | Cross-file references | Framework / ecosystem support |
+|----------|----------------|-------------|----------------------|-------------------------------|
+| Ruby | `.rb`, `.rbw`, `.rake`, `.gemspec` | Yes | Yes | Rails, Forwardable |
+| Java | `.java` | Yes | Yes | Annotations, records |
+| Kotlin | `.kt`, `.kts` | Yes | Yes | Extension functions, operator desugaring |
+| Python | `.py` | Yes | Yes | Relative imports, decorators |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Yes | Yes | Path aliases (`tsconfig.json`) |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, `.json` | Yes | Yes | Vue SFC, React/JSX, CommonJS, ESM |
+| Rust | `.rs` | Yes | Yes | Cargo workspaces, macro expansion |
+| Go | `.go` | Yes | Yes | Struct embedding, composite literals |
+| C# | `.cs` | Yes | Yes | Records, `using static`, attributes |
+| C | `.c`, `.h` | Yes | Yes | Include graph |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` | Yes | Yes | Namespaces, include graph |
 
 Languages not currently indexed: Swift, COBOL, Terraform, YAML.
+
+For per-language details on what constructs are extracted and how cross-file references
+are resolved, see the [language details](../remote/indexing.md#language-details) section
+in the Orbit Remote documentation. The code indexer is identical between Local and Remote.
 
 ## What is not indexed
 
