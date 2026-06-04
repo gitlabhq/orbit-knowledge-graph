@@ -161,3 +161,6 @@ billing:
     fallback_cache_ttl_secs: 3600
     # api_user: ""
     # api_token: ""
+
+features:
+  system_notes: false

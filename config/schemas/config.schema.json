@@ -92,6 +92,12 @@
         "topics": {}
       }
     },
+    "features": {
+      "$ref": "#/$defs/FeaturesConfig",
+      "default": {
+        "system_notes": false
+      }
+    },
     "gitlab": {
       "$ref": "#/$defs/GitlabConfig",
       "default": {
@@ -595,6 +601,17 @@
           "format": "uint",
           "default": 8,
           "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "FeaturesConfig": {
+      "description": "Feature flag states, deserialized from the `features:` config section.\nEvery flag defaults to `false`; an unknown key is a config error.",
+      "type": "object",
+      "properties": {
+        "system_notes": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

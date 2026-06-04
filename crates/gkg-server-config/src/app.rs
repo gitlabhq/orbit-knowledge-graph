@@ -10,6 +10,7 @@ use crate::analytics::AnalyticsConfig;
 use crate::billing::BillingConfig;
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
+use crate::features::FeaturesConfig;
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
 use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
@@ -85,6 +86,8 @@ pub struct AppConfig {
     pub analytics: AnalyticsConfig,
     #[serde(default)]
     pub billing: BillingConfig,
+    #[serde(default)]
+    pub features: FeaturesConfig,
 }
 
 impl AppConfig {

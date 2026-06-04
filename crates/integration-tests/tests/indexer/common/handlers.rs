@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -108,6 +108,13 @@ pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
 /// exactly the edges it materializes without the rest of the namespace
 /// fan-out also writing to `gl_edge`.
 pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
+    // SystemNotes is feature-flagged off by default; the global is process-wide
+    // and init panics if called twice, so guard it for the subtests sharing a run.
+    static ENABLE_SYSTEM_NOTES: Once = Once::new();
+    ENABLE_SYSTEM_NOTES.call_once(|| {
+        gkg_server_config::features::init(gkg_server_config::FeaturesConfig { system_notes: true });
+    });
+
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();

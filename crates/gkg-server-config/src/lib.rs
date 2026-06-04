@@ -11,7 +11,7 @@ pub mod app;
 pub mod billing;
 pub mod clickhouse;
 pub mod engine;
-
+pub mod features;
 pub mod gitlab;
 pub mod grpc;
 pub mod health_check;
@@ -34,6 +34,7 @@ pub use engine::{
     NamespaceDispatcherConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
     SiphonCodeIndexingTaskDispatcherConfig, SubscriptionConfig, TableCleanupConfig,
 };
+pub use features::{Feature, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
