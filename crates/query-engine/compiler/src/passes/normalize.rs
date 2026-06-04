@@ -279,6 +279,22 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 filter.value = Some(coerce_value(value, enum_values));
             }
         }
+
+        // Upgrade selectivity for filters on sort-key columns. ClickHouse
+        // can prune granules on these columns regardless of cardinality,
+        // making narrowing CTEs cheap and effective.
+        if let Some(table) = node.table.as_deref() {
+            if let Some(sort_key) = input.compiler.table_sort_keys.get(table) {
+                let sort_cols: HashSet<&str> = sort_key.iter().map(|s| s.as_str()).collect();
+                for (prop, filters) in &mut node.filters {
+                    if sort_cols.contains(prop.as_str()) {
+                        for f in filters.iter_mut() {
+                            f.selectivity = ontology::FieldSelectivity::High;
+                        }
+                    }
+                }
+            }
+        }
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
     resolve_fk_metadata(&mut input, ontology);
@@ -667,6 +683,40 @@ mod tests {
         assert!(
             edge_cols.contains("source_id"),
             "table_columns[gl_edge] must include storage column source_id"
+        );
+    }
+
+    #[test]
+    fn sort_key_columns_upgrade_selectivity() {
+        let mut input = parse_input(
+            r#"{
+                "query_type": "traversal",
+                "node": {"id": "f", "entity": "File", "filters": {"project_id": 123, "language": "rust"}}
+            }"#,
+        )
+        .unwrap();
+
+        // Simulate validate having set both filters to Low selectivity.
+        for filters in input.nodes[0].filters.values_mut() {
+            for f in filters {
+                f.selectivity = ontology::FieldSelectivity::Low;
+            }
+        }
+
+        let ontology = Ontology::load_embedded().unwrap();
+        let result = normalize(input, &ontology).unwrap();
+
+        // File sort key is (traversal_path, project_id, branch, id).
+        // project_id is in the sort key → upgraded to High.
+        assert_eq!(
+            result.nodes[0].filters.get("project_id").unwrap()[0].selectivity,
+            ontology::FieldSelectivity::High,
+        );
+
+        // language is NOT in the sort key → stays Low.
+        assert_eq!(
+            result.nodes[0].filters.get("language").unwrap()[0].selectivity,
+            ontology::FieldSelectivity::Low,
         );
     }
 }
