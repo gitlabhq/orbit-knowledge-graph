@@ -1,4 +1,3 @@
-
 ---
 stage: Analytics
 group: Knowledge Graph

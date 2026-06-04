@@ -79,6 +79,7 @@ glab skills install --global orbit
 
 プロジェクトスコープのインストール、更新手順、スキルの内容については、[Orbitスキルを使用したAIコーディングエージェントのセットアップ](../ai_coding_agents.md)を参照してください。
 
+<!-- markdownlint-disable-next-line MD044 -->
 ### REST API {#rest-api}
 
 `your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
