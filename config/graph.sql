@@ -338,7 +338,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     allow_failure Bool DEFAULT false,
     coverage String DEFAULT '' CODEC(ZSTD(1)),
     environment String DEFAULT '' CODEC(ZSTD(1)),
-    `when` String DEFAULT '' CODEC(ZSTD(1)),
+    `when` LowCardinality(String) DEFAULT '' CODEC(LZ4),
     retried Nullable(Bool),
     failure_reason String DEFAULT '' CODEC(ZSTD(1)),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
