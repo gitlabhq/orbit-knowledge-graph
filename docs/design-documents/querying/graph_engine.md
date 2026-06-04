@@ -76,7 +76,7 @@ These choices preserve factorization: each hop operates on a compact frontier an
 
 ### Row deduplication
 
-Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads with `FINAL`:
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The ClickHouse compiler ensures query-time correctness for node table reads, mostly via `FINAL` (hydration arms instead dedup with `LIMIT 1 BY <sort_key>`, which preserves the same latest-non-deleted semantics while keeping column pruning and projections; see the Hydration row below):
 
 | Scan type | Strategy | Rationale |
 |---|---|---|
@@ -85,7 +85,7 @@ Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between backg
 | FK candidate CTEs | Non-`FINAL` `SELECT DISTINCT id` or FK values plus outer `FINAL` recheck | Lets ClickHouse use selective filters before the expensive latest-row scan while preserving correctness through the outer recheck |
 | Edge narrowing CTEs | Non-`FINAL` `SELECT DISTINCT edge_id` frontier | Narrows joined node `FINAL` scans while avoiding duplicate-heavy `IN` sets from fan-out edges |
 | Redaction joins for filtered non-default auth IDs | Filtered node table subquery with `FINAL` | Lets enforcement joins for entities such as code definitions apply property filters inside the latest-row read |
-| Hydration (UNION ALL arms) | Node table scan with `FINAL` | Excludes deleted rows and stale properties for dynamically hydrated entities |
+| Hydration (UNION ALL arms) | Non-`FINAL` scan with `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC`, outer `_deleted = false` | Hydration reads a tiny pinned `id IN (...)` set; dropping `FINAL` lets column pruning and projections apply (`FINAL` reconstructs full rows, defeating both). Dedup identity is the table's full sort key, matching `FINAL`'s per-ORDER-BY-key semantics. Falls back to `FINAL` when a table has no sort key. |
 | Main query node scans | Node table scan with `FINAL` | Keeps traversal, FK, aggregation, and single-node lookup semantics consistent |
 | Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
 
