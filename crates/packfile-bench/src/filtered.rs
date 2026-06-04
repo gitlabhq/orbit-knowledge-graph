@@ -30,34 +30,7 @@ impl Method for FilteredMethod {
     }
 }
 
-const MAX_FILE_SIZE: u64 = 5_000_000; // 5MB, same as GKG default
-
-/// Extensions that GKG skips during extraction (from EXCLUDED_INDEXING_GLOBS).
-const EXCLUDED_EXTENSIONS: &[&str] = &[
-    // Images
-    "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "avif", "tiff", "tif", "svg",
-    // Fonts
-    "ttf", "otf", "woff", "woff2", "eot",
-    // Audio/video
-    "mp3", "mp4", "mov", "webm", "ogg", "wav", "flac", "m4a", "m4v", "avi", "mkv", "opus",
-    // Archives
-    "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar", "lz4", "zst",
-    // Compiled
-    "exe", "dll", "so", "dylib", "class", "jar", "war", "pyc", "pyo", "o", "a", "lib",
-    // Documents
-    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
-    // Datastores
-    "db", "sqlite", "sqlite3", "iso", "dmg", "bin", "dat",
-];
-
-fn is_excluded(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    if let Some(ext) = lower.rsplit('.').next() {
-        EXCLUDED_EXTENSIONS.contains(&ext)
-    } else {
-        false
-    }
-}
+use crate::filter::{self, MAX_FILE_SIZE};
 
 pub struct FilteredResult {
     pub bench: BenchResult,
@@ -148,7 +121,7 @@ pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<Filtered
 
         all_entries.push((oid.clone(), path.to_string(), size));
 
-        if size > MAX_FILE_SIZE || is_excluded(path) {
+        if size > MAX_FILE_SIZE || filter::is_excluded(path) {
             files_skipped += 1;
             bytes_skipped += size;
         } else {

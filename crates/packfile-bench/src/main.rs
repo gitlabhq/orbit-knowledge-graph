@@ -8,6 +8,7 @@
 //!   packfile-bench --repo repo1,repo2,repo3
 
 mod archive;
+pub mod filter;
 mod filtered;
 mod gix_extract;
 mod packfile;
