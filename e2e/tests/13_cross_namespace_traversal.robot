@@ -4,7 +4,7 @@ Documentation       A project- or group-id-scoped query rewrites the scope filte
 ...                 prune a related entity that lives under a DIFFERENT top-level namespace.
 ...                 Seeds two projects under two top-level groups, links their issues across
 ...                 namespaces (RELATED_TO, including a 3-hop chain) and opens a cross-project
-...                 closing MR (CLOSED), then asserts the cross-namespace entity still appears across
+...                 closing MR (CLOSES), then asserts the cross-namespace entity still appears across
 ...                 every query type: traversal (2-hop and 3-hop), variable-length neighbors,
 ...                 aggregation (3-hop), and path_finding, under both project scope and group scope.
 ...                 Discovered result nodes are polled within the shared budget because their
@@ -133,7 +133,7 @@ Project Scoped Traversal Returns Cross Namespace Closed Issue
     ${mr}=    Create Dictionary    id=mr    entity=MergeRequest
     ${issue}=    Create Dictionary    id=issue    entity=WorkItem    columns=${{["id"]}}
     ${r1}=    Create Dictionary    type=IN_PROJECT    from=mr    to=p
-    ${r2}=    Create Dictionary    type=CLOSED    from=mr    to=issue
+    ${r2}=    Create Dictionary    type=CLOSES    from=mr    to=issue
     ${query}=    Create Dictionary    query_type=traversal
     ...    nodes=${{[$p, $mr, $issue]}}    relationships=${{[$r1, $r2]}}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
@@ -149,7 +149,7 @@ Group Scoped Multi Hop Traversal Returns Cross Namespace Closed Issue
     ${issue}=    Create Dictionary    id=issue    entity=WorkItem    columns=${{["id"]}}
     ${r1}=    Create Dictionary    type=CONTAINS    from=g    to=p
     ${r2}=    Create Dictionary    type=IN_PROJECT    from=mr    to=p
-    ${r3}=    Create Dictionary    type=CLOSED    from=mr    to=issue
+    ${r3}=    Create Dictionary    type=CLOSES    from=mr    to=issue
     ${query}=    Create Dictionary    query_type=traversal
     ...    nodes=${{[$g, $p, $mr, $issue]}}    relationships=${{[$r1, $r2, $r3]}}    limit=${100}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_B}
@@ -200,15 +200,15 @@ Seed Cross Namespace Fixture
 
 Seed Cross Project Closing MR
     [Documentation]    Idempotent: opens the cross-project closing MR once and waits for the
-    ...                MergeRequest CLOSED WorkItem edge. Shared by the project- and group-scoped
-    ...                CLOSED test cases.
+    ...                MergeRequest CLOSES WorkItem edge. Shared by the project- and group-scoped
+    ...                closing test cases.
     ${existing}=    Get Variable Value    ${XNS_MR_ID_A}    ${EMPTY}
     Return From Keyword If    "${existing}" != "${EMPTY}"
     ${mr_a}=    Open Closing Merge Request    ${XNS_PROJECT_ID_A}
     ...    ${XNS_PROJECT_B_FULL_PATH}    ${XNS_ISSUE_B_IID}
     Set Suite Variable    ${XNS_MR_ID_A}    ${mr_a["id"]}
-    # The CLOSED edge is the slowest path (cache_merge_request_closes_issues! -> CDC ->
+    # The CLOSES edge is the slowest path (cache_merge_request_closes_issues! -> CDC ->
     # namespaced re-index), so give it its own full budget rather than the setup remainder.
     Start Indexing Budget    400
-    Wait For Edge Indexed Within Budget    MergeRequest    ${XNS_MR_ID_A}    CLOSED
+    Wait For Edge Indexed Within Budget    MergeRequest    ${XNS_MR_ID_A}    CLOSES
     ...    WorkItem    ${XNS_ISSUE_ID_B}
