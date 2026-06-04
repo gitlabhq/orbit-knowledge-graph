@@ -90,6 +90,12 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
+    fn record_datalake_scan(&mut self, rows: u64, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_datalake_scan(rows, bytes);
+        }
+    }
+
     fn record_graph_write(&mut self, entity: &str, rows: u64, bytes: u64) {
         for o in self.iter_mut() {
             o.record_graph_write(entity, rows, bytes);
@@ -223,6 +229,9 @@ mod tests {
         fn record_datalake_read(&mut self, _: u64, _: u64) {
             self.push("record_datalake_read");
         }
+        fn record_datalake_scan(&mut self, _: u64, _: u64) {
+            self.push("record_datalake_scan");
+        }
         fn record_graph_write(&mut self, _: &str, _: u64, _: u64) {
             self.push("record_graph_write");
         }
@@ -278,6 +287,7 @@ mod tests {
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);
         obs.record_datalake_read(1000, 50_000);
+        obs.record_datalake_scan(80_000, 4_000_000);
         obs.record_graph_write("gl_merge_request", 1000, 40_000);
         obs.record_duration(12);
         obs.finish();
@@ -291,6 +301,7 @@ mod tests {
             "set_indexing_mode",
             "extracted",
             "record_datalake_read",
+            "record_datalake_scan",
             "record_graph_write",
             "record_duration",
             "finish",

@@ -114,6 +114,8 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+        // The Arrow 2GB-overflow byte-cap lives in `query_arrow_with_scan`; this
+        // path only serves `query_batches`, which always passes `None`.
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let query = self.build_query(sql, params);
         let stream = query
