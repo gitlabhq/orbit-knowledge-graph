@@ -166,7 +166,7 @@ fn lower_node_column(column: &NodeColumn) -> String {
             let null_case = if *nullable {
                 format!("WHEN {source} IS NULL THEN NULL ")
             } else {
-                String::new()
+                format!("WHEN {source} IS NULL THEN '' ")
             };
             format!(
                 "CASE {null_case}{} ELSE 'unknown' END AS {target}",

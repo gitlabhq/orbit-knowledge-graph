@@ -30,7 +30,7 @@ properties:
   full_path:
     type: string
     source: full_path
-    nullable: true
+    nullable: false
     description: "Full path (e.g. gitlab-org/gitlab)."
 
   name:
@@ -145,7 +145,7 @@ storage:
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: full_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: full_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: archived, type: "Nullable(Bool)"}

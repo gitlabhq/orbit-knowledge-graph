@@ -258,7 +258,7 @@ settings:
         - {name: project_id, type: int64, codec: ["zstd(1)"]}
         - {name: branch, type: string, codec: ["zstd(1)"]}
         - {name: last_task_id, type: int64, codec: ["zstd(1)"]}
-        - {name: last_commit, type: string, nullable: true, codec: ["zstd(1)"]}
+        - {name: last_commit, type: string, default: "''", codec: ["zstd(1)"]}
         - {name: indexed_at, type: timestamp, codec: ["delta(8)", "zstd(1)"]}
       order_by: [traversal_path, project_id, branch]
       version_type: uint64

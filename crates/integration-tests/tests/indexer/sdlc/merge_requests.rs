@@ -1,4 +1,4 @@
-use arrow::array::{Array, Int64Array, StringArray};
+use arrow::array::{Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -104,12 +104,12 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
 
     let merged_sha =
         ArrowUtils::get_column_by_name::<StringArray>(batch, "merged_commit_sha").unwrap();
-    assert!(merged_sha.is_null(0));
+    assert!(merged_sha.value(0).is_empty());
     assert_eq!(merged_sha.value(1), "abc123def456");
 
     let squash_sha =
         ArrowUtils::get_column_by_name::<StringArray>(batch, "squash_commit_sha").unwrap();
-    assert!(squash_sha.is_null(0));
+    assert!(squash_sha.value(0).is_empty());
     assert_eq!(squash_sha.value(1), "squash789");
 
     let commits = ArrowUtils::get_column_by_name::<Int64Array>(batch, "commits_count")

@@ -39,13 +39,13 @@ properties:
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Detailed description."
 
   solution:
     type: string
     source: solution
-    nullable: true
+    nullable: false
     description: "Recommended remediation."
 
   severity:
@@ -70,7 +70,7 @@ properties:
   overridden_uuid:
     type: uuid
     source: overridden_uuid
-    nullable: true
+    nullable: false
     description: "UUID of the overridden finding."
 
   project_id:
@@ -135,11 +135,11 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: solution, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: solution, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: deduplicated, type: "Bool", default: "false"}
-    - {name: overridden_uuid, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: overridden_uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: scan_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: scanner_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
