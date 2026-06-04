@@ -103,6 +103,27 @@ pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     build_fan_out(ctx, "global_fan_out", GlobalIndexingRequest::subscription()).await
 }
 
+/// Build a handler that runs only the `SystemNote` entity handler in
+/// isolation — so we can seed system-note rows and assert on
+/// exactly the edges it materializes without the rest of the namespace
+/// fan-out also writing to `gl_edge`.
+pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
+    let config = create_test_indexer_config(&ctx.config);
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let registry = HandlerRegistry::default();
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        indexer::analytics::IndexingAnalytics::disabled(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
+    registry
+        .find_by_name("entity.systemnote")
+        .expect("system-notes handler must be registered")
+}
+
 pub async fn entity_handler_with_partitions(
     ctx: &TestContext,
     entity_name: &str,

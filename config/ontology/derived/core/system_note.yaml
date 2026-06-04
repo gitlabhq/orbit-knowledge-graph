@@ -3,7 +3,7 @@ description: >-
   Rails-authored system notes, parsed for cross-entity edges. A Rust transform
   parses each note body and resolves GFM references into edges.
 
-emits: [MENTIONS, ADDS_COMMIT, MERGED_AT_COMMIT, REOPENED]
+emits: [MENTIONS, REOPENED]
 
 etl:
   type: query
