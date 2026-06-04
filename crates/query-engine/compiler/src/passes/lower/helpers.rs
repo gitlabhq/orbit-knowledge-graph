@@ -130,7 +130,7 @@ fn emit_node_join_inner(
         wheres.push(in_predicate);
     }
 
-    let node_scan = if let Some(sk) = sort_key {
+    let node_scan = if let Some(sk) = sort_key.filter(|sk| !sk.is_empty()) {
         let mut order_by: Vec<OrderExpr> = sk
             .iter()
             .map(|col| OrderExpr::asc(Expr::col(alias, col)))
