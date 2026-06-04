@@ -137,7 +137,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 {
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn list_tools(
         &self,
@@ -158,7 +158,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn list_agent_commands(
         &self,
@@ -218,7 +218,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn invoke_agent_command(
         &self,
@@ -270,7 +270,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn execute_query(
         &self,
@@ -381,7 +381,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn get_graph_schema(
         &self,
@@ -413,7 +413,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn get_response_format(
         &self,
@@ -450,7 +450,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn get_query_dsl(
         &self,
@@ -483,7 +483,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn get_cluster_health(
         &self,
@@ -501,7 +501,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
     #[instrument(
         skip(self, request),
-        fields(user_id, source_type, ai_session_id, coding_agent)
+        fields(user_id, source_type, ai_session_id, coding_agent, realm)
     )]
     async fn get_graph_status(
         &self,

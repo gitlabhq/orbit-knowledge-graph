@@ -154,6 +154,12 @@ impl PipelineObserver for BillingObserver {
 
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
         if self.errored.get() {
+            tracing::debug!(
+                user_id = self.inputs.user_id,
+                source_type = %self.inputs.source_type,
+                correlation_id = %correlation_id_string(),
+                "billing event skipped: pipeline reported an error"
+            );
             return;
         }
         if let Some(ref tracker) = self.tracker
@@ -171,6 +177,13 @@ impl PipelineObserver for BillingObserver {
             .entered();
             match tracker.track(event) {
                 Ok(()) => {
+                    tracing::debug!(
+                        user_id = self.inputs.user_id,
+                        realm = ?self.inputs.realm,
+                        source_type = %self.inputs.source_type,
+                        query_type = self.query_type,
+                        "billing event enqueued for delivery"
+                    );
                     METRICS.emitted.add(1, &[]);
                 }
                 Err(e) => {

@@ -20,6 +20,9 @@ impl RequestContext {
         let span = tracing::Span::current();
         span.record("user_id", self.claims.user_id);
         span.record("source_type", <&str>::from(self.claims.source_type));
+        if let Some(r) = &self.claims.realm {
+            span.record("realm", r.as_str());
+        }
         if let Some(sid) = &self.claims.ai_session_id {
             span.record("ai_session_id", sid.as_str());
         }
