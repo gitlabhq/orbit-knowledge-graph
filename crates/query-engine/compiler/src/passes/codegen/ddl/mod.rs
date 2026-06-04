@@ -1,12 +1,13 @@
 //! Ontology-driven DDL generator.
 //!
-//! Builds [`CreateTable`] AST nodes from an [`Ontology`]. The storage metadata
-//! in each node/edge/auxiliary YAML is fully explicit: every column, codec,
-//! default, index, and projection is specified. The generator is a thin
-//! pass-through with no auto-derivation.
+//! Builds [`CreateTable`] and [`CreateMaterializedView`] AST nodes from an
+//! [`Ontology`]. The storage metadata in each node/edge/auxiliary YAML is
+//! fully explicit: every column, codec, default, index, and projection is
+//! specified. The generator is a thin pass-through with no auto-derivation.
 //!
 //! Submodules provide backend-specific SQL emission:
-//! - [`clickhouse`] — ClickHouse `CREATE TABLE` with engine, codecs, indexes, projections
+//! - [`clickhouse`] — ClickHouse `CREATE TABLE` / `CREATE MATERIALIZED VIEW`
+//!   with engine, codecs, indexes, projections
 //! - [`duckdb`] — DuckDB `CREATE TABLE` stripped of ClickHouse-specific features
 
 pub mod clickhouse;
@@ -14,7 +15,10 @@ pub mod duckdb;
 
 use std::collections::BTreeMap;
 
-use ontology::{AuxiliaryTable, Ontology, StorageColumn, StorageIndex, StorageProjection};
+use ontology::{
+    AuxiliaryTable, MaterializedViewDefinition, Ontology, StorageColumn, StorageIndex,
+    StorageProjection,
+};
 
 use crate::ast::ddl::*;
 
@@ -46,6 +50,55 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
     }
 
     tables
+}
+
+/// Generates all materialized view DDL from the ontology.
+///
+/// Views are returned unprefixed. Call
+/// [`generate_graph_materialized_views_with_prefix`] to apply a schema
+/// version prefix to view names, `TO` targets, and table references inside
+/// the `SELECT` query.
+pub fn generate_graph_materialized_views(
+    ontology: &Ontology,
+) -> Vec<CreateMaterializedView> {
+    generate_graph_materialized_views_with_prefix(ontology, "")
+}
+
+/// Generates all materialized view DDL with a schema-version prefix applied
+/// to view names, `TO` targets, and `{table_name}` placeholders in the
+/// `SELECT` query.
+///
+/// The prefix is also applied to every known graph table name found inside
+/// placeholders, so `{gl_edge}` becomes `v54_gl_edge` when `prefix` is
+/// `"v54_"`.
+pub fn generate_graph_materialized_views_with_prefix(
+    ontology: &Ontology,
+    prefix: &str,
+) -> Vec<CreateMaterializedView> {
+    let known_tables = collect_table_names(ontology);
+
+    ontology
+        .materialized_views()
+        .iter()
+        .map(|mv| build_materialized_view(mv).with_prefix(prefix, &known_tables))
+        .collect()
+}
+
+/// Collects all known graph table names from the ontology (auxiliary + node
+/// + edge) so that `{table_name}` placeholders in materialized view queries
+/// can be resolved.
+fn collect_table_names(ontology: &Ontology) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for aux in ontology.auxiliary_tables() {
+        names.push(aux.name.clone());
+    }
+    for node in ontology.nodes() {
+        names.push(node.destination_table.clone());
+    }
+    for table_name in ontology.edge_tables() {
+        names.push(table_name.to_string());
+    }
+    names
 }
 
 /// Generates local (DuckDB) graph table DDL from the ontology's `local_db` config.
@@ -436,6 +489,24 @@ fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Materialized view builder
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn build_materialized_view(mv: &MaterializedViewDefinition) -> CreateMaterializedView {
+    CreateMaterializedView {
+        name: mv.name.clone(),
+        to_table: mv.to_table.clone(),
+        select_query: mv.select_query.clone(),
+        engine: mv.engine.as_ref().map(|name| Engine {
+            name: name.clone(),
+            args: mv.engine_args.clone(),
+        }),
+        order_by: mv.order_by.clone(),
+        populate: mv.populate,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Local (DuckDB) table builders
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -618,6 +689,45 @@ mod tests {
         assert!(merge_request.settings.iter().any(|setting| {
             setting.key == "add_minmax_index_for_temporal_columns" && setting.value == "1"
         }));
+    }
+
+    // ─── Materialized view generation tests ─────────────────────────────
+
+    #[test]
+    fn generates_no_materialized_views_by_default() {
+        let views = generate_graph_materialized_views(&ontology());
+        assert!(
+            views.is_empty(),
+            "default ontology should have no materialized views"
+        );
+    }
+
+    #[test]
+    fn materialized_view_prefix_resolves_table_placeholders() {
+        use super::clickhouse::emit_create_materialized_view;
+
+        let mv_def = ontology::MaterializedViewDefinition {
+            name: "mv_edge_summary".into(),
+            to_table: None,
+            select_query:
+                "SELECT traversal_path, count() AS cnt FROM {gl_edge} GROUP BY traversal_path"
+                    .into(),
+            engine: Some("SummingMergeTree".into()),
+            engine_args: vec![],
+            order_by: vec!["traversal_path".into()],
+            populate: false,
+        };
+        let known_tables = vec!["gl_edge".into(), "gl_project".into()];
+        let mv = build_materialized_view(&mv_def).with_prefix("v5_", &known_tables);
+
+        assert_eq!(mv.name, "v5_mv_edge_summary");
+        assert!(mv.select_query.contains("v5_gl_edge"));
+        assert!(!mv.select_query.contains("{gl_edge}"));
+
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS v5_mv_edge_summary"));
+        assert!(sql.contains("ENGINE = SummingMergeTree"));
+        assert!(sql.contains("ORDER BY (traversal_path)"));
     }
 
     // ─── Local table generation tests ────────────────────────────────────

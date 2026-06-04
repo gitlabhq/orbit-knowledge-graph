@@ -506,6 +506,22 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    // Load materialized views.
+    ontology.materialized_views = schema
+        .settings
+        .materialized_views
+        .into_iter()
+        .map(|mv| crate::entities::MaterializedViewDefinition {
+            name: mv.name,
+            to_table: mv.to_table,
+            select_query: mv.select_query,
+            engine: mv.engine,
+            engine_args: mv.engine_args,
+            order_by: mv.order_by,
+            populate: mv.populate,
+        })
+        .collect();
+
     // Validate storage columns match declared properties.
     validate_storage_columns(&ontology)?;
 

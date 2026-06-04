@@ -19,7 +19,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
+use query_engine::compiler::{
+    emit_create_materialized_view, emit_create_table, generate_graph_materialized_views_with_prefix,
+    generate_graph_tables_with_prefix,
+};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -236,6 +239,25 @@ async fn create_prefixed_tables(
     }
 
     info!(count = tables.len(), prefix = %new_prefix, "new-prefix tables created");
+
+    // Materialized views depend on the tables they SELECT FROM, so they
+    // must be created after all tables exist.
+    let views = generate_graph_materialized_views_with_prefix(ontology, &new_prefix);
+    for view in &views {
+        info!(view = %view.name, "creating materialized view");
+        graph
+            .execute(&emit_create_materialized_view(view))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: view.name.clone(),
+                reason: e.to_string(),
+            })?;
+    }
+
+    if !views.is_empty() {
+        info!(count = views.len(), prefix = %new_prefix, "new-prefix materialized views created");
+    }
+
     metrics.record("create_tables", "success");
     Ok(())
 }

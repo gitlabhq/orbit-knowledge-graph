@@ -554,6 +554,47 @@
             "additionalProperties": false
           }
         },
+        "materialized_views": {
+          "type": "array",
+          "description": "ClickHouse materialized views created after all graph tables. Views act as insert triggers that transform incoming data and write to a destination table or implicit storage.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Materialized view name. Receives the schema-version prefix during migration."
+              },
+              "to_table": {
+                "type": "string",
+                "description": "Target table for the TO clause. When set, the view inserts into this pre-existing table instead of creating implicit storage. Receives the schema-version prefix during migration."
+              },
+              "select_query": {
+                "type": "string",
+                "description": "The SELECT query for the view body. Table references use {table_name} placeholder syntax so that schema-version prefixes are resolved at DDL generation time."
+              },
+              "engine": {
+                "type": "string",
+                "description": "Engine name for implicit storage (e.g. AggregatingMergeTree, SummingMergeTree). Ignored when to_table is set."
+              },
+              "engine_args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Engine arguments for implicit storage."
+              },
+              "order_by": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "ORDER BY columns for implicit storage. Ignored when to_table is set."
+              },
+              "populate": {
+                "type": "boolean",
+                "description": "When true, emit POPULATE to backfill the view with existing data on creation. Defaults to false."
+              }
+            },
+            "required": ["name", "select_query"],
+            "additionalProperties": false
+          }
+        },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."

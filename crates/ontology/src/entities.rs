@@ -94,6 +94,31 @@ pub struct EdgeTableStorage {
     pub settings: BTreeMap<String, String>,
 }
 
+/// A materialized view definition from the ontology settings.
+///
+/// Materialized views act as ClickHouse insert triggers that transform
+/// incoming data and write it to a destination. The `select_query` uses
+/// `{table_name}` placeholders for table references so that schema-version
+/// prefixes can be resolved at DDL generation time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterializedViewDefinition {
+    pub name: String,
+    /// Target table for the `TO` clause. When set, the view writes into this
+    /// pre-existing table. Table name uses the logical name (without prefix).
+    pub to_table: Option<String>,
+    /// The `SELECT ...` query. Table references use `{table_name}` placeholders.
+    pub select_query: String,
+    /// Engine name for implicit storage (e.g. `"AggregatingMergeTree"`).
+    /// Ignored when `to_table` is set.
+    pub engine: Option<String>,
+    /// Engine arguments (e.g. `["_version"]`).
+    pub engine_args: Vec<String>,
+    /// ORDER BY columns for implicit storage. Ignored when `to_table` is set.
+    pub order_by: Vec<String>,
+    /// Whether to backfill the view with existing data on creation.
+    pub populate: bool,
+}
+
 /// A non-ontology auxiliary table definition (checkpoint, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
