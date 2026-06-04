@@ -65,120 +65,19 @@ pub trait Method {
     ) -> Result<MethodOutput, BenchError>;
 }
 
-// ─── Method implementations ─────────────────────────────────────────────────
+// ─── Method registry ────────────────────────────────────────────────────────
 
-struct ArchiveMethod;
-impl Method for ArchiveMethod {
-    fn key(&self) -> char { 'a' }
-    fn label(&self) -> &'static str { "A: archive | gzip" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        archive::run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
-    }
-}
-
-struct PackCatfileMethod;
-impl Method for PackCatfileMethod {
-    fn key(&self) -> char { 'b' }
-    fn label(&self) -> &'static str { "B: pack + cat-file" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        packfile::run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
-    }
-}
-
-struct PackCheckoutMethod;
-impl Method for PackCheckoutMethod {
-    fn key(&self) -> char { 'c' }
-    fn label(&self) -> &'static str { "C: pack + checkout" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        packfile_checkout::run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
-    }
-}
-
-struct FilteredMethod;
-impl Method for FilteredMethod {
-    fn key(&self) -> char { 'd' }
-    fn label(&self) -> &'static str { "D: pack + filtered" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        filtered::run(repo, commit, out).map(|fr| MethodOutput {
-            detail: Some(format!(
-                "    filter: wrote={} skipped={} ({} skipped)  ls-tree={:.2?} cat-file={:.2?}",
-                fr.files_written, fr.files_skipped,
-                format_bytes(fr.bytes_skipped),
-                fr.ls_tree_time, fr.cat_file_time,
-            )),
-            result: fr.bench,
-        })
-    }
-}
-
-fn gix_detail(gr: &gix_extract::GixResult) -> String {
-    format!(
-        "    wrote={} skipped={} ({} skipped)  idx-pack={:.2?} walk+extract={:.2?}",
-        gr.files_written, gr.files_skipped,
-        format_bytes(gr.bytes_skipped),
-        gr.index_pack_time, gr.walk_extract_time,
-    )
-}
-
-struct GixMethod;
-impl Method for GixMethod {
-    fn key(&self) -> char { 'e' }
-    fn label(&self) -> &'static str { "E: pack + gix" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        gix_extract::run_e(repo, commit, out).map(|gr| MethodOutput {
-            detail: Some(gix_detail(&gr)),
-            result: gr.bench,
-        })
-    }
-}
-
-struct NodeltaMethod;
-impl Method for NodeltaMethod {
-    fn key(&self) -> char { 'f' }
-    fn label(&self) -> &'static str { "F: nodelta + gix" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        gix_extract::run_f(repo, commit, out).map(|gr| MethodOutput {
-            detail: Some(gix_detail(&gr)),
-            result: gr.bench,
-        })
-    }
-}
-
-struct RayonMethod;
-impl Method for RayonMethod {
-    fn key(&self) -> char { 'g' }
-    fn label(&self) -> &'static str { "G: pack + rayon" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        gix_extract::run_g(repo, commit, out).map(|gr| MethodOutput {
-            detail: Some(gix_detail(&gr)),
-            result: gr.bench,
-        })
-    }
-}
-
-struct BundledIdxMethod;
-impl Method for BundledIdxMethod {
-    fn key(&self) -> char { 'h' }
-    fn label(&self) -> &'static str { "H: bundled idx" }
-    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
-        gix_extract::run_h(repo, commit, out).map(|gr| MethodOutput {
-            detail: Some(gix_detail(&gr)),
-            result: gr.bench,
-        })
-    }
-}
-
-/// All available methods in order.
+/// All available methods in order. Each module owns its Method impl.
 fn all_methods() -> Vec<Box<dyn Method>> {
     vec![
-        Box::new(ArchiveMethod),
-        Box::new(PackCatfileMethod),
-        Box::new(PackCheckoutMethod),
-        Box::new(FilteredMethod),
-        Box::new(GixMethod),
-        Box::new(NodeltaMethod),
-        Box::new(RayonMethod),
-        Box::new(BundledIdxMethod),
+        Box::new(archive::ArchiveMethod),
+        Box::new(packfile::PackCatfileMethod),
+        Box::new(packfile_checkout::PackCheckoutMethod),
+        Box::new(filtered::FilteredMethod),
+        Box::new(gix_extract::GixMethod),
+        Box::new(gix_extract::NodeltaMethod),
+        Box::new(gix_extract::RayonMethod),
+        Box::new(gix_extract::BundledIdxMethod),
     ]
 }
 

@@ -11,7 +11,52 @@ use std::time::{Duration, Instant};
 use gix_features::zlib;
 use sha2::{Digest, Sha256};
 
-use crate::BenchResult;
+use crate::{format_bytes, BenchError, BenchResult, Method, MethodOutput};
+
+fn gix_detail(gr: &GixResult) -> String {
+    format!(
+        "    wrote={} skipped={} ({} skipped)  idx-pack={:.2?} walk+extract={:.2?}",
+        gr.files_written, gr.files_skipped,
+        format_bytes(gr.bytes_skipped),
+        gr.index_pack_time, gr.walk_extract_time,
+    )
+}
+
+pub struct GixMethod;
+impl Method for GixMethod {
+    fn key(&self) -> char { 'e' }
+    fn label(&self) -> &'static str { "E: pack + gix" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run_e(repo, commit, out).map(|gr| MethodOutput { detail: Some(gix_detail(&gr)), result: gr.bench })
+    }
+}
+
+pub struct NodeltaMethod;
+impl Method for NodeltaMethod {
+    fn key(&self) -> char { 'f' }
+    fn label(&self) -> &'static str { "F: nodelta + gix" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run_f(repo, commit, out).map(|gr| MethodOutput { detail: Some(gix_detail(&gr)), result: gr.bench })
+    }
+}
+
+pub struct RayonMethod;
+impl Method for RayonMethod {
+    fn key(&self) -> char { 'g' }
+    fn label(&self) -> &'static str { "G: pack + rayon" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run_g(repo, commit, out).map(|gr| MethodOutput { detail: Some(gix_detail(&gr)), result: gr.bench })
+    }
+}
+
+pub struct BundledIdxMethod;
+impl Method for BundledIdxMethod {
+    fn key(&self) -> char { 'h' }
+    fn label(&self) -> &'static str { "H: bundled idx" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run_h(repo, commit, out).map(|gr| MethodOutput { detail: Some(gix_detail(&gr)), result: gr.bench })
+    }
+}
 
 const MAX_FILE_SIZE: u64 = 5_000_000;
 

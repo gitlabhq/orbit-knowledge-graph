@@ -10,7 +10,25 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
-use crate::BenchResult;
+use crate::{format_bytes, BenchError, BenchResult, Method, MethodOutput};
+
+pub struct FilteredMethod;
+
+impl Method for FilteredMethod {
+    fn key(&self) -> char { 'd' }
+    fn label(&self) -> &'static str { "D: pack + filtered" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run(repo, commit, out).map(|fr| MethodOutput {
+            detail: Some(format!(
+                "    filter: wrote={} skipped={} ({} skipped)  ls-tree={:.2?} cat-file={:.2?}",
+                fr.files_written, fr.files_skipped,
+                format_bytes(fr.bytes_skipped),
+                fr.ls_tree_time, fr.cat_file_time,
+            )),
+            result: fr.bench,
+        })
+    }
+}
 
 const MAX_FILE_SIZE: u64 = 5_000_000; // 5MB, same as GKG default
 

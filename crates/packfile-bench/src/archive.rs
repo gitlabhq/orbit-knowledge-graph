@@ -10,7 +10,17 @@ use std::time::Instant;
 use flate2::read::GzDecoder;
 use sha2::{Digest, Sha256};
 
-use crate::BenchResult;
+use crate::{BenchError, BenchResult, Method, MethodOutput};
+
+pub struct ArchiveMethod;
+
+impl Method for ArchiveMethod {
+    fn key(&self) -> char { 'a' }
+    fn label(&self) -> &'static str { "A: archive | gzip" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
+    }
+}
 
 /// Run the archive method: execute git archive | gzip, then extract and hash all files.
 pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<BenchResult, crate::BenchError> {

@@ -10,7 +10,17 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use crate::BenchResult;
+use crate::{BenchError, BenchResult, Method, MethodOutput};
+
+pub struct PackCatfileMethod;
+
+impl Method for PackCatfileMethod {
+    fn key(&self) -> char { 'b' }
+    fn label(&self) -> &'static str { "B: pack + cat-file" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
+    }
+}
 
 /// Run the packfile method: execute rev-list | pack-objects, then parse and extract.
 pub fn run(repo_path: &Path, commit: &str, output_dir: &Path) -> Result<BenchResult, crate::BenchError> {

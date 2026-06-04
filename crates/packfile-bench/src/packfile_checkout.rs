@@ -10,7 +10,17 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
-use crate::BenchResult;
+use crate::{BenchError, BenchResult, Method, MethodOutput};
+
+pub struct PackCheckoutMethod;
+
+impl Method for PackCheckoutMethod {
+    fn key(&self) -> char { 'c' }
+    fn label(&self) -> &'static str { "C: pack + checkout" }
+    fn run(&self, repo: &Path, commit: &str, out: &Path) -> Result<MethodOutput, BenchError> {
+        run(repo, commit, out).map(|r| MethodOutput { result: r, detail: None })
+    }
+}
 
 struct ExtractTimings {
     init: Duration,
