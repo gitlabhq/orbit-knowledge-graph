@@ -170,6 +170,7 @@ impl PipelineObserver for BillingObserver {
                 query_type = self.query_type,
                 user_id = self.inputs.user_id,
                 realm = realm,
+                source_type = %self.inputs.source_type,
                 root_namespace_id = ?self.inputs.root_namespace_id,
                 deployment_type = ?self.inputs.deployment_type,
                 correlation_id = %correlation_id,
