@@ -274,6 +274,7 @@ pub async fn run_dispatcher(
     info!("running schema migration check");
     schema::migration::run_if_needed(
         &graph,
+        &config.graph.database,
         &lock_service,
         ontology,
         &migration_metrics,

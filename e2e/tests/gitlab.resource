@@ -133,6 +133,50 @@ Create Issue
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
 
+Link Issues
+    [Documentation]    Relate ${src_iid} (in ${src_project_id}) to ${dst_iid} (in ${dst_project_id})
+    ...                across projects, creating a WorkItem RELATED_TO WorkItem edge once Siphon
+    ...                replicates the issue_links row.
+    [Arguments]    ${src_project_id}    ${src_iid}    ${dst_project_id}    ${dst_iid}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    target_project_id=${dst_project_id}    target_issue_iid=${dst_iid}
+    ...    link_type=relates_to
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${src_project_id}/issues/${src_iid}/links
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Open Closing Merge Request
+    [Documentation]    Seed a repo in ${project_id}, branch off main, and open an MR whose
+    ...                description closes ${target_full_path}#${target_iid} in another project,
+    ...                creating a MergeRequest CLOSED WorkItem edge once Siphon replicates the
+    ...                merge_requests_closing_issues row. Returns the MR dict (global id under "id").
+    [Arguments]    ${project_id}    ${target_full_path}    ${target_iid}
+    ${headers}=    GitLab Auth Headers
+    ${main}=    Create Dictionary    branch=main    commit_message=seed
+    ...    actions=${{[{"action": "create", "file_path": "README.md", "content": "seed"}]}}
+    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/repository/commits
+    ...    headers=${headers}    json=${main}    expected_status=201
+    ${feature}=    Create Dictionary    branch=xns-close    start_branch=main    commit_message=close
+    ...    actions=${{[{"action": "create", "file_path": "fix.txt", "content": "fix"}]}}
+    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/repository/commits
+    ...    headers=${headers}    json=${feature}    expected_status=201
+    ${mr}=    Create Dictionary    source_branch=xns-close    target_branch=main
+    ...    title=Close cross-namespace issue    description=Closes ${target_full_path}#${target_iid}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests
+    ...    headers=${headers}    json=${mr}    expected_status=201
+    ${iid}=    Set Variable    ${resp.json()["iid"]}
+    # The cross-project closing relationship registers on merge, so merge the MR
+    # (retry while GitLab is still computing merge_status / settling the branch).
+    ${merged}=    Wait Until Keyword Succeeds    90s    3s    Merge The MR    ${project_id}    ${iid}
+    RETURN    ${merged}
+
+Merge The MR
+    [Arguments]    ${project_id}    ${iid}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}/merge_requests/${iid}/merge
+    ...    headers=${headers}    expected_status=200
+    RETURN    ${resp.json()}
+
 Create Epic
     [Documentation]    Create a group-scoped epic and return its dict. The response includes
     ...                both the epic id (REST-scoped) and work_item_id (the global id indexed

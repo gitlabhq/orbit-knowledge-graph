@@ -59,6 +59,24 @@ WHERE startsWith(traversal_path, {traversal_path:String})
 
 Namespace deletion is separate from the row-level soft-delete that flows through Siphon's CDC pipeline. When an individual row is deleted in the source PostgreSQL database, Siphon sets `_siphon_deleted = true`, and the SDLC indexer carries the `_deleted` flag through to the graph table during normal ETL. Namespace deletion removes an entire namespace and all of its data at once.
 
+### Reconciling moved entities
+
+When a project or subgroup is transferred or reparented, Rails rewrites its `traversal_path` in the route tables (`project_namespace_traversal_paths`, `namespace_traversal_paths`) while keeping the same `id`. The SDLC ETL then re-indexes the entity at its new path, creating a new ReplacingMergeTree key. The graph tables are sorted by `traversal_path`, so the old-path row is a distinct key that never gets touched and survives FINAL with `_deleted = false`, producing a duplicate live row under the stale path.
+
+On the same cadence as the deletion scheduler, `reconcile_moved_entities` runs one pass per enabled root namespace. For each root it reuses the deletion `INSERT INTO ... SELECT` but appends one predicate that narrows the scan from "all rows under the root" to "rows whose `traversal_path` is no longer a current route under the root":
+
+```sql
+INSERT INTO {table} ({sort_key_columns}, _deleted, _version)
+SELECT {sort_key_columns}, true, now64(6)
+FROM {table}
+WHERE startsWith(traversal_path, {traversal_path:String})
+  AND _deleted = false
+  AND (SELECT count() FROM (current routes under root)) > 0
+  AND traversal_path NOT IN (current routes under root)
+```
+
+A row at the entity's current path is always present in the route set (the ETL joins those same tables to write it), so it is never matched. Only old-path rows match. The `count() > 0` guard skips reconcile for a freshly-enabled root whose route tables have not replicated yet, so a transient empty-route window can never tombstone a just-indexed namespace. The pass is idempotent: a tombstoned row has `_deleted = true` and is filtered out, and a still-stale row re-inserts an identical tombstone that ReplacingMergeTree collapses.
+
 ## Data model
 
 The `namespace_deletion_schedule` table tracks pending and completed deletions:

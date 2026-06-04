@@ -31,6 +31,8 @@ pub struct SnowplowIndexingObserver {
     entity_type: Option<String>,
     read_rows: u64,
     read_bytes: u64,
+    scanned_rows: u64,
+    scanned_bytes: u64,
 
     project_id: Option<i64>,
     branch: Option<String>,
@@ -66,6 +68,8 @@ impl SnowplowIndexingObserver {
             entity_type: None,
             read_rows: 0,
             read_bytes: 0,
+            scanned_rows: 0,
+            scanned_bytes: 0,
             project_id: None,
             branch: None,
             commit_sha: None,
@@ -134,6 +138,8 @@ impl SnowplowIndexingObserver {
                     campaign_id: self.campaign_id.clone(),
                     read_rows: self.read_rows,
                     read_bytes: self.read_bytes,
+                    scanned_rows: self.scanned_rows,
+                    scanned_bytes: self.scanned_bytes,
                     written_rows: self.written_rows,
                     written_bytes: self.written_bytes,
                     duration_ms: self.duration_ms,
@@ -237,6 +243,11 @@ impl IndexingObserver for SnowplowIndexingObserver {
     fn record_datalake_read(&mut self, rows: u64, bytes: u64) {
         self.read_rows += rows;
         self.read_bytes += bytes;
+    }
+
+    fn record_datalake_scan(&mut self, rows: u64, bytes: u64) {
+        self.scanned_rows += rows;
+        self.scanned_bytes += bytes;
     }
 
     fn record_source_bytes(&mut self, bytes: u64) {
@@ -418,6 +429,7 @@ mod tests {
         obs.set_traversal_path(Some("42/100/"));
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.record_datalake_read(1000, 50_000);
+        obs.record_datalake_scan(80_000, 4_000_000);
         obs.record_graph_write("gl_merge_request", 1000, 40_000);
         obs.record_duration(12_000);
         obs.finish();
@@ -435,6 +447,8 @@ mod tests {
         assert_eq!(data["campaign_id"], "migration-v48");
         assert_eq!(data["read_rows"], 1000);
         assert_eq!(data["read_bytes"], 50_000);
+        assert_eq!(data["scanned_rows"], 80_000);
+        assert_eq!(data["scanned_bytes"], 4_000_000);
         assert_eq!(data["written_rows"], 1000);
         assert_eq!(data["written_bytes"], 40_000);
         assert_eq!(data["duration_ms"], 12_000);

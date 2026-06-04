@@ -5157,6 +5157,7 @@ dependencies = [
  "labkit",
  "labkit-events",
  "mimalloc",
+ "moka",
  "nats-client",
  "ontology",
  "opentelemetry",

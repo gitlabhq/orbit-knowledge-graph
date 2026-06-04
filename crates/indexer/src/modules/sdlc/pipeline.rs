@@ -15,7 +15,9 @@ use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeError, DatalakeQuery, ReadStats, RecordBatchStream};
+use super::datalake::{
+    DatalakeError, DatalakeQuery, ReadStats, RecordBatchStream, ScanStats, ScanStatsFuture,
+};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TableBatch, TransformRegistry};
@@ -37,15 +39,19 @@ enum WriteCommand {
         extracted_rows: u64,
         extracted_bytes: u64,
         read_stats: ReadStats,
+        scan_stats: ScanStats,
     },
 }
 
-/// `read_*` count the rows/bytes actually returned from the datalake;
-/// `written_*` the transformed rows/bytes inserted.
+/// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
+/// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
+/// rows/bytes inserted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PipelineStats {
     pub read_rows: u64,
     pub read_bytes: u64,
+    pub scanned_rows: u64,
+    pub scanned_bytes: u64,
     pub written_rows: u64,
     pub written_bytes: u64,
     pub duration_ms: u64,
@@ -55,6 +61,8 @@ impl PipelineStats {
     pub(in crate::modules::sdlc) fn merge(&mut self, other: PipelineStats) {
         self.read_rows += other.read_rows;
         self.read_bytes += other.read_bytes;
+        self.scanned_rows += other.scanned_rows;
+        self.scanned_bytes += other.scanned_bytes;
         self.written_rows += other.written_rows;
         self.written_bytes += other.written_bytes;
         self.duration_ms = self.duration_ms.max(other.duration_ms);
@@ -152,12 +160,14 @@ impl Pipeline {
         {
             let mut observer = context.observer.lock().unwrap();
             observer.record_datalake_read(stats.read_rows, stats.read_bytes);
+            observer.record_datalake_scan(stats.scanned_rows, stats.scanned_bytes);
             observer.record_duration(stats.duration_ms);
         }
 
         if stats.written_rows > 0 || stats.read_rows > 0 {
             info!(
                 read_rows = stats.read_rows,
+                scanned_rows = stats.scanned_rows,
                 written_rows = stats.written_rows,
                 duration_ms = stats.duration_ms,
                 "pipeline completed"
@@ -286,10 +296,13 @@ impl Pipeline {
                     extracted_rows,
                     extracted_bytes,
                     read_stats,
+                    scan_stats,
                 } => {
                     let written = loader.flush_page().await?;
                     stats.read_rows += read_stats.read_rows;
                     stats.read_bytes += read_stats.read_bytes;
+                    stats.scanned_rows += scan_stats.scanned_rows;
+                    stats.scanned_bytes += scan_stats.scanned_bytes;
 
                     {
                         let mut observer = context.observer.lock().unwrap();
@@ -330,9 +343,9 @@ impl Extractor {
         &self,
         sql: &str,
         max_block_size: Option<u64>,
-    ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+    ) -> Result<(RecordBatchStream<'_>, ScanStatsFuture), DatalakeError> {
         self.datalake
-            .query_arrow(sql, self.params.clone(), max_block_size)
+            .query_arrow_with_scan(sql, self.params.clone(), max_block_size)
             .await
     }
 }
@@ -342,6 +355,7 @@ struct PageStats {
     rows: u64,
     bytes: u64,
     read_stats: ReadStats,
+    scan_stats: ScanStats,
     extract_elapsed: Duration,
     transform_duration: Duration,
 }
@@ -407,6 +421,7 @@ impl Producer {
                     extracted_rows: page.rows,
                     extracted_bytes: page.bytes,
                     read_stats: page.read_stats,
+                    scan_stats: page.scan_stats,
                 })
                 .await
                 .is_err()
@@ -480,7 +495,7 @@ impl Producer {
         max_block_size: Option<u64>,
     ) -> Result<Option<PageStats>, PageError> {
         let extract_start = Instant::now();
-        let mut stream = self
+        let (mut stream, scan_stats) = self
             .extractor
             .open(page_sql, max_block_size)
             .await
@@ -518,18 +533,20 @@ impl Producer {
             }
         }
 
-        // Stats reflect the data actually returned; ClickHouse's scanned
-        // X-ClickHouse-Summary figures are unused for now.
+        // read_* count what the page returned; the scan summary arrives only
+        // after the body is fully drained.
         let read_stats = ReadStats {
             read_rows: page_rows,
             read_bytes: page_bytes,
         };
+        let scan_stats = scan_stats.await;
 
         Ok(Some(PageStats {
             cursor: page_cursor,
             rows: page_rows,
             bytes: page_bytes,
             read_stats,
+            scan_stats,
             extract_elapsed: extract_start.elapsed(),
             transform_duration,
         }))
@@ -1215,9 +1232,11 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Returns one page of `rows`, then nothing.
+    /// Returns one page of `rows` plus a fixed `ScanStats` from its summary,
+    /// then nothing.
     struct StatsDatalake {
         rows: usize,
+        scan_stats: ScanStats,
         calls: Mutex<u32>,
     }
 
@@ -1229,14 +1248,7 @@ mod tests {
             _params: Value,
             _max_block_size: Option<u64>,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-            let mut calls = self.calls.lock().unwrap();
-            *calls += 1;
-            let blocks: Vec<Result<RecordBatch, DatalakeError>> = if *calls == 1 {
-                vec![Ok(test_batch(self.rows))]
-            } else {
-                vec![]
-            };
-            Ok(Box::pin(futures::stream::iter(blocks)))
+            Ok(Box::pin(futures::stream::empty()))
         }
 
         async fn query_batches(
@@ -1247,12 +1259,38 @@ mod tests {
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             Ok(vec![])
         }
+
+        async fn query_arrow_with_scan(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<(RecordBatchStream<'_>, ScanStatsFuture), DatalakeError> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            let (blocks, stats): (Vec<Result<RecordBatch, DatalakeError>>, ScanStats) =
+                if *calls == 1 {
+                    (vec![Ok(test_batch(self.rows))], self.scan_stats)
+                } else {
+                    (vec![], ScanStats::default())
+                };
+            Ok((
+                Box::pin(futures::stream::iter(blocks)),
+                Box::pin(async move { stats }),
+            ))
+        }
     }
 
     #[tokio::test]
     async fn run_plan_reports_resource_stats() {
         let datalake = Arc::new(StatsDatalake {
             rows: 5,
+            // ClickHouse scanned far more rows than the page returns; read_rows
+            // must track the 5 returned while scanned_rows carries the cost.
+            scan_stats: ScanStats {
+                scanned_rows: 1000,
+                scanned_bytes: 64_000,
+            },
             calls: Mutex::new(0),
         });
         let pipeline = Pipeline::new(
@@ -1281,6 +1319,14 @@ mod tests {
         assert!(
             stats.read_bytes > 0,
             "read bytes reflect the data actually returned"
+        );
+        assert_eq!(
+            stats.scanned_rows, 1000,
+            "scanned rows come from the summary"
+        );
+        assert_eq!(
+            stats.scanned_bytes, 64_000,
+            "scanned bytes come from the summary"
         );
         assert_eq!(
             stats.written_rows, 5,

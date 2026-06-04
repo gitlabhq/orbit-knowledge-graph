@@ -16,7 +16,7 @@ use crate::grpc::GrpcConfig;
 use crate::health_check::HealthCheckConfig;
 use crate::metrics::MetricsConfig;
 use crate::nats::NatsConfiguration;
-use crate::query::QuerySettings;
+use crate::query::{PathResolverConfig, QuerySettings};
 use crate::schema::SchemaConfig;
 use crate::secret_file_source::SecretFileSource;
 use crate::tls::TlsConfig;
@@ -78,6 +78,8 @@ pub struct AppConfig {
     pub tls: TlsConfig,
     #[serde(default)]
     pub query: QuerySettings,
+    #[serde(default)]
+    pub path_resolver: PathResolverConfig,
     #[serde(default)]
     pub grpc: GrpcConfig,
     #[serde(default)]

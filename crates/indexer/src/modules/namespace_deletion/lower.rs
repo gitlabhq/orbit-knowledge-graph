@@ -21,6 +21,21 @@ pub struct DeletionStatement {
 ///   AND _deleted = false
 /// ```
 pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
+    build_statements(ontology, None)
+}
+
+pub fn build_reconcile_statements(ontology: &ontology::Ontology) -> Vec<DeletionStatement> {
+    build_statements(ontology, Some(MOVED_ROW_PREDICATE))
+}
+
+const MOVED_ROW_PREDICATE: &str = "\
+AND length({current_paths:Array(String)}) > 0 \
+AND traversal_path NOT IN {current_paths:Array(String)}";
+
+fn build_statements(
+    ontology: &ontology::Ontology,
+    extra_predicate: Option<&str>,
+) -> Vec<DeletionStatement> {
     let mut statements = Vec::new();
 
     for node in ontology.nodes() {
@@ -35,6 +50,7 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
             &node.destination_table,
             &prefixed,
             sort_key,
+            extra_predicate,
         ));
     }
 
@@ -47,6 +63,7 @@ pub fn build_deletion_statements(ontology: &ontology::Ontology) -> Vec<DeletionS
             edge_table,
             &prefixed,
             &config.sort_key,
+            extra_predicate,
         ));
     }
 
@@ -57,15 +74,17 @@ fn build_deletion_insert(
     unprefixed_table: &str,
     prefixed_table: &str,
     sort_key: &[String],
+    extra_predicate: Option<&str>,
 ) -> DeletionStatement {
     let sort_key_cols = sort_key.join(", ");
     let insert_columns = format!("{sort_key_cols}, {DELETED_COLUMN}, {VERSION_COLUMN}");
+    let extra = extra_predicate.map(|p| format!(" {p}")).unwrap_or_default();
     let sql = format!(
         "INSERT INTO {prefixed_table} ({insert_columns}) \
          SELECT {sort_key_cols}, true, now64(6) \
          FROM {prefixed_table} \
          WHERE (startsWith({TRAVERSAL_PATH_COLUMN}, {{{TRAVERSAL_PATH_COLUMN}:String}}) \
-         AND ({DELETED_COLUMN} = false))"
+         AND ({DELETED_COLUMN} = false){extra})"
     );
     DeletionStatement {
         table: unprefixed_table.to_string(),
@@ -218,5 +237,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reconcile_covers_the_same_tables_as_deletion() {
+        let ontology = load_ontology();
+        let deletion: Vec<String> = build_deletion_statements(&ontology)
+            .into_iter()
+            .map(|s| s.table)
+            .collect();
+        let reconcile = build_reconcile_statements(&ontology);
+
+        assert_eq!(deletion.len(), reconcile.len());
+        for statement in &reconcile {
+            assert!(deletion.contains(&statement.table));
+        }
+    }
+
+    #[test]
+    fn reconcile_scopes_to_rows_absent_from_current_routes() {
+        let ontology = load_ontology();
+        let statements = build_reconcile_statements(&ontology);
+        let statement = find_statement(&statements, "gl_project");
+
+        assert!(
+            statement.sql.contains("(_deleted = false)"),
+            "should keep the FINAL-safe non-deleted filter: {}",
+            statement.sql
+        );
+        assert!(
+            statement
+                .sql
+                .contains("traversal_path NOT IN {current_paths:Array(String)}"),
+            "should exclude rows still present in the route set: {}",
+            statement.sql
+        );
+        assert!(
+            statement
+                .sql
+                .contains("length({current_paths:Array(String)}) > 0"),
+            "should no-op when the root has no current routes yet: {}",
+            statement.sql
+        );
+        assert!(
+            !statement.sql.contains("traversal_paths"),
+            "should not embed a datalake route subquery in a graph-side query: {}",
+            statement.sql
+        );
     }
 }

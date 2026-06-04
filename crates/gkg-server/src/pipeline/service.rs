@@ -19,8 +19,10 @@ use query_engine::pipeline::{
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
 use super::metrics::OTelPipelineObserver;
+use super::path_resolver::PathResolver;
 use super::stages::{
-    AuthorizationStage, ClickHouseExecutor, HydrationStage, RedactionStage, SecurityStage,
+    AuthorizationStage, ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage,
+    SecurityStage,
 };
 
 #[derive(Clone)]
@@ -29,6 +31,7 @@ pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
+    path_resolver: Option<Arc<PathResolver>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
     analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
     analytics_config: Arc<AnalyticsConfig>,
@@ -45,6 +48,7 @@ impl QueryPipelineService {
             client,
             resolver_registry: None,
             cache_broker: None,
+            path_resolver: None,
             billing_tracker: None,
             analytics_tracker: None,
             analytics_config,
@@ -58,6 +62,11 @@ impl QueryPipelineService {
 
     pub fn with_cache_broker(mut self, broker: Arc<NatsClient>) -> Self {
         self.cache_broker = Some(broker);
+        self
+    }
+
+    pub fn with_path_resolver(mut self, resolver: Arc<PathResolver>) -> Self {
+        self.path_resolver = Some(resolver);
         self
     }
 
@@ -107,6 +116,9 @@ impl QueryPipelineService {
         if let Some(broker) = &self.cache_broker {
             server_extensions.insert(Arc::clone(broker));
         }
+        if let Some(resolver) = &self.path_resolver {
+            server_extensions.insert(Arc::clone(resolver));
+        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -124,6 +136,8 @@ impl QueryPipelineService {
         let pipeline = async {
             PipelineRunner::start(&mut ctx, &mut obs)
                 .then(&SecurityStage)
+                .await?
+                .then(&PathResolutionStage)
                 .await?
                 .then(&CompilationStage)
                 .await?

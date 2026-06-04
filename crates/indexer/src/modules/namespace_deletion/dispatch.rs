@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::NamespaceDeletionStore;
@@ -70,6 +70,48 @@ impl NamespaceDeletionScheduler {
     async fn run_inner(&self) -> Result<(), TaskError> {
         self.record_newly_deleted_namespaces().await?;
         self.dispatch_due_deletions().await?;
+        self.reconcile_moved_entities().await?;
+        Ok(())
+    }
+
+    async fn reconcile_moved_entities(&self) -> Result<(), TaskError> {
+        let roots = self
+            .store
+            .enabled_namespace_roots()
+            .await
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "query");
+                TaskError::new(error)
+            })?;
+
+        let mut reconciled = 0u64;
+        for root in &roots {
+            if !gkg_utils::traversal_path::is_valid(root) {
+                warn!(
+                    traversal_path = %root,
+                    "skipping reconcile for enabled namespace with invalid traversal_path"
+                );
+                continue;
+            }
+
+            let outcomes = self.store.reconcile_moved_entities(root).await;
+            for outcome in &outcomes {
+                if let Some(error) = &outcome.error {
+                    warn!(
+                        traversal_path = %root,
+                        table = %outcome.table,
+                        error,
+                        "failed to reconcile moved entities for table"
+                    );
+                }
+            }
+            reconciled += 1;
+        }
+
+        info!(
+            reconciled,
+            "reconciled moved entities for enabled namespaces"
+        );
         Ok(())
     }
 
@@ -313,6 +355,43 @@ mod tests {
         scheduler.run().await.unwrap();
 
         assert!(store.schedule_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reconciles_moved_entities_per_enabled_root() {
+        let store = Arc::new(
+            MockNamespaceDeletionStore::new()
+                .with_enabled_roots(vec!["1/100/".to_string(), "1/200/".to_string()]),
+        );
+        let scheduler = scheduler_with_store(store.clone());
+
+        scheduler.run().await.unwrap();
+
+        assert_eq!(store.reconcile_calls(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[tokio::test]
+    async fn skips_reconcile_when_no_namespaces_enabled() {
+        let store = Arc::new(MockNamespaceDeletionStore::new());
+        let scheduler = scheduler_with_store(store.clone());
+
+        scheduler.run().await.unwrap();
+
+        assert!(store.reconcile_calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn skips_reconcile_for_invalid_roots() {
+        let store = Arc::new(MockNamespaceDeletionStore::new().with_enabled_roots(vec![
+            "0/".to_string(),
+            "1/100/".to_string(),
+            "abc/100/".to_string(),
+        ]));
+        let scheduler = scheduler_with_store(store.clone());
+
+        scheduler.run().await.unwrap();
+
+        assert_eq!(store.reconcile_calls(), vec!["1/100/"]);
     }
 
     #[tokio::test]

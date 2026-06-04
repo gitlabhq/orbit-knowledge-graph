@@ -252,7 +252,32 @@ pub fn emit_neighbors(
         }
     };
 
-    if direction == Direction::Both {
+    // When the center is default-PK with no non-denormalized filters and a single
+    // physical edge table, each arm degenerates to a plain edge scan, so both
+    // directions collapse into ONE scan: each matching row emits its applicable
+    // neighbor row(s) via arrayJoin over the matched direction tuples. A self-loop
+    // (source==target==center) matches both arms and still yields two rows.
+    let fused_both_eligible = direction == Direction::Both
+        && !has_non_denorm
+        && center_uses_default_pk
+        && edge_table.len() == 1;
+
+    if fused_both_eligible {
+        let mut q = build_fused_both_arm(
+            &center_id,
+            &center_entity,
+            center_has_tp,
+            &center_node_ids,
+            &center_filters,
+            plan,
+            edge,
+            &edge_table[0],
+            edge_alias,
+        );
+        q.order_by = order_by;
+        q.limit = Some(plan.limit);
+        Ok(Node::Query(Box::new(q)))
+    } else if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
@@ -263,5 +288,147 @@ pub fn emit_neighbors(
         arm.order_by = order_by;
         arm.limit = Some(plan.limit);
         Ok(Node::Query(Box::new(arm)))
+    }
+}
+
+/// Direction::Both collapsed into a single edge scan (see `fused_both_eligible`).
+///
+/// Inner query: scan the edge once with `WHERE (source side) OR (target side)`,
+/// projecting `arrayJoin(arrayFilter(matched, [out_tuple, in_tuple]))` so each
+/// row yields one entry per matched arm. Outer query: project the `_gkg_*`
+/// columns out of the tuple. `arrayFilter` (not `multiIf`) keeps self-loop
+/// semantics: when both arms match the same edge, both rows are emitted.
+#[allow(clippy::too_many_arguments)]
+fn build_fused_both_arm(
+    center_id: &str,
+    center_entity: &str,
+    center_has_tp: bool,
+    center_node_ids: &[i64],
+    center_filters: &[(String, InputFilter)],
+    plan: &Plan,
+    edge: &EdgeTableConfig,
+    edge_table: &str,
+    edge_alias: &str,
+) -> Query {
+    let arm_predicate = |kind_col: &str, id_col: &str, denorm_dir: &str| -> Expr {
+        let mut parts = vec![Expr::eq(
+            Expr::col(edge_alias, kind_col),
+            Expr::string(center_entity),
+        )];
+        if !center_node_ids.is_empty() {
+            parts.push(id_list_predicate(edge_alias, id_col, center_node_ids));
+        }
+        for (prop, filter) in center_filters {
+            let key = (
+                center_entity.to_string(),
+                prop.clone(),
+                denorm_dir.to_string(),
+            );
+            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+            {
+                parts.push(expr);
+            }
+        }
+        Expr::conjoin(parts).expect("fused arm predicate always has the center-kind conjunct")
+    };
+
+    let source_arm = arm_predicate(SOURCE_KIND_COLUMN, SOURCE_ID_COLUMN, "source");
+    let target_arm = arm_predicate(TARGET_KIND_COLUMN, TARGET_ID_COLUMN, "target");
+
+    // (matched, is_outgoing, neighbor_id, neighbor_kind, center_id)
+    let out_tuple = Expr::func(
+        "tuple",
+        vec![
+            source_arm.clone(),
+            Expr::int(1),
+            Expr::col(edge_alias, TARGET_ID_COLUMN),
+            Expr::col(edge_alias, TARGET_KIND_COLUMN),
+            Expr::col(edge_alias, SOURCE_ID_COLUMN),
+        ],
+    );
+    let in_tuple = Expr::func(
+        "tuple",
+        vec![
+            target_arm.clone(),
+            Expr::int(0),
+            Expr::col(edge_alias, SOURCE_ID_COLUMN),
+            Expr::col(edge_alias, SOURCE_KIND_COLUMN),
+            Expr::col(edge_alias, TARGET_ID_COLUMN),
+        ],
+    );
+    let matched_only = Expr::func(
+        "arrayFilter",
+        vec![
+            Expr::lambda(
+                "_gkg_arm",
+                Expr::func("tupleElement", vec![Expr::ident("_gkg_arm"), Expr::int(1)]),
+            ),
+            Expr::func("array", vec![out_tuple, in_tuple]),
+        ],
+    );
+    let dir_row = Expr::func("arrayJoin", vec![matched_only]);
+
+    const ROW_COL: &str = "_gkg_arm_row";
+    let rel_col = relationship_type_column();
+    let tp_col = traversal_path_column(center_id);
+    let mut inner_select = vec![
+        SelectExpr::new(dir_row, ROW_COL),
+        SelectExpr::new(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN), rel_col),
+    ];
+    if center_has_tp {
+        inner_select.push(SelectExpr::new(
+            Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
+            tp_col.clone(),
+        ));
+    }
+
+    let mut where_parts = vec![Expr::binary(Op::Or, source_arm, target_arm)];
+    if let Some(ref types) = edge.rel_type_filter
+        && let Some(f) = rel_kind_filter(edge_alias, types)
+    {
+        where_parts.push(f);
+    }
+    where_parts.push(deleted_false(edge_alias));
+
+    let inner = Query {
+        select: inner_select,
+        from: TableRef::scan(edge_table, edge_alias),
+        where_clause: Expr::conjoin(where_parts),
+        ..Default::default()
+    };
+
+    let inner_alias = "_gkg_fused";
+    let te = |n: i64| {
+        Expr::func(
+            "tupleElement",
+            vec![Expr::col(inner_alias, ROW_COL), Expr::int(n)],
+        )
+    };
+    let mut select = vec![
+        SelectExpr::new(te(3), neighbor_id_column()),
+        SelectExpr::new(te(4), neighbor_type_column()),
+        SelectExpr::new(Expr::col(inner_alias, rel_col), rel_col),
+        SelectExpr::new(te(2), neighbor_is_outgoing_column()),
+        SelectExpr::new(te(5), redaction_id_column(center_id)),
+        SelectExpr::new(
+            Expr::string(center_entity),
+            redaction_type_column(center_id),
+        ),
+    ];
+    if center_has_tp {
+        select.push(SelectExpr::new(
+            Expr::col(inner_alias, &tp_col),
+            tp_col.clone(),
+        ));
+    }
+
+    Query {
+        select,
+        from: TableRef::Subquery {
+            query: Box::new(inner),
+            alias: inner_alias.to_string(),
+        },
+        ..Default::default()
     }
 }

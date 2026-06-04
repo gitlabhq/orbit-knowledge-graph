@@ -203,6 +203,29 @@ Result Must Contain Node Ids
         Result Node Ids Contain    ${resp}    ${node_id}
     END
 
+Aggregation Value
+    [Documentation]    Return the ${column} value from the first row of an aggregation response.
+    [Arguments]    ${resp}    ${column}
+    ${rows}=    Set Variable    ${resp["result"]["rows"]}
+    Should Not Be Empty    ${rows}    aggregation returned no rows
+    RETURN    ${rows[0]["${column}"]}
+
+Wait Until Aggregation At Least
+    [Documentation]    Re-run an aggregation ${query} until ${column} in the first row is >= ${minimum},
+    ...                within the shared indexing budget. A discovered cross-namespace node is
+    ...                eventually consistent on the per-resource authz path, so an immediate count can
+    ...                race the redaction refresh and undercount (same reason as the node-id poll above).
+    [Arguments]    ${query}    ${column}    ${minimum}=1
+    ${budget}=    Remaining Budget
+    Wait Until Keyword Succeeds    ${budget}    3s
+    ...    Aggregation At Least    ${query}    ${column}    ${minimum}
+
+Aggregation At Least
+    [Arguments]    ${query}    ${column}    ${minimum}
+    ${resp}=    Orbit Query    ${query}
+    ${value}=    Aggregation Value    ${resp}    ${column}
+    Should Be True    ${value} >= ${minimum}    ${column}=${value} (need >= ${minimum})
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30

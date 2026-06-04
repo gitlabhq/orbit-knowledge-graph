@@ -346,9 +346,15 @@ fn neighbors_query() {
         rendered.contains("_gkg_neighbor_is_outgoing"),
         "bidirectional should include direction"
     );
-    // Edge-only: no JOIN, edge scan with IN subquery for center node IDs.
     assert!(rendered.contains("gl_edge"));
-    assert!(rendered.contains("UNION ALL"));
+    // A pinned default-PK center on a single edge table fuses both directions into
+    // one scan: arrayJoin over the matched-arm tuples, no UNION ALL. The multi-table
+    // and non-denorm-filter neighbors tests still exercise the UNION ALL path.
+    assert!(
+        rendered.contains("arrayJoin") && rendered.contains("arrayFilter"),
+        "pinned default-PK both should fuse to a single arrayJoin scan"
+    );
+    assert!(!rendered.contains("UNION ALL"));
 }
 
 #[test]
@@ -684,4 +690,86 @@ fn multi_table_neighbors_scans_all_tables() {
         rendered.contains("gl_edge") && rendered.contains("gl_code_edge"),
         "wildcard neighbors should scan both edge tables: {rendered}"
     );
+}
+
+use crate::compiler::setup::{admin_ctx, embedded_ontology};
+
+const SCOPED_PREFIX: &str = "1/24/23/";
+
+fn scoped_ctx() -> compiler::SecurityContext {
+    let mut prefixes = std::collections::HashMap::new();
+    prefixes.insert("p".to_string(), SCOPED_PREFIX.to_string());
+    admin_ctx().with_scope_prefixes(prefixes)
+}
+
+fn render_scoped(json: &str) -> String {
+    compile(json, &embedded_ontology(), &scoped_ctx())
+        .unwrap()
+        .base
+        .render()
+}
+
+#[test]
+fn scoped_traversal_injects_tight_prefix() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+        ],
+        "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
+        "limit": 100
+    }"#;
+    assert!(render_scoped(json).contains(SCOPED_PREFIX));
+}
+
+#[test]
+fn scoped_aggregation_injects_tight_prefix() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}}
+        ],
+        "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
+        "group_by": [{"kind": "node", "node": "p"}],
+        "aggregations": [{"function": "count", "target": "wi", "alias": "c"}],
+        "limit": 100
+    }"#;
+    assert!(render_scoped(json).contains(SCOPED_PREFIX));
+}
+
+#[test]
+fn cross_namespace_related_to_keeps_prefix_only_on_scoped_node() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": 1}}},
+            {"id": "wi", "entity": "WorkItem", "columns": ["id"]},
+            {"id": "rel", "entity": "WorkItem", "columns": ["id", "title"]}
+        ],
+        "relationships": [
+            {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+            {"type": "RELATED_TO", "from": "wi", "to": "rel"}
+        ],
+        "limit": 100
+    }"#;
+    let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
+    let sql = compiled.base.render();
+
+    assert_eq!(sql.matches(SCOPED_PREFIX).count(), 1);
+
+    let scoped_filter = sql.split("WHERE").nth(1).unwrap();
+    let scoped_clause = scoped_filter.split("SELECT").next().unwrap();
+    assert!(scoped_clause.contains(SCOPED_PREFIX));
+
+    let after_related = sql.split("RELATED_TO").nth(1).unwrap();
+    assert!(!after_related.contains(SCOPED_PREFIX));
+
+    let compiler::HydrationPlan::Static(templates) = &compiled.hydration else {
+        panic!("expected static hydration");
+    };
+    let rel = templates.iter().find(|t| t.node_alias == "rel").unwrap();
+    assert!(rel.injected_columns.is_empty());
+    assert_eq!(rel.destination_table, "gl_work_item");
 }
