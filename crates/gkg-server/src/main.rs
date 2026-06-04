@@ -233,7 +233,7 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
     } else {
-        info!("billing tracker disabled (billing.enabled=false) — no events will be emitted");
+        info!("billing tracker disabled (billing.enabled=false): no events will be emitted");
     }
 
     if config.billing.quota.enabled {
