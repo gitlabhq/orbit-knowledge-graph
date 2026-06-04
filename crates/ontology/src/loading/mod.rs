@@ -1,3 +1,4 @@
+mod derived;
 mod edge;
 mod node;
 mod schema;
@@ -9,6 +10,7 @@ use std::path::Path;
 use crate::entities::{DomainInfo, EdgeColumn};
 use crate::{Ontology, OntologyError};
 
+use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
 pub(crate) use node::NodeYaml;
 use schema::SchemaYaml;
@@ -116,7 +118,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 projections: s
                     .projections
                     .into_iter()
-                    .map(node::convert_storage_projection)
+                    .map(|p| node::convert_storage_projection(p, &cfg.sort_key))
                     .collect(),
                 denormalized_columns: vec![],
                 denormalized_indexes: vec![],
@@ -220,6 +222,21 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             ontology.nodes.insert(node_name.clone(), entity);
             node_names.push(node_name.clone());
+        }
+
+        for (derived_name, derived_path) in &domain.derived {
+            if ontology.derived_entities.contains_key(derived_name) {
+                return Err(OntologyError::Validation(format!(
+                    "duplicate derived entity definition: '{derived_name}'"
+                )));
+            }
+
+            let content = reader.read(derived_path)?;
+            let derived_def: DerivedYaml = parse_yaml(&content, derived_path)?;
+            let derived = derived_def.into_derived(derived_name.clone(), &etl_settings)?;
+            ontology
+                .derived_entities
+                .insert(derived_name.clone(), derived);
         }
 
         node_names.sort();
@@ -462,27 +479,30 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .settings
         .auxiliary_tables
         .into_iter()
-        .map(|t| crate::entities::AuxiliaryTable {
-            name: t.name,
-            columns: t
-                .columns
-                .into_iter()
-                .map(|c| crate::entities::AuxiliaryColumn {
-                    name: c.name,
-                    data_type: c.data_type,
-                    nullable: c.nullable,
-                    codec: c.codec,
-                    default: c.default,
-                })
-                .collect(),
-            order_by: t.order_by,
-            version_only_engine: t.version_only_engine,
-            version_type: t.version_type,
-            projections: t
+        .map(|t| {
+            let projections = t
                 .projections
                 .into_iter()
-                .map(node::convert_storage_projection)
-                .collect(),
+                .map(|p| node::convert_storage_projection(p, &t.order_by))
+                .collect();
+            crate::entities::AuxiliaryTable {
+                name: t.name,
+                columns: t
+                    .columns
+                    .into_iter()
+                    .map(|c| crate::entities::AuxiliaryColumn {
+                        name: c.name,
+                        data_type: c.data_type,
+                        nullable: c.nullable,
+                        codec: c.codec,
+                        default: c.default,
+                    })
+                    .collect(),
+                order_by: t.order_by,
+                version_only_engine: t.version_only_engine,
+                version_type: t.version_type,
+                projections,
+            }
         })
         .collect();
 

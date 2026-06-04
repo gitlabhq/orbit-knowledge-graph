@@ -19,6 +19,7 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
+gkg-analytics = { path = "../gkg-analytics" }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
@@ -27,6 +28,7 @@ flate2 = { workspace = true }
 futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
+labkit-events = { workspace = true }
 moka = { workspace = true }
 nats-client = { workspace = true }
 ontology = { path = "../ontology" }
@@ -35,6 +37,7 @@ opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
+regex = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -52,7 +55,23 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
+jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
+
+# This crate opts into the workspace lints AND additionally denies bare `#[allow(..)]`
+# attributes. A crate-local `[lints.clippy]` table replaces (does not merge with) the
+# workspace `[workspace.lints.clippy]` block, so the workspace lints are re-declared here.
+# Rationale: handler/pipeline work in this crate previously shipped scaffold-era
+# `#[allow(dead_code)]` markers (see !1416). Denying allows-without-reason turns every
+# `#[allow(..)]` into a reviewable, justified `#[allow(.., reason = "..")]`. See
+# `crates/indexer/AGENTS.md` and the no-shipped-dead-code rule in the root `AGENTS.md`.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+allow_attributes_without_reason = "deny"

@@ -1,8 +1,8 @@
 use std::net::SocketAddr;
 
 use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfigError, EngineConfiguration, GitlabClientConfiguration,
-    NatsConfiguration, ScheduleConfig, SchemaConfig,
+    AnalyticsConfig, ClickHouseConfiguration, EngineConfigError, EngineConfiguration,
+    GitlabClientConfiguration, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use thiserror::Error;
 
@@ -34,6 +34,8 @@ pub struct IndexerConfig {
     pub health_bind_address: SocketAddr,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub analytics: AnalyticsConfig,
 }
 
 impl Default for IndexerConfig {
@@ -47,6 +49,7 @@ impl Default for IndexerConfig {
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),
+            analytics: AnalyticsConfig::default(),
         }
     }
 }
@@ -71,14 +74,17 @@ pub enum IndexerError {
     #[error("Schema version error: {0}")]
     SchemaVersion(#[from] crate::schema::version::SchemaVersionError),
 
-    #[error("Schema migration error: {0}")]
-    SchemaMigration(#[from] crate::schema::migration::MigrationError),
+    #[error("Schema readiness wait failed: {0}")]
+    SchemaWait(#[from] crate::schema::version::SchemaWaitError),
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
 
     #[error("Invalid engine configuration: {0}")]
     InvalidEngineConfig(#[from] EngineConfigError),
+
+    #[error("Analytics tracker initialization failed: {0}")]
+    Analytics(#[from] labkit_events::Error),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -101,6 +107,9 @@ pub struct DispatcherConfig {
 pub enum DispatcherError {
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::scheduler::SchedulerError),
+
+    #[error("schema migration error: {0}")]
+    Migration(#[from] crate::schema::migration::MigrationError),
 
     #[error("health server failed: {0}")]
     Health(#[from] std::io::Error),

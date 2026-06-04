@@ -9,6 +9,7 @@
 //! uses `vN_`.
 
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
@@ -18,6 +19,8 @@ use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
 use thiserror::Error;
+use tokio::time::{Instant, sleep};
+use tracing::{info, warn};
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
@@ -319,6 +322,131 @@ pub async fn init(graph: &ArrowClickHouseClient) -> Result<(), SchemaVersionErro
     Ok(())
 }
 
+const MAX_BACKOFF_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchemaReadiness {
+    Ready,
+    Pending,
+    Outdated,
+}
+
+fn classify_readiness(
+    active: Option<u32>,
+    migrating: Option<u32>,
+    embedded: u32,
+) -> SchemaReadiness {
+    if let Some(active_version) = active
+        && active_version > embedded
+    {
+        return SchemaReadiness::Outdated;
+    }
+
+    if active == Some(embedded) || migrating == Some(embedded) {
+        return SchemaReadiness::Ready;
+    }
+
+    SchemaReadiness::Pending
+}
+
+#[derive(Debug, Error)]
+pub enum SchemaWaitError {
+    #[error(
+        "timed out after {seconds}s waiting for schema version {target} to become ready \
+         (last seen active={active:?}, migrating={migrating:?})"
+    )]
+    Timeout {
+        target: u32,
+        seconds: u64,
+        active: Option<u32>,
+        migrating: Option<u32>,
+    },
+
+    #[error(
+        "binary schema version {embedded} is older than the active version {active}; \
+         binary is outdated and must not process"
+    )]
+    Outdated { embedded: u32, active: u32 },
+}
+
+/// Blocks until `target_version` is ready or the `timeout` budget is exhausted.
+/// Transient read errors are retried; an outdated binary fails fast.
+pub async fn wait_until_ready(
+    graph: &ArrowClickHouseClient,
+    target_version: u32,
+    timeout: Duration,
+    poll_interval: Duration,
+) -> Result<(), SchemaWaitError> {
+    info!(
+        target_version,
+        timeout_secs = timeout.as_secs(),
+        "waiting for schema version to become ready"
+    );
+
+    let deadline = Instant::now() + timeout;
+    let mut attempt: u32 = 0;
+
+    loop {
+        // A failed read is treated as "unknown" (None) so the other read can
+        // still drive an outdated/ready decision; both failing falls through to
+        // a retry within the budget.
+        let active = match read_active_version(graph).await {
+            Ok(version) => version,
+            Err(error) => {
+                warn!(%error, "failed to read active schema version — retrying");
+                None
+            }
+        };
+        let migrating = match read_migrating_version(graph).await {
+            Ok(version) => version,
+            Err(error) => {
+                warn!(%error, "failed to read migrating schema version — retrying");
+                None
+            }
+        };
+
+        match classify_readiness(active, migrating, target_version) {
+            SchemaReadiness::Ready => {
+                info!(target_version, "schema version is ready — proceeding");
+                return Ok(());
+            }
+            SchemaReadiness::Outdated => {
+                return Err(SchemaWaitError::Outdated {
+                    embedded: target_version,
+                    active: active.expect("Outdated requires a known active version"),
+                });
+            }
+            SchemaReadiness::Pending => {
+                info!(
+                    target_version,
+                    active_version = ?active,
+                    migrating_version = ?migrating,
+                    "schema version not ready yet — dispatcher has not prepared it"
+                );
+            }
+        }
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(SchemaWaitError::Timeout {
+                target: target_version,
+                seconds: timeout.as_secs(),
+                active,
+                migrating,
+            });
+        }
+
+        let backoff = backoff_interval(poll_interval, attempt).min(remaining);
+        sleep(backoff).await;
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+fn backoff_interval(base: Duration, attempt: u32) -> Duration {
+    base.saturating_mul(2u32.saturating_pow(attempt.min(16)))
+        .min(MAX_BACKOFF_INTERVAL)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +525,62 @@ mod tests {
             "migrating query must target version table: {sql}"
         );
         assert!(!params.is_empty(), "migrating query must have parameters");
+    }
+
+    #[test]
+    fn readiness_active_matches_is_ready() {
+        assert_eq!(classify_readiness(Some(2), None, 2), SchemaReadiness::Ready);
+    }
+
+    #[test]
+    fn readiness_migrating_matches_is_ready() {
+        assert_eq!(
+            classify_readiness(Some(1), Some(2), 2),
+            SchemaReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn readiness_no_version_is_pending() {
+        assert_eq!(classify_readiness(None, None, 2), SchemaReadiness::Pending);
+    }
+
+    #[test]
+    fn readiness_migrating_without_active_is_ready() {
+        assert_eq!(classify_readiness(None, Some(2), 2), SchemaReadiness::Ready);
+    }
+
+    #[test]
+    fn readiness_only_older_active_is_pending() {
+        assert_eq!(
+            classify_readiness(Some(1), None, 2),
+            SchemaReadiness::Pending
+        );
+    }
+
+    #[test]
+    fn readiness_higher_active_is_outdated() {
+        assert_eq!(
+            classify_readiness(Some(3), None, 2),
+            SchemaReadiness::Outdated
+        );
+    }
+
+    #[test]
+    fn readiness_outdated_takes_precedence_over_matching_migrating() {
+        assert_eq!(
+            classify_readiness(Some(3), Some(2), 2),
+            SchemaReadiness::Outdated
+        );
+    }
+
+    #[test]
+    fn backoff_grows_exponentially_then_caps() {
+        let base = Duration::from_secs(5);
+        assert_eq!(backoff_interval(base, 0), Duration::from_secs(5));
+        assert_eq!(backoff_interval(base, 1), Duration::from_secs(10));
+        assert_eq!(backoff_interval(base, 2), Duration::from_secs(20));
+        assert_eq!(backoff_interval(base, 3), MAX_BACKOFF_INTERVAL);
+        assert_eq!(backoff_interval(base, 99), MAX_BACKOFF_INTERVAL);
     }
 }

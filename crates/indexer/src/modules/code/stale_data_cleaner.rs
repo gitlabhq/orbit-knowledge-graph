@@ -82,7 +82,7 @@ impl ClickHouseStaleDataCleaner {
             WHERE traversal_path = {{traversal_path:String}}
               AND project_id = {{project_id:Int64}}
               AND branch = {{branch:String}}
-              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -109,7 +109,7 @@ impl ClickHouseStaleDataCleaner {
                 WHERE traversal_path = {{traversal_path:String}}
                   AND project_id = {{project_id:Int64}}
                   AND branch = {{branch:String}}
-                  AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
+                  AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
                 "#,
             );
         }
@@ -149,7 +149,7 @@ impl ClickHouseStaleDataCleaner {
             FROM {edge_table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
               AND source_id IN ({source_id_union})
-              AND _version != {{watermark_time:DateTime64(6, 'UTC')}}
+              AND _version < {{watermark_time:DateTime64(6, 'UTC')}}
             "#
         )
     }
@@ -249,7 +249,10 @@ pub mod test_utils {
 
     #[derive(Default)]
     pub struct MockStaleDataCleaner {
-        #[allow(clippy::type_complexity)]
+        #[allow(
+            clippy::type_complexity,
+            reason = "test-only call recorder; the tuple mirrors the trait method arguments"
+        )]
         pub calls: Mutex<Vec<(String, i64, String, DateTime<Utc>)>>,
     }
 

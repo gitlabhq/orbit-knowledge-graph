@@ -6,6 +6,7 @@ use chrono::Utc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
@@ -27,6 +28,7 @@ pub struct NamespaceDispatcher {
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
     config: NamespaceDispatcherConfig,
+    campaign: Arc<CampaignState>,
 }
 
 impl NamespaceDispatcher {
@@ -35,12 +37,14 @@ impl NamespaceDispatcher {
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
+        campaign: Arc<CampaignState>,
     ) -> Self {
         Self {
             nats,
             datalake,
             metrics,
             config,
+            campaign,
         }
     }
 }
@@ -92,6 +96,7 @@ impl NamespaceDispatcher {
         );
 
         let watermark = Utc::now();
+        let campaign_id = self.campaign.current();
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -110,6 +115,7 @@ impl NamespaceDispatcher {
                 traversal_path: traversal_path.clone(),
                 watermark,
                 dispatch_id: Uuid::new_v4(),
+                campaign_id: campaign_id.clone(),
             };
 
             let subscription = request.publish_subscription();

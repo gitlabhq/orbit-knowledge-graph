@@ -187,12 +187,14 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
             services.nats.clone(),
             metrics.clone(),
             GlobalDispatcherConfig::default(),
+            std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         )),
         Box::new(NamespaceDispatcher::new(
             services.nats,
             datalake,
             metrics,
             NamespaceDispatcherConfig::default(),
+            std::sync::Arc::new(indexer::campaign::CampaignState::new()),
         )),
     ];
 

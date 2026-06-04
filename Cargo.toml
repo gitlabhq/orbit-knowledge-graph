@@ -42,8 +42,8 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "e8bc31e" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "e8bc31e" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f154f948" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f154f948" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -104,7 +104,7 @@ toon-format = { version = "0.5.0", default-features = false }
 opentelemetry = { version = "0.32", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
-async-nats = { version = "0.48.0", features = ["server_2_11"] }
+async-nats = { version = "0.49.0", features = ["server_2_11"] }
 arrow-ipc = "58.0.0"
 clickhouse = { version = "0.15", features = ["inserter", "rustls-tls-aws-lc", "rustls-tls-native-roots"] }
 testcontainers = "0.27.3"
@@ -139,16 +139,16 @@ lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
-ra_ap_hir = "0.0.333"
-ra_ap_cfg = "0.0.333"
-ra_ap_ide = "0.0.333"
-ra_ap_ide_db = "0.0.333"
-ra_ap_intern = "0.0.333"
-ra_ap_load-cargo = "0.0.333"
-ra_ap_paths = "0.0.333"
-ra_ap_project_model = "0.0.333"
-ra_ap_syntax = "0.0.333"
-ra_ap_vfs = "0.0.333"
+ra_ap_hir = "0.0.334"
+ra_ap_cfg = "0.0.334"
+ra_ap_ide = "0.0.334"
+ra_ap_ide_db = "0.0.334"
+ra_ap_intern = "0.0.334"
+ra_ap_load-cargo = "0.0.334"
+ra_ap_paths = "0.0.334"
+ra_ap_project_model = "0.0.334"
+ra_ap_syntax = "0.0.334"
+ra_ap_vfs = "0.0.334"
 sqlparser = { version = "0.62.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"

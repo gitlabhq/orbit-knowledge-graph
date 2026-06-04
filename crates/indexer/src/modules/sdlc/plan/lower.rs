@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::input::{
-    DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql, ExtractColumn,
-    ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
+    DenormalizedColumnProjection, DerivedEntityPlan, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql,
+    ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
     StandaloneEdgePlan,
 };
-use super::{Plan, Plans, SOURCE_DATA_TABLE, Transformation};
+use super::{Plan, Plans, SOURCE_DATA_TABLE, TransformSpec, Transformation};
 
 const VERSION_ALIAS: &str = "_version";
 const DELETED_ALIAS: &str = "_deleted";
@@ -56,7 +56,31 @@ pub(in crate::modules::sdlc) fn lower(
         }
     }
 
+    for derived in inputs.derived_entity_plans {
+        let scope_default = match derived.scope {
+            EtlScope::Global => global_batch_size,
+            EtlScope::Namespaced => namespaced_batch_size,
+        };
+        let batch_size = batch_size_overrides
+            .get(&derived.name)
+            .copied()
+            .unwrap_or(scope_default);
+        let scope = derived.scope;
+        let plan = lower_derived_entity_plan(derived, batch_size);
+        match scope {
+            EtlScope::Global => global.push(plan),
+            EtlScope::Namespaced => namespaced.push(plan),
+        }
+    }
+
     Plans { global, namespaced }
+}
+
+fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {
+    let mut plan = lower_extract_plan(input.extract, batch_size);
+    plan.name = input.name;
+    plan.transform = TransformSpec::Rust(input.transform);
+    plan
 }
 
 fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Plan {
@@ -86,7 +110,7 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pla
     }
 
     plan.name = input.name;
-    plan.transforms = transforms;
+    plan.transform = TransformSpec::DataFusion(transforms);
     plan
 }
 
@@ -166,7 +190,7 @@ fn lower_node_column(column: &NodeColumn) -> String {
             let null_case = if *nullable {
                 format!("WHEN {source} IS NULL THEN NULL ")
             } else {
-                String::new()
+                format!("WHEN {source} IS NULL THEN '' ")
             };
             format!(
                 "CASE {null_case}{} ELSE 'unknown' END AS {target}",
@@ -197,11 +221,11 @@ fn lower_standalone_edge_plan(
         &meta.sort_key,
     );
     plan.name = name;
-    plan.transforms = vec![Transformation {
+    plan.transform = TransformSpec::DataFusion(vec![Transformation {
         sql,
         destination_table,
         dict_encode_columns: meta.dict_columns,
-    }];
+    }]);
     plan
 }
 
@@ -266,7 +290,10 @@ fn lower_filters(filters: &[EdgeFilter]) -> Option<String> {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQL builder takes each edge-transform input as a distinct typed parameter"
+)]
 fn build_edge_transform_sql(
     source_id: &str,
     source_kind: &str,
@@ -416,7 +443,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
         watermark_column: input.watermark,
         sort_key: input.order_by,
         batch_size,
-        transforms: vec![],
+        transform: TransformSpec::DataFusion(vec![]),
     }
 }
 
@@ -596,13 +623,13 @@ mod tests {
         let plans = build_plans(&ontology, 1_000_000);
 
         let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
-        assert!(note_plan.transforms.len() >= 2);
+        assert!(note_plan.transformations().len() >= 2);
         assert_eq!(
-            note_plan.transforms[0].destination_table,
+            note_plan.transformations()[0].destination_table,
             prefixed_table_name("gl_note", *SCHEMA_VERSION),
         );
         assert_eq!(
-            note_plan.transforms[1].destination_table,
+            note_plan.transformations()[1].destination_table,
             prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         );
     }
@@ -614,7 +641,7 @@ mod tests {
 
         let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
         let sql = note_plan
-            .transforms
+            .transformations()
             .iter()
             .map(|t| t.sql.clone())
             .find(|sql| sql.contains("'HAS_NOTE' AS relationship_kind"))
@@ -670,7 +697,7 @@ mod tests {
         );
 
         assert!(
-            plan.transforms[0].sql.contains("target_tags"),
+            plan.transformations()[0].sql.contains("target_tags"),
             "transform should produce target_tags"
         );
     }

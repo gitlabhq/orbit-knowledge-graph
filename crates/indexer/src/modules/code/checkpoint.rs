@@ -89,7 +89,8 @@ impl ClickHouseCodeCheckpointStore {
         let last_commit = if last_commit_col.is_null(0) {
             None
         } else {
-            Some(last_commit_col.value(0).to_string())
+            let v = last_commit_col.value(0).to_string();
+            if v.is_empty() { None } else { Some(v) }
         };
         let indexed_at_micros = indexed_at_col.value(0);
         let indexed_at = Utc
@@ -156,14 +157,14 @@ impl CodeCheckpointStore for ClickHouseCodeCheckpointStore {
                 r#"
                 INSERT INTO {table}
                 (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at)
-                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:Nullable(String)}}, {{indexed_at:String}})
+                VALUES ({{traversal_path:String}}, {{project_id:Int64}}, {{branch:String}}, {{last_task_id:Int64}}, {{last_commit:String}}, {{indexed_at:String}})
             "#
             ))
             .param("traversal_path", &checkpoint.traversal_path)
             .param("project_id", checkpoint.project_id)
             .param("branch", &checkpoint.branch)
             .param("last_task_id", checkpoint.last_task_id)
-            .param("last_commit", &checkpoint.last_commit)
+            .param("last_commit", checkpoint.last_commit.as_deref().unwrap_or_default())
             .param("indexed_at", formatted_timestamp)
             .execute()
             .await
@@ -179,12 +180,10 @@ pub mod test_utils {
     use parking_lot::Mutex;
     use std::collections::HashMap;
 
-    #[allow(dead_code)]
     pub struct MockCodeCheckpointStore {
         checkpoints: Mutex<HashMap<(String, i64, String), CodeIndexingCheckpoint>>,
     }
 
-    #[allow(dead_code)]
     impl MockCodeCheckpointStore {
         pub fn new() -> Self {
             Self {

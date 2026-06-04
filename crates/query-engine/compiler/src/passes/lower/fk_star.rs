@@ -169,6 +169,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             } else if target_np.filters.is_empty()
                 && target_np.node_ids.is_empty()
                 && target_np.id_range.is_none()
+                && center_np.has_selective_filters()
             {
                 let narrow_name = format!("_narrow_{}", fk.target_node);
                 ctes.push(Cte::new(
@@ -191,6 +192,12 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             // Don't add traversal_path equality to FK JOINs: entities
             // at different depths have different TP prefixes (e.g.
             // WorkItem at '1/100/' vs Project at '1/100/1000/').
+            let target_table = target_np.table.as_deref().ok_or_else(|| {
+                QueryError::Lowering(format!("node '{}' has no table", target_np.alias))
+            })?;
+            let node_sort_key = plan.table_sort_keys.get(target_table).ok_or_else(|| {
+                QueryError::Lowering(format!("no sort key for node table '{target_table}'"))
+            })?;
             let (new_from, ns, nw) = emit_node_join_with_narrowing(
                 from,
                 target_np,
@@ -198,6 +205,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
                 &fk.fk_column,
                 false,
                 narrow,
+                node_sort_key,
             )?;
             from = new_from;
             selects.extend(ns);
@@ -226,6 +234,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             where_parts,
             select: selects,
             ctes,
+            edge_if_predicates: None,
         });
     }
     for (i, hop) in plan.hops.iter().enumerate() {
@@ -283,6 +292,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         where_parts,
         select: selects,
         ctes,
+        edge_if_predicates: None,
     })
 }
 

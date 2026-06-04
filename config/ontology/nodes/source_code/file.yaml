@@ -66,12 +66,14 @@ properties:
     source: extension
     nullable: false
     description: "Extension (e.g., rb, py, java)."
+    selectivity: low
 
   language:
     type: string
     source: language
     nullable: false
     description: "Programming language (e.g., ruby, python, java)."
+    selectivity: low
 
   content:
     type: string
@@ -104,7 +106,7 @@ storage:
     - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_path_ngram, column: path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_branch, order_by: [branch]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_branch, versioned_sort_key: [branch]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

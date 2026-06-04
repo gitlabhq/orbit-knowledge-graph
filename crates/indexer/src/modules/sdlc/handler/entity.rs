@@ -4,16 +4,17 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use ontology::EtlScope;
 use tokio::task::JoinSet;
-use tracing::{Instrument, info, info_span};
+use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
+use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats};
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
@@ -29,6 +30,7 @@ pub struct EntityHandler {
     metrics: SdlcMetrics,
     subscription: Subscription,
     partition_strategy: Option<PartitionStrategy>,
+    analytics: IndexingAnalytics,
 }
 
 struct IndexingRequest {
@@ -37,10 +39,14 @@ struct IndexingRequest {
     traversal_path: Option<String>,
     namespace_id: Option<i64>,
     dispatch_id: Uuid,
+    campaign_id: Option<String>,
 }
 
 impl EntityHandler {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "handler constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub(in crate::modules::sdlc) fn new(
         plan: Plan,
         scope: EtlScope,
@@ -50,6 +56,7 @@ impl EntityHandler {
         metrics: SdlcMetrics,
         subscription: Subscription,
         partition_strategy: Option<PartitionStrategy>,
+        analytics: IndexingAnalytics,
     ) -> Self {
         let handler_name = format!("entity.{}", plan.name.to_lowercase());
         Self {
@@ -62,6 +69,7 @@ impl EntityHandler {
             metrics,
             subscription,
             partition_strategy,
+            analytics,
         }
     }
 
@@ -76,6 +84,7 @@ impl EntityHandler {
                     traversal_path: None,
                     namespace_id: None,
                     dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
             EtlScope::Namespaced => {
@@ -87,6 +96,7 @@ impl EntityHandler {
                     traversal_path: Some(payload.traversal_path),
                     namespace_id: Some(payload.namespace),
                     dispatch_id: payload.dispatch_id,
+                    campaign_id: payload.campaign_id,
                 })
             }
         }
@@ -97,15 +107,16 @@ impl EntityHandler {
         context: HandlerContext,
         request: IndexingRequest,
     ) -> Result<(), HandlerError> {
-        let mut observer: observer::MultiObserver = observer::MultiObserver::new(vec![Box::new(
-            SdlcOtelObserver::new(self.metrics.clone()),
-        )]);
+        let mut observers: Vec<Box<dyn IndexingObserver>> =
+            vec![Box::new(SdlcOtelObserver::new(self.metrics.clone()))];
+        observers.extend(self.analytics.observer());
+        let mut observer: observer::MultiObserver = observer::MultiObserver::new(observers);
         observer.set_dispatch_id(request.dispatch_id);
+        observer.set_campaign_id(request.campaign_id.clone());
         observer.set_pipeline_type(PipelineType::Sdlc);
         observer.set_entity_type(&self.plan.name);
-        if let Some(namespace_id) = request.namespace_id {
-            observer.set_namespace(namespace_id);
-        }
+        observer.set_traversal_path(request.traversal_path.as_deref());
+        observer.set_namespace(request.namespace_id);
 
         let checkpoint_key = format!("{}.{}", request.scope_key, self.plan.name);
         let parent_checkpoint = self
@@ -187,32 +198,45 @@ impl EntityHandler {
                 )
                 .await;
 
-            if partition_result.is_ok() {
-                let partition_checkpoints = self
-                    .checkpoint_store
-                    .load_by_prefix(&format!(
-                        "{checkpoint_key}{}",
-                        PartitionAssignment::CHECKPOINT_PREFIX
-                    ))
-                    .await
-                    .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                let consolidated_watermark = partition_checkpoints
-                    .iter()
-                    .map(|(_, cp)| cp.watermark)
-                    .min()
-                    .unwrap_or(request.watermark);
+            match partition_result {
+                Ok(stats) => {
+                    let partition_checkpoints = self
+                        .checkpoint_store
+                        .load_by_prefix(&format!(
+                            "{checkpoint_key}{}",
+                            PartitionAssignment::CHECKPOINT_PREFIX
+                        ))
+                        .await
+                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                    let consolidated_watermark = partition_checkpoints
+                        .iter()
+                        .map(|(_, cp)| cp.watermark)
+                        .min()
+                        .unwrap_or(request.watermark);
 
-                self.checkpoint_store
-                    .consolidate(&checkpoint_key, &consolidated_watermark)
-                    .await
-                    .map_err(|err| HandlerError::Processing(err.to_string()))
-            } else {
-                partition_result
+                    self.checkpoint_store
+                        .consolidate(&checkpoint_key, &consolidated_watermark)
+                        .await
+                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
+                    Ok(stats)
+                }
+                Err(e) => Err(e),
             }
         };
 
         match &result {
-            Ok(()) => observer.lock().unwrap().finish(),
+            Ok(stats) => {
+                debug!(
+                    entity = %self.plan.name,
+                    read_rows = stats.read_rows,
+                    read_bytes = stats.read_bytes,
+                    written_rows = stats.written_rows,
+                    written_bytes = stats.written_bytes,
+                    duration_ms = stats.duration_ms,
+                    "indexing resource stats"
+                );
+                observer.lock().unwrap().finish()
+            }
             Err(e) => {
                 let mut obs = observer.lock().unwrap();
                 obs.record_error(&e.to_string());
@@ -220,7 +244,7 @@ impl EntityHandler {
             }
         }
 
-        result
+        result.map(|_| ())
     }
 
     async fn run_partitions(
@@ -233,8 +257,8 @@ impl EntityHandler {
         target_watermark: DateTime<Utc>,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
-    ) -> Result<(), HandlerError> {
-        let mut set: JoinSet<Result<(), HandlerError>> = JoinSet::new();
+    ) -> Result<PipelineStats, HandlerError> {
+        let mut set: JoinSet<Result<PipelineStats, HandlerError>> = JoinSet::new();
         for (assignment, query) in partitions {
             let position_key = format!("{checkpoint_key}{}", assignment.position_suffix());
 
@@ -272,16 +296,17 @@ impl EntityHandler {
         }
 
         let mut errors = Vec::new();
+        let mut total = PipelineStats::default();
         while let Some(result) = set.join_next().await {
             match result {
-                Ok(Ok(())) => {}
+                Ok(Ok(stats)) => total.merge(stats),
                 Ok(Err(err)) => errors.push(err.to_string()),
                 Err(join_err) => errors.push(format!("partition task panicked: {join_err}")),
             }
         }
 
         if errors.is_empty() {
-            Ok(())
+            Ok(total)
         } else {
             Err(HandlerError::Processing(format!(
                 "partition failures: {}",
@@ -317,11 +342,13 @@ impl Handler for EntityHandler {
                 entity = %self.plan.name,
                 namespace_id = id,
                 dispatch_id = %request.dispatch_id,
+                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
             None => info_span!(
                 "entity_indexing",
                 entity = %self.plan.name,
                 dispatch_id = %request.dispatch_id,
+                campaign_id = request.campaign_id.as_deref().unwrap_or("none"),
             ),
         };
         let traversal_path = request.traversal_path.clone();
@@ -424,6 +451,7 @@ mod tests {
             test_metrics(),
             subscription,
             None,
+            IndexingAnalytics::disabled(),
         )
     }
 

@@ -313,6 +313,16 @@ pub struct EdgeSourceEtlConfig {
     pub to: EdgeEndpoint,
 }
 
+/// An entity extracted from the datalake and turned into edges by a named
+/// transform, with no node table of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedEntity {
+    pub name: String,
+    pub emits: Vec<String>,
+    pub transform: String,
+    pub etl: EtlConfig,
+}
+
 /// Configuration for an edge endpoint (source or target).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EdgeEndpoint {
@@ -441,6 +451,11 @@ pub struct Field {
     /// Defaults to false. When true, non-admin users cannot select or
     /// filter on this field.
     pub admin_only: bool,
+    /// Filter selectivity hint for the query planner. Low-selectivity columns
+    /// (enums, booleans) match most rows and should not trigger narrowing CTEs.
+    /// High-selectivity columns (IDs, paths, names) narrow effectively.
+    /// Derived automatically from `data_type` unless overridden in YAML.
+    pub selectivity: FieldSelectivity,
     /// Human-readable description of this field from the ontology YAML.
     pub description: Option<String>,
 }
@@ -457,6 +472,7 @@ impl Default for Field {
             like_allowed: true,
             filterable: true,
             admin_only: false,
+            selectivity: FieldSelectivity::High,
             description: None,
         }
     }
@@ -504,6 +520,27 @@ pub enum DataType {
     Enum,
     /// A UUID value.
     Uuid,
+}
+
+/// Filter selectivity hint for the query planner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldSelectivity {
+    /// Few distinct values (enums, booleans). Filtering narrows weakly.
+    Low,
+    /// Many distinct values (IDs, strings, timestamps). Filtering narrows effectively.
+    #[default]
+    High,
+}
+
+impl FieldSelectivity {
+    /// Derive selectivity from data type when not explicitly set.
+    pub fn from_data_type(dt: DataType) -> Self {
+        match dt {
+            DataType::Enum | DataType::Bool => Self::Low,
+            _ => Self::High,
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for DataType {

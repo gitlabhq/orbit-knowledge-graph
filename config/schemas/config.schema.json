@@ -67,6 +67,7 @@
           "code-indexing-task": {
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
+              "fetch_concurrency": 6,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -77,7 +78,9 @@
           "entity-handler": {
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
-            "partition_overrides": {}
+            "partition_overrides": {},
+            "stream_block_size": 65536,
+            "write_channel_capacity": 8
           }
         },
         "max_concurrent_workers": 16,
@@ -87,6 +90,12 @@
           "namespace_deletion"
         ],
         "topics": {}
+      }
+    },
+    "features": {
+      "$ref": "#/$defs/FeaturesConfig",
+      "default": {
+        "system_notes": false
       }
     },
     "gitlab": {
@@ -243,6 +252,7 @@
     "schema": {
       "$ref": "#/$defs/SchemaConfig",
       "default": {
+        "indexer_schema_wait_timeout_secs": 300,
         "max_retained_versions": 2,
         "version_poll_interval_secs": 5
       }
@@ -365,6 +375,13 @@
           "default": 180000,
           "minimum": 0
         },
+        "fetch_concurrency": {
+          "description": "Maximum concurrent Gitaly repository fetch operations. Controls how\nmany repositories can be downloaded simultaneously in the pipelined\ncode indexer. 0 = no limit. Defaults to 6.",
+          "type": "integer",
+          "format": "uint",
+          "default": 6,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -406,6 +423,7 @@
           "$ref": "#/$defs/CodeIndexingPipelineConfig",
           "default": {
             "cross_file_resolve_timeout_ms": 180000,
+            "fetch_concurrency": 6,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -496,6 +514,7 @@
             "code-indexing-task": {
               "pipeline": {
                 "cross_file_resolve_timeout_ms": 180000,
+                "fetch_concurrency": 6,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -506,7 +525,9 @@
             "entity-handler": {
               "batch_size_overrides": {},
               "datalake_batch_size": 500000,
-              "partition_overrides": {}
+              "partition_overrides": {},
+              "stream_block_size": 65536,
+              "write_channel_capacity": 8
             }
           }
         },
@@ -566,6 +587,31 @@
             "minimum": 0
           },
           "default": {}
+        },
+        "stream_block_size": {
+          "description": "Rows per block streamed from the datalake (`max_block_size`). Larger blocks\namortize per-batch write round-trips (more throughput) at the cost of peak\nmemory per in-flight block.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 65536,
+          "minimum": 1
+        },
+        "write_channel_capacity": {
+          "description": "Read-ahead window for the streaming ingestion pipeline: how many extracted\nblocks may be buffered ahead of the ClickHouse writer. Higher values keep the\nwriter fed (more throughput) at the cost of peak memory. Tune up in\nmemory-generous deployments; the default is conservative.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8,
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "FeaturesConfig": {
+      "description": "Feature flag states, deserialized from the `features:` config section.\nEvery flag defaults to `false`; an unknown key is a config error.",
+      "type": "object",
+      "properties": {
+        "system_notes": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -686,6 +732,7 @@
           "default": {
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
+              "fetch_concurrency": 6,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -699,7 +746,9 @@
           "default": {
             "batch_size_overrides": {},
             "datalake_batch_size": 500000,
-            "partition_overrides": {}
+            "partition_overrides": {},
+            "stream_block_size": 65536,
+            "write_channel_capacity": 8
           }
         }
       },
@@ -1330,6 +1379,13 @@
       "description": "Schema configuration: version retention and related settings.",
       "type": "object",
       "properties": {
+        "indexer_schema_wait_timeout_secs": {
+          "description": "How long the indexer waits for the dispatcher to prepare its schema\nversion before exiting non-zero (relying on the orchestrator to restart\nit). The indexer retries with backoff within this budget. Must be at\nleast 1.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 300,
+          "minimum": 1
+        },
         "max_retained_versions": {
           "description": "Number of schema version table-sets to retain.\n\nAfter migrating to version N, the indexer keeps the N active tables plus\nthe N-1 rollback target. Must be at least 2.",
           "type": "integer",

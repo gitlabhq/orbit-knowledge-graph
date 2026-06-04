@@ -11,6 +11,10 @@ fn default_version_poll_interval_secs() -> u64 {
     5
 }
 
+fn default_indexer_schema_wait_timeout_secs() -> u64 {
+    300
+}
+
 /// Schema configuration: version retention and related settings.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -28,6 +32,14 @@ pub struct SchemaConfig {
     #[serde(default = "default_version_poll_interval_secs")]
     #[schemars(range(min = 1))]
     pub version_poll_interval_secs: u64,
+
+    /// How long the indexer waits for the dispatcher to prepare its schema
+    /// version before exiting non-zero (relying on the orchestrator to restart
+    /// it). The indexer retries with backoff within this budget. Must be at
+    /// least 1.
+    #[serde(default = "default_indexer_schema_wait_timeout_secs")]
+    #[schemars(range(min = 1))]
+    pub indexer_schema_wait_timeout_secs: u64,
 }
 
 impl SchemaConfig {
@@ -41,6 +53,9 @@ impl SchemaConfig {
         if self.version_poll_interval_secs < 1 {
             return Err(SchemaConfigError::VersionPollIntervalTooLow);
         }
+        if self.indexer_schema_wait_timeout_secs < 1 {
+            return Err(SchemaConfigError::IndexerSchemaWaitTimeoutTooLow);
+        }
         Ok(())
     }
 }
@@ -50,6 +65,7 @@ impl Default for SchemaConfig {
         Self {
             max_retained_versions: default_max_retained_versions(),
             version_poll_interval_secs: default_version_poll_interval_secs(),
+            indexer_schema_wait_timeout_secs: default_indexer_schema_wait_timeout_secs(),
         }
     }
 }
@@ -64,6 +80,9 @@ pub enum SchemaConfigError {
 
     #[error("schema.version_poll_interval_secs must be at least 1")]
     VersionPollIntervalTooLow,
+
+    #[error("schema.indexer_schema_wait_timeout_secs must be at least 1")]
+    IndexerSchemaWaitTimeoutTooLow,
 }
 
 #[cfg(test)]
@@ -79,7 +98,7 @@ mod tests {
     fn max_retained_versions_one_fails() {
         let cfg = SchemaConfig {
             max_retained_versions: 1,
-            version_poll_interval_secs: default_version_poll_interval_secs(),
+            ..SchemaConfig::default()
         };
         assert!(cfg.validate().is_err());
     }
@@ -88,7 +107,7 @@ mod tests {
     fn max_retained_versions_zero_fails() {
         let cfg = SchemaConfig {
             max_retained_versions: 0,
-            version_poll_interval_secs: default_version_poll_interval_secs(),
+            ..SchemaConfig::default()
         };
         assert!(cfg.validate().is_err());
     }
@@ -97,7 +116,7 @@ mod tests {
     fn max_retained_versions_two_passes() {
         let cfg = SchemaConfig {
             max_retained_versions: 2,
-            version_poll_interval_secs: default_version_poll_interval_secs(),
+            ..SchemaConfig::default()
         };
         assert!(cfg.validate().is_ok());
     }
@@ -105,8 +124,8 @@ mod tests {
     #[test]
     fn version_poll_interval_zero_fails() {
         let cfg = SchemaConfig {
-            max_retained_versions: 2,
             version_poll_interval_secs: 0,
+            ..SchemaConfig::default()
         };
         assert!(cfg.validate().is_err());
     }
@@ -114,9 +133,26 @@ mod tests {
     #[test]
     fn version_poll_interval_one_passes() {
         let cfg = SchemaConfig {
-            max_retained_versions: 2,
             version_poll_interval_secs: 1,
+            ..SchemaConfig::default()
         };
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn indexer_schema_wait_timeout_zero_fails() {
+        let cfg = SchemaConfig {
+            indexer_schema_wait_timeout_secs: 0,
+            ..SchemaConfig::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn indexer_schema_wait_timeout_defaults_to_five_minutes() {
+        assert_eq!(
+            SchemaConfig::default().indexer_schema_wait_timeout_secs,
+            300
+        );
     }
 }

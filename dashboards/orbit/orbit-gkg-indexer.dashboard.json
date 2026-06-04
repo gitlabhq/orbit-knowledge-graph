@@ -2560,7 +2560,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Per-scope coverage of the migrating schema version. SDLC reaching 100% triggers promotion. Code coverage is informational. Currently dark in prod, see #524.",
+         "description": "Per-scope coverage of the migrating schema version. SDLC reaching 100% triggers promotion. Code coverage is informational.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -2598,7 +2598,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "(sum by (scope) (gkg_schema_indexed_units{container=\"gkg-indexer\", cluster=~\"$cluster\"})) / (sum by (scope) (gkg_schema_eligible_units{container=\"gkg-indexer\", cluster=~\"$cluster\"}) > 0)",
+               "expr": "(sum by (scope) (gkg_schema_indexed_units{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})) / (sum by (scope) (gkg_schema_eligible_units{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}) > 0)",
                "legendFormat": "{{scope}}",
                "refId": "A"
             }
@@ -2611,7 +2611,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Wall-clock seconds since the current migrating version was marked. Flat zero when no migration is active. Currently dark in prod, see #524.",
+         "description": "Wall-clock seconds since the current migrating version was marked. Flat zero when no migration is active.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -2649,7 +2649,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "gkg_schema_migrating_age_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"}",
+               "expr": "gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}",
                "legendFormat": "age",
                "refId": "A"
             }
@@ -2700,12 +2700,114 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (phase, result) (rate(gkg_schema_migration_phase_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "expr": "sum by (phase, result) (rate(gkg_schema_migration_phase_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
                "legendFormat": "{{phase}} / {{result}}",
                "refId": "A"
             }
          ],
          "title": "gkg_schema_migration_phase_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total successful schema migration completions.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 123
+         },
+         "id": 57,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_migration_completed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Schema table cleanup operations, labelled by version band and result.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 123
+         },
+         "id": 58,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (version_band, result) (rate(gkg_schema_cleanup_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{version_band}} / {{result}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_cleanup_total — rate/s",
          "type": "timeseries"
       },
       {
@@ -2716,7 +2818,7 @@
             "x": 0,
             "y": 131
          },
-         "id": 57,
+         "id": 59,
          "panels": [
             {
                "datasource": {
@@ -2741,7 +2843,7 @@
                   "x": 0,
                   "y": 132
                },
-               "id": 58,
+               "id": 60,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2792,7 +2894,7 @@
                   "x": 8,
                   "y": 132
                },
-               "id": 59,
+               "id": 61,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2861,7 +2963,7 @@
                   "x": 16,
                   "y": 132
                },
-               "id": 60,
+               "id": 62,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2912,7 +3014,7 @@
                   "x": 0,
                   "y": 140
                },
-               "id": 61,
+               "id": 63,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2963,7 +3065,7 @@
                   "x": 8,
                   "y": 140
                },
-               "id": 62,
+               "id": 64,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3014,7 +3116,7 @@
                   "x": 16,
                   "y": 140
                },
-               "id": 63,
+               "id": 65,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3083,7 +3185,7 @@
                   "x": 0,
                   "y": 148
                },
-               "id": 64,
+               "id": 66,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3134,7 +3236,7 @@
                   "x": 8,
                   "y": 148
                },
-               "id": 65,
+               "id": 67,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3185,7 +3287,7 @@
                   "x": 16,
                   "y": 148
                },
-               "id": 66,
+               "id": 68,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3254,7 +3356,7 @@
                   "x": 0,
                   "y": 156
                },
-               "id": 67,
+               "id": 69,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3305,7 +3407,7 @@
                   "x": 8,
                   "y": 156
                },
-               "id": 68,
+               "id": 70,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3356,7 +3458,7 @@
                   "x": 16,
                   "y": 156
                },
-               "id": 69,
+               "id": 71,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3425,7 +3527,7 @@
                   "x": 0,
                   "y": 164
                },
-               "id": 70,
+               "id": 72,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3476,7 +3578,7 @@
                   "x": 8,
                   "y": 164
                },
-               "id": 71,
+               "id": 73,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3545,7 +3647,7 @@
                   "x": 16,
                   "y": 164
                },
-               "id": 72,
+               "id": 74,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3596,7 +3698,7 @@
                   "x": 0,
                   "y": 172
                },
-               "id": 73,
+               "id": 75,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3636,7 +3738,7 @@
             "x": 0,
             "y": 180
          },
-         "id": 74,
+         "id": 76,
          "panels": [
             {
                "datasource": {
@@ -3661,7 +3763,7 @@
                   "x": 0,
                   "y": 181
                },
-               "id": 75,
+               "id": 77,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3712,7 +3814,7 @@
                   "x": 8,
                   "y": 181
                },
-               "id": 76,
+               "id": 78,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3763,7 +3865,7 @@
                   "x": 16,
                   "y": 181
                },
-               "id": 77,
+               "id": 79,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3814,7 +3916,7 @@
                   "x": 0,
                   "y": 189
                },
-               "id": 78,
+               "id": 80,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3865,7 +3967,7 @@
                   "x": 8,
                   "y": 189
                },
-               "id": 79,
+               "id": 81,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3916,7 +4018,7 @@
                   "x": 16,
                   "y": 189
                },
-               "id": 80,
+               "id": 82,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3967,7 +4069,7 @@
                   "x": 0,
                   "y": 197
                },
-               "id": 81,
+               "id": 83,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4018,7 +4120,7 @@
                   "x": 8,
                   "y": 197
                },
-               "id": 82,
+               "id": 84,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4087,7 +4189,7 @@
                   "x": 16,
                   "y": 197
                },
-               "id": 83,
+               "id": 85,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4138,7 +4240,7 @@
                   "x": 0,
                   "y": 205
                },
-               "id": 84,
+               "id": 86,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4207,7 +4309,7 @@
                   "x": 8,
                   "y": 205
                },
-               "id": 85,
+               "id": 87,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4258,7 +4360,7 @@
                   "x": 16,
                   "y": 205
                },
-               "id": 86,
+               "id": 88,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4309,7 +4411,7 @@
                   "x": 0,
                   "y": 213
                },
-               "id": 87,
+               "id": 89,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4360,7 +4462,7 @@
                   "x": 8,
                   "y": 213
                },
-               "id": 88,
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4429,7 +4531,7 @@
                   "x": 16,
                   "y": 213
                },
-               "id": 89,
+               "id": 91,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4480,7 +4582,7 @@
                   "x": 0,
                   "y": 221
                },
-               "id": 90,
+               "id": 92,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4531,7 +4633,7 @@
                   "x": 8,
                   "y": 221
                },
-               "id": 91,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4600,7 +4702,7 @@
                   "x": 16,
                   "y": 221
                },
-               "id": 92,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4651,7 +4753,7 @@
                   "x": 0,
                   "y": 229
                },
-               "id": 93,
+               "id": 95,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4702,7 +4804,7 @@
                   "x": 8,
                   "y": 229
                },
-               "id": 94,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4753,7 +4855,7 @@
                   "x": 16,
                   "y": 229
                },
-               "id": 95,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4822,7 +4924,7 @@
                   "x": 0,
                   "y": 237
                },
-               "id": 96,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4873,7 +4975,7 @@
                   "x": 8,
                   "y": 237
                },
-               "id": 97,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4924,7 +5026,7 @@
                   "x": 16,
                   "y": 237
                },
-               "id": 98,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4975,7 +5077,7 @@
                   "x": 0,
                   "y": 245
                },
-               "id": 99,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5044,7 +5146,7 @@
                   "x": 8,
                   "y": 245
                },
-               "id": 100,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5084,7 +5186,7 @@
             "x": 0,
             "y": 253
          },
-         "id": 101,
+         "id": 103,
          "panels": [
             {
                "datasource": {
@@ -5109,7 +5211,7 @@
                   "x": 0,
                   "y": 254
                },
-               "id": 102,
+               "id": 104,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5160,7 +5262,7 @@
                   "x": 8,
                   "y": 254
                },
-               "id": 103,
+               "id": 105,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5229,7 +5331,7 @@
                   "x": 16,
                   "y": 254
                },
-               "id": 104,
+               "id": 106,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5280,7 +5382,7 @@
                   "x": 0,
                   "y": 262
                },
-               "id": 105,
+               "id": 107,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5349,7 +5451,7 @@
                   "x": 8,
                   "y": 262
                },
-               "id": 106,
+               "id": 108,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5400,7 +5502,7 @@
                   "x": 16,
                   "y": 262
                },
-               "id": 107,
+               "id": 109,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5469,7 +5571,7 @@
                   "x": 0,
                   "y": 270
                },
-               "id": 108,
+               "id": 110,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5520,7 +5622,7 @@
                   "x": 8,
                   "y": 270
                },
-               "id": 109,
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5571,7 +5673,7 @@
                   "x": 16,
                   "y": 270
                },
-               "id": 110,
+               "id": 112,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5622,7 +5724,7 @@
                   "x": 0,
                   "y": 278
                },
-               "id": 111,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5691,7 +5793,7 @@
                   "x": 8,
                   "y": 278
                },
-               "id": 112,
+               "id": 114,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5742,7 +5844,7 @@
                   "x": 16,
                   "y": 278
                },
-               "id": 113,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5782,7 +5884,7 @@
             "x": 0,
             "y": 286
          },
-         "id": 114,
+         "id": 116,
          "panels": [
             {
                "datasource": {
@@ -5807,7 +5909,7 @@
                   "x": 0,
                   "y": 287
                },
-               "id": 115,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5882,7 +5984,7 @@
                   "x": 12,
                   "y": 287
                },
-               "id": 116,
+               "id": 118,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5940,7 +6042,7 @@
                   "x": 0,
                   "y": 295
                },
-               "id": 117,
+               "id": 119,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5992,7 +6094,7 @@
                   "x": 12,
                   "y": 295
                },
-               "id": 118,
+               "id": 120,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6067,7 +6169,7 @@
                   "x": 0,
                   "y": 303
                },
-               "id": 119,
+               "id": 121,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6125,7 +6227,7 @@
                   "x": 12,
                   "y": 303
                },
-               "id": 120,
+               "id": 122,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6177,7 +6279,7 @@
                   "x": 0,
                   "y": 311
                },
-               "id": 121,
+               "id": 123,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6246,7 +6348,7 @@
                   "x": 8,
                   "y": 311
                },
-               "id": 122,
+               "id": 124,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6297,7 +6399,7 @@
                   "x": 16,
                   "y": 311
                },
-               "id": 123,
+               "id": 125,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6337,7 +6439,7 @@
             "x": 0,
             "y": 319
          },
-         "id": 124,
+         "id": 126,
          "panels": [
             {
                "datasource": {
@@ -6362,7 +6464,7 @@
                   "x": 0,
                   "y": 320
                },
-               "id": 125,
+               "id": 127,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6431,7 +6533,7 @@
                   "x": 8,
                   "y": 320
                },
-               "id": 126,
+               "id": 128,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6482,7 +6584,7 @@
                   "x": 16,
                   "y": 320
                },
-               "id": 127,
+               "id": 129,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6533,7 +6635,7 @@
                   "x": 0,
                   "y": 328
                },
-               "id": 128,
+               "id": 130,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6602,7 +6704,7 @@
                   "x": 8,
                   "y": 328
                },
-               "id": 129,
+               "id": 131,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6653,7 +6755,7 @@
                   "x": 16,
                   "y": 328
                },
-               "id": 130,
+               "id": 132,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6704,7 +6806,7 @@
                   "x": 0,
                   "y": 336
                },
-               "id": 131,
+               "id": 133,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6755,7 +6857,7 @@
                   "x": 8,
                   "y": 336
                },
-               "id": 132,
+               "id": 134,
                "options": {
                   "legend": {
                      "calcs": [

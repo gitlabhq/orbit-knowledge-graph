@@ -288,6 +288,10 @@ yaml_test!(
 );
 yaml_test!(ruby_top_level_constants, "ruby/top_level_constants.yaml");
 yaml_test!(ruby_line_indexing, "ruby/line_indexing.yaml");
+yaml_test!(
+    ruby_qualified_and_concern_includes,
+    "ruby/qualified_and_concern_includes.yaml"
+);
 
 // Rust
 yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");

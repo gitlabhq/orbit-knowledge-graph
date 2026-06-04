@@ -133,4 +133,6 @@ pub(super) struct DomainYaml {
     pub description: Option<String>,
     #[serde(default)]
     pub nodes: BTreeMap<String, String>,
+    #[serde(default)]
+    pub derived: BTreeMap<String, String>,
 }

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
-use super::batch_writer::ClickHouseBatchWriter;
-use crate::destination::{BatchWriter, Destination, DestinationError};
+use super::batch_writer::{ClickHouseBatchWriter, ClickHouseStreamingWriter};
+use crate::destination::{BatchWriter, Destination, DestinationError, StreamingWriter};
 use crate::metrics::EngineMetrics;
 
 pub struct ClickHouseDestination {
@@ -34,6 +34,17 @@ impl Destination for ClickHouseDestination {
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
         Ok(Box::new(ClickHouseBatchWriter::new(
             self.client.clone(),
+            table.to_string(),
+            self.metrics.clone(),
+        )))
+    }
+
+    async fn open_streaming_writer(
+        &self,
+        table: &str,
+    ) -> Result<Box<dyn StreamingWriter>, DestinationError> {
+        Ok(Box::new(ClickHouseStreamingWriter::new(
+            &self.client,
             table.to_string(),
             self.metrics.clone(),
         )))

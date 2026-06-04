@@ -43,7 +43,11 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
         .expect("st_diff column");
     assert!(st_diffs.value(0).contains("@@"));
     for i in 1..st_diffs.len() {
-        assert!(st_diffs.is_null(i), "note {} expected NULL st_diff", i + 1);
+        assert!(
+            st_diffs.value(i).is_empty(),
+            "note {} expected empty st_diff",
+            i + 1
+        );
     }
 
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 5).await;

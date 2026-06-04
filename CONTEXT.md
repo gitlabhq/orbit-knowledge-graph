@@ -36,8 +36,12 @@ _Avoid_: vertex
 A typed directed connection between two **Nodes** (e.g., `AUTHORED`, `CONTAINS`, `IN_PROJECT`). Defined in the **Ontology** with one or more source→target **Node** type variants. Stored in physical edge tables.
 _Avoid_: interaction, link
 
+**Derived Entity**:
+A third **Ontology** shape alongside **Node** and **Relationship**: a **Datalake** extract with no node table, whose rows a named Rust transform turns into **Relationships**. Declared per domain in `schema.yaml` and named via `etl.transform`; it stays dormant until that transform is registered in Rust. Used for entities (e.g. SystemNote) whose graph shape can't be a SQL row-projection — they need multi-hop datalake reads or free-text parsing. See ADR 015.
+_Avoid_: storageless node, derived node
+
 **Ontology**:
-The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
+The YAML-defined schema of the property graph. Declares all **Node** types, **Relationship** types, **Derived Entity** definitions, their properties, and valid source→target pairings. Lives in `config/ontology/`. The single source of truth for what the graph can contain.
 _Avoid_: schema (too generic), data model (refers to the broader design)
 
 **WorkItem**:
@@ -81,6 +85,10 @@ _Avoid_: replication (too broad)
 **Dispatch ID**:
 A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
 _Avoid_: request ID, trace ID (dispatch_id groups many requests, not a single one)
+
+**Campaign**:
+The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration — opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, attached to every dispatch while the migration runs, and closed when the migration completes (promotion to `active`). Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
+_Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
 
 **Siphon**:
 GitLab's CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.

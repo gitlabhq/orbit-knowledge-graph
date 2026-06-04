@@ -7,6 +7,9 @@
 #
 # Identifiers MUST match `application_identifier` values in `values/siphon.yaml.gotmpl`.
 
+# Required since siphon 0.0.99-beta; must match the producer's queueing.stream_name.
+stream_name: e2e_siphon_event_stream
+
 producers:
   main:
     - e2e_siphon_1

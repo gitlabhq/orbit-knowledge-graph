@@ -1,23 +1,20 @@
 //! Schema migration orchestrator for zero-downtime table-prefix migrations.
 //!
-//! When the indexer starts and detects a mismatch between the embedded
-//! `SCHEMA_VERSION` and the active version in `gkg_schema_version`, it runs
-//! this migration flow before accepting any NATS messages:
+//! The dispatcher runs this flow at boot, before starting its task loops, when
+//! the embedded `SCHEMA_VERSION` differs from the active version in
+//! `gkg_schema_version`. Indexers do not migrate; they wait for the version to
+//! become ready via [`crate::schema::version::wait_until_ready`].
 //!
-//! 1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based).
-//!    If another pod holds the lock, wait and skip — it is handling the migration.
-//! 2. **Drain** — The engine has not started yet; no in-flight jobs exist.
-//!    This phase is a no-op today but is reserved for future dual-write scenarios.
-//! 3. **Create new-prefix tables** — Generate DDL from the ontology via
+//! 1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based),
+//!    serializing migration across dispatcher replicas.
+//! 2. **Create new-prefix tables** — DDL from the ontology via
 //!    `generate_graph_tables_with_prefix()` with the version prefix applied.
-//! 4. **Mark migrating** — Insert the new version with status `migrating` in
-//!    `gkg_schema_version`. The Webserver cutover (issue #441) switches reads.
-//! 5. **Release lock** — Allow other pods to detect the migration is done.
+//! 3. **Mark migrating** — Insert the new version with status `migrating` in
+//!    `gkg_schema_version`, signalling indexers that the tables exist.
+//! 4. **Release lock**.
 //!
-//! After this function returns, the indexer starts normally and writes to the
-//! new-prefix tables. Because all new-prefix checkpoints are empty, the
-//! dispatcher's normal namespace poll cycle re-dispatches backfill work
-//! automatically — no explicit trigger is needed.
+//! New-prefix checkpoints start empty, so the dispatcher's normal namespace
+//! poll cycle re-dispatches backfill work automatically.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,6 +25,7 @@ use tracing::{info, warn};
 
 use super::metrics::MigrationMetrics;
 
+use crate::campaign::{CampaignState, campaign_id_for_version};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};
 use crate::schema::version::{
@@ -62,11 +60,8 @@ pub enum MigrationError {
     LockTimeout { seconds: u64 },
 }
 
-/// Runs the pre-engine migration check.
-///
-/// Called by `indexer::run()` after NATS and ClickHouse are connected but
-/// **before** `Engine::run()` starts consuming messages. This ensures there
-/// are never in-flight NATS messages to drain.
+/// Runs the migration check. Called by `run_dispatcher()` at boot, before the
+/// task loops start.
 ///
 /// # Behaviour
 ///
@@ -81,6 +76,7 @@ pub async fn run_if_needed(
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
+    campaign: &CampaignState,
 ) -> Result<(), MigrationError> {
     let active = read_active_version(graph).await?;
 
@@ -109,7 +105,15 @@ pub async fn run_if_needed(
                 target_version = *SCHEMA_VERSION,
                 "schema version mismatch detected — starting migration"
             );
-            run_migration(graph, lock_service, ontology, metrics, active_version).await
+            run_migration(
+                graph,
+                lock_service,
+                ontology,
+                metrics,
+                campaign,
+                active_version,
+            )
+            .await
         }
     }
 }
@@ -119,6 +123,7 @@ async fn run_migration(
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
+    campaign: &CampaignState,
     active_version: u32,
 ) -> Result<(), MigrationError> {
     // Phase 1: acquire distributed lock.
@@ -139,14 +144,8 @@ async fn run_migration(
         return Ok(());
     }
 
-    // Phase 2: drain.
-    // The engine has not started — no in-flight messages exist. This phase is
-    // a no-op today and is reserved for future dual-write migration scenarios.
-    info!(
-        active_version,
-        target_version = *SCHEMA_VERSION,
-        "drain phase: engine not yet started — no in-flight messages to drain"
-    );
+    // Drain is a no-op: the dispatcher runs no engine, so no in-flight messages
+    // exist. Reserved for future dual-write scenarios.
     metrics.record("drain", "success");
 
     // Phase 3: create new-prefix tables.
@@ -169,6 +168,10 @@ async fn run_migration(
         return Err(e.into());
     }
     metrics.record("mark_migrating", "success");
+
+    // Open the re-index campaign for this migration. The completion checker
+    // clears it on promotion.
+    campaign.set(campaign_id_for_version(*SCHEMA_VERSION));
 
     // Phase 5: release lock.
     let _ = lock_service.release(MIGRATION_LOCK_KEY).await;

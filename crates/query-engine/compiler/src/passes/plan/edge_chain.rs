@@ -84,6 +84,18 @@ impl NodePlan {
     pub fn uses_default_pk(&self) -> bool {
         self.redaction_id_column == DEFAULT_PRIMARY_KEY
     }
+
+    /// Whether this node has point selectivity (node_ids, id_range) or at
+    /// least one high-selectivity filter. Used to decide if a narrowing CTE
+    /// is worth the cost of a pre-scan.
+    pub fn has_selective_filters(&self) -> bool {
+        !self.node_ids.is_empty()
+            || self.id_range.is_some()
+            || self
+                .filters
+                .iter()
+                .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -204,6 +216,8 @@ pub fn plan(input: &mut Input) -> Plan {
         cursor: input.cursor,
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
+        table_columns: input.compiler.table_columns.clone(),
+        table_sort_keys: input.compiler.table_sort_keys.clone(),
         body,
     }
 }
@@ -354,7 +368,7 @@ fn elide_fk_hops<'a>(
                     InputFilter {
                         op: Some(FilterOp::Eq),
                         value: Some(serde_json::Value::Number(pinned_ids[0].into())),
-                        data_type: None,
+                        ..Default::default()
                     }
                 } else {
                     InputFilter {
@@ -365,7 +379,7 @@ fn elide_fk_hops<'a>(
                                 .map(|&id| serde_json::Value::Number(id.into()))
                                 .collect(),
                         )),
-                        data_type: None,
+                        ..Default::default()
                     }
                 };
                 fk_np.filters.push((fk_column, filter));
@@ -559,13 +573,15 @@ fn compute_node_edge_mappings(
     mappings
 }
 
-/// Resolve narrowing, elevated access, and FK join needs in a single pass.
 fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
-    // 1. Narrowing: Join nodes without own filters need narrowing when filter CTEs exist
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
     if has_filter_only {
+        let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
+        for hop in hops {
+            *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
+        }
         let needs: Vec<String> = nodes
             .values()
             .filter(|np| {
@@ -573,6 +589,11 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
                     && np.filters.is_empty()
                     && np.node_ids.is_empty()
                     && np.id_range.is_none()
+                    && convergent_targets
+                        .get(np.alias.as_str())
+                        .copied()
+                        .unwrap_or(0)
+                        < 2
             })
             .map(|np| np.alias.clone())
             .collect();

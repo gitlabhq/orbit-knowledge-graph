@@ -161,7 +161,7 @@ mod tests {
                 instance_id: String::new(),
                 unique_instance_id: "u".into(),
                 event_type: "orbit_workflow_completion".into(),
-                feature_qualified_name: "orbit-mcp".into(),
+                feature_qualified_name: "orbit_mcp".into(),
             },
             global_user_id: "g".into(),
         }

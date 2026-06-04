@@ -81,6 +81,11 @@ async fn data_correctness() {
         // traversal: code graph cascades
         traversal::traversal_code_graph_calls_without_node_ids,
         traversal::traversal_code_graph_calls_with_node_ids,
+        // traversal: code graph project_id/branch edge scoping
+        traversal::traversal_code_graph_project_id_filter_scopes_edges,
+        traversal::traversal_code_graph_project_id_filter_on_target_scopes_edges,
+        traversal::traversal_code_graph_edge_level_project_filter,
+        traversal::traversal_code_graph_project_id_filter_no_match_returns_empty,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_wildcard_user_to_mr_counts_inferred_edges,
@@ -274,6 +279,7 @@ async fn data_correctness() {
         dedup::search_filter_returns_latest_matching_version,
         dedup::search_filter_excludes_stale_match,
         dedup::aggregation_dedup_counts_unique_entities,
+        dedup::aggregation_multi_hop_self_join_dedups_edge_versions,
         dedup::aggregation_filter_excludes_stale_mutable_match,
         dedup::traversal_dedup_returns_single_edge,
         dedup::traversal_filter_excludes_stale_version,

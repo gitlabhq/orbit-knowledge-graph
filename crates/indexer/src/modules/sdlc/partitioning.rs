@@ -339,6 +339,7 @@ mod tests {
                 },
             }],
             standalone_edge_plans: vec![],
+            derived_entity_plans: vec![],
         };
 
         let overrides = HashMap::from([("User".to_string(), 4)]);

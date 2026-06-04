@@ -7,7 +7,8 @@
   "oneOf": [
     { "$ref": "#/definitions/mainSchema" },
     { "$ref": "#/definitions/nodeSchema" },
-    { "$ref": "#/definitions/edgeSchema" }
+    { "$ref": "#/definitions/edgeSchema" },
+    { "$ref": "#/definitions/derivedSchema" }
   ],
 
   "definitions": {
@@ -127,6 +128,11 @@
               "type": "boolean",
               "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
               "default": false
+            },
+            "selectivity": {
+              "type": "string",
+              "enum": ["low", "high"],
+              "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             }
           },
           "required": ["type", "source"],
@@ -226,6 +232,11 @@
               "items": { "type": "string" },
               "minItems": 1
             },
+            "transform": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
+            },
             "edges": {
               "type": "object",
               "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges (for example an outgoing FK plus its inverse).",
@@ -286,6 +297,11 @@
             "table_alias": {
               "type": "string",
               "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+            },
+            "transform": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
             },
             "edges": {
               "type": "object",
@@ -582,9 +598,14 @@
           "type": "object",
           "description": "Map of node names to their YAML file paths.",
           "additionalProperties": { "type": "string" }
+        },
+        "derived": {
+          "type": "object",
+          "description": "Map of edge-producing derived-entity names to their YAML file paths.",
+          "additionalProperties": { "type": "string" }
         }
       },
-      "required": ["description", "nodes"],
+      "required": ["description"],
       "additionalProperties": false
     },
 
@@ -814,6 +835,29 @@
       "additionalProperties": false
     },
 
+    "derivedSchema": {
+      "type": "object",
+      "description": "Edge-producing derived entity. The extract (with `transform: rust`) is declared in `etl`; the registered Rust transform parses and emits edges. Produces no node table.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Entity kind. Must match the key under a domain's `derived`."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the derived entity."
+        },
+        "emits": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Edge relationship kinds this entity is expected to emit (informational)."
+        },
+        "etl": { "$ref": "#/definitions/etlConfig" }
+      },
+      "required": ["etl"],
+      "additionalProperties": false
+    },
+
     "nodeStorage": {
       "type": "object",
       "description": "ClickHouse DDL storage metadata for a node table.",
@@ -878,7 +922,7 @@
         },
         "default": {
           "type": "string",
-          "pattern": "^[a-zA-Z0-9_()',./_ ]+$",
+          "pattern": "^[a-zA-Z0-9_()',./_ {}]+$",
           "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
         },
         "codec": {
@@ -955,6 +999,15 @@
             "description": "Column name. Lowercase with underscores."
           },
           "description": "GROUP BY columns (for aggregate projections)."
+        },
+        "versioned_sort_key": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "Prefix columns for a dedup-compatible lightweight projection. The table sort key and _version are appended automatically."
         }
       },
       "required": ["type", "name"],

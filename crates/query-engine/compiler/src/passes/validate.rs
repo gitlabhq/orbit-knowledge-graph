@@ -420,10 +420,20 @@ impl<'a> Validator<'a> {
         }
 
         for (i, rel) in input.relationships.iter().enumerate() {
+            // Resolve the physical edge table for this relationship so we
+            // can validate filters against that table's actual columns,
+            // not the union across all edge tables.
+            let edge_table = rel
+                .types
+                .first()
+                .map(|t| self.ontology.edge_table_for_relationship(t))
+                .unwrap_or(self.ontology.edge_table());
             for (prop, filters) in &rel.filters {
-                let Some(data_type) = self.ontology.get_edge_column_type(prop) else {
+                let Some(data_type) = self.ontology.get_edge_table_column_type(edge_table, prop)
+                else {
                     return Err(QueryError::Validation(format!(
-                        "relationship[{i}] filter on unknown edge column \"{prop}\""
+                        "relationship[{i}] filter on unknown edge column \"{prop}\" \
+                         (table \"{edge_table}\" does not have this column)"
                     )));
                 };
                 for filter in filters {
@@ -451,8 +461,15 @@ impl<'a> Validator<'a> {
             };
             for (prop, filters) in node.filters.iter_mut() {
                 let dt = self.ontology.get_field_type(&entity, prop);
+                let selectivity = self
+                    .ontology
+                    .get_node(&entity)
+                    .and_then(|n| n.fields.iter().find(|f| f.name == *prop))
+                    .map(|f| f.selectivity)
+                    .unwrap_or_default();
                 for filter in filters {
                     filter.data_type = dt;
+                    filter.selectivity = selectivity;
                 }
             }
         }

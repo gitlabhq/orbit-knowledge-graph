@@ -52,6 +52,7 @@ properties:
     source: environment_type
     nullable: false
     description: "Category from name prefix before first '/' (e.g. 'review'); empty when no '/'."
+    selectivity: low
 
   state:
     type: enum
@@ -197,8 +198,8 @@ storage:
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
-    - {type: lightweight, name: by_tier_state, order_by: [tier, state, id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_merge_request_id, versioned_sort_key: [merge_request_id]}
+    - {type: lightweight, name: by_tier_state, versioned_sort_key: [tier, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

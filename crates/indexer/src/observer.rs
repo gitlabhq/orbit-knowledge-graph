@@ -35,25 +35,36 @@ impl fmt::Display for IndexingMode {
 pub trait IndexingObserver: Send {
     fn set_dispatch_id(&mut self, _dispatch_id: Uuid) {}
 
+    fn set_campaign_id(&mut self, _campaign_id: Option<String>) {}
+
+    fn record_datalake_read(&mut self, _rows: u64, _bytes: u64) {}
+
+    fn record_graph_write(&mut self, _entity: &str, _rows: u64, _bytes: u64) {}
+
+    fn record_duration(&mut self, _duration_ms: u64) {}
+
     fn set_pipeline_type(&mut self, _pipeline_type: PipelineType) {}
 
-    fn set_traversal_path(&mut self, traversal_path: &str) {
-        if let Some(namespace_id) =
-            gkg_utils::traversal_path::top_level_namespace_id(traversal_path)
-        {
-            self.set_namespace(namespace_id);
+    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
+        let Some(path) = traversal_path else { return };
+        if let Some(namespace_id) = gkg_utils::traversal_path::top_level_namespace_id(path) {
+            self.set_namespace(Some(namespace_id));
         }
     }
 
-    fn set_namespace(&mut self, _namespace_id: i64) {}
+    fn set_namespace(&mut self, _namespace_id: Option<i64>) {}
 
     fn set_entity_type(&mut self, _entity_type: &str) {}
 
     fn set_project(&mut self, _project_id: i64, _branch: &str) {}
 
+    fn set_commit_sha(&mut self, _commit_sha: Option<String>) {}
+
     fn set_indexing_mode(&mut self, _mode: IndexingMode) {}
 
     fn extracted(&mut self, _rows: u64, _bytes: u64) {}
+
+    fn record_source_bytes(&mut self, _bytes: u64) {}
 
     fn files_processed(&mut self, _discovered: u64, _parsed: u64, _skipped: u64) {}
 
@@ -71,9 +82,33 @@ impl IndexingObserver for NoOpObserver {}
 pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn IndexingObserver>;
 
 impl IndexingObserver for MultiObserver {
+    fn record_datalake_read(&mut self, rows: u64, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_datalake_read(rows, bytes);
+        }
+    }
+
+    fn record_graph_write(&mut self, entity: &str, rows: u64, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_graph_write(entity, rows, bytes);
+        }
+    }
+
+    fn record_duration(&mut self, duration_ms: u64) {
+        for o in self.iter_mut() {
+            o.record_duration(duration_ms);
+        }
+    }
+
     fn set_dispatch_id(&mut self, dispatch_id: Uuid) {
         for o in self.iter_mut() {
             o.set_dispatch_id(dispatch_id);
+        }
+    }
+
+    fn set_campaign_id(&mut self, campaign_id: Option<String>) {
+        for o in self.iter_mut() {
+            o.set_campaign_id(campaign_id.clone());
         }
     }
 
@@ -83,13 +118,13 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
-    fn set_traversal_path(&mut self, traversal_path: &str) {
+    fn set_traversal_path(&mut self, traversal_path: Option<&str>) {
         for o in self.iter_mut() {
             o.set_traversal_path(traversal_path);
         }
     }
 
-    fn set_namespace(&mut self, namespace_id: i64) {
+    fn set_namespace(&mut self, namespace_id: Option<i64>) {
         for o in self.iter_mut() {
             o.set_namespace(namespace_id);
         }
@@ -107,6 +142,12 @@ impl IndexingObserver for MultiObserver {
         }
     }
 
+    fn set_commit_sha(&mut self, commit_sha: Option<String>) {
+        for o in self.iter_mut() {
+            o.set_commit_sha(commit_sha.clone());
+        }
+    }
+
     fn set_indexing_mode(&mut self, mode: IndexingMode) {
         for o in self.iter_mut() {
             o.set_indexing_mode(mode);
@@ -116,6 +157,12 @@ impl IndexingObserver for MultiObserver {
     fn extracted(&mut self, rows: u64, bytes: u64) {
         for o in self.iter_mut() {
             o.extracted(rows, bytes);
+        }
+    }
+
+    fn record_source_bytes(&mut self, bytes: u64) {
+        for o in self.iter_mut() {
+            o.record_source_bytes(bytes);
         }
     }
 
@@ -168,10 +215,22 @@ mod tests {
         fn set_dispatch_id(&mut self, _: Uuid) {
             self.push("set_dispatch_id");
         }
+        fn set_campaign_id(&mut self, _: Option<String>) {
+            self.push("set_campaign_id");
+        }
+        fn record_datalake_read(&mut self, _: u64, _: u64) {
+            self.push("record_datalake_read");
+        }
+        fn record_graph_write(&mut self, _: &str, _: u64, _: u64) {
+            self.push("record_graph_write");
+        }
+        fn record_duration(&mut self, _: u64) {
+            self.push("record_duration");
+        }
         fn set_pipeline_type(&mut self, _: PipelineType) {
             self.push("set_pipeline_type");
         }
-        fn set_traversal_path(&mut self, _: &str) {
+        fn set_traversal_path(&mut self, _: Option<&str>) {
             self.push("set_traversal_path");
         }
         fn set_entity_type(&mut self, _: &str) {
@@ -210,20 +269,28 @@ mod tests {
         ]);
 
         obs.set_dispatch_id(Uuid::new_v4());
+        obs.set_campaign_id(Some("migration-v48".to_string()));
         obs.set_pipeline_type(PipelineType::Sdlc);
-        obs.set_traversal_path("42/100/");
+        obs.set_traversal_path(Some("42/100/"));
         obs.set_entity_type("MergeRequest");
         obs.set_indexing_mode(IndexingMode::Incremental);
         obs.extracted(1000, 50_000);
+        obs.record_datalake_read(1000, 50_000);
+        obs.record_graph_write("gl_merge_request", 1000, 40_000);
+        obs.record_duration(12);
         obs.finish();
 
         let expected = vec![
             "set_dispatch_id",
+            "set_campaign_id",
             "set_pipeline_type",
             "set_traversal_path",
             "set_entity_type",
             "set_indexing_mode",
             "extracted",
+            "record_datalake_read",
+            "record_graph_write",
+            "record_duration",
             "finish",
         ];
         assert_eq!(*log_a.lock().unwrap(), expected);

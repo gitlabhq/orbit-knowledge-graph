@@ -56,7 +56,7 @@ properties:
   line_code:
     type: string
     source: line_code
-    nullable: true
+    nullable: false
     description: "Line position identifier for diff notes."
 
   created_at:
@@ -98,13 +98,13 @@ properties:
   commit_id:
     type: string
     source: commit_id
-    nullable: true
+    nullable: false
     description: "Commit SHA for commit notes."
 
   st_diff:
     type: string
     source: st_diff
-    nullable: true
+    nullable: false
     description: "Serialized diff snippet for diff notes."
 
   project_id:
@@ -169,9 +169,9 @@ storage:
     - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: noteable_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: line_code, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: commit_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: st_diff, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: line_code, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: commit_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: st_diff, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: discussion_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: resolved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: internal, type: "Bool", default: "false"}
@@ -193,8 +193,8 @@ storage:
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_author_id, column: author_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_author_id, order_by: [author_id]}
-    - {type: lightweight, name: by_noteable, order_by: [traversal_path, noteable_type, noteable_id, id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_author_id, versioned_sort_key: [author_id]}
+    - {type: lightweight, name: by_noteable, versioned_sort_key: [traversal_path, noteable_type, noteable_id, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

@@ -85,6 +85,7 @@ pub(super) fn emit_node_join_with_narrowing(
     edge_col: &str,
     use_traversal_path_join: bool,
     narrow: Option<NarrowSource>,
+    sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     emit_node_join_inner(
         from,
@@ -93,10 +94,11 @@ pub(super) fn emit_node_join_with_narrowing(
         edge_col,
         use_traversal_path_join,
         narrow,
+        sort_key,
     )
 }
 
-/// JOIN a node's latest-row `FINAL` scan into the FROM tree.
+/// JOIN a node's latest-row LIMIT BY scan into the FROM tree.
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -104,6 +106,7 @@ fn emit_node_join_inner(
     edge_col: &str,
     use_traversal_path_join: bool,
     narrow: Option<NarrowSource>,
+    sort_key: &[String],
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = np
         .table
@@ -123,11 +126,21 @@ fn emit_node_join_inner(
         wheres.push(in_predicate);
     }
 
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+
     let node_scan = TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(table, alias),
+            from: TableRef::scan(table, alias),
             where_clause: Expr::conjoin(wheres),
+            order_by,
+            limit_by: Some((1, limit_by_cols)),
             ..Default::default()
         },
         alias,
@@ -252,9 +265,11 @@ pub(super) fn push_edge_predicates(
     alias: &str,
     hop: &Hop,
     nodes: &HashMap<String, NodePlan>,
-    start_col: &str,
-    end_col: &str,
+    table_columns: &HashMap<String, HashSet<String>>,
+    skip_deleted: bool,
 ) {
+    let (start_col, end_col) = hop.direction.edge_columns();
+
     if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
         where_parts.push(f);
     }
@@ -271,7 +286,133 @@ pub(super) fn push_edge_predicates(
             where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
         }
     }
-    where_parts.push(deleted_false(alias));
+    if !skip_deleted {
+        where_parts.push(deleted_false(alias));
+    }
+
+    // Push node-level filters down to the edge scan when the edge table
+    // carries those columns (e.g. project_id, branch on gl_code_edge).
+    // This lets ClickHouse use the primary key prefix for scoping.
+    // Deduplicate by property name so we don't emit the same predicate
+    // twice when both nodes share the filter (common case: both are
+    // code entities in the same project).
+    if let Some(edge_cols) = table_columns.get(&hop.edge_table) {
+        let reserved: HashSet<&str> = ontology::constants::EDGE_RESERVED_COLUMNS
+            .iter()
+            .copied()
+            .collect();
+        let mut seen_props: HashSet<&str> = HashSet::new();
+        for node_alias in [&hop.from_node, &hop.to_node] {
+            if let Some(np) = nodes.get(node_alias) {
+                for (prop, filter) in &np.filters {
+                    if edge_cols.contains(prop)
+                        && !reserved.contains(prop.as_str())
+                        && seen_props.insert(prop.as_str())
+                    {
+                        where_parts.push(filter_to_expr(alias, prop, filter));
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn dedup_edge_scan(
+    edge_table: &str,
+    alias: &str,
+    table_columns: &HashMap<String, HashSet<String>>,
+    inner_predicates: Vec<Expr>,
+) -> TableRef {
+    let Some(cols) = table_columns.get(edge_table) else {
+        return TableRef::scan_final(edge_table, alias);
+    };
+
+    let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
+        .iter()
+        .copied()
+        .filter(|c| cols.contains(*c))
+        .collect();
+
+    let mut projected: Vec<&str> = cols
+        .iter()
+        .map(String::as_str)
+        .filter(|c| !identity.contains(c) && *c != VERSION_COLUMN && *c != DELETED_COLUMN)
+        .collect();
+    projected.sort_unstable();
+
+    let mut select = Vec::with_capacity(identity.len() + projected.len());
+    for col in &identity {
+        select.push(SelectExpr::col(alias, *col));
+    }
+    for col in projected {
+        select.push(SelectExpr::new(
+            Expr::func(
+                "argMax",
+                vec![Expr::col(alias, col), Expr::col(alias, VERSION_COLUMN)],
+            ),
+            col,
+        ));
+    }
+
+    let group_by = identity
+        .iter()
+        .map(|c| Expr::col(alias, *c))
+        .collect::<Vec<_>>();
+
+    let having = Expr::eq(
+        Expr::func(
+            "argMax",
+            vec![
+                Expr::col(alias, DELETED_COLUMN),
+                Expr::col(alias, VERSION_COLUMN),
+            ],
+        ),
+        Expr::lit(false),
+    );
+
+    let where_clause = Expr::conjoin(inner_predicates);
+
+    let query = Query {
+        select,
+        from: TableRef::scan(edge_table, alias),
+        where_clause,
+        group_by,
+        having: Some(having),
+        ..Default::default()
+    };
+    TableRef::subquery(query, alias)
+}
+
+/// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
+/// over a plain (non-`FINAL`) scan, with WHERE predicates injected for PK
+/// pruning. Reproduces `ReplacingMergeTree` latest-row semantics while keeping
+/// column pruning and projections eligible. `select` is the projection (e.g.
+/// `*` for edge aggregations, or the requested columns for hydration);
+/// `sort_key` is the dedup identity (the table's full ORDER BY key).
+pub(super) fn limit_by_scan(
+    table: &str,
+    alias: &str,
+    select: Vec<SelectExpr>,
+    sort_key: &[String],
+    where_predicates: Vec<Expr>,
+) -> TableRef {
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+
+    let query = Query {
+        select,
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(where_predicates),
+        order_by,
+        limit_by: Some((1, limit_by_cols)),
+        ..Default::default()
+    };
+    TableRef::subquery(query, alias)
 }
 
 /// Emit denorm tag filters computed from `plan.denorm_columns`.
@@ -310,6 +451,30 @@ pub(super) fn emit_denorm_tags(
             }
         }
     }
+}
+
+pub(super) fn node_id_pin_predicates(
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+) -> Vec<Expr> {
+    let (start_col, end_col) = hop.direction.edge_columns();
+    let mut out = Vec::new();
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        let Some(np) = nodes.get(node_alias) else {
+            continue;
+        };
+        if let Some(ref range) = np.id_range {
+            out.push(Expr::and(
+                Expr::binary(Op::Ge, Expr::col(alias, id_col), Expr::int(range.start)),
+                Expr::binary(Op::Le, Expr::col(alias, id_col), Expr::int(range.end)),
+            ));
+        }
+        if !np.node_ids.is_empty() {
+            out.push(id_list_predicate(alias, id_col, &np.node_ids));
+        }
+    }
+    out
 }
 
 pub(super) fn emit_node_ids_on_edge(
@@ -355,10 +520,15 @@ pub(super) fn emit_filter_narrowing(
         let Some(np) = nodes.get(node_alias) else {
             continue;
         };
-        let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
+        let has_point_selectivity = !np.node_ids.is_empty() || np.id_range.is_some();
+        let has_selective_filters = np
+            .filters
+            .iter()
+            .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High);
+        let selective = has_point_selectivity || has_selective_filters;
         let should_narrow = match np.hydration {
-            // FilterOnly nodes get their CTE + IN predicate from
-            // emit_filter_subquery in the second loop.
+            // FilterOnly nodes are JOINed directly in the node
+            // processing loop — no narrowing CTE needed here.
             HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
             HydrationStrategy::Skip => false,
@@ -368,8 +538,6 @@ pub(super) fn emit_filter_narrowing(
         }
         let cte_name = format!("_filter_{node_alias}");
         // Create the CTE once per node for selective Join nodes.
-        // FilterOnly CTEs are created by emit_filter_subquery in the
-        // second loop (it handles the full filter/node_ids/id_range logic).
         if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
             let table = np.table.as_deref().unwrap_or("");
             ctes.push(Cte::new(

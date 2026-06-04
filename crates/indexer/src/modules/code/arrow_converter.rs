@@ -825,15 +825,27 @@ impl BufferedClickHouseSink {
 
     /// Flush all buffered tables to ClickHouse in parallel. Each table
     /// gets a single `insert_arrow_streaming` call with all its batches,
-    /// and all tables are written concurrently.
-    pub async fn flush(&self) -> Result<(), code_graph::v2::SinkError> {
+    /// and all tables are written concurrently. Returns the total rows and
+    /// in-memory bytes written across all tables.
+    pub async fn flush(&self) -> Result<Vec<TableWriteTotals>, code_graph::v2::SinkError> {
         let buffers = std::mem::take(&mut *self.buffers.write());
         let mut handles = Vec::new();
+        let mut per_table = Vec::new();
 
         for (table, batches) in buffers {
             if batches.is_empty() {
                 continue;
             }
+            let rows: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let bytes: u64 = batches
+                .iter()
+                .map(|b| b.get_array_memory_size() as u64)
+                .sum();
+            per_table.push(TableWriteTotals {
+                table: table.clone(),
+                rows,
+                bytes,
+            });
             let dest = self.destination.clone();
             handles.push(tokio::spawn(async move {
                 let writer = dest
@@ -852,8 +864,15 @@ impl BufferedClickHouseSink {
         for result in results {
             result.map_err(|e| code_graph::v2::SinkError(format!("flush join: {e}")))??;
         }
-        Ok(())
+        Ok(per_table)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TableWriteTotals {
+    pub table: String,
+    pub rows: u64,
+    pub bytes: u64,
 }
 
 impl code_graph::v2::BatchSink for BufferedClickHouseSink {
@@ -877,6 +896,32 @@ impl code_graph::v2::BatchSink for BufferedClickHouseSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn flush_returns_per_table_totals() {
+        use crate::testkit::MockDestination;
+        use arrow::array::Int64Array;
+        use arrow::datatypes::{DataType, Field, Schema};
+        use code_graph::v2::BatchSink;
+        use std::collections::HashMap;
+
+        let sink = BufferedClickHouseSink::new(Arc::new(MockDestination::new()));
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1, 2, 3]))]).unwrap();
+
+        sink.write_batch("gl_file", &batch).unwrap();
+        sink.write_batch("gl_definition", &batch).unwrap();
+
+        let per_table = sink.flush().await.expect("flush should succeed");
+        let by_table: HashMap<&str, &TableWriteTotals> =
+            per_table.iter().map(|t| (t.table.as_str(), t)).collect();
+
+        assert_eq!(by_table.len(), 2);
+        assert_eq!(by_table["gl_file"].rows, 3);
+        assert_eq!(by_table["gl_definition"].rows, 3);
+        assert!(by_table.values().all(|t| t.bytes > 0));
+    }
 
     #[test]
     fn compute_branch_id_is_always_non_negative() {

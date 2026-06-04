@@ -5,16 +5,23 @@ use std::collections::{BTreeMap, HashSet};
 use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
-    DataType, EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig,
-    StorageIndex, StorageProjection, VirtualSource,
+    DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
+    RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
 };
-use crate::etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
 use super::EtlSettings;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct NodeYaml {
-    #[allow(dead_code)]
+    /// Canonical entity name (e.g. `Project`, `MergeRequest`). Mirrors the
+    /// `schema.yaml` registry key the loader actually reads for node identity;
+    /// kept here as human-facing self-documentation so each node file states
+    /// which entity it defines without cross-referencing `schema.yaml`.
+    #[expect(
+        dead_code,
+        reason = "human-facing self-documentation; the entity name is read from the schema.yaml registry key, this field mirrors it for readability in the node file"
+    )]
     node_type: String,
     domain: String,
     #[serde(default)]
@@ -40,7 +47,7 @@ pub(crate) struct NodeYaml {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-enum EtlYaml {
+pub(crate) enum EtlYaml {
     #[serde(rename = "table")]
     Table {
         scope: EtlScope,
@@ -51,6 +58,8 @@ enum EtlYaml {
         deleted: Option<String>,
         #[serde(default)]
         order_by: Option<Vec<String>>,
+        #[serde(default)]
+        transform: Option<String>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
@@ -73,13 +82,25 @@ enum EtlYaml {
         #[serde(default)]
         table_alias: Option<String>,
         #[serde(default)]
+        transform: Option<String>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
 
+impl EtlYaml {
+    pub(crate) fn transform(&self) -> Option<&str> {
+        match self {
+            EtlYaml::Table { transform, .. } | EtlYaml::Query { transform, .. } => {
+                transform.as_deref()
+            }
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum EdgeMappingYamlEntry {
+pub(crate) enum EdgeMappingYamlEntry {
     Single(EdgeMappingYaml),
     Multi(Vec<EdgeMappingYaml>),
 }
@@ -94,7 +115,7 @@ impl EdgeMappingYamlEntry {
 }
 
 #[derive(Debug, Deserialize)]
-struct EdgeMappingYaml {
+pub(crate) struct EdgeMappingYaml {
     #[serde(rename = "to")]
     target_literal: Option<String>,
     #[serde(rename = "to_column")]
@@ -136,6 +157,8 @@ struct PropertyYaml {
     filterable: bool,
     #[serde(default)]
     admin_only: bool,
+    #[serde(default)]
+    selectivity: Option<FieldSelectivity>,
     #[serde(default)]
     description: Option<String>,
 }
@@ -197,7 +220,18 @@ pub(crate) enum StorageProjectionYaml {
     #[serde(rename = "reorder")]
     Reorder { name: String, order_by: Vec<String> },
     #[serde(rename = "lightweight")]
-    Lightweight { name: String, order_by: Vec<String> },
+    Lightweight {
+        name: String,
+        /// Raw ORDER BY columns. Mutually exclusive with `versioned_sort_key`.
+        #[serde(default)]
+        order_by: Vec<String>,
+        /// Prefix columns for a dedup-compatible LWP. The table sort key and
+        /// `_version` are appended automatically, producing an ORDER BY of
+        /// `(prefix..., sort_key..., _version)`. Mutually exclusive with
+        /// `order_by`.
+        #[serde(default)]
+        versioned_sort_key: Vec<String>,
+    },
     #[serde(rename = "aggregate")]
     Aggregate {
         name: String,
@@ -273,6 +307,10 @@ impl NodeYaml {
                     }
                 };
 
+                let selectivity = prop_def
+                    .selectivity
+                    .unwrap_or_else(|| FieldSelectivity::from_data_type(prop_def.data_type));
+
                 Ok(Field {
                     name: prop_name,
                     source,
@@ -283,6 +321,7 @@ impl NodeYaml {
                     like_allowed: prop_def.like_allowed,
                     filterable: prop_def.filterable,
                     admin_only: prop_def.admin_only,
+                    selectivity,
                     description: prop_def.description,
                 })
             })
@@ -351,13 +390,22 @@ impl NodeYaml {
             .sort_key
             .unwrap_or_else(|| default_entity_sort_key.to_vec());
 
+        match self.etl.as_ref().and_then(|e| e.transform()) {
+            Some(transform) if transform != DEFAULT_TRANSFORM => {
+                return Err(OntologyError::Validation(format!(
+                    "node '{name}' sets etl.transform '{transform}'; custom transforms are only for derived entities"
+                )));
+            }
+            _ => {}
+        }
+
         let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
 
         let has_traversal_path = fields
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
-        let storage = convert_node_storage(self.storage.unwrap_or_default());
+        let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
         Ok(NodeEntity {
             name,
@@ -454,7 +502,10 @@ fn convert_edge_mappings(
 }
 
 impl EtlYaml {
-    fn into_config(self, etl_settings: &EtlSettings) -> Result<EtlConfig, OntologyError> {
+    pub(crate) fn into_config(
+        self,
+        etl_settings: &EtlSettings,
+    ) -> Result<EtlConfig, OntologyError> {
         match self {
             EtlYaml::Table {
                 scope,
@@ -462,6 +513,7 @@ impl EtlYaml {
                 watermark,
                 deleted,
                 order_by,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Table {
                 scope,
@@ -482,6 +534,7 @@ impl EtlYaml {
                 order_by,
                 traversal_path_filter,
                 table_alias,
+                transform: _,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
@@ -500,7 +553,7 @@ impl EtlYaml {
     }
 }
 
-fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
+fn convert_node_storage(yaml: NodeStorageYaml, sort_key: &[String]) -> NodeStorage {
     NodeStorage {
         version_only_engine: yaml.version_only_engine,
         primary_key: yaml.primary_key,
@@ -522,7 +575,7 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
         projections: yaml
             .projections
             .into_iter()
-            .map(convert_storage_projection)
+            .map(|p| convert_storage_projection(p, sort_key))
             .collect(),
         settings: yaml.settings,
     }
@@ -537,13 +590,38 @@ pub(crate) fn convert_storage_index(yaml: StorageIndexYaml) -> StorageIndex {
     }
 }
 
-pub(crate) fn convert_storage_projection(yaml: StorageProjectionYaml) -> StorageProjection {
+pub(crate) fn convert_storage_projection(
+    yaml: StorageProjectionYaml,
+    sort_key: &[String],
+) -> StorageProjection {
     match yaml {
         StorageProjectionYaml::Reorder { name, order_by } => {
             StorageProjection::Reorder { name, order_by }
         }
-        StorageProjectionYaml::Lightweight { name, order_by } => {
-            StorageProjection::Lightweight { name, order_by }
+        StorageProjectionYaml::Lightweight {
+            name,
+            order_by,
+            versioned_sort_key,
+        } => {
+            let resolved = if !versioned_sort_key.is_empty() {
+                let mut cols = versioned_sort_key;
+                for col in sort_key {
+                    if !cols.contains(col) {
+                        cols.push(col.clone());
+                    }
+                }
+                let version = crate::constants::VERSION_COLUMN.to_string();
+                if !cols.contains(&version) {
+                    cols.push(version);
+                }
+                cols
+            } else {
+                order_by
+            };
+            StorageProjection::Lightweight {
+                name,
+                order_by: resolved,
+            }
         }
         StorageProjectionYaml::Aggregate {
             name,
@@ -657,6 +735,32 @@ mod tests {
         assert!(
             err.contains("must be database-backed"),
             "error should say virtual deps not allowed, got: {err}"
+        );
+    }
+
+    #[test]
+    fn node_rejects_custom_etl_transform() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: siphon_test
+              transform: system_notes
+            "#,
+        );
+        let err = result.expect_err("custom transform on a node should be rejected");
+        assert!(
+            err.to_string()
+                .contains("custom transforms are only for derived entities"),
+            "got: {err}"
         );
     }
 
@@ -839,5 +943,111 @@ mod tests {
                 ("project_id", "IN_PROJECT"),
             ]
         );
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_builds_full_ordering() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_project_id".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["project_id".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(
+                    order_by,
+                    vec!["project_id", "traversal_path", "id", "_version"]
+                );
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_does_not_duplicate_overlap() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_tp".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["traversal_path".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(order_by, vec!["traversal_path", "id", "_version"]);
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_versioned_sort_key_does_not_duplicate_version() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_ver".into(),
+                order_by: vec![],
+                versioned_sort_key: vec!["project_id".into(), "_version".into()],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(
+                    order_by,
+                    vec!["project_id", "_version", "traversal_path", "id"]
+                );
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn lwp_raw_order_by_passes_through() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+        let proj = convert_storage_projection(
+            StorageProjectionYaml::Lightweight {
+                name: "by_raw".into(),
+                order_by: vec!["project_id".into()],
+                versioned_sort_key: vec![],
+            },
+            &sort_key,
+        );
+        match proj {
+            StorageProjection::Lightweight { order_by, .. } => {
+                assert_eq!(order_by, vec!["project_id"]);
+            }
+            _ => panic!("expected Lightweight"),
+        }
+    }
+
+    #[test]
+    fn reorder_and_aggregate_pass_through_unchanged() {
+        let sort_key = vec!["traversal_path".into(), "id".into()];
+
+        let reorder = convert_storage_projection(
+            StorageProjectionYaml::Reorder {
+                name: "r".into(),
+                order_by: vec!["col_a".into()],
+            },
+            &sort_key,
+        );
+        assert!(matches!(reorder, StorageProjection::Reorder { .. }));
+
+        let agg = convert_storage_projection(
+            StorageProjectionYaml::Aggregate {
+                name: "a".into(),
+                select: vec!["x".into()],
+                group_by: vec!["y".into()],
+            },
+            &sort_key,
+        );
+        assert!(matches!(agg, StorageProjection::Aggregate { .. }));
     }
 }

@@ -104,7 +104,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: true
+    nullable: false
     description: "Failure reason."
     values:
       0: unknown_failure
@@ -238,7 +238,7 @@ storage:
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
     - {name: duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -255,6 +255,11 @@ storage:
   indexes:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
     - {name: idx_tag, column: tag, type: "minmax", granularity: 1}
+    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
+    - {name: idx_started_at, column: started_at, type: "minmax", granularity: 1}
+    - {name: idx_finished_at, column: finished_at, type: "minmax", granularity: 1}
+    - {name: idx_committed_at, column: committed_at, type: "minmax", granularity: 1}
+    - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_source, column: source, type: "set(20)", granularity: 2}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
@@ -264,10 +269,10 @@ storage:
     - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
-    - {type: lightweight, name: by_project_id, order_by: [project_id]}
-    - {type: lightweight, name: by_user_id, order_by: [user_id]}
-    - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
-    - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}
-    - {type: lightweight, name: by_status_id, order_by: [status, id]}
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: lightweight, name: by_user_id, versioned_sort_key: [user_id]}
+    - {type: lightweight, name: by_merge_request_id, versioned_sort_key: [merge_request_id]}
+    - {type: lightweight, name: by_auto_canceled_by_id, versioned_sort_key: [auto_canceled_by_id]}
+    - {type: lightweight, name: by_status_id, versioned_sort_key: [status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

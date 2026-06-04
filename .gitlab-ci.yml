@@ -56,8 +56,8 @@ include:
     inputs:
       automatic: manual
       labels_enabled: "false"
-      model: "anthropic/claude-opus-4-7"
-      variant: "xhigh"
+      model: "anthropic/claude-opus-4-8"
+      variant: "high"
 
 stages:
   - lint

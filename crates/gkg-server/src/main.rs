@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         QueryType::VARIANTS,
     );
     gkg_server_config::query::init(config.query.clone());
+    gkg_server_config::features::init(config.features.clone());
 
     let mut builder = labkit::Builder::new(args.mode.service_name())
         .propagate_correlation(true)
@@ -105,6 +106,7 @@ async fn main() -> anyhow::Result<()> {
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
                 schema: config.schema.clone(),
+                analytics: config.analytics.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await

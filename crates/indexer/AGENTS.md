@@ -37,10 +37,16 @@ NATS JetStream → Engine → Handler Registry → ClickHouse
 
 ### Schema migration
 
-Before the NATS engine starts, `schema_migration::run_if_needed()` compares the embedded
-`SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a NATS KV
-distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
-creates new-prefix ClickHouse tables, and marks the new version as `migrating`. All write paths
+The **dispatcher** owns schema migration. At boot, `schema::migration::run_if_needed()` compares
+the embedded `SCHEMA_VERSION` with the active version in ClickHouse. On a mismatch, it acquires a
+NATS KV distributed lock, generates DDL from the ontology via `generate_graph_tables_with_prefix()`,
+creates new-prefix ClickHouse tables, and marks the new version as `migrating`. Marking
+`migrating` also opens a re-index **campaign** (`campaign::CampaignState`, in-memory) that
+dispatchers stamp onto every request as `campaign_id` until completion clears it.
+
+Indexers do not run DDL. Before consuming, the indexer calls `schema::version::wait_until_ready()`,
+which polls `gkg_schema_version` with backoff until its version is `active`/`migrating`, exiting
+non-zero (→ restart) if the budget is exhausted or the binary is outdated. All write paths
 (checkpoints, namespace deletion, ontology-driven tables) use
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
@@ -51,12 +57,13 @@ table-set.
 mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
 comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
 `active`, retires the old active version, and drops tables for retired versions outside the
-`max_retained_versions` retention window.
+`max_retained_versions` retention window. On promotion it also clears the re-index campaign, so
+subsequent steady-state dispatches carry `campaign_id = null`.
 
 ### Entry point
 
-The `run()` function in `lib.rs` wires everything together: runs the migration orchestrator,
-connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
+The `run()` function in `lib.rs` wires everything together: waits for the schema version to be
+ready, connects to NATS and ClickHouse, registers handlers via `sdlc::register_handlers()`,
 `code::register_handlers()`, and `namespace_deletion::register_handlers()`, builds the engine,
 and runs until shutdown.
 
@@ -84,13 +91,74 @@ Located in `testkit/`:
 
 ## Common tasks
 
+### Before writing a new handler: reuse existing infra
+
+Most handler work re-derives infrastructure the crate already provides. Before scaffolding a
+self-contained module, do an explicit "what does the codebase already give me?" pass. This is a
+reuse-first **default**, not a hard rule — but in review it is the single most common class of
+preventable feedback (see #2772, !1416). Check each of these first:
+
+- **Paging + checkpoint + cursor:** `Pipeline::run_plan` and `EntityHandler`
+  (`modules/sdlc/pipeline.rs`, `modules/sdlc/handler/entity.rs`) already provide windowed
+  extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
+  watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
+  checkpoint store in `modules/code/checkpoint.rs`.
+- **Arrow extraction:** decode datalake `RecordBatch` rows with the `gkg_utils::arrow` helpers
+  (`get_column`, `get_column_string`, `get_string_list`, `extract_row` in
+  `crates/utils/src/arrow.rs`), not bespoke `col_i64` / `col_string` functions.
+- **Edge/node `RecordBatch` specs:** derive column specs from the ontology — `edge_specs(ontology)`
+  in `modules/code/arrow_converter.rs` (also `crates/duckdb-client/src/converter.rs`). Do not
+  hardcode them; hardcoded specs silently drift from `config/graph.sql`.
+- **Filtering:** push row filters into the extraction SQL (`WHERE`, `action IN (...)`) instead of
+  post-filtering in Rust, so rows you discard never cross the wire.
+- **Concurrency:** independent datalake lookups (routes / MR / work-item) should run concurrently
+  (e.g. `tokio::try_join!`), not sequentially.
+- **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
+  magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
+
+If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
+shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.
+
+Do not ship `#[allow(dead_code)]` to silence scaffold warnings — see the no-shipped-dead-code rule
+below and in the root `AGENTS.md`.
+
+### When a Rust transform is justified (ADR 015)
+
+The SDLC transform stage is pluggable (`modules/sdlc/transform.rs`): the built-in `data_fusion`
+transform is a row-wise SQL projection of one extracted block and is the **default** for every
+node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
+is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
+when it needs:
+
+- **multi-hop datalake reads** mid-transform (e.g. resolving GFM references to entity IDs via a
+  second `IN`-list lookup against `siphon_routes` and entity tables), or
+- **cross-row or free-text work** SQL can't do (parsing note bodies, fanning one source row into
+  several edge kinds).
+
+If the transform is a per-row projection of one extracted batch, express it as an ontology plan +
+`data_fusion`, not Rust. SystemNote is the reference case for the Rust path (ADR 013). See
+`docs/design-documents/decisions/015_pluggable_entity_pipelines.md`.
+
 ### Adding a handler
 
-1. Define event type implementing `Event`
-2. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
-3. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
-4. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
-5. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+1. Run the **reuse-infra checklist above** before writing new code.
+2. Define event type implementing `Event`
+3. Create handler implementing `Handler` (`name`, `subscription`, `handle`)
+4. Add topic config to `engine.topics` in `config/default.yaml` for retry/concurrency policy
+5. If handler needs domain config, add a typed config field to `HandlersConfiguration` in `engine.rs`
+6. Register in `sdlc::register_handlers()`, `code::register_handlers()`, or `namespace_deletion::register_handlers()`
+
+### No `#[allow(dead_code)]` in shipped code
+
+This crate denies bare `#[allow(..)]` attributes (`clippy::allow_attributes_without_reason = "deny"`
+in `Cargo.toml`). Scaffold-era `#[allow(dead_code)]` markers must not survive into a merged MR:
+
+- If a symbol is test-only, gate it with `#[cfg(test)]` instead of allowing dead code.
+- If it is genuinely unused, delete it.
+- If you must keep an exception, it has to carry an explicit `reason`
+  (`#[allow(dead_code, reason = "…")]`) so the justification is reviewable, ideally linking an
+  issue. Prefer `#[expect(dead_code, reason = "…")]`, which fails once the code becomes used and so
+  self-cleans.
 
 ### Concurrency
 

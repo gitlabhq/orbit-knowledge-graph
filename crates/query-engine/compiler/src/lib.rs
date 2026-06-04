@@ -364,9 +364,13 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("COUNT()") || sql.contains("count()"),
-            "unfiltered edge-only count must emit bare COUNT() for projection \
-             routing, got:\n{sql}"
+            sql.contains("countIf("),
+            "single-hop edge count should use countIf on the LIMIT BY path, \
+             got:\n{sql}"
+        );
+        assert!(
+            sql.contains("LIMIT 1 BY"),
+            "single-hop edge aggregation should use LIMIT BY dedup, got:\n{sql}"
         );
         assert!(
             !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),
@@ -410,6 +414,134 @@ mod tests {
         assert!(
             sql.contains("state = 'opened'"),
             "state filter must reach the SQL on the MR subquery, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn dedup_edge_scan_pushes_filter_cte_in_subquery_into_inner_where() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+        let (e0_inner, rest) = sql
+            .split_once(") AS e0 INNER JOIN")
+            .expect("e0 dedup subquery is closed before the join");
+        let (e1_inner, post_join) = rest
+            .split_once(") AS e1 ON")
+            .expect("e1 dedup subquery is closed before ON");
+        let outer = post_join
+            .split_once(" WHERE ")
+            .map(|(_, tail)| tail)
+            .unwrap_or("");
+
+        for clause in [
+            "e0.source_id = 490855697",
+            "e0.target_id IN (SELECT id FROM _filter_label)",
+        ] {
+            assert!(
+                e0_inner.contains(clause),
+                "expected `{clause}` inside e0 dedup inner WHERE, got:\n{e0_inner}"
+            );
+        }
+        for clause in [
+            "e1.source_id = 490855697",
+            "e1.target_id IN (SELECT id FROM _filter_project)",
+        ] {
+            assert!(
+                e1_inner.contains(clause),
+                "expected `{clause}` inside e1 dedup inner WHERE, got:\n{e1_inner}"
+            );
+        }
+        for kind in [
+            "e0.relationship_kind = 'HAS_LABEL'",
+            "e0.source_kind = 'MergeRequest'",
+            "e0.target_kind = 'Label'",
+            "e1.relationship_kind = 'IN_PROJECT'",
+            "e1.target_kind = 'Project'",
+        ] {
+            assert!(
+                outer.contains(kind),
+                "kind predicate `{kind}` must stay in outer WHERE so CH's PredicateRewriteVisitor handles it, got:\n{outer}"
+            );
+            assert!(
+                !e0_inner.contains(kind) && !e1_inner.contains(kind),
+                "kind predicate `{kind}` must not be duplicated into dedup inner WHERE"
+            );
+        }
+    }
+
+    /// Regression for #801: when two or more hops self-join the edge table,
+    /// each edge scan must deduplicate ReplacingMergeTree row versions before
+    /// the join. Without it the self-join multiplies un-merged versions of
+    /// each hop, inflating `count(mr)` multiplicatively (the issue observed
+    /// 7, 49, 245 for an MR that should return 1). The dedup uses an argMax
+    /// GROUP BY subquery, which keeps the `source_id` projection (FINAL would
+    /// discard it and read ~170x more bytes).
+    #[test]
+    fn multi_edge_self_join_dedups_edge_versions() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}},
+                {"id": "project", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "project"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("argMax(e0._deleted, e0._version) = false")
+                && sql.contains("argMax(e1._deleted, e1._version) = false"),
+            "multi-edge self-join must dedup each edge scan via argMax, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("FROM gl_edge AS e0 FINAL"),
+            "dedup must keep the projection, not fall back to FINAL, got:\n{sql}"
+        );
+    }
+
+    /// A single-hop edge scan cannot fan a node out, so it stays a plain scan.
+    /// Deduplicating the hot single-edge path would cost an unnecessary
+    /// aggregation.
+    #[test]
+    fn single_edge_scan_stays_plain() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [490855697]},
+                {"id": "label", "entity": "Label", "filters": {"title": "group::source code"}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "label"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "n"}],
+            "limit": 1
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("argMax"),
+            "single-hop edge scan must not dedup, got:\n{sql}"
         );
     }
 
@@ -1067,21 +1199,21 @@ mod tests {
     }
 
     #[test]
-    fn denorm_partial_filters_keeps_filter_cte() {
+    fn denorm_partial_filters_joins_for_non_denorm() {
         let sql = denorm_traversal_sql(
             r#""state": {"op": "eq", "value": "merged"}, "source_branch": {"op": "eq", "value": "main"}"#,
         );
         assert!(
-            sql.contains("_filter_mr"),
-            "partial denorm must keep a filter CTE for non-denormalized filters, got:\n{sql}"
+            sql.contains("INNER JOIN"),
+            "partial denorm must JOIN node table for non-denormalized filters, got:\n{sql}"
         );
         assert!(
             sql.contains("has(e0.target_tags, 'state:merged')"),
             "denormalized state filter must be pushed to edge tags, got:\n{sql}"
         );
         assert!(
-            sql.contains("main"),
-            "filter CTE must retain non-denormalized source_branch filter, got:\n{sql}"
+            sql.contains("source_branch") && sql.contains("main"),
+            "JOIN must retain non-denormalized source_branch filter, got:\n{sql}"
         );
     }
 
@@ -1292,14 +1424,19 @@ mod tests {
             let compiled = compile(query, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
+            // Node JOINs in FK-star aggregations use LIMIT BY; other query
+            // types (traversal, path_finding, neighbors) keep FINAL on
+            // their primary scans and may use LIMIT BY on node JOINs.
             assert!(
-                sql.contains(" FINAL"),
-                "{name} should use FINAL for node-table reads, got:\n{sql}"
+                sql.contains(" FINAL") || sql.contains("LIMIT 1 BY"),
+                "{name} should use FINAL or LIMIT BY for node-table dedup, got:\n{sql}"
             );
-            assert!(
-                !sql.contains("LIMIT 1 BY"),
-                "{name} should not use manual LIMIT BY dedup, got:\n{sql}"
-            );
+            if name == "traversal" || name == "path_finding" || name == "neighbors" {
+                assert!(
+                    sql.contains(" FINAL"),
+                    "{name} must still use FINAL for its primary node scan, got:\n{sql}"
+                );
+            }
         }
     }
 
@@ -1332,9 +1469,9 @@ mod tests {
             "center should get a non-FINAL candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j FINAL WHERE")
-                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe FINAL WHERE"),
-            "outer latest-row reads should still use FINAL with joined node filtering pushed down, got:\n{sql}"
+            sql.contains("FROM (SELECT * FROM gl_job AS j")
+                && sql.contains("AS j INNER JOIN (SELECT * FROM gl_pipeline AS pipe"),
+            "outer latest-row reads should use dedup (FINAL or LIMIT BY), got:\n{sql}"
         );
         assert!(
             sql.contains("j.pipeline_id IN (SELECT id FROM _candidate_pipe)")
@@ -1408,14 +1545,14 @@ mod tests {
             "center scan should not use a same-table candidate set without target-derived predicates, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM (SELECT * FROM gl_job AS j1 FINAL WHERE")
-                && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2 FINAL WHERE"),
-            "outer source and joined target should still use FINAL with joined node filtering pushed down, got:\n{sql}"
+            sql.contains("FROM (SELECT * FROM gl_job AS j1")
+                && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2"),
+            "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
         );
     }
 
     #[test]
-    fn flat_chain_edge_narrowing_deduplicates_frontier() {
+    fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1435,19 +1572,45 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(
-                "_narrow_p AS (SELECT DISTINCT e0n.target_id AS id FROM gl_edge AS e0n WHERE"
-            ),
-            "edge-derived narrowing frontiers should deduplicate high fan-out IDs, got:\n{sql}"
+            !sql.contains("_narrow_p"),
+            "single FilterOnly node should not emit _narrow_p cascade CTE; the IN-CTE push on the same hop already narrows the join, got:\n{sql}"
         );
         assert!(
-            sql.contains("p.id IN (SELECT id FROM _narrow_p)"),
-            "joined node FINAL scan should use the edge-derived frontier, got:\n{sql}"
+            sql.contains("e1.source_id IN (SELECT id FROM _filter_g)"),
+            "FilterOnly IN-CTE should land inside the dedup CTE inner WHERE, got:\n{sql}"
         );
     }
 
     #[test]
-    fn filtered_redaction_joins_push_filters_into_final_subquery() {
+    fn cascade_narrowing_skipped_for_convergent_join_target() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "n", "entity": "Note"},
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
+                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "n", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "n"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "n", "alias": "note_count"}],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("_narrow_p"),
+            "p is the join target of two hops (IN_PROJECT and CONTAINS), so the cross-hop joins narrow it without a cascade CTE; got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn filtered_redaction_joins_push_filters_into_subquery() {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1461,19 +1624,19 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f WHERE")
                 && sql.contains("endsWith(f.path, '.rb')"),
-            "filtered File redaction join should push filters into the FINAL subquery, got:\n{sql}"
+            "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d WHERE")
                 && sql.contains("startsWith(d.name, 'process')"),
-            "filtered Definition redaction join should push filters into the FINAL subquery, got:\n{sql}"
+            "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
     }
 
     #[test]
-    fn hydration_uses_final_for_latest_rows() {
+    fn hydration_uses_limit_by_for_latest_rows() {
         let input = Input {
             query_type: QueryType::Hydration,
             nodes: vec![InputNode {
@@ -1495,12 +1658,12 @@ mod tests {
             compile_input(input, &ont, &security_ctx()).expect("hydration input should compile");
         let sql = compiled.base.render();
         assert!(
-            sql.contains(" FINAL"),
-            "hydration should use FINAL for node-table reads, got:\n{sql}"
+            !sql.contains(" FINAL"),
+            "hydration should dedup via LIMIT BY, not FINAL, got:\n{sql}"
         );
         assert!(
-            !sql.contains("LIMIT 1 BY"),
-            "hydration should not use manual LIMIT BY dedup, got:\n{sql}"
+            sql.contains("LIMIT 1 BY"),
+            "hydration should dedup latest rows via LIMIT 1 BY, got:\n{sql}"
         );
     }
 

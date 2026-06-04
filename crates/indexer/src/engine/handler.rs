@@ -155,6 +155,16 @@ pub trait Handler: Send + Sync {
     /// Returns a [`HandlerError`] if processing fails. The engine will
     /// retry or ack based on the subscription's config.
     async fn handle(&self, context: HandlerContext, message: Envelope) -> Result<(), HandlerError>;
+
+    /// Whether the engine should acquire a worker pool permit before calling
+    /// [`handle`](Handler::handle). Defaults to `true`.
+    ///
+    /// Handlers that manage their own concurrency (e.g. pipelined handlers
+    /// with separate fetch and process semaphores) return `false` so the
+    /// engine does not gate them behind the shared worker pool.
+    fn requires_worker_pool(&self) -> bool {
+        true
+    }
 }
 
 /// A registry for managing handlers and their topic subscriptions.

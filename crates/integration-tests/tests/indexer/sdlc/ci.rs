@@ -1,4 +1,4 @@
-use arrow::array::{Array, StringArray};
+use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -55,7 +55,7 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     let failure_reason =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "failure_reason")
             .expect("failure_reason column");
-    assert!(failure_reason.is_null(0));
+    assert!(failure_reason.value(0).is_empty());
     assert_eq!(failure_reason.value(1), "filtered_by_no_pipeline");
 
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Pipeline", "Project", "1/100/1000/", 2)
@@ -187,7 +187,7 @@ pub async fn processes_jobs(ctx: &TestContext) {
     let failure_reason =
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "failure_reason")
             .expect("failure_reason column");
-    assert!(failure_reason.is_null(0));
+    assert!(failure_reason.value(0).is_empty());
     assert_eq!(failure_reason.value(1), "script_failure");
     assert_eq!(failure_reason.value(2), "protected_environment_failure");
 

@@ -142,6 +142,16 @@ fn restrict(ctx: &mut impl CompilerCtx) -> Result<()> {
 
 fn plan(ctx: &mut impl CompilerCtx) -> Result<()> {
     let mut input = require(ctx.take_input(), "input")?;
+    // The hydration pipeline skips `normalize`, so source node sort keys (used
+    // for LIMIT BY dedup) straight from the ontology when absent.
+    if input.compiler.table_sort_keys.is_empty() {
+        for node in ctx.ontology().nodes() {
+            input
+                .compiler
+                .table_sort_keys
+                .insert(node.destination_table.clone(), node.sort_key.clone());
+        }
+    }
     let query_plan = plan::plan(&mut input)?;
     ctx.set_input(input);
     ctx.set_query_plan(query_plan);

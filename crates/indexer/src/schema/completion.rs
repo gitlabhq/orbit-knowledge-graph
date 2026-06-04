@@ -21,6 +21,7 @@ use query_engine::compiler::generate_graph_tables;
 use tracing::{info, warn};
 
 use super::metrics::CompletionMetrics;
+use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
@@ -102,9 +103,14 @@ pub struct MigrationCompletionChecker {
     config: MigrationCompletionConfig,
     metrics: CompletionMetrics,
     _task_metrics: ScheduledTaskMetrics,
+    campaign: Arc<CampaignState>,
 }
 
 impl MigrationCompletionChecker {
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "completion checker constructor wires all collaborators explicitly; grouping into a struct would just move the arity"
+    )]
     pub fn new(
         graph: ArrowClickHouseClient,
         datalake: ArrowClickHouseClient,
@@ -113,6 +119,7 @@ impl MigrationCompletionChecker {
         schema_config: SchemaConfig,
         config: MigrationCompletionConfig,
         task_metrics: ScheduledTaskMetrics,
+        campaign: Arc<CampaignState>,
     ) -> Self {
         Self {
             graph,
@@ -123,6 +130,7 @@ impl MigrationCompletionChecker {
             config,
             metrics: CompletionMetrics::new(),
             _task_metrics: task_metrics,
+            campaign,
         }
     }
 }
@@ -239,6 +247,9 @@ impl MigrationCompletionChecker {
         mark_version_active(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;
+
+        // Campaign ends when its migration completes.
+        self.campaign.clear();
 
         self.metrics.record_migration_completed();
 

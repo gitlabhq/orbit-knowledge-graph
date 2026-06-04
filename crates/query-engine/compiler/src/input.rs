@@ -162,6 +162,10 @@ pub struct CompilerMetadata {
     /// Physical table columns from the ontology. Used by lowering to emit
     /// internal predicates only when a table is known to carry that column.
     pub table_columns: HashMap<String, HashSet<String>>,
+    /// ORDER BY (sort key) columns per table from the ontology. Used by
+    /// the lowerer to emit `LIMIT 1 BY` dedup with PK-prefixed ORDER BY
+    /// instead of FINAL for single-hop edge aggregations.
+    pub table_sort_keys: HashMap<String, Vec<String>>,
     /// Maps relationship kind → valid source entity kinds. Used by
     /// pathfinding to add intermediate kind filters on frontier hops.
     pub edge_source_kinds: HashMap<String, Vec<String>>,
@@ -182,6 +186,7 @@ impl Default for CompilerMetadata {
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
             table_columns: HashMap::new(),
+            table_sort_keys: HashMap::new(),
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
         }
@@ -471,6 +476,9 @@ pub struct InputFilter {
     /// Populated by the validate pass; lets the lowerer bind temporal columns
     /// with their typed CH param.
     pub data_type: Option<ontology::DataType>,
+    /// Populated by the validate pass from the ontology field definition.
+    /// Used by the planner to decide whether a filter justifies a narrowing CTE.
+    pub selectivity: ontology::FieldSelectivity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, strum::AsRefStr)]
@@ -826,6 +834,18 @@ impl AggFunction {
             Self::Min => "MIN",
             Self::Max => "MAX",
             Self::Collect => "groupArray",
+        }
+    }
+
+    /// ClickHouse `-If` combinator name (e.g. `countIf`, `sumIf`).
+    pub fn as_sql_if(&self) -> &'static str {
+        match self {
+            Self::Count => "countIf",
+            Self::Sum => "sumIf",
+            Self::Avg => "avgIf",
+            Self::Min => "minIf",
+            Self::Max => "maxIf",
+            Self::Collect => "groupArrayIf",
         }
     }
 }

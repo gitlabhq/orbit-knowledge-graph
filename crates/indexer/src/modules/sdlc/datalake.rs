@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::ArrowClickHouseClient;
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -25,6 +25,15 @@ impl From<clickhouse::error::Error> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
+/// Rows and bytes a page actually returned from the datalake, for cost
+/// attribution. ClickHouse's scanned `X-ClickHouse-Summary` figures are not
+/// used for now; the pipeline fills these from the returned blocks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ReadStats {
+    pub read_rows: u64,
+    pub read_bytes: u64,
+}
+
 #[async_trait]
 pub(crate) trait DatalakeQuery: Send + Sync {
     async fn query_arrow(
@@ -42,6 +51,10 @@ pub(crate) trait DatalakeQuery: Send + Sync {
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 }
 
+/// Byte cap for retry blocks, keeping a block's String column under the 2GB
+/// Arrow offset limit even for MB-wide rows. ClickHouse's own default.
+const RETRY_PREFERRED_BLOCK_SIZE_BYTES: &str = "1000000";
+
 pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
@@ -56,6 +69,16 @@ impl Datalake {
             default_max_block_size,
         }
     }
+
+    fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
+        let mut query = self.client.query(sql);
+        if let Value::Object(map) = params {
+            for (key, value) in map {
+                query = query.param(&key, value);
+            }
+        }
+        query
+    }
 }
 
 #[async_trait]
@@ -66,15 +89,16 @@ impl DatalakeQuery for Datalake {
         params: Value,
         max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
-        let mut query = self.client.query(sql);
-
-        if let Value::Object(map) = params {
-            for (key, value) in map {
-                query = query.param(&key, value);
-            }
-        }
-
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
+        let mut query = self.build_query(sql, params);
+        if max_block_size.is_some() {
+            // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
+            // blocks so the retry is safe regardless of row width.
+            query = query.with_setting(
+                "preferred_block_size_bytes",
+                RETRY_PREFERRED_BLOCK_SIZE_BYTES,
+            );
+        }
         let stream = query
             .fetch_arrow_streamed(block_size)
             .await
