@@ -183,6 +183,26 @@ Result Node Ids Contain
     ${ids}=    Evaluate    [n["id"] for n in $resp["result"]["nodes"]]
     Should Contain    ${ids}    ${{str($node_id)}}    node ${node_id} not in result nodes ${ids}
 
+Wait Until Result Node Ids Contain
+    [Documentation]    Re-run a graph-shaped query until every ${node_id} appears among result.nodes,
+    ...                within the shared indexing budget. neighbors / path_finding DISCOVER their
+    ...                result nodes, so each one is authorized per-resource through Rails redaction;
+    ...                a just-created node is only eventually consistent on that authz path (the seed
+    ...                waits confirm graph indexing via an explicit-id traversal that needs no
+    ...                redaction), so a single immediate query can race the authz refresh and omit it.
+    ...                Polling mirrors the Wait For * Within Budget keywords the rest of the suite uses.
+    [Arguments]    ${query}    @{node_ids}
+    ${budget}=    Remaining Budget
+    Wait Until Keyword Succeeds    ${budget}    3s
+    ...    Result Must Contain Node Ids    ${query}    @{node_ids}
+
+Result Must Contain Node Ids
+    [Arguments]    ${query}    @{node_ids}
+    ${resp}=    Orbit Query    ${query}
+    FOR    ${node_id}    IN    @{node_ids}
+        Result Node Ids Contain    ${resp}    ${node_id}
+    END
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30
