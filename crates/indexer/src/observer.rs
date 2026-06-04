@@ -39,6 +39,8 @@ pub trait IndexingObserver: Send {
 
     fn record_datalake_read(&mut self, _rows: u64, _bytes: u64) {}
 
+    fn record_datalake_scan(&mut self, _rows: u64, _bytes: u64) {}
+
     fn record_graph_write(&mut self, _entity: &str, _rows: u64, _bytes: u64) {}
 
     fn record_duration(&mut self, _duration_ms: u64) {}
