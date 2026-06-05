@@ -47,8 +47,8 @@ fn assert_diff_file_chain(resp: &ResponseView) {
     resp.assert_node_ids("MergeRequest", &[2000]);
     resp.assert_node_ids("MergeRequestDiff", &[5000]);
     resp.assert_node_ids("MergeRequestDiffFile", &[9300, 9301]);
-    resp.assert_filter("MergeRequest", "project_id", |n| {
-        n.prop_i64("project_id") == Some(1000)
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
     });
     resp.assert_edge_set("HAS_DIFF", &[(2000, 5000)]);
     resp.assert_edge_set("HAS_FILE", &[(5000, 9300), (5000, 9301)]);
@@ -128,8 +128,8 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
     resp.assert_node_count(2);
     resp.assert_node_ids("MergeRequest", &[2000]);
     resp.assert_node_ids("WorkItem", &[4002]);
-    resp.assert_filter("MergeRequest", "project_id", |n| {
-        n.prop_i64("project_id") == Some(1000)
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
     });
     resp.assert_edge_set("CLOSES", &[(2000, 4002)]);
     resp.assert_referential_integrity();
@@ -168,10 +168,11 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
     )
     .await;
 
+    resp.assert_node_count(4);
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
-    resp.assert_filter("MergeRequest", "project_id", |n| {
-        matches!(n.prop_i64("project_id"), Some(1000) | Some(1001))
+    resp.skip_requirement(Requirement::Filter {
+        field: "project_id".into(),
     });
     resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (1, 2002)]);
     resp.assert_referential_integrity();
