@@ -189,7 +189,6 @@ impl DslLanguage for RubyDsl {
             }],
             constructor: &[],
             qualified_type_kinds: &[],
-            ..Default::default()
         })
     }
 
@@ -198,7 +197,6 @@ impl DslLanguage for RubyDsl {
             self_names: &["self"],
             super_name: Some("super"),
             constructor_methods: CONSTRUCTOR_METHODS,
-            ..Default::default()
         }
     }
 }

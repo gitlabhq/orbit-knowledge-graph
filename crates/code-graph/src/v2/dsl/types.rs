@@ -42,8 +42,6 @@ pub struct ScopeRule {
     name: Extract,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
-    /// Anchor a `no_scope` def's FQN to the enclosing type, not the lexical scope (PHP promoted properties).
-    pub(crate) hoist_to_type_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
 
@@ -89,12 +87,6 @@ impl ScopeRule {
         self
     }
 
-    /// Anchor this definition's FQN to the enclosing type container, not the lexical sub-scope.
-    pub fn hoist_to_type_scope(mut self) -> Self {
-        self.hoist_to_type_scope = true;
-        self
-    }
-
     pub fn def_kind(mut self, kind: DefKind) -> Self {
         self.def_kind = kind;
         self
@@ -134,7 +126,6 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
-        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }
@@ -149,7 +140,6 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
-        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }
@@ -169,7 +159,6 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         name: default_name(),
         default_name: None,
         creates_scope: true,
-        hoist_to_type_scope: false,
         metadata_rule: None,
     }
 }
@@ -190,16 +179,9 @@ pub struct FieldAccessEntry {
     pub member: Extract,
 }
 
-/// Constructor whose class name is a positional child, not a tree-sitter field (PHP `object_creation_expression`).
-pub struct PositionalConstructor {
-    pub kind: &'static str,
-    pub type_extract: Extract,
-}
-
 /// Per-language configuration for expression chain extraction.
 /// Tells the engine how to recognize identifiers, this/super,
 /// field access, and constructors in the tree-sitter AST.
-#[derive(Default)]
 pub struct ChainConfig {
     /// Node kinds that are bare identifiers (e.g. `["identifier"]` for Java).
     pub ident_kinds: &'static [&'static str],
@@ -217,10 +199,6 @@ pub struct ChainConfig {
     /// into chain steps (Ident for the base, Field for nested parts,
     /// New for the final segment) instead of treating it as a single name.
     pub qualified_type_kinds: &'static [&'static str],
-    /// Constructor matchers whose class name is positional (PHP). Empty by default.
-    pub positional_constructor: Vec<PositionalConstructor>,
-    /// Node kinds to walk through during chain extraction (PHP `parenthesized_expression`). Empty by default.
-    pub transparent_kinds: &'static [&'static str],
 }
 
 impl Rule for ReferenceRule {
@@ -779,8 +757,6 @@ pub struct SsaConfig {
     /// `Receiver.new(args)`, the SSA value is `Type(Receiver)` instead
     /// of `Alias(new)`. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
-    /// Opt-in: rewrite a self/static/parent return type to the enclosing type's FQN. Off by default.
-    pub rewrite_self_in_return_type: bool,
 }
 
 // ── Hooks ───────────────────────────────────────────────────────
@@ -805,8 +781,6 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
-    /// Node kinds `on_import` fires on. Empty (default) = every node.
-    pub on_import_kinds: &'static [&'static str],
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.

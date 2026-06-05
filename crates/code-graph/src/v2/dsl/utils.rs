@@ -16,10 +16,6 @@ pub fn resolve_type_name(
     module_prefix: Option<&str>,
     sep: &str,
 ) -> String {
-    // A leading separator marks an absolute name (PHP `\Vendor\X`, C++ `::Foo`): resolve it directly.
-    if let Some(abs) = name.strip_prefix(sep) {
-        return abs.to_string();
-    }
     if let Some(fqn) = import_map.get(name) {
         return fqn.clone();
     }

@@ -90,7 +90,6 @@ impl DslLanguage for CDsl {
             }],
             constructor: &[],
             qualified_type_kinds: &[],
-            ..Default::default()
         })
     }
 

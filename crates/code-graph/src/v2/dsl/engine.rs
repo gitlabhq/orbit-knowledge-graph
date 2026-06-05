@@ -114,7 +114,6 @@ struct ScopeMatch {
     def_kind: DefKind,
     range: crate::utils::Range,
     creates_scope: bool,
-    hoist_to_type_scope: bool,
     metadata: Option<Box<DefinitionMetadata>>,
 }
 
@@ -142,7 +141,6 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            hoist_to_type_scope: rule.hoist_to_type_scope,
             metadata: rule.extract_metadata(node, &resolve),
         })
     }
@@ -336,30 +334,6 @@ impl LanguageSpec {
                 break;
             }
 
-            // Positional constructor (PHP `object_creation_expression`): class is a child, not a field.
-            let mut matched_pctor = false;
-            for pctor in &cc.positional_constructor {
-                if kind_ref == pctor.kind {
-                    if let Some(name) = pctor.type_extract.apply(&current) {
-                        let resolved = resolve_type_name(&name, import_map, module_prefix, sep);
-                        trace!(
-                            tracer,
-                            ChainStepMatched {
-                                node_kind: kind_ref.to_string(),
-                                category: "New(positional)".to_string(),
-                                text: resolved.clone(),
-                            }
-                        );
-                        chain.push(ExpressionStep::New(resolved.into()));
-                    }
-                    matched_pctor = true;
-                    break;
-                }
-            }
-            if matched_pctor {
-                break;
-            }
-
             // ── Recursive cases (defer step, advance inward) ──
 
             // Field access (obj.field) — defer the Field step, advance to obj
@@ -386,15 +360,6 @@ impl LanguageSpec {
             }
             if matched_fa {
                 continue;
-            }
-
-            // Transparent wrappers (PHP `parenthesized_expression`): advance to the first named child.
-            if cc.transparent_kinds.contains(&kind_ref) {
-                let inner = current.children().find(|c| c.is_named());
-                if let Some(inner) = inner {
-                    current = inner;
-                    continue;
-                }
             }
 
             // Call expression — defer the Call step, advance to receiver
@@ -831,7 +796,7 @@ impl LanguageSpec {
         }
 
         // Scope matching → push def + optional SSA self/super writes
-        if let Some(mut m) = self.evaluate_scope(node, nk, |bare, _origin| {
+        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
             }
@@ -864,52 +829,11 @@ impl LanguageSpec {
                         .collect::<Vec<_>>(),
                     sep,
                 )
-            } else if m.hoist_to_type_scope
-                && let Some(type_fqn) = state.enclosing_def_stack.iter().rev().find_map(|&idx| {
-                    let d = &state.defs[idx as usize];
-                    d.kind
-                        .is_type_container()
-                        .then(|| d.fqn.as_str().to_string())
-                })
-            {
-                // Anchor to the enclosing type (PHP promoted properties are class members).
-                Fqn::from_parts(&[type_fqn.as_str(), m.name.as_str()], sep)
             } else {
                 Fqn::from_scope(&state.scope_stack, &m.name, sep)
             };
 
             let is_type_scope = m.def_kind.is_type_container();
-
-            // Rewrite a self/static/parent return type to the declaring class so chains continue.
-            if self.ssa_config.rewrite_self_in_return_type
-                && let Some(meta) = m.metadata.as_mut()
-                && let Some(rt) = meta.return_type.as_ref()
-            {
-                let last_seg = rt.rsplit_once(sep).map_or(rt.as_str(), |(_, s)| s);
-                let is_self = self.ssa_config.self_names.contains(&last_seg);
-                let is_super = self.ssa_config.super_name.is_some_and(|n| n == last_seg);
-                if is_self || is_super {
-                    let enclosing_type = state.enclosing_def_stack.iter().rev().find_map(|&idx| {
-                        let d = &state.defs[idx as usize];
-                        d.kind
-                            .is_type_container()
-                            .then(|| (idx, d.fqn.as_str().to_string()))
-                    });
-                    if let Some((enclosing_idx, enclosing_fqn)) = enclosing_type {
-                        if is_self {
-                            meta.return_type = Some(enclosing_fqn);
-                        } else if is_super
-                            && let Some(parent_fqn) = state.defs[enclosing_idx as usize]
-                                .metadata
-                                .as_ref()
-                                .and_then(|em| em.super_types.first())
-                                .cloned()
-                        {
-                            meta.return_type = Some(parent_fqn);
-                        }
-                    }
-                }
-            }
 
             let def_name = m.name.clone();
             trace!(
@@ -1067,13 +991,10 @@ impl LanguageSpec {
 
             // Import handling → also write to SSA
             let import_count_before = state.imports.len();
-            let on_import_applies =
-                self.hooks.on_import_kinds.is_empty() || self.hooks.on_import_kinds.contains(&nk);
-            let handled = on_import_applies
-                && self
-                    .hooks
-                    .on_import
-                    .is_some_and(|f| f(node, &mut state.imports));
+            let handled = self
+                .hooks
+                .on_import
+                .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 let ms = state.scope_stack.first().map(|s| s.as_ref());
                 self.evaluate_imports(node, nk, &mut state.imports, ms, sep);

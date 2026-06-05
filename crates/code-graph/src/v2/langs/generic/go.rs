@@ -182,7 +182,6 @@ impl DslLanguage for GoDsl {
             }],
             constructor: &[("composite_literal", "type")],
             qualified_type_kinds: &[],
-            ..Default::default()
         })
     }
 }

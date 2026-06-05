@@ -161,7 +161,6 @@ impl DslLanguage for PythonDsl {
             }],
             constructor: &[],
             qualified_type_kinds: &[],
-            ..Default::default()
         })
     }
 

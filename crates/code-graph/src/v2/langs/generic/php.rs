@@ -66,8 +66,9 @@ impl DslLanguage for PhpDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
+            on_scope: Some(php_on_scope),
             on_import: Some(php_extract_use),
-            on_import_kinds: &["namespace_use_declaration"],
+            ref_name_rewrite: Some(php_strip_leading_backslash),
             ..LanguageHooks::default()
         }
     }
@@ -104,11 +105,10 @@ impl DslLanguage for PhpDsl {
                         .child_of_kind("name"),
                 )
                 .metadata(metadata().type_annotation(field("type").descendant("name"))),
-            // Constructor property promotion (PHP 8.0): hoist the promoted param to the class scope.
+            // Constructor property promotion (PHP 8.0); php_on_scope re-anchors the FQN to the class.
             scope("property_promotion_parameter", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope()
-                .hoist_to_type_scope()
                 .name_from(field("name").child_of_kind("name"))
                 .metadata(metadata().type_annotation(field("type").descendant("name"))),
             scope("const_declaration", "Constant")
@@ -178,13 +178,6 @@ impl DslLanguage for PhpDsl {
             ],
             constructor: &[],
             qualified_type_kinds: &[],
-            // PHP `new Foo()`: the class is the first positional name/qualified_name child.
-            positional_constructor: vec![PositionalConstructor {
-                kind: "object_creation_expression",
-                type_extract: Extract::one(Child, AnyKind(&["name", "qualified_name"])),
-            }],
-            // `(new Foo())->bar()`: walk through the parens.
-            transparent_kinds: &["parenthesized_expression"],
         })
     }
 
@@ -268,11 +261,85 @@ impl DslLanguage for PhpDsl {
         types::SsaConfig {
             self_names: &["$this", "self", "static"],
             super_name: Some("parent"),
-            // `foo(): self|static` exposes the declaring class; `parent` the first super.
-            rewrite_self_in_return_type: true,
             ..Default::default()
         }
     }
+}
+
+/// On-scope hook: re-anchor a promoted property's FQN to the enclosing class,
+/// and rewrite a method's self/static/parent return type to a concrete class FQN.
+#[expect(
+    clippy::ptr_arg,
+    reason = "signature must match the on_scope hook fn pointer"
+)]
+fn php_on_scope(
+    node: &N<'_>,
+    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    let nk = node.kind();
+    let nk_ref = nk.as_ref();
+
+    if nk_ref == "property_promotion_parameter" {
+        // The lexical scope adds the trailing `__construct`; drop it so the
+        // promoted property is class-scoped.
+        if let Some(last) = defs.last_mut()
+            && last.kind == DefKind::Property
+        {
+            let class_scope = match scope_stack.last().map(|s| s.as_ref()) {
+                Some("__construct") => &scope_stack[..scope_stack.len() - 1],
+                _ => scope_stack,
+            };
+            let name = last.name.clone();
+            last.fqn = crate::v2::types::Fqn::from_scope(class_scope, &name, sep);
+        }
+        return false;
+    }
+
+    if nk_ref == "method_declaration" || nk_ref == "function_definition" {
+        let is_parent = match defs
+            .last()
+            .and_then(|d| d.metadata.as_ref())
+            .and_then(|m| m.return_type.as_deref())
+        {
+            Some("self") | Some("static") => false,
+            Some("parent") => true,
+            _ => return false,
+        };
+        if scope_stack.len() < 2 {
+            return false;
+        }
+        let class_fqn: String = scope_stack[..scope_stack.len() - 1]
+            .iter()
+            .map(|s| s.as_ref())
+            .collect::<Vec<&str>>()
+            .join(sep);
+        let new_rt = if is_parent {
+            // `parent` returns the declaring class's first super (already `\`-stripped).
+            let parent = defs
+                .iter()
+                .rev()
+                .find(|d| d.kind.is_type_container() && d.fqn.as_str() == class_fqn)
+                .and_then(|d| d.metadata.as_ref())
+                .and_then(|m| m.super_types.first().cloned());
+            match parent {
+                Some(p) => p,
+                None => return false,
+            }
+        } else {
+            class_fqn
+        };
+        if let Some(meta) = defs.last_mut().and_then(|d| d.metadata.as_mut()) {
+            meta.return_type = Some(new_rt);
+        }
+    }
+    false
+}
+
+/// Reference names keep the leading `\` of an absolute PHP name; graph FQNs omit it.
+fn php_strip_leading_backslash(_node: &N<'_>, name: &str) -> Option<String> {
+    name.strip_prefix('\\').map(str::to_string)
 }
 
 /// Extract `use` imports: single, aliased, grouped, and `use function`/`use const`.
