@@ -564,7 +564,7 @@ pub fn generate_statistics_ddl_with_prefix(
             columns: vec![
                 ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
                 ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
-                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("String")),
                 ColumnDef::new("value", parse_column_type("String")),
                 ColumnDef::new(
                     "row_count",
@@ -596,7 +596,7 @@ pub fn generate_statistics_ddl_with_prefix(
             columns: vec![
                 ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
                 ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
-                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("String")),
                 ColumnDef::new("value", parse_column_type("String")),
                 ColumnDef::new(
                     "row_count",
@@ -636,7 +636,7 @@ pub fn generate_statistics_ddl_with_prefix(
             columns: vec![
                 ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
                 ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
-                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("String")),
                 ColumnDef::new("token", parse_column_type("String")),
                 ColumnDef::new(
                     "row_count",
@@ -684,7 +684,7 @@ pub fn generate_statistics_ddl_with_prefix(
                 "SELECT \
                  toLowCardinality('{{{table}}}') AS table_name, \
                  toLowCardinality(col.1) AS column_name, \
-                 toLowCardinality({pk_expr}) AS partition_key, \
+                 {pk_expr} AS partition_key, \
                  col.2 AS value, \
                  uniqState(id) AS row_count \
                  FROM {{{table}}} \
@@ -719,7 +719,7 @@ pub fn generate_statistics_ddl_with_prefix(
                 "SELECT \
                  toLowCardinality('{{{table}}}') AS table_name, \
                  toLowCardinality(col.1) AS column_name, \
-                 toLowCardinality({pk_expr}) AS partition_key, \
+                 {pk_expr} AS partition_key, \
                  col.2 AS value, \
                  uniqState(id) AS row_count, \
                  col.2 AS min_value, \
@@ -756,7 +756,7 @@ pub fn generate_statistics_ddl_with_prefix(
                 "SELECT \
                  toLowCardinality('{{{table}}}') AS table_name, \
                  toLowCardinality(col.1) AS column_name, \
-                 toLowCardinality({pk_expr}) AS partition_key, \
+                 {pk_expr} AS partition_key, \
                  col.2 AS token, \
                  uniqState(id) AS row_count \
                  FROM {{{table}}} \
