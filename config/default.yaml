@@ -76,6 +76,7 @@ engine:
       max_attempts: 1  # re-dispatched daily, no need to retry
   handlers:
     entity-handler:
+      system_notes_resolve_lookup_batch_size: 1000
       batch_size_overrides:
         WorkItem: 50000
       partition_overrides:

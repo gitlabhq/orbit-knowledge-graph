@@ -5,6 +5,7 @@ use std::time::Duration;
 use gkg_observability::billing::events as spec;
 use labkit_events::BillingEvent;
 use opentelemetry::KeyValue;
+use query_engine::compiler::{CompiledQueryContext, ExecMetrics};
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
@@ -33,6 +34,7 @@ pub struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
     inputs: BillingInputs,
     query_type: &'static str,
+    metrics: ExecMetrics,
     errored: Cell<bool>,
 }
 
@@ -42,6 +44,7 @@ impl BillingObserver {
             tracker,
             inputs,
             query_type: "unknown",
+            metrics: ExecMetrics::default(),
             errored: Cell::new(false),
         }
     }
@@ -102,10 +105,16 @@ impl BillingObserver {
             builder = builder.deployment_type(dt.as_str());
         }
 
-        builder = builder.metadata(json!({
+        let mut metadata = json!({
             "query_type": self.query_type,
             "feature_qualified_name": feature_qualified_name(&self.inputs.source_type),
-        }));
+        });
+        if let (serde_json::Value::Object(map), Ok(serde_json::Value::Object(m))) =
+            (&mut metadata, serde_json::to_value(&self.metrics))
+        {
+            map.extend(m);
+        }
+        builder = builder.metadata(metadata);
 
         match builder.build() {
             Ok(event) => Some(event),
@@ -127,18 +136,22 @@ impl PipelineObserver for BillingObserver {
     fn set_query_type(&mut self, query_type: &'static str) {
         self.query_type = query_type;
     }
-
-    fn compiled(&mut self, _elapsed: Duration) {}
-
-    fn executed(&mut self, _elapsed: Duration, _batch_count: usize) {}
-
-    fn authorized(&mut self, _elapsed: Duration) {}
-
-    fn hydrated(&mut self, _elapsed: Duration) {}
-
-    fn query_executed(&mut self, _label: &str, _read_rows: u64, _read_bytes: u64, _memory: i64) {}
-
-    fn record_error(&self, _error: &PipelineError) {
+    fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
+        self.metrics.input = Some(ctx.input.clone());
+        self.metrics.hydration = Some(ctx.hydration.clone());
+    }
+    fn compiled(&mut self, elapsed: Duration) {
+        self.metrics.compile_ms = Some(ExecMetrics::ms(elapsed));
+    }
+    fn executed(&mut self, elapsed: Duration, _: usize) {
+        self.metrics.execute_ms = Some(ExecMetrics::ms(elapsed));
+    }
+    fn authorized(&mut self, _: Duration) {}
+    fn hydrated(&mut self, _: Duration) {}
+    fn query_executed(&mut self, _: &str, r: u64, b: u64, m: i64) {
+        self.metrics.query_executed(r, b, m);
+    }
+    fn record_error(&self, _: &PipelineError) {
         self.errored.set(true);
     }
 

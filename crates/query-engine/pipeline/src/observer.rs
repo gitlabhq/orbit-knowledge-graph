@@ -1,10 +1,13 @@
 use std::time::Duration;
 
 use crate::error::PipelineError;
+use compiler::CompiledQueryContext;
 
 /// Trait for observing pipeline stage timings and outcomes.
 pub trait PipelineObserver: Send {
     fn set_query_type(&mut self, query_type: &'static str);
+    /// Called once after successful compilation with the full compiled context.
+    fn set_compiled(&mut self, _ctx: &CompiledQueryContext) {}
     fn compiled(&mut self, elapsed: Duration);
     fn executed(&mut self, elapsed: Duration, batch_count: usize);
     fn authorized(&mut self, elapsed: Duration);
@@ -43,6 +46,12 @@ impl PipelineObserver for MultiObserver {
     fn set_query_type(&mut self, query_type: &'static str) {
         for o in self.iter_mut() {
             o.set_query_type(query_type);
+        }
+    }
+
+    fn set_compiled(&mut self, ctx: &CompiledQueryContext) {
+        for o in self.iter_mut() {
+            o.set_compiled(ctx);
         }
     }
 

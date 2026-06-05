@@ -80,6 +80,7 @@
             "datalake_batch_size": 500000,
             "partition_overrides": {},
             "stream_block_size": 65536,
+            "system_notes_resolve_lookup_batch_size": 1000,
             "write_channel_capacity": 8
           }
         },
@@ -534,6 +535,7 @@
               "datalake_batch_size": 500000,
               "partition_overrides": {},
               "stream_block_size": 65536,
+              "system_notes_resolve_lookup_batch_size": 1000,
               "write_channel_capacity": 8
             }
           }
@@ -600,6 +602,13 @@
           "type": "integer",
           "format": "uint64",
           "default": 65536,
+          "minimum": 1
+        },
+        "system_notes_resolve_lookup_batch_size": {
+          "description": "Maximum number of items bound into each SystemNote resolver lookup.",
+          "type": "integer",
+          "format": "uint",
+          "default": 1000,
           "minimum": 1
         },
         "write_channel_capacity": {
@@ -755,6 +764,7 @@
             "datalake_batch_size": 500000,
             "partition_overrides": {},
             "stream_block_size": 65536,
+            "system_notes_resolve_lookup_batch_size": 1000,
             "write_channel_capacity": 8
           }
         }

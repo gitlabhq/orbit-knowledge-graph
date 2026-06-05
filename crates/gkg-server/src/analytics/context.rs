@@ -1,6 +1,10 @@
+use std::collections::BTreeSet;
+use std::time::Duration;
+
 use gkg_analytics::{OrbitCommonContext, OrbitQueryContext, orbit_common, orbit_query};
 use gkg_server_config::{AnalyticsConfig, DeploymentKind};
 use labkit_events::Error as LabkitError;
+use query_engine::compiler::ExecMetrics;
 
 use crate::auth::{Claims, SourceType};
 
@@ -48,10 +52,14 @@ pub(crate) fn build_query(
     claims: &Claims,
     tool_name: &str,
     coding_agent: Option<&str>,
+    metrics: &ExecMetrics,
+    row_count: usize,
+    redacted_count: usize,
+    total_elapsed: Duration,
 ) -> Result<OrbitQueryContext, LabkitError> {
     let queried = leaf_namespace_ids(claims);
 
-    Ok(OrbitQueryContext::new(orbit_query::OrbitQuery {
+    let mut q = orbit_query::OrbitQuery {
         source_type: source_type(claims.source_type),
         tool_name: Some(
             tool_name
@@ -73,11 +81,175 @@ pub(crate) fn build_query(
             .map(str::parse::<orbit_query::OrbitQuerySessionId>)
             .transpose()
             .map_err(validation("session_id"))?,
-        user_type: None,
-        plan: None,
         is_gitlab_team_member: claims.is_gitlab_team_member,
-    }))
+        ..Default::default()
+    };
+    apply_metrics(&mut q, metrics, row_count, redacted_count, total_elapsed);
+    Ok(OrbitQueryContext::new(q))
 }
+
+fn apply_metrics(
+    q: &mut orbit_query::OrbitQuery,
+    metrics: &ExecMetrics,
+    row_count: usize,
+    redacted_count: usize,
+    total_elapsed: Duration,
+) {
+    if let Some(input) = &metrics.input {
+        let query_type: &str = input.query_type.into();
+        q.query_type = query_type.parse().ok();
+        q.node_count = Some(input.nodes.len() as i64);
+        q.relationship_count = Some(input.relationships.len() as i64);
+        q.is_search = Some(input.is_search());
+        q.has_cursor = Some(input.cursor.is_some());
+        q.has_order_by = Some(input.order_by.is_some());
+        q.limit = Some(input.limit as i64);
+        q.group_by_count = Some(input.aggregation.group_by.len() as i64);
+        q.dynamic_columns = <&str>::from(input.options.dynamic_columns).parse().ok();
+        q.path_max_depth = input.path.as_ref().map(|p| p.max_depth as i64);
+
+        let mut entities = BTreeSet::new();
+        let mut rel_types = BTreeSet::new();
+        let mut fields = BTreeSet::new();
+        let mut ops = BTreeSet::new();
+        let mut filter_count: i64 = 0;
+        let mut max_hops: i64 = 0;
+        let mut variable_hops = false;
+        let mut virtual_cols = false;
+
+        let mut columns = BTreeSet::new();
+        let mut has_star = false;
+
+        for node in &input.nodes {
+            if let Some(e) = &node.entity {
+                entities.insert(e.clone());
+            }
+            virtual_cols |= !node.virtual_columns.is_empty();
+            match &node.columns {
+                Some(query_engine::compiler::ColumnSelection::All) => has_star = true,
+                Some(query_engine::compiler::ColumnSelection::List(cols)) => {
+                    columns.extend(cols.iter().cloned());
+                }
+                None => {}
+            }
+            for (f, entries) in &node.filters {
+                fields.insert(f.clone());
+                for ef in entries {
+                    filter_count += 1;
+                    if let Some(op) = &ef.op {
+                        ops.insert(op.as_ref().to_owned());
+                    }
+                }
+            }
+        }
+        for rel in &input.relationships {
+            rel_types.extend(rel.types.iter().cloned());
+            max_hops = max_hops.max(rel.max_hops as i64);
+            variable_hops |= rel.min_hops != rel.max_hops;
+            for (f, entries) in &rel.filters {
+                fields.insert(f.clone());
+                for ef in entries {
+                    filter_count += 1;
+                    if let Some(op) = &ef.op {
+                        ops.insert(op.as_ref().to_owned());
+                    }
+                }
+            }
+        }
+
+        fn to_vec<T: std::str::FromStr>(set: BTreeSet<String>) -> Vec<T> {
+            set.into_iter().filter_map(|s| s.parse().ok()).collect()
+        }
+        q.entity_types = Some(to_vec(entities));
+        q.relationship_types = Some(to_vec(rel_types));
+        q.filter_fields = Some(to_vec(fields));
+        q.filter_ops = Some(to_vec(ops));
+        q.agg_functions = Some(
+            input
+                .aggregation
+                .metrics
+                .iter()
+                .map(|m| m.function.to_string())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .filter_map(|s| s.parse().ok())
+                .collect(),
+        );
+        q.filter_count = Some(filter_count);
+        q.max_hops = Some(max_hops);
+        q.has_variable_hops = Some(variable_hops);
+        q.has_virtual_columns = Some(virtual_cols);
+        q.column_selection_mode = if has_star {
+            "all"
+        } else if !columns.is_empty() {
+            "list"
+        } else {
+            "default"
+        }
+        .parse()
+        .ok();
+        q.requested_columns = if columns.is_empty() {
+            None
+        } else {
+            Some(to_vec(columns))
+        };
+        q.traversal_shape = traversal_shape(input).and_then(|s| s.parse().ok());
+    }
+
+    let label: &str = metrics.hydration.as_ref().map_or("none", |h| h.into());
+    q.hydration_plan = label.parse().ok();
+    q.duration_ms = Some(ExecMetrics::ms(total_elapsed) as i64);
+    q.compile_ms = metrics.compile_ms.map(|v| v as i64);
+    q.execute_ms = metrics.execute_ms.map(|v| v as i64);
+    q.authorization_ms = metrics.authorization_ms.map(|v| v as i64);
+    q.hydration_ms = metrics.hydration_ms.map(|v| v as i64);
+    q.row_count = Some(row_count as i64);
+    q.redacted_count = Some(redacted_count as i64);
+    q.ch_read_rows = Some(metrics.ch_read_rows as i64);
+    q.ch_read_bytes = Some(metrics.ch_read_bytes as i64);
+    q.ch_memory_usage = Some(metrics.ch_memory_usage as i64);
+
+    q.graph_schema_version = GRAPH_SCHEMA_VERSION.trim().parse().ok();
+    q.query_dsl_version = QUERY_DSL_VERSION.trim().parse().ok();
+    q.raw_output_format_version = RAW_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+    q.goon_output_format_version = GOON_OUTPUT_FORMAT_VERSION.trim().parse().ok();
+}
+
+/// Build a topology fingerprint like `User-[AUTHORED]->MergeRequest`.
+///
+/// Walks relationships in order, resolving `from`/`to` to entity types.
+/// Returns `None` for search queries (no relationships).
+fn traversal_shape(input: &query_engine::compiler::Input) -> Option<String> {
+    if input.relationships.is_empty() {
+        return None;
+    }
+    let entity_of = |id: &str| -> &str {
+        input
+            .nodes
+            .iter()
+            .find(|n| n.id == id)
+            .and_then(|n| n.entity.as_deref())
+            .unwrap_or("?")
+    };
+    let mut parts = Vec::new();
+    for rel in &input.relationships {
+        let types = rel.types.join("|");
+        parts.push(format!(
+            "{}-[{}]->{}",
+            entity_of(&rel.from),
+            types,
+            entity_of(&rel.to),
+        ));
+    }
+    Some(parts.join(", "))
+}
+
+const GRAPH_SCHEMA_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION"));
+const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
+const RAW_OUTPUT_FORMAT_VERSION: &str =
+    include_str!(concat!(env!("CONFIG_DIR"), "/RAW_OUTPUT_FORMAT_VERSION"));
+const GOON_OUTPUT_FORMAT_VERSION: &str =
+    include_str!(concat!(env!("CONFIG_DIR"), "/GOON_OUTPUT_FORMAT_VERSION"));
 
 /// Parse an optional `Claims` string into one of the orbit_common bounded
 /// newtypes. The bounds are 255 chars for instance/host fields; if the
@@ -173,7 +345,16 @@ mod tests {
 
     fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
-        let query = build_query(claims, tool, None).unwrap();
+        let query = build_query(
+            claims,
+            tool,
+            None,
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -184,7 +365,16 @@ mod tests {
 
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, "query_graph", None).unwrap();
+        let query = build_query(
+            claims,
+            "query_graph",
+            None,
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -232,7 +422,16 @@ mod tests {
     fn build_query_passes_through_coding_agent() {
         let claims = claims_with_paths(vec![]);
         let common = build_common(&AnalyticsConfig::default(), &claims, "33").unwrap();
-        let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
+        let query = build_query(
+            &claims,
+            "query_graph",
+            Some("claude-code"),
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         let event = StructuredEvent::builder("gkg", "gkg_query_executed")
             .context(common)
             .context(query)
@@ -252,7 +451,16 @@ mod tests {
     #[test]
     fn build_query_drops_oversized_coding_agent() {
         let claims = claims_with_paths(vec![]);
-        let query = build_query(&claims, "query_graph", Some(&"x".repeat(65))).unwrap();
+        let query = build_query(
+            &claims,
+            "query_graph",
+            Some(&"x".repeat(65)),
+            &ExecMetrics::default(),
+            0,
+            0,
+            Duration::ZERO,
+        )
+        .unwrap();
         assert!(query.data().get("coding_agent").is_none());
     }
 
@@ -332,14 +540,32 @@ mod tests {
         #[test]
         fn query_context_validates_against_iglu_schema() {
             let claims = claims_with_paths(vec!["1/22/"]);
-            let query = build_query(&claims, "query_graph", Some("claude-code")).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                Some("claude-code"),
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_valid(&ORBIT_QUERY_VALIDATOR, &query.data(), "orbit_query");
         }
 
         #[test]
         fn query_context_minimal_validates() {
             let claims = claims_with_paths(vec![]);
-            let query = build_query(&claims, "query_graph", None).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                None,
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
                 &query.data(),
@@ -351,7 +577,16 @@ mod tests {
         fn code_intelligence_validates_against_iglu_schema() {
             let mut claims = claims_with_paths(vec!["1/22/"]);
             claims.source_type = crate::auth::SourceType::CodeIntelligence;
-            let query = build_query(&claims, "query_graph", None).unwrap();
+            let query = build_query(
+                &claims,
+                "query_graph",
+                None,
+                &ExecMetrics::default(),
+                0,
+                0,
+                Duration::ZERO,
+            )
+            .unwrap();
             assert_eq!(query.data()["source_type"], "code_intelligence");
             assert_valid(
                 &ORBIT_QUERY_VALIDATOR,
@@ -359,5 +594,62 @@ mod tests {
                 "orbit_query (code_intelligence)",
             );
         }
+    }
+
+    #[test]
+    fn input_fields_mapped_to_context() {
+        use query_engine::compiler::HydrationPlan;
+        use query_engine::compiler::input::{
+            Direction, FilterOp, InputFilter, InputNode, InputRelationship,
+        };
+
+        let claims = claims_with_paths(vec!["1/22/"]);
+        let metrics = ExecMetrics {
+            input: Some(query_engine::compiler::Input {
+                nodes: vec![
+                    InputNode {
+                        entity: Some("User".into()),
+                        ..Default::default()
+                    },
+                    InputNode {
+                        entity: Some("MergeRequest".into()),
+                        filters: [(
+                            "state".into(),
+                            vec![InputFilter {
+                                op: Some(FilterOp::Eq),
+                                ..Default::default()
+                            }],
+                        )]
+                        .into(),
+                        ..Default::default()
+                    },
+                ],
+                relationships: vec![InputRelationship {
+                    types: vec!["AUTHORED".into()],
+                    from: "u".into(),
+                    to: "mr".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                    fk_column: None,
+                }],
+                ..Default::default()
+            }),
+            hydration: Some(HydrationPlan::Static(vec![])),
+            ..Default::default()
+        };
+        let query =
+            build_query(&claims, "query_graph", None, &metrics, 0, 0, Duration::ZERO).unwrap();
+        let data = query.data();
+
+        assert_eq!(data["source_type"], "mcp");
+        assert_eq!(data["queried_namespace_ids"][0], 22);
+        assert_eq!(data["query_type"], "traversal");
+        assert_eq!(data["node_count"], 2);
+        assert_eq!(data["entity_types"][0], "MergeRequest");
+        assert_eq!(data["filter_ops"][0], "eq");
+        assert_eq!(data["is_search"], false);
+        assert_eq!(data["hydration_plan"], "static");
     }
 }

@@ -83,6 +83,8 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
         obj.remove("self");
         obj.insert("title".to_string(), Value::String((*type_name).to_string()));
     }
+    inject_defaults(&mut parsed, schema_name);
+    promote_defaults_on_required(&mut parsed);
 
     let mut type_space = TypeSpace::new(
         TypeSpaceSettings::default()
@@ -126,6 +128,43 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
     ));
     out.push_str("}\n\n");
     out
+}
+
+/// Inject property defaults that GKG needs for `derive(Default)` but that
+/// don't belong in the canonical Iglu schema. Runs before
+/// `promote_defaults_on_required` so the injected defaults get the same
+/// treatment as any naturally present ones.
+fn inject_defaults(schema: &mut Value, schema_name: &str) {
+    if schema_name == "orbit_query"
+        && let Some(source_type) = schema
+            .pointer_mut("/properties/source_type")
+            .and_then(Value::as_object_mut)
+    {
+        source_type
+            .entry("default")
+            .or_insert(Value::String("rest".to_string()));
+    }
+}
+
+/// Remove required properties that carry a `default` so typify generates
+/// `#[serde(default)]` on those fields, enabling `derive(Default)` on the struct.
+fn promote_defaults_on_required(schema: &mut Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let props = obj
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(Value::Array(req)) = obj.get_mut("required") {
+        req.retain(|r| {
+            r.as_str()
+                .and_then(|name| props.get(name))
+                .and_then(|p| p.get("default"))
+                .is_none()
+        });
+    }
 }
 
 fn assert_self_matches_path(parsed: &Value, schema_path: &Path, schema_name: &str, version: &str) {

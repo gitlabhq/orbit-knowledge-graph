@@ -31,6 +31,7 @@
 //! println!("SQL: {}", result.base.sql);
 //! ```
 
+pub mod analytics;
 pub mod ast;
 pub mod constants;
 pub mod error;
@@ -58,6 +59,7 @@ pub use input::{
 pub use metrics::{METRICS, QueryEngineMetrics};
 pub use ontology::{Ontology, OntologyError};
 
+pub use analytics::ExecMetrics;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query,

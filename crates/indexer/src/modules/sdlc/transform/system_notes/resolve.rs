@@ -19,6 +19,12 @@ use std::collections::{HashMap, HashSet};
 
 use super::parse::{RefKind, Reference};
 
+/// The clickhouse crate serializes params into the URL query string, so these
+/// lookup arrays must stay bounded independently of Arrow block size.
+pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<Item = &[T]> {
+    items.chunks(batch_size.max(1))
+}
+
 /// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
@@ -230,7 +236,7 @@ impl ResolutionPlan {
 /// `gl_edge` primary key), which is what an inbound-edge query expects.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ResolvedIndex {
-    by_key: HashMap<(String, RefKind, i64), ResolvedTarget>,
+    by_key: HashMap<(RefKind, i64), HashMap<String, ResolvedTarget>>,
 }
 
 impl ResolvedIndex {
@@ -256,13 +262,16 @@ impl ResolvedIndex {
         ] {
             for e in entities {
                 if let Some(&(path, traversal_path)) = path_routes.get(&e.project_id) {
-                    by_key.insert(
-                        (path.to_string(), kind, e.iid),
-                        ResolvedTarget {
-                            id: e.id,
-                            traversal_path: traversal_path.to_string(),
-                        },
-                    );
+                    by_key
+                        .entry((kind, e.iid))
+                        .or_insert_with(HashMap::new)
+                        .insert(
+                            path.to_string(),
+                            ResolvedTarget {
+                                id: e.id,
+                                traversal_path: traversal_path.to_string(),
+                            },
+                        );
                 }
             }
         }
@@ -281,9 +290,7 @@ impl ResolvedIndex {
         if project.is_empty() {
             return None;
         }
-        self.by_key
-            .get(&(project.to_string(), r.kind, iid))
-            .cloned()
+        self.by_key.get(&(r.kind, iid))?.get(project).cloned()
     }
 }
 
@@ -292,10 +299,36 @@ mod tests {
     use super::*;
     use crate::modules::sdlc::transform::system_notes::parse::{Action, extract};
 
+    const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
+
     #[test]
     fn routes_sql_uses_named_parameters() {
         assert!(ROUTES_SQL.contains("{paths:Array(String)}"));
         assert!(ROUTES_SQL.contains("path IN"));
+    }
+
+    #[test]
+    fn lookup_chunks_bounds_param_array_size() {
+        let empty: Vec<i32> = Vec::new();
+        assert_eq!(
+            lookup_chunks(&empty, TEST_RESOLVE_LOOKUP_BATCH_SIZE).count(),
+            0
+        );
+
+        let values: Vec<_> = (0..TEST_RESOLVE_LOOKUP_BATCH_SIZE).collect();
+        let chunk_sizes: Vec<_> = lookup_chunks(&values, TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+            .map(<[_]>::len)
+            .collect();
+        assert_eq!(chunk_sizes, vec![TEST_RESOLVE_LOOKUP_BATCH_SIZE]);
+
+        let values: Vec<_> = (0..TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1).collect();
+        let chunk_sizes: Vec<_> = lookup_chunks(&values, TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+            .map(<[_]>::len)
+            .collect();
+        assert_eq!(chunk_sizes, vec![TEST_RESOLVE_LOOKUP_BATCH_SIZE, 1]);
+
+        let chunk_sizes: Vec<_> = lookup_chunks(&values, 0).map(<[_]>::len).collect();
+        assert_eq!(chunk_sizes, vec![1; TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1]);
     }
 
     #[test]

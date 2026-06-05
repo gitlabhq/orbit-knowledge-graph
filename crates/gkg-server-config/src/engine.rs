@@ -124,6 +124,10 @@ fn default_stream_block_size() -> u64 {
     65_536
 }
 
+fn default_system_notes_resolve_lookup_batch_size() -> usize {
+    1_000
+}
+
 fn default_halving_initial_block_size() -> u64 {
     100_000
 }
@@ -188,6 +192,11 @@ pub struct EntityHandlerConfig {
     #[serde(default = "default_stream_block_size")]
     #[schemars(range(min = 1))]
     pub stream_block_size: u64,
+
+    /// Maximum number of items bound into each SystemNote resolver lookup.
+    #[serde(default = "default_system_notes_resolve_lookup_batch_size")]
+    #[schemars(range(min = 1))]
+    pub system_notes_resolve_lookup_batch_size: usize,
 }
 
 impl Default for EntityHandlerConfig {
@@ -198,6 +207,8 @@ impl Default for EntityHandlerConfig {
             partition_overrides: HashMap::new(),
             write_channel_capacity: default_write_channel_capacity(),
             stream_block_size: default_stream_block_size(),
+            system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
+            ),
         }
     }
 }
@@ -520,6 +531,9 @@ impl EngineConfiguration {
         if entity_handler.stream_block_size == 0 {
             return Err(EngineConfigError::ZeroStreamBlockSize);
         }
+        if entity_handler.system_notes_resolve_lookup_batch_size == 0 {
+            return Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize);
+        }
         Ok(())
     }
 }
@@ -537,6 +551,11 @@ pub enum EngineConfigError {
 
     #[error("engine.handlers.entity_handler.stream_block_size must be at least 1")]
     ZeroStreamBlockSize,
+
+    #[error(
+        "engine.handlers.entity_handler.system_notes_resolve_lookup_batch_size must be at least 1"
+    )]
+    ZeroSystemNotesResolveLookupBatchSize,
 }
 
 /// Top-level schedule configuration.
@@ -609,14 +628,16 @@ modules: [sdlc, namespace_deletion]
         let cfg = EntityHandlerConfig::default();
         assert_eq!(cfg.write_channel_capacity, 8);
         assert_eq!(cfg.stream_block_size, 65_536);
+        assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
     #[test]
     fn entity_handler_streaming_knobs_override_from_yaml() {
-        let yaml = "write_channel_capacity: 32\nstream_block_size: 262144\n";
+        let yaml = "write_channel_capacity: 32\nstream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
         assert_eq!(cfg.write_channel_capacity, 32);
         assert_eq!(cfg.stream_block_size, 262_144);
+        assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
     }
 
     #[test]
@@ -636,6 +657,18 @@ modules: [sdlc, namespace_deletion]
         assert!(matches!(
             cfg.validate(),
             Err(EngineConfigError::ZeroStreamBlockSize)
+        ));
+    }
+
+    #[test]
+    fn zero_system_notes_resolve_lookup_batch_size_fails_validation() {
+        let mut cfg = EngineConfiguration::default();
+        cfg.handlers
+            .entity_handler
+            .system_notes_resolve_lookup_batch_size = 0;
+        assert!(matches!(
+            cfg.validate(),
+            Err(EngineConfigError::ZeroSystemNotesResolveLookupBatchSize)
         ));
     }
 }
