@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn generated_ddl_snapshot() {
-        use super::clickhouse::{emit_create_dictionary, emit_create_table};
+        use super::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table};
 
         let tables = generate_graph_tables(&ontology());
         let full_ddl: String = tables
@@ -660,12 +660,21 @@ mod tests {
             );
         }
 
+        let default_source = DictionarySource {
+            database: "default",
+            user: "default",
+            password: None,
+        };
         for dict in &dicts {
-            let sql = emit_create_dictionary(dict, "default");
+            let sql = emit_create_dictionary(dict, &default_source);
             eprintln!("\n--- GENERATED DICTIONARY DDL ---\n{sql};\n--- END ---\n");
             assert!(sql.contains("CREATE DICTIONARY IF NOT EXISTS"), "{sql}");
             assert!(sql.contains("id Int64"), "Int64 key: {sql}");
             assert!(sql.contains("PRIMARY KEY id"), "{sql}");
+            assert!(
+                sql.contains("SOURCE(CLICKHOUSE(USER 'default' QUERY"),
+                "explicit source user: {sql}"
+            );
             assert!(
                 sql.contains("argMax(traversal_path, _version) AS traversal_path"),
                 "argMax dedup: {sql}"

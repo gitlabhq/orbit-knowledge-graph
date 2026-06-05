@@ -166,7 +166,22 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     parts.join("\n")
 }
 
-pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> String {
+/// Connection identity for a dictionary's local `CLICKHOUSE` source. ClickHouse
+/// rejects a `SOURCE(CLICKHOUSE(...))` that omits the user when the user loading
+/// the dictionary isn't `default` (BAD_ARGUMENTS), so the user is always emitted
+/// and the password is emitted whenever one is configured.
+pub struct DictionarySource<'a> {
+    pub database: &'a str,
+    pub user: &'a str,
+    pub password: Option<&'a str>,
+}
+
+/// Escapes a value for a single-quoted ClickHouse string literal.
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource) -> String {
     let key_type = dict
         .attributes
         .iter()
@@ -207,10 +222,19 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> Strin
         "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
         outer = outer_selects.join(", "),
         inner = inner_selects.join(", "),
-        db = source_db,
+        db = source.database,
         table = dict.source_table,
         key = dict.key,
     );
+
+    let credentials = match source.password {
+        Some(password) => format!(
+            "USER {} PASSWORD {} ",
+            quote_literal(source.user),
+            quote_literal(password)
+        ),
+        None => format!("USER {} ", quote_literal(source.user)),
+    };
 
     let layout = match dict.layout.size_in_cells {
         Some(n) => format!("{}(SIZE_IN_CELLS {n})", dict.layout.kind.to_uppercase()),
@@ -220,7 +244,7 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> Strin
     // $q$...$q$ is a ClickHouse heredoc (dollar-quoted string literal), so the backtick-quoted
     // identifiers in `query` need no escaping; the body is schema-derived and never contains $q$.
     format!(
-        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE(QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
+        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE({credentials}QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
         name = dict.name,
         body = body.join(",\n"),
         key = dict.key,
@@ -588,6 +612,51 @@ mod tests {
         assert!(
             sql.contains("bloom_filter(0.01)"),
             "bloom_filter precision should be stable: {sql}"
+        );
+    }
+
+    fn dict() -> CreateDictionary {
+        CreateDictionary {
+            name: "gl_project_traversal_paths_dict".into(),
+            source_table: "gl_project".into(),
+            key: "id".into(),
+            attributes: vec![
+                ColumnDef::new("id", ColumnType::Int64),
+                ColumnDef::new("traversal_path", ColumnType::String),
+            ],
+            layout: DictLayout {
+                kind: "hashed".into(),
+                size_in_cells: None,
+            },
+            lifetime_min: 60,
+            lifetime_max: 300,
+        }
+    }
+
+    #[test]
+    fn dictionary_source_emits_user_without_password() {
+        let source = DictionarySource {
+            database: "graph",
+            user: "gkg",
+            password: None,
+        };
+        let sql = emit_create_dictionary(&dict(), &source);
+        assert!(sql.contains("SOURCE(CLICKHOUSE(USER 'gkg' QUERY"), "{sql}");
+        assert!(!sql.contains("PASSWORD"), "{sql}");
+        assert!(sql.contains("FROM `graph`.gl_project"), "{sql}");
+    }
+
+    #[test]
+    fn dictionary_source_emits_user_and_password() {
+        let source = DictionarySource {
+            database: "graph",
+            user: "gkg",
+            password: Some("s3cr't\\x"),
+        };
+        let sql = emit_create_dictionary(&dict(), &source);
+        assert!(
+            sql.contains(r"SOURCE(CLICKHOUSE(USER 'gkg' PASSWORD 's3cr\'t\\x' QUERY"),
+            "{sql}"
         );
     }
 }
