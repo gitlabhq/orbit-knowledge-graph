@@ -32,9 +32,10 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
-    RedactionConfig, RequiredRole, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition, NodeEntity,
+    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
+    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
+    VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -130,6 +131,8 @@ pub struct Ontology {
     /// Edge-producing entities derived by a Rust transform (keyed by name).
     /// These have no node table; they extract from the datalake and emit edges.
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
+    /// Materialized views defined in the ontology settings.
+    pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
 }
 
@@ -183,6 +186,7 @@ impl Ontology {
             auxiliary_dictionaries: Vec::new(),
             denormalized_properties: Vec::new(),
             derived_entities: BTreeMap::new(),
+            materialized_views: Vec::new(),
             traversal_path_lookups: Vec::new(),
         }
     }
@@ -878,6 +882,12 @@ impl Ontology {
     #[must_use]
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.auxiliary_tables
+    }
+
+    /// Materialized view definitions from the ontology settings.
+    #[must_use]
+    pub fn materialized_views(&self) -> &[MaterializedViewDefinition] {
+        &self.materialized_views
     }
 
     #[must_use]

@@ -506,6 +506,56 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    // Load and validate materialized views.
+    let all_table_names: std::collections::HashSet<String> = ontology
+        .auxiliary_tables
+        .iter()
+        .map(|t| t.name.clone())
+        .chain(ontology.nodes.values().map(|n| n.destination_table.clone()))
+        .chain(ontology.edge_table_configs.keys().cloned())
+        .collect();
+
+    ontology.materialized_views = schema
+        .settings
+        .materialized_views
+        .into_iter()
+        .map(|mv| {
+            match (&mv.to_table, &mv.engine) {
+                (None, None) => {
+                    return Err(OntologyError::Validation(format!(
+                        "materialized_view '{}': must set either `to_table` or `engine`",
+                        mv.name
+                    )));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(OntologyError::Validation(format!(
+                        "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
+                        mv.name
+                    )));
+                }
+                _ => {}
+            }
+            if let Some(ref to_table) = mv.to_table
+                && !all_table_names.contains(to_table)
+            {
+                return Err(OntologyError::Validation(format!(
+                    "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
+                     it would be orphaned during schema version cleanup",
+                    mv.name, to_table
+                )));
+            }
+            Ok(crate::entities::MaterializedViewDefinition {
+                name: mv.name,
+                to_table: mv.to_table,
+                select_query: mv.select_query,
+                engine: mv.engine,
+                engine_args: mv.engine_args,
+                order_by: mv.order_by,
+                populate: mv.populate,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     ontology.auxiliary_dictionaries = schema
         .settings
         .auxiliary_dictionaries

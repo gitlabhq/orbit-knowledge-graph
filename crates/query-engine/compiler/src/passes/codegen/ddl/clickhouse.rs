@@ -2,7 +2,10 @@
 //!
 //! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST.
 
-use crate::ast::ddl::{Codec, ColumnType, CreateDictionary, CreateTable, IndexType, ProjectionDef};
+use crate::ast::ddl::{
+    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
+    ProjectionDef,
+};
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
 /// ClickHouse reserved words that must be backtick-quoted when used as column identifiers.
@@ -162,6 +165,46 @@ pub fn emit_create_table(table: &CreateTable) -> String {
             .collect();
         parts.push(format!("SETTINGS {}", settings.join(", ")));
     }
+
+    parts.join("\n")
+}
+
+/// Emits a complete `CREATE MATERIALIZED VIEW IF NOT EXISTS` statement for ClickHouse.
+///
+/// The `select_query` must already have `{table_name}` placeholders resolved
+/// (see [`CreateMaterializedView::with_prefix`]).
+pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
+    let mut parts = Vec::new();
+
+    let mut header = format!("CREATE MATERIALIZED VIEW IF NOT EXISTS {}", mv.name);
+
+    if let Some(ref to_table) = mv.to_table {
+        header.push_str(&format!("\nTO {to_table}"));
+    } else {
+        let engine = mv.engine.as_ref().unwrap_or_else(|| {
+            panic!(
+                "materialized view '{}' uses implicit storage but has no engine; \
+                 either set `to_table` or `engine`",
+                mv.name
+            )
+        });
+        let engine_args = if engine.args.is_empty() {
+            String::new()
+        } else {
+            format!("({})", engine.args.join(", "))
+        };
+        header.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
+        if !mv.order_by.is_empty() {
+            header.push_str(&format!("\nORDER BY ({})", mv.order_by.join(", ")));
+        }
+    }
+
+    if mv.populate {
+        header.push_str("\nPOPULATE");
+    }
+
+    parts.push(header);
+    parts.push(format!("AS {}", mv.select_query));
 
     parts.join("\n")
 }
@@ -584,6 +627,62 @@ mod tests {
             sql.contains("Enum8('active' = 1, 'migrating' = 2, 'deleted' = 3)"),
             "Enum8 column type should emit variant list: {sql}"
         );
+    }
+
+    #[test]
+    fn emit_materialized_view_with_to_table() {
+        let mv = CreateMaterializedView {
+            name: "mv_edge_summary".into(),
+            to_table: Some("gl_edge_summary".into()),
+            select_query:
+                "SELECT traversal_path, count() AS cnt FROM gl_edge GROUP BY traversal_path".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        };
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_edge_summary"));
+        assert!(sql.contains("TO gl_edge_summary"));
+        assert!(sql.contains("AS SELECT traversal_path, count()"));
+        assert!(!sql.contains("ENGINE"));
+        assert!(!sql.contains("POPULATE"));
+    }
+
+    #[test]
+    fn emit_materialized_view_with_implicit_storage() {
+        let mv = CreateMaterializedView {
+            name: "mv_counts".into(),
+            to_table: None,
+            select_query: "SELECT source_kind, count() AS cnt FROM gl_edge GROUP BY source_kind"
+                .into(),
+            engine: Some(Engine {
+                name: "AggregatingMergeTree".into(),
+                args: vec![],
+            }),
+            order_by: vec!["source_kind".into()],
+            populate: true,
+        };
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_counts"));
+        assert!(sql.contains("ENGINE = AggregatingMergeTree"));
+        assert!(sql.contains("ORDER BY (source_kind)"));
+        assert!(sql.contains("POPULATE"));
+        assert!(sql.contains("AS SELECT source_kind"));
+        assert!(!sql.contains("TO "));
+    }
+
+    #[test]
+    #[should_panic(expected = "implicit storage but has no engine")]
+    fn emit_materialized_view_panics_without_engine_or_to_table() {
+        let mv = CreateMaterializedView {
+            name: "mv_bad".into(),
+            to_table: None,
+            select_query: "SELECT 1".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        };
+        emit_create_materialized_view(&mv);
     }
 
     #[test]

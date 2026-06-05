@@ -20,8 +20,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use query_engine::compiler::{
-    DictionarySource, emit_create_dictionary, emit_create_table,
-    generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
+    DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
+    generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
+    generate_graph_tables_with_prefix,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -242,6 +243,8 @@ async fn create_prefixed_tables(
             })?;
     }
 
+    info!(count = tables.len(), prefix = %new_prefix, "new-prefix tables created");
+
     let dicts = generate_graph_dictionaries_with_prefix(ontology, &new_prefix);
     for dict in &dicts {
         info!(dictionary = %dict.name, source = %dict.source_table, "creating dictionary");
@@ -254,11 +257,26 @@ async fn create_prefixed_tables(
             })?;
     }
 
+    // Materialized views depend on the tables they SELECT FROM, so they
+    // must be created after all tables exist.
+    let views = generate_graph_materialized_views_with_prefix(ontology, &new_prefix);
+    for view in &views {
+        info!(view = %view.name, "creating materialized view");
+        graph
+            .execute(&emit_create_materialized_view(view))
+            .await
+            .map_err(|e| MigrationError::Ddl {
+                table: view.name.clone(),
+                reason: e.to_string(),
+            })?;
+    }
+
     info!(
         tables = tables.len(),
         dictionaries = dicts.len(),
+        views = views.len(),
         prefix = %new_prefix,
-        "new-prefix tables and dictionaries created"
+        "new-prefix tables, dictionaries, and materialized views created"
     );
     metrics.record("create_tables", "success");
     Ok(())

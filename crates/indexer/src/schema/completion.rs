@@ -17,7 +17,9 @@ use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
-use query_engine::compiler::{generate_graph_dictionaries, generate_graph_tables};
+use query_engine::compiler::{
+    generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
+};
 use tracing::{info, warn};
 
 use super::metrics::CompletionMetrics;
@@ -541,9 +543,39 @@ impl MigrationCompletionChecker {
         Ok(())
     }
 
-    /// Drops all graph tables for a given schema version.
+    /// Drops all materialized views and graph tables for a given schema version.
+    ///
+    /// Materialized views are dropped first because they reference the source
+    /// tables; dropping a table while a view still selects from it would leave
+    /// an orphaned view definition.
+    ///
+    /// TO-table targets are not dropped here separately -- the ontology loader
+    /// validates that every `to_table` references an ontology-tracked table
+    /// (auxiliary, node, or edge), so the table-cleanup loop below handles them.
     async fn drop_version_tables(&self, version: u32) -> Result<(), String> {
         let prefix = table_prefix(version);
+
+        // Drop materialized views before their source tables.
+        let views: Vec<String> = generate_graph_materialized_views(&self.ontology)
+            .into_iter()
+            .map(|mv| mv.name)
+            .collect();
+
+        for view_name in &views {
+            let prefixed = format!("{prefix}{view_name}");
+            let ddl = format!("DROP VIEW IF EXISTS {prefixed}");
+
+            info!(
+                version,
+                view = %prefixed,
+                "dropping materialized view"
+            );
+
+            self.graph
+                .execute(&ddl)
+                .await
+                .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
+        }
 
         let dicts: Vec<String> = generate_graph_dictionaries(&self.ontology)
             .into_iter()
