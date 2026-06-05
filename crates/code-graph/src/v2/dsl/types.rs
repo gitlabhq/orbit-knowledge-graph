@@ -42,10 +42,7 @@ pub struct ScopeRule {
     name: Extract,
     pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
-    /// When set on a `no_scope` definition, the FQN is anchored to the
-    /// nearest enclosing type-container scope instead of the immediate
-    /// lexical scope. PHP constructor-promoted properties live inside the
-    /// constructor's parameter list but are members of the class.
+    /// Anchor a `no_scope` def's FQN to the enclosing type, not the lexical scope (PHP promoted properties).
     pub(crate) hoist_to_type_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
@@ -92,10 +89,7 @@ impl ScopeRule {
         self
     }
 
-    /// Anchor this definition's FQN to the nearest enclosing type
-    /// container (class/interface/trait/enum) rather than the immediate
-    /// lexical scope. For members declared inside a sub-scope, such as
-    /// PHP constructor-promoted properties.
+    /// Anchor this definition's FQN to the enclosing type container, not the lexical sub-scope.
     pub fn hoist_to_type_scope(mut self) -> Self {
         self.hoist_to_type_scope = true;
         self
@@ -196,12 +190,7 @@ pub struct FieldAccessEntry {
     pub member: Extract,
 }
 
-/// Constructor entries whose class identifier is a positional child rather
-/// than a tree-sitter field. PHP's `object_creation_expression` exposes the
-/// class name as the first named child (`name` / `qualified_name`), not
-/// behind a field, so `constructor: &[(kind, type_field)]` cannot match it.
-/// The Extract is applied to the constructor node and must return the bare
-/// (possibly absolute) class name; the engine then runs `resolve_type_name`.
+/// Constructor whose class name is a positional child, not a tree-sitter field (PHP `object_creation_expression`).
 pub struct PositionalConstructor {
     pub kind: &'static str,
     pub type_extract: Extract,
@@ -228,12 +217,9 @@ pub struct ChainConfig {
     /// into chain steps (Ident for the base, Field for nested parts,
     /// New for the final segment) instead of treating it as a single name.
     pub qualified_type_kinds: &'static [&'static str],
-    /// Constructor matchers whose class name is positional (no field). Empty
-    /// by default. Used by PHP for `object_creation_expression`.
+    /// Constructor matchers whose class name is positional (PHP). Empty by default.
     pub positional_constructor: Vec<PositionalConstructor>,
-    /// Node kinds that wrap a single expression child and should be walked
-    /// through during chain extraction (e.g. PHP `parenthesized_expression`).
-    /// Empty by default; preserves existing behavior for all other languages.
+    /// Node kinds to walk through during chain extraction (PHP `parenthesized_expression`). Empty by default.
     pub transparent_kinds: &'static [&'static str],
 }
 
@@ -793,12 +779,7 @@ pub struct SsaConfig {
     /// `Receiver.new(args)`, the SSA value is `Type(Receiver)` instead
     /// of `Alias(new)`. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
-    /// Opt-in: when a scope def's `return_type` metadata resolves to one
-    /// of `self_names` or `super_name`, rewrite it to the enclosing type's
-    /// FQN (or the enclosing type's first super FQN for `super_name`).
-    /// PHP `function step(): self { ... }` declared on `Builder` should
-    /// expose `Builder` so a chain hop on the call result can continue.
-    /// Off by default; existing languages keep current behavior.
+    /// Opt-in: rewrite a self/static/parent return type to the enclosing type's FQN. Off by default.
     pub rewrite_self_in_return_type: bool,
 }
 
@@ -824,9 +805,7 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
-    /// Node kinds `on_import` cares about. Empty (default) calls `on_import`
-    /// on every node (back-compatible); a non-empty list restricts the call
-    /// to those kinds, avoiding a per-node indirect call on large repos.
+    /// Node kinds `on_import` fires on. Empty (default) = every node.
     pub on_import_kinds: &'static [&'static str],
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,

@@ -16,9 +16,7 @@ pub fn resolve_type_name(
     module_prefix: Option<&str>,
     sep: &str,
 ) -> String {
-    // A leading separator marks an already-rooted absolute name
-    // (PHP `\Vendor\X`, C++ `::Foo`): strip it and resolve directly,
-    // bypassing imports and the module-prefix fallback.
+    // A leading separator marks an absolute name (PHP `\Vendor\X`, C++ `::Foo`): resolve it directly.
     if let Some(abs) = name.strip_prefix(sep) {
         return abs.to_string();
     }

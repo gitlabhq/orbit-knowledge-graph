@@ -94,10 +94,7 @@ impl<'a> ImportResolver<'a> {
             return vec![];
         }
 
-        // The imported symbol's FQN is `path + sep + name`. The alias is only
-        // the local handle (callers key the import_map by it); rebuilding the
-        // FQN target must use `name`. (Fixes aliased imports, e.g. PHP
-        // `use function Vendor\Util\helper as h;`.)
+        // Rebuild the imported symbol's FQN from `name`; the alias is only the local handle.
         let symbol_name = import
             .name
             .or(import.alias)

@@ -336,11 +336,7 @@ impl LanguageSpec {
                 break;
             }
 
-            // Positional constructor (e.g. PHP `object_creation_expression`,
-            // whose class is the first named child rather than a tree-sitter
-            // field). Walks the user-supplied Extract to read the class name,
-            // resolves it via the import_map/module_prefix, and emits a single
-            // `New` step.
+            // Positional constructor (PHP `object_creation_expression`): class is a child, not a field.
             let mut matched_pctor = false;
             for pctor in &cc.positional_constructor {
                 if kind_ref == pctor.kind {
@@ -392,10 +388,7 @@ impl LanguageSpec {
                 continue;
             }
 
-            // Transparent wrappers — advance through to the inner expression.
-            // For PHP `parenthesized_expression`, which wraps `(new Foo())`
-            // and has no tree-sitter field. Pick the first NAMED child to
-            // skip the literal `(` / `)` tokens.
+            // Transparent wrappers (PHP `parenthesized_expression`): advance to the first named child.
             if cc.transparent_kinds.contains(&kind_ref) {
                 let inner = current.children().find(|c| c.is_named());
                 if let Some(inner) = inner {
@@ -879,9 +872,7 @@ impl LanguageSpec {
                         .then(|| d.fqn.as_str().to_string())
                 })
             {
-                // Anchor to the enclosing type, not the lexical sub-scope
-                // (e.g. a PHP promoted property declared in the constructor's
-                // parameter list is a member of the class).
+                // Anchor to the enclosing type (PHP promoted properties are class members).
                 Fqn::from_parts(&[type_fqn.as_str(), m.name.as_str()], sep)
             } else {
                 Fqn::from_scope(&state.scope_stack, &m.name, sep)
@@ -889,14 +880,7 @@ impl LanguageSpec {
 
             let is_type_scope = m.def_kind.is_type_container();
 
-            // Opt-in: rewrite a self/static/parent return-type marker to the
-            // declaring class (or its first super), so chain hops on the call
-            // result can continue. The `resolve` closure in `evaluate_scope`
-            // namespace-prefixes any bare name, so the stored value is either
-            // equal to a self_name (no module prefix) or ends with
-            // `{sep}{self_name}` (module-prefixed). At this point
-            // `enclosing_def_stack` holds only PARENT defs (the current scope
-            // is pushed later), so the nearest type container is the declarer.
+            // Rewrite a self/static/parent return type to the declaring class so chains continue.
             if self.ssa_config.rewrite_self_in_return_type
                 && let Some(meta) = m.metadata.as_mut()
                 && let Some(rt) = meta.return_type.as_ref()
