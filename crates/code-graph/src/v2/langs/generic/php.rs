@@ -5,6 +5,7 @@ use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind,
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Emit, Extract, child_of_kind, default_name, field, text};
+use treesitter_visit::predicate::has_child_text;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -68,7 +69,7 @@ impl DslLanguage for PhpDsl {
             adopt_sibling_refs: &["attribute_list"],
             on_scope: Some(php_on_scope),
             on_import: Some(php_extract_use),
-            ref_name_rewrite: Some(php_strip_leading_backslash),
+            ref_name_rewrite: Some(php_rewrite_ref_name),
             ..LanguageHooks::default()
         }
     }
@@ -135,6 +136,11 @@ impl DslLanguage for PhpDsl {
             reference("scoped_call_expression")
                 .name_from(field("name"))
                 .receiver_via(field("scope")),
+            // Foo::class is the class-name fetch, not a member: reference the class itself
+            // (first named child), not the `class` keyword. ref_name_rewrite maps self/static/parent.
+            reference("class_constant_access_expression")
+                .when(has_child_text("class"))
+                .name_from(Extract::one(Child, Named)),
             // Foo::CONST / self::VERSION / EnumType::Case: scope is the first named child, name the last.
             reference("class_constant_access_expression")
                 .name_from(Extract::terminal(Emit::Text).nth(Child, Named, -1))
@@ -149,6 +155,10 @@ impl DslLanguage for PhpDsl {
                 .name_from(Extract::one(Child, AnyKind(&["name", "qualified_name"]))),
             // Bare type references: param/return/property types, instanceof, catch.
             reference("named_type").name_from(text()),
+            // $x instanceof Foo: the right operand is the class being tested.
+            reference("binary_expression")
+                .when(has_child_text("instanceof"))
+                .name_from(field("right")),
         ]
     }
 
@@ -337,9 +347,47 @@ fn php_on_scope(
     false
 }
 
-/// Reference names keep the leading `\` of an absolute PHP name; graph FQNs omit it.
-fn php_strip_leading_backslash(_node: &N<'_>, name: &str) -> Option<String> {
-    name.strip_prefix('\\').map(str::to_string)
+/// Rewrite a reference name: strip the leading `\` of an absolute name, and resolve
+/// `new self/static/parent` and `self/static/parent::class` to the enclosing concrete type.
+fn php_rewrite_ref_name(node: &N<'_>, name: &str) -> Option<String> {
+    if let Some(stripped) = name.strip_prefix('\\') {
+        return Some(stripped.to_string());
+    }
+    if !matches!(name, "self" | "static" | "parent") {
+        return None;
+    }
+    if !matches!(
+        node.kind().as_ref(),
+        "object_creation_expression" | "class_constant_access_expression"
+    ) {
+        return None;
+    }
+    // Walk up to the enclosing class/enum. Traits/interfaces are skipped: `new self`
+    // there is ambiguous (the resolver has no concrete type to anchor to).
+    let mut cur = node.parent();
+    while let Some(p) = cur {
+        match p.kind().as_ref() {
+            "class_declaration" => {
+                if name == "parent" {
+                    let base = p.children().find(|c| c.kind().as_ref() == "base_clause")?;
+                    let sup = base
+                        .children()
+                        .find(|c| matches!(c.kind().as_ref(), "name" | "qualified_name"))?;
+                    return Some(sup.text().trim_start_matches('\\').to_string());
+                }
+                return p.field("name").map(|n| n.text().to_string());
+            }
+            // Enums cannot extend; `new parent` inside one is unresolvable by design.
+            "enum_declaration" => {
+                return (name != "parent")
+                    .then(|| p.field("name").map(|n| n.text().to_string()))
+                    .flatten();
+            }
+            _ => {}
+        }
+        cur = p.parent();
+    }
+    None
 }
 
 /// Extract `use` imports: single, aliased, grouped, and `use function`/`use const`.

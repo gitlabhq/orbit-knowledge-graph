@@ -278,6 +278,18 @@ yaml_test!(php_match_attributes, "php/match_attributes.yaml");
 yaml_test!(php_magic_late_static, "php/magic_late_static.yaml");
 yaml_test!(php_cross_file, "php/cross_file_resolution.yaml");
 yaml_test!(php_frameworks, "php/frameworks_patterns.yaml");
+yaml_test!(
+    php_cross_file_di_self_parent_instanceof,
+    "php/cross_file_di_self_parent_instanceof.yaml"
+);
+yaml_test!(
+    php_cross_file_aliased_parent_catch,
+    "php/cross_file_aliased_parent_catch.yaml"
+);
+yaml_test!(
+    php_cross_file_class_const_singleton,
+    "php/cross_file_class_const_singleton.yaml"
+);
 
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
