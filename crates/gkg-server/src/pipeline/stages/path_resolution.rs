@@ -137,9 +137,6 @@ mod tests {
             .unwrap()
     }
 
-    // Guards that the embedded ontology's scope annotations flood a
-    // MergeRequest's resolved prefix to its diffs and diff files (HAS_DIFF /
-    // HAS_FILE are annotated same_namespace in !1556).
     #[test]
     fn flood_reaches_diff_and_file_with_embedded_ontology() {
         use std::collections::HashMap;

@@ -8,6 +8,7 @@ mod path_finding;
 mod search;
 mod security;
 mod traversal;
+mod traversal_scoping;
 mod work_items;
 
 use helpers::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, seed};
@@ -155,6 +156,7 @@ async fn data_correctness() {
         edge_cases::cross_namespace_narrow_scope_returns_all_authors,
         edge_cases::cross_namespace_aggregation_respects_scope,
         edge_cases::neighbors_cross_namespace_no_false_positives,
+        traversal_scoping::cross_namespace_has_label_returns_cross_group_label,
         // non-default redaction id_column
         edge_cases::non_default_redaction_id_entity_traversal,
         edge_cases::non_default_redaction_id_denies_unauthorized,
@@ -291,5 +293,7 @@ async fn data_correctness() {
         dedup::traversal_excludes_deleted_edge,
         dedup::search_three_versions_returns_latest,
         dedup::aggregation_excludes_deleted_from_count,
+        traversal_scoping::project_scoped_multi_edge_traversal_is_lossless,
+        traversal_scoping::cross_namespace_closes_returns_cross_project_work_item,
     );
 }
