@@ -163,6 +163,37 @@ mod tests {
         assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
     }
 
+    // Two project anchors in one query each flood only their own subtree — the
+    // prefixes must not cross-contaminate.
+    #[test]
+    fn flood_keeps_distinct_anchor_prefixes_separate() {
+        use std::collections::HashMap;
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr_a", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                {"id": "diff_a", "entity": "MergeRequestDiff"},
+                {"id": "mr_b", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1001}}},
+                {"id": "diff_b", "entity": "MergeRequestDiff"}
+            ],
+            "relationships": [
+                {"type": "HAS_DIFF", "from": "mr_a", "to": "diff_a"},
+                {"type": "HAS_DIFF", "from": "mr_b", "to": "diff_b"}
+            ],
+            "limit": 50
+        }"#;
+        let input = parse_input(json).unwrap();
+        let seed = HashMap::from([
+            ("mr_a".to_string(), "1/100/1000/".to_string()),
+            ("mr_b".to_string(), "1/101/1001/".to_string()),
+        ]);
+        let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
+        assert_eq!(got.get("mr_a").map(String::as_str), Some("1/100/1000/"));
+        assert_eq!(got.get("diff_a").map(String::as_str), Some("1/100/1000/"));
+        assert_eq!(got.get("mr_b").map(String::as_str), Some("1/101/1001/"));
+        assert_eq!(got.get("diff_b").map(String::as_str), Some("1/101/1001/"));
+    }
+
     fn ontology_keys(node: &InputNode, ontology: &Ontology) -> Vec<PathResolutionKey> {
         scope_keys(node, &ontology.anchor_fk_mappings())
             .into_iter()

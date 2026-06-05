@@ -145,6 +145,54 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
     resp.assert_referential_integrity();
 }
 
+/// Multiple anchors in one query apply distinct traversal_paths. User 1
+/// authors MRs in two different projects; the two MergeRequest nodes are pinned
+/// to different projects, so each must be scoped to its own project's prefix.
+/// Cross-contamination would drop one project's MRs.
+pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestContext) {
+    // User 1 already authors MRs 2000/2001 in project 1000 (1/100/1000/);
+    // give them an authored MR in project 1001 (1/101/1001/) too.
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/101/1001/', 1, 'User', 'AUTHORED', 2002, 'MergeRequest', [], ['state:merged'])",
+        t("gl_edge")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr_a", "entity": "MergeRequest", "columns": ["project_id"],
+                 "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                {"id": "mr_b", "entity": "MergeRequest", "columns": ["project_id"],
+                 "filters": {"project_id": {"op": "eq", "value": 1001}}}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr_a"},
+                {"type": "AUTHORED", "from": "u", "to": "mr_b"}
+            ],
+            "limit": 50
+        }"#,
+        &allow_all(),
+        scoped("1/", &[("mr_a", "1/100/1000/"), ("mr_b", "1/101/1001/")]),
+    )
+    .await;
+
+    // mr_a is scoped to project 1000 (returns 2000, 2001); mr_b to project 1001
+    // (returns 2002). Both prefixes apply independently — neither over-prunes.
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
+    resp.assert_filter("MergeRequest", "project_id", |n| {
+        matches!(n.prop_i64("project_id"), Some(1000) | Some(1001))
+    });
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (1, 2002)]);
+    resp.assert_referential_integrity();
+}
+
 /// Cross-namespace WorkItem -> Label: WorkItems 4000/4001 live in group 100
 /// (`1/100/`); WorkItem 4001 carries Label 7002, which lives in a different
 /// group (`1/101/`). HAS_LABEL is not scope-preserving, so scoping the work
