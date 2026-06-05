@@ -136,45 +136,41 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
 }
 
 pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestContext) {
-    // User 1 already authors MRs 2000/2001 in project 1000 (1/100/1000/);
-    // give them an authored MR in project 1001 (1/101/1001/) too.
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-         ('1/101/1001/', 1, 'User', 'AUTHORED', 2002, 'MergeRequest', [], ['state:merged'])",
+         ('1/101/', 2000, 'MergeRequest', 'CLOSES', 4002, 'WorkItem', ['state:opened'], ['state:opened', 'wi_type:task'])",
         t("gl_edge")
     ))
     .await;
     ctx.optimize_all().await;
 
+    // Two anchors with distinct prefixes: mr only scans under 1/100/1000/ and wi
+    // only under 1/101/, so swapping either prefix onto the other node would drop
+    // its row. The cross-namespace CLOSES edge stays unscoped, so the pair joins.
     let resp = run_query_with_security(
         ctx,
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "mr_a", "entity": "MergeRequest", "columns": ["project_id"],
+                {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
                  "filters": {"project_id": {"op": "eq", "value": 1000}}},
-                {"id": "mr_b", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1001}}}
+                {"id": "wi", "entity": "WorkItem"}
             ],
-            "relationships": [
-                {"type": "AUTHORED", "from": "u", "to": "mr_a"},
-                {"type": "AUTHORED", "from": "u", "to": "mr_b"}
-            ],
+            "relationships": [{"type": "CLOSES", "from": "mr", "to": "wi"}],
             "limit": 50
         }"#,
         &allow_all(),
-        scoped("1/", &[("mr_a", "1/100/1000/"), ("mr_b", "1/101/1001/")]),
+        scoped("1/", &[("mr", "1/100/1000/"), ("wi", "1/101/")]),
     )
     .await;
 
-    resp.assert_node_count(4);
-    resp.assert_node_ids("User", &[1]);
-    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
+    resp.assert_node_count(2);
+    resp.assert_node_ids("MergeRequest", &[2000]);
+    resp.assert_node_ids("WorkItem", &[4002]);
     resp.skip_requirement(Requirement::Filter {
         field: "project_id".into(),
     });
-    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (1, 2002)]);
+    resp.assert_edge_set("CLOSES", &[(2000, 4002)]);
     resp.assert_referential_integrity();
 }
 
