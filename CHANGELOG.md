@@ -1,3 +1,42 @@
+## [0.70.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.69.0...v0.70.0) (2026-06-05)
+
+### Features
+
+* **compiler:** rewrite project/group-scoped filters to traversal_path PK prefixes ([201ede9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/201ede971e08189bef3fd81fcd9b37656823e34a)) by Michael Angelo Rivera
+* **compiler:** skip narrowing CTEs for low-selectivity filters ([2c0144f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2c0144f7d41384a07c5139bb6abe7ae56699791d)) by Michael Usachenko
+* **config:** add process-wide feature flags ([65e9e8c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/65e9e8c1c399f8a068211a5bd635c33b83ff48d6)) by Jean-Gabriel Doyon
+* **indexer:** capture ClickHouse scan cost in SDLC indexing analytics ([b898266](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b8982660c3e19811d6fb5d22d37aeaffefe4af9f)) by Jean-Gabriel Doyon
+* **indexer:** register SystemNotes transform and edge kinds ([b13e77d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b13e77dd9453a396e5e1ba0be38fe6bd9777c431)) by Dmitry Gruzd
+* **orbit:** derived entities + pluggable transform seam ([8f7eec6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f7eec60333b1c49d25adb6241aaa86ad18e98db)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** bump labkit-rs to surface GCP OIDC error response body ([cb20390](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb20390905721cdce7406f2ce5c49c59e3b418bb)) by Sharmad Nachnolkar
+* **graph_status:** correct counts, degrade per-branch, and cache ([f5dca92](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5dca92b5eac99d5500daf0d70ca2fae8f12dbc3)) by Michael Angelo Rivera
+* **indexer:** count SDLC read rows from returned rows, drop X-ClickHouse-Summary ([0f578da](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f578dafbf6d76fcdf84ee8cdffa0619ce339b1b)) by Jean-Gabriel Doyon
+* **indexer:** retry SDLC datalake pages on Arrow 2GB overflow ([597355e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/597355e5609fa641cc47de20fc6dedcd7446214f)) by Jean-Gabriel Doyon
+* **indexer:** tombstone old traversal_path on namespace move ([d3badbc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d3badbcc5d9eee41c4dc578b810eaff1be6a0326)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** faster, lighter hydration via LIMIT BY ([e5035c2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e5035c2589aa6b0412784b4ef6da7e2c081baf2b)) by Michael Angelo Rivera
+* **compiler:** fuse Direction::Both neighbors into one scan ([ca95744](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ca95744c8cf99b20a6104468c99fac40c2e045ee)) by Michael Angelo Rivera
+* **compiler:** push filter-CTE IN-subqueries inner and skip redundant cascade narrowing ([07766e5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/07766e5c6b86c70d1e0cdbc7a4c2b050df546634)) by Michael Angelo Rivera
+* **compiler:** replace FilterOnly CTE+IN with INNER JOIN for edge chains ([f5e3861](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f5e3861d03039630820b50c14ff8026d8d8b956b)) by Michael Usachenko
+* **compiler:** replace FINAL with LIMIT BY + -If combinators for edge aggregations ([4bd5814](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4bd5814659bf09ca4c83ce941aa89c305f7122d3)) by Michael Usachenko
+* **compiler:** replace FINAL with LIMIT BY for node JOIN dedup ([eed57ee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/eed57ee5d4386413c265d79c1511a32a55f279d4)) by Michael Usachenko
+* **ontology:** expand selectivity annotations for low-cardinality fields ([862d8fe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/862d8fe0cd2637077086cd6dccc24e6549366e07)) by Michael Usachenko
+* **schema:** add minmax skip indexes on Nullable temporal columns ([ed56781](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ed56781d35e54407e5de3d3db696cf1e1210a818)) by Michael Angelo Rivera
+* **schema:** drop Nullable on string columns with safe empty default ([9995690](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/99956906183fa166c1e699b8e650b2d0dde29b94)) by Michael Angelo Rivera
+* **schema:** tighten minmax granularity to 1 on the new temporal indexes ([237bb53](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/237bb537035a08e3909114eb903b23e758b91cb5)) by Michael Angelo Rivera
+
+### Other
+
+* bump labkit and widen rpc.server.duration buckets ([0c9204e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c9204e01abf7f10a3294a7379f752ac7f0f9d7c)) by Bohdan Parkhomchuk
+* **e2e:** poll discovered-node query shapes within budget ([8f781d4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f781d41fe1eb93503829d0b8437b26d9d6fc357)) by Michael Angelo Rivera
+* **e2e:** siphon 0.0.99-beta + refresh-on-namespace-change (gitlab!238905) ([d5671b7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d5671b7ac080fac9604ed1a6d68bbf1f86a4e1a5)) by Jean-Gabriel Doyon
+* **orbit:** stop guiding agents to the GitLab API ([f0696fa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0696fa5df77e62f7d67873c82a6fb391f483958)) by Michael Angelo Rivera
+
 ## [0.69.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.68.0...v0.69.0) (2026-06-03)
 
 ### Features
