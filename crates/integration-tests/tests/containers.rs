@@ -17,5 +17,6 @@ mod server {
     pub mod hydration;
     pub mod redaction;
     pub mod schema_readiness;
+    pub mod statistics;
     pub mod telemetry;
 }
