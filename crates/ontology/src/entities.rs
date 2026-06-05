@@ -119,6 +119,41 @@ pub struct MaterializedViewDefinition {
     pub populate: bool,
 }
 
+/// Configuration for automated column statistics collection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatisticsConfig {
+    /// AggregatingMergeTree table for per-value frequency stats.
+    pub stats_table: String,
+    /// AggregatingMergeTree table for histogram bucket states (continuous columns).
+    pub histogram_table: String,
+    /// AggregatingMergeTree table for token frequency states (text columns).
+    pub token_table: String,
+    /// ClickHouse dictionary for fast stats lookups.
+    pub dictionary: String,
+    /// Dictionary refresh interval.
+    pub lifetime_min: u32,
+    pub lifetime_max: u32,
+    /// Number of histogram buckets for continuous/high-NDV columns.
+    pub histogram_buckets: u16,
+    /// Number of top-K tokens to track per token column.
+    pub top_k_tokens: u16,
+    /// Per-node column tracking configuration.
+    pub tracked: Vec<TrackedNodeStats>,
+}
+
+/// Per-node statistics tracking declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackedNodeStats {
+    /// Entity name (e.g. "MergeRequest", "File").
+    pub node: String,
+    /// Low-NDV categorical columns → stats_table (per-value frequencies).
+    pub columns: Vec<String>,
+    /// Medium/high-NDV text columns → token_table (token frequencies).
+    pub token_columns: Vec<String>,
+    /// Continuous/numerical columns → histogram_table (equi-depth buckets).
+    pub histogram_columns: Vec<String>,
+}
+
 /// A non-ontology auxiliary table definition (checkpoint, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {

@@ -218,6 +218,58 @@ settings:
     - {node: WorkItem, property: state}
     - {node: WorkItem, property: work_item_type, as: wi_type}
     - {node: WorkItem, property: confidential}
+  statistics:
+    stats_table: gkg_column_stats
+    histogram_table: gkg_histogram_stats
+    token_table: gkg_token_stats
+    dictionary: gkg_column_stats_dict
+    lifetime: {min: 120, max: 300}
+    histogram_buckets: 16
+    top_k_tokens: 100
+    tracked_columns:
+      # --- Core ---
+      - {node: User, columns: [state, user_type]}
+      - {node: Group, columns: [visibility_level]}
+      - {node: Project, columns: [visibility_level, archived]}
+      # --- Code review ---
+      - node: MergeRequest
+        columns: [state, merge_status, draft]
+        token_columns: [source_branch, target_branch]
+        histogram_columns: [author_id, created_at]
+      - {node: MergeRequestDiff, columns: [state, diff_type]}
+      - {node: MergeRequestDiffFile, columns: [a_mode, b_mode, new_file, deleted_file, renamed_file]}
+      # --- CI ---
+      - node: Pipeline
+        columns: [status, source]
+        histogram_columns: [created_at]
+      - {node: Stage, columns: [status]}
+      - node: Job
+        columns: [status, type, when]
+        histogram_columns: [created_at]
+      - {node: Deployment, columns: [status, deployable_type]}
+      - {node: Environment, columns: [state, environment_type, tier]}
+      # --- Security ---
+      - {node: Vulnerability, columns: [state, severity, report_type]}
+      - {node: VulnerabilityOccurrence, columns: [severity, report_type, detection_method]}
+      - {node: Finding, columns: [severity, deduplicated]}
+      - {node: VulnerabilityScanner, columns: [vendor]}
+      - {node: VulnerabilityIdentifier, columns: [external_type]}
+      - {node: SecurityScan, columns: [scan_type, status]}
+      # --- Plan ---
+      - {node: WorkItem, columns: [state, work_item_type]}
+      - {node: Milestone, columns: [state]}
+      - {node: Note, columns: [noteable_type, internal]}
+      # --- Source code ---
+      - node: File
+        columns: [extension, language]
+        token_columns: [path]
+      - node: Definition
+        columns: [definition_type]
+        token_columns: [name]
+      - node: ImportedSymbol
+        columns: [import_type]
+        token_columns: [name]
+      - {node: Branch, columns: [is_default]}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User, Runner]
   local_db:

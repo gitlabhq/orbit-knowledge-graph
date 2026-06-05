@@ -483,6 +483,82 @@
             "additionalProperties": false
           }
         },
+        "statistics": {
+          "type": "object",
+          "description": "Automated column statistics collection via AggregatingMergeTree MVs. Three stat types: value frequencies (categorical low-NDV), token frequencies (text medium/high-NDV), and histograms (continuous/numerical).",
+          "properties": {
+            "stats_table": {
+              "type": "string",
+              "description": "AggregatingMergeTree table for per-value frequency stats (categorical low-NDV columns)."
+            },
+            "histogram_table": {
+              "type": "string",
+              "description": "AggregatingMergeTree table for equi-depth histogram bucket states (continuous/numerical columns)."
+            },
+            "token_table": {
+              "type": "string",
+              "description": "AggregatingMergeTree table for token frequency states (text columns)."
+            },
+            "dictionary": {
+              "type": "string",
+              "description": "ClickHouse dictionary for fast stats lookups at query time."
+            },
+            "lifetime": {
+              "type": "object",
+              "properties": {
+                "min": { "type": "integer" },
+                "max": { "type": "integer" }
+              },
+              "required": ["min", "max"],
+              "additionalProperties": false,
+              "description": "Dictionary refresh interval in seconds."
+            },
+            "histogram_buckets": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 256,
+              "description": "Number of equi-depth histogram buckets for continuous/numerical columns."
+            },
+            "top_k_tokens": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 1000,
+              "description": "Number of top-K tokens to track per token column."
+            },
+            "tracked_columns": {
+              "type": "array",
+              "description": "Per-node statistics configuration. Each entry declares which columns get which stat type.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "node": {
+                    "type": "string",
+                    "description": "Entity name (e.g. MergeRequest, File)."
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Low-NDV categorical columns for per-value frequency tracking."
+                  },
+                  "token_columns": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Medium/high-NDV text columns for token frequency tracking."
+                  },
+                  "histogram_columns": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Continuous/numerical columns for equi-depth histogram tracking."
+                  }
+                },
+                "required": ["node", "columns"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["stats_table", "histogram_table", "token_table", "dictionary", "lifetime", "histogram_buckets", "top_k_tokens", "tracked_columns"],
+          "additionalProperties": false
+        },
         "internal_column_prefix": {
           "type": "string",
           "pattern": "^_[a-z_]+$",

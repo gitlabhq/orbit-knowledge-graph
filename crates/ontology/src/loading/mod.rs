@@ -587,6 +587,29 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    ontology.statistics = schema.settings.statistics.map(|s| {
+        crate::entities::StatisticsConfig {
+            stats_table: s.stats_table,
+            histogram_table: s.histogram_table,
+            token_table: s.token_table,
+            dictionary: s.dictionary,
+            lifetime_min: s.lifetime.min,
+            lifetime_max: s.lifetime.max,
+            histogram_buckets: s.histogram_buckets,
+            top_k_tokens: s.top_k_tokens,
+            tracked: s
+                .tracked_columns
+                .into_iter()
+                .map(|t| crate::entities::TrackedNodeStats {
+                    node: t.node,
+                    columns: t.columns,
+                    token_columns: t.token_columns,
+                    histogram_columns: t.histogram_columns,
+                })
+                .collect(),
+        }
+    });
+
     ontology.traversal_path_lookups = ontology
         .nodes
         .values()

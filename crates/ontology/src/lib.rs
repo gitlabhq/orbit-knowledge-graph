@@ -33,7 +33,8 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition, NodeEntity,
-    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
+    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig, StorageColumn,
+    StorageIndex,
     StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
     VirtualSource,
 };
@@ -133,6 +134,7 @@ pub struct Ontology {
     pub(crate) derived_entities: BTreeMap<String, DerivedEntity>,
     /// Materialized views defined in the ontology settings.
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
+    pub(crate) statistics: Option<StatisticsConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
 }
 
@@ -187,6 +189,7 @@ impl Ontology {
             denormalized_properties: Vec::new(),
             derived_entities: BTreeMap::new(),
             materialized_views: Vec::new(),
+            statistics: None,
             traversal_path_lookups: Vec::new(),
         }
     }
@@ -888,6 +891,11 @@ impl Ontology {
     #[must_use]
     pub fn materialized_views(&self) -> &[MaterializedViewDefinition] {
         &self.materialized_views
+    }
+
+    #[must_use]
+    pub fn statistics(&self) -> Option<&StatisticsConfig> {
+        self.statistics.as_ref()
     }
 
     #[must_use]
