@@ -19,6 +19,15 @@ use std::collections::{HashMap, HashSet};
 
 use super::parse::{RefKind, Reference};
 
+/// Maximum number of array elements bound into a single ClickHouse resolver
+/// request. The clickhouse crate serializes params into the URL query string,
+/// so these lookup arrays must stay bounded independently of Arrow block size.
+pub(super) const RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
+
+pub(super) fn lookup_chunks<T>(items: &[T]) -> impl Iterator<Item = &[T]> {
+    items.chunks(RESOLVE_LOOKUP_BATCH_SIZE)
+}
+
 /// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
@@ -296,6 +305,20 @@ mod tests {
     fn routes_sql_uses_named_parameters() {
         assert!(ROUTES_SQL.contains("{paths:Array(String)}"));
         assert!(ROUTES_SQL.contains("path IN"));
+    }
+
+    #[test]
+    fn lookup_chunks_bounds_param_array_size() {
+        let empty: Vec<i32> = Vec::new();
+        assert_eq!(lookup_chunks(&empty).count(), 0);
+
+        let values: Vec<_> = (0..RESOLVE_LOOKUP_BATCH_SIZE).collect();
+        let chunk_sizes: Vec<_> = lookup_chunks(&values).map(<[_]>::len).collect();
+        assert_eq!(chunk_sizes, vec![RESOLVE_LOOKUP_BATCH_SIZE]);
+
+        let values: Vec<_> = (0..RESOLVE_LOOKUP_BATCH_SIZE + 1).collect();
+        let chunk_sizes: Vec<_> = lookup_chunks(&values).map(<[_]>::len).collect();
+        assert_eq!(chunk_sizes, vec![RESOLVE_LOOKUP_BATCH_SIZE, 1]);
     }
 
     #[test]
