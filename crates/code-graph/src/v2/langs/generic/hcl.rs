@@ -215,8 +215,7 @@ fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
     // Find the first get_attr sibling after the variable_expr.
     let attr_name = parent
         .children()
-        .filter(|c| c.kind().as_ref() == "get_attr")
-        .next()?
+        .find(|c| c.kind().as_ref() == "get_attr")?
         .children()
         .find(|c| c.kind().as_ref() == "identifier")
         .map(|c| c.text().to_string())?;
