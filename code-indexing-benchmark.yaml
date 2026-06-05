@@ -101,6 +101,28 @@ repos:
     commit_sha: 7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1
     groups: [python]
 
+  # PHP
+  - name: laravel-framework
+    source: github
+    project: laravel/framework
+    version: v13.14.0
+    commit_sha: e60b1c817a9ef7da319e4007de6cfda5301a58c0
+    groups: [php]
+
+  - name: symfony
+    source: github
+    project: symfony/symfony
+    version: v8.1.0
+    commit_sha: 0989c3650c8f52dff75ba5000bf51d593de24120
+    groups: [php]
+
+  - name: monolog
+    source: github
+    project: Seldaek/monolog
+    version: "3.10.0"
+    commit_sha: b321dd6749f0bf7189444158a3ce785cc16d69b0
+    groups: [php]
+
   # C
   - name: redis
     source: github

@@ -27,7 +27,7 @@ crates/
   code-graph/
     src/v2/
       langs/
-        generic/      # tree-sitter DSL languages (C, C++, C#, Go, Java, Kotlin, Python, Ruby)
+        generic/      # tree-sitter DSL languages (C, C++, C#, Go, Java, Kotlin, PHP, Python, Ruby)
         custom/       # JS/TS via OXC, Rust via rust-analyzer
       registry.rs     # register_v2_pipelines! — one line per language
       config/lang.rs  # define_languages! — Language enum + metadata

@@ -1,0 +1,378 @@
+name: "PHP traits — multi-use, trait-in-trait, abstract, static, constants, conflicts"
+
+fixtures:
+  - path: src/Concerns/Loggable.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Loggable {
+          public function log(string $msg): void {}
+      }
+
+  - path: src/Concerns/Cacheable.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Cacheable {
+          public function cache(string $key): void {}
+      }
+
+  - path: src/Concerns/Greeter.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Greeter {
+          abstract public function name(): string;
+
+          public function greet(): string {
+              return 'Hello, ' . $this->name();
+          }
+      }
+
+  - path: src/Concerns/Counter.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Counter {
+          public static function tick(): int {
+              return 1;
+          }
+
+          public static function reset(): void {}
+      }
+
+  - path: src/Concerns/HasVersion.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait HasVersion {
+          const VERSION = '1.0';
+
+          public function version(): string {
+              return self::VERSION;
+          }
+      }
+
+  - path: src/Concerns/Base.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Base {
+          public function ping(): void {}
+      }
+
+  - path: src/Concerns/Composer.php
+    content: |
+      <?php
+      namespace App\Concerns;
+
+      trait Composer {
+          use Base;
+
+          public function compose(): void {
+              $this->ping();
+          }
+      }
+
+  - path: src/Speakers/Left.php
+    content: |
+      <?php
+      namespace App\Speakers;
+
+      trait Left {
+          public function speak(): string {
+              return 'left';
+          }
+      }
+
+  - path: src/Speakers/Right.php
+    content: |
+      <?php
+      namespace App\Speakers;
+
+      trait Right {
+          public function speak(): string {
+              return 'right';
+          }
+
+          public function whisper(): string {
+              return 'right-whisper';
+          }
+      }
+
+  - path: src/Models/Person.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Concerns\Greeter;
+
+      class Person {
+          use Greeter;
+
+          public function name(): string {
+              return 'World';
+          }
+
+          public function hello(): string {
+              return $this->greet();
+          }
+      }
+
+  - path: src/Models/Widget.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Concerns\Counter;
+
+      class Widget {
+          use Counter;
+
+          public function bump(): int {
+              return self::tick();
+          }
+
+          public function clear(): void {
+              static::reset();
+          }
+      }
+
+  - path: src/Models/Product.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Concerns\Loggable;
+      use App\Concerns\Cacheable;
+
+      class Product {
+          use Loggable, Cacheable;
+
+          public function persist(string $key): void {
+              $this->log('persisting');
+              $this->cache($key);
+          }
+      }
+
+  - path: src/Models/Host.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Concerns\Composer;
+
+      class Host {
+          use Composer;
+
+          public function run(): void {
+              $this->compose();
+          }
+      }
+
+  - path: src/Models/App.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Concerns\HasVersion;
+
+      class App {
+          use HasVersion;
+
+          public function show(): string {
+              return $this->version();
+          }
+      }
+
+  - path: src/Models/Speaker.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Speakers\Left;
+      use App\Speakers\Right;
+
+      class Speaker {
+          use Left, Right {
+              Left::speak insteadof Right;
+              Right::speak as speakRight;
+              Right::whisper as protected hush;
+          }
+      }
+
+tests:
+  # ── Trait definitions and their members ───────────────────────────
+  - name: "Traits are typed as Trait"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Concerns\Loggable', 'App\Concerns\Cacheable',
+                      'App\Concerns\Greeter', 'App\Concerns\Counter',
+                      'App\Concerns\HasVersion', 'App\Concerns\Base',
+                      'App\Concerns\Composer', 'App\Speakers\Left',
+                      'App\Speakers\Right']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 9 }
+      - { unique: fqn }
+      - { row: { fqn: 'App\Concerns\Loggable', type: Trait } }
+      - { row: { fqn: 'App\Concerns\Composer', type: Trait } }
+      - { row: { fqn: 'App\Speakers\Right', type: Trait } }
+
+  - name: "Abstract trait method is indexed as a Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Concerns\Greeter\name'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Static trait methods are indexed under their trait"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['App\Concerns\Counter\tick', 'App\Concerns\Counter\reset']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  - name: "Trait constant is indexed under the trait"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Concerns\HasVersion\VERSION'
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Inheritance via `use Trait;` (Extends edges) ──────────────────
+  - name: "Multiple traits in one use: Product uses both Loggable and Cacheable"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Models\Product'
+        AND e.edge_kind = 'Extends'
+        AND p.fqn IN ['App\Concerns\Loggable', 'App\Concerns\Cacheable']
+      RETURN p.fqn AS parent
+    assert:
+      - { row_count: 2 }
+      - { unique: parent }
+
+  - name: "Trait composed of trait: Composer uses Base"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Concerns\Composer'
+        AND p.fqn = 'App\Concerns\Base'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Conflict-resolution use still emits Extends for both traits"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Models\Speaker'
+        AND e.edge_kind = 'Extends'
+        AND p.fqn IN ['App\Speakers\Left', 'App\Speakers\Right']
+      RETURN p.fqn AS parent
+    assert:
+      - { row_count: 2 }
+      - { unique: parent }
+
+  # ── Calls into trait-provided members ─────────────────────────────
+  - name: "Trait method via \\$this: Product.persist -> Loggable.log"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Product\persist'
+        AND callee.fqn = 'App\Concerns\Loggable\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Second trait method via \\$this: Product.persist -> Cacheable.cache"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Product\persist'
+        AND callee.fqn = 'App\Concerns\Cacheable\cache'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Abstract-trait greet -> abstract name: Greeter.greet -> Greeter.name"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Concerns\Greeter\greet'
+        AND callee.fqn = 'App\Concerns\Greeter\name'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Class invoking inherited trait method: Person.hello -> Greeter.greet"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Person\hello'
+        AND callee.fqn = 'App\Concerns\Greeter\greet'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Static trait method via self::: Widget.bump -> Counter.tick"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Widget\bump'
+        AND callee.fqn = 'App\Concerns\Counter\tick'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Static trait method via static::: Widget.clear -> Counter.reset"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Widget\clear'
+        AND callee.fqn = 'App\Concerns\Counter\reset'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Transitive trait method through composing trait: Host.run -> Composer.compose"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Host\run'
+        AND callee.fqn = 'App\Concerns\Composer\compose'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait-of-trait \\$this call: Composer.compose -> Base.ping"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Concerns\Composer\compose'
+        AND callee.fqn = 'App\Concerns\Base\ping'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait-method-on-trait-method via class: App.show -> HasVersion.version"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\App\show'
+        AND callee.fqn = 'App\Concerns\HasVersion\version'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }

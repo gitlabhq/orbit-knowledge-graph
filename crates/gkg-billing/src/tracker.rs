@@ -24,6 +24,7 @@ impl SnowplowBillingTracker {
 
         let tracker = labkit_events::Tracker::builder(&config.collector_url, APP_ID)
             .batch_size(1)
+            .collector_path(labkit_events::AUTH_COLLECTOR_PATH)
             .token_source(Arc::new(source))
             .build()?;
 

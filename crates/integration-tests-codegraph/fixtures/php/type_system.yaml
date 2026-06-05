@@ -1,0 +1,369 @@
+name: "PHP type system — typed properties, union/intersection/DNF, nullable, self/static/parent return, typed const, param-typed method calls"
+
+fixtures:
+  - path: src/Iface/Countable.php
+    content: |
+      <?php
+      namespace App\Iface;
+
+      interface Countable {
+          public function count(): int;
+      }
+
+  - path: src/Iface/Stringable.php
+    content: |
+      <?php
+      namespace App\Iface;
+
+      interface Stringable {
+          public function asString(): string;
+      }
+
+  - path: src/Iface/Empty_.php
+    content: |
+      <?php
+      namespace App\Iface;
+
+      class Empty_ {
+          public function isEmpty(): bool { return true; }
+      }
+
+  - path: src/Service/Repo.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class Repo {
+          public function find(int $id): string { return ''; }
+          public function save(string $name): bool { return true; }
+      }
+
+  - path: src/Service/Cache.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class Cache {
+          public function get(string $key): ?string { return null; }
+          public function put(string $key, string $val): void {}
+      }
+
+  - path: src/Service/TypedProps.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class TypedProps {
+          public int $count = 0;
+          public ?string $name = null;
+          private Repo $repo;
+          protected static float $rate = 1.0;
+
+          public function __construct(Repo $repo) {
+              $this->repo = $repo;
+          }
+
+          public function lookup(int $id): string {
+              return $this->repo->find($id);
+          }
+      }
+
+  - path: src/Service/UnionTypes.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class UnionTypes {
+          private Repo|Cache $primary;
+
+          public function __construct(Repo|Cache $svc) {
+              $this->primary = $svc;
+          }
+
+          public function process(Repo|Cache $svc, int $id): string {
+              return $svc->find($id);
+          }
+
+          public function resolve(int|string $key): ?string {
+              return (string) $key;
+          }
+      }
+
+  - path: src/Service/IntersectionTypes.php
+    content: |
+      <?php
+      namespace App\Iface;
+
+      class Counter implements Countable, Stringable {
+          public function count(): int { return 1; }
+          public function asString(): string { return ''; }
+      }
+
+  - path: src/Service/IntersectionUser.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Iface\Countable;
+      use App\Iface\Stringable;
+
+      class IntersectionUser {
+          private Countable&Stringable $thing;
+
+          public function __construct(Countable&Stringable $t) {
+              $this->thing = $t;
+          }
+
+          public function measure(Countable&Stringable $other): int {
+              return $other->count();
+          }
+      }
+
+  - path: src/Service/DnfTypes.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Iface\Countable;
+      use App\Iface\Stringable;
+      use App\Iface\Empty_;
+
+      class DnfTypes {
+          public function inspect((Countable&Stringable)|Empty_ $x): int {
+              return $x->count();
+          }
+
+          public function describe(Empty_|(Countable&Stringable) $y): string {
+              return $y->asString();
+          }
+      }
+
+  - path: src/Service/NullableTypes.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class NullableTypes {
+          private ?Cache $cache = null;
+
+          public function __construct(?Cache $cache) {
+              $this->cache = $cache;
+          }
+
+          public function fetch(?Repo $repo, string $key): ?string {
+              if ($repo !== null) {
+                  return $repo->save($key) ? $key : null;
+              }
+              return null;
+          }
+      }
+
+  - path: src/Service/ReturnTypes.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class Builder {
+          public function step(): self { return $this; }
+          public function finish(): void {}
+          public function clone_(): static { return $this; }
+      }
+
+      class FluentBuilder extends Builder {
+          public function go(): void {
+              $this->step()->finish();
+          }
+      }
+
+  - path: src/Service/TypedConstants.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class TypedConstants {
+          const string NAME = 'svc';
+          const int VERSION = 1;
+          public const ?string OPTIONAL = null;
+          public const array TAGS = [];
+
+          public function describe(): string {
+              return self::NAME;
+          }
+      }
+
+  - path: src/Service/Boot.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      function boot(Repo $repo, Cache $cache): void {
+          $repo->find(1);
+          $cache->get('k');
+      }
+
+tests:
+  # ── Typed properties (PHP 7.4) ─────────────────────────────────
+  - name: "Typed properties produce Property definitions with bare names"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Service\TypedProps\count',
+                      'App\Service\TypedProps\name',
+                      'App\Service\TypedProps\repo',
+                      'App\Service\TypedProps\rate']
+        AND d.definition_type = 'Property'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "Typed property invocation: TypedProps.lookup -> Repo.find via \\$this->repo"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\TypedProps\lookup'
+        AND callee.fqn = 'App\Service\Repo\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Param-typed method call (the classic case) ─────────────────
+  - name: "Top-level function parameter typed Repo: boot -> Repo.find via \\$repo"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\boot'
+        AND callee.fqn = 'App\Service\Repo\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Top-level function parameter typed Cache: boot -> Cache.get via \\$cache"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\boot'
+        AND callee.fqn = 'App\Service\Cache\get'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Nullable types ?T (PHP 7.1) ────────────────────────────────
+  - name: "Nullable param ?Repo: NullableTypes.fetch -> Repo.save"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\NullableTypes\fetch'
+        AND callee.fqn = 'App\Service\Repo\save'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Union types A|B (PHP 8.0) ──────────────────────────────────
+  # Per PHP semantics, $svc could be either Repo or Cache. The
+  # graph should record a Calls edge to AT LEAST ONE member type's
+  # `find` if one exists. Only Repo has `find`, so the edge to
+  # Repo.find is the correct minimum.
+  - name: "Union param Repo|Cache resolves \\$svc->find to Repo.find"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\UnionTypes\process'
+        AND callee.fqn = 'App\Service\Repo\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Union property Repo|Cache is indexed as Property with bare name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Service\UnionTypes\primary'
+        AND d.definition_type = 'Property'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Intersection types A&B (PHP 8.1) ───────────────────────────
+  # $other is both Countable and Stringable. The graph should
+  # resolve $other->count() to Countable.count.
+  - name: "Intersection param Countable&Stringable resolves \\$other->count to Countable.count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\IntersectionUser\measure'
+        AND callee.fqn = 'App\Iface\Countable\count'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── DNF types (PHP 8.2) ────────────────────────────────────────
+  # (Countable&Stringable)|Empty_ — $x->count() is valid on the
+  # intersection arm. At minimum the engine should record a Calls
+  # edge to Countable.count.
+  - name: "DNF param (Countable&Stringable)|Empty_ resolves \\$x->count to Countable.count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\DnfTypes\inspect'
+        AND callee.fqn = 'App\Iface\Countable\count'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── self / static / parent return types ────────────────────────
+  # Builder.step(): self — calling ->step() on $this yields a
+  # Builder, so the chain $this->step()->finish() should resolve
+  # to Builder.finish.
+  # `step(): self` declared on Builder is rewritten to the declaring class, so
+  # the chain `$this->step()->finish()` continues to Builder.finish.
+  - name: "self return-type chain FluentBuilder.go -> Builder.finish"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\FluentBuilder\go'
+        AND callee.fqn = 'App\Service\Builder\finish'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "FluentBuilder extends Builder"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Service\FluentBuilder'
+        AND p.fqn = 'App\Service\Builder'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Typed class constants (PHP 8.3) ────────────────────────────
+  - name: "Typed class constants indexed with bare names"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Service\TypedConstants\NAME',
+                      'App\Service\TypedConstants\VERSION',
+                      'App\Service\TypedConstants\OPTIONAL',
+                      'App\Service\TypedConstants\TAGS']
+        AND d.definition_type = 'Constant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  # ── Cross-arm: ensure intersection class implements both ifaces ──
+  - name: "Counter implements Countable and Stringable"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Iface\Counter'
+        AND e.edge_kind = 'Extends'
+      RETURN p.fqn AS parent
+    assert:
+      - { row: { parent: 'App\Iface\Countable' } }
+      - { row: { parent: 'App\Iface\Stringable' } }
+
+  # ── Sanity: no NULL fqns anywhere ──────────────────────────────
+  - name: "Every Definition has a non-null FQN"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.fqn AS fqn
+    assert:
+      - { no_nulls: fqn }

@@ -1,0 +1,363 @@
+name: "PHP 8.0-8.4 — match expressions, attributes, throw-as-expression"
+
+fixtures:
+  - path: src/Support/Logger.php
+    content: |
+      <?php
+      namespace App\Support;
+
+      class Logger {
+          public static function level(): int { return 1; }
+          public function write(string $line): void {}
+      }
+
+  - path: src/Errors/Errors.php
+    content: |
+      <?php
+      namespace App\Errors;
+
+      class Errors {
+          public static function code(int $c): \RuntimeException {
+              return new \RuntimeException((string) $c);
+          }
+      }
+
+  - path: src/Contracts/Labeled.php
+    content: |
+      <?php
+      namespace App\Contracts;
+
+      interface Labeled {
+          public function label(): string;
+      }
+
+  - path: src/Http/Router.php
+    content: |
+      <?php
+      namespace App\Http;
+
+      class Router {
+          public function route(int $code): string {
+              return match ($code) {
+                  200, 201 => $this->ok(),
+                  301, 302 => self::redirect(),
+                  404      => static::missing(),
+                  default  => $this->fallback(),
+              };
+          }
+
+          public function ok(): string { return 'ok'; }
+          public static function redirect(): string { return 'r'; }
+          public static function missing(): string { return 'm'; }
+          public function fallback(): string { return 'f'; }
+      }
+
+  - path: src/Http/ApiRouter.php
+    content: |
+      <?php
+      namespace App\Http;
+
+      class ApiRouter extends Router {
+          public function dispatch(int $code): string {
+              return match (true) {
+                  $code >= 500 => parent::fallback(),
+                  $code >= 400 => $this->client($code),
+                  default      => 'ok',
+              };
+          }
+
+          public function client(int $code): string { return (string) $code; }
+      }
+
+  - path: src/Domain/Dispatcher.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      use App\Errors\Errors;
+
+      class Dispatcher {
+          public function pick(string $kind): string {
+              return match ($kind) {
+                  'a', 'b' => $this->handleA(),
+                  'c'      => throw Errors::code(500),
+                  'd'      => throw new \LogicException('nope'),
+                  default  => 'unknown',
+              };
+          }
+
+          public function handleA(): string { return 'A'; }
+      }
+
+  - path: src/Domain/Validator.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      class Validator {
+          public function require(?string $value): string {
+              return $value ?? throw new \InvalidArgumentException('null');
+          }
+      }
+
+  - path: src/Domain/Status.php
+    content: |
+      <?php
+      namespace App\Domain;
+
+      use App\Contracts\Labeled;
+
+      enum Status: string implements Labeled {
+          case Active = 'active';
+          case Archived = 'archived';
+
+          public function label(): string {
+              return match ($this) {
+                  Status::Active   => self::format('on'),
+                  Status::Archived => self::format('off'),
+              };
+          }
+
+          public static function format(string $v): string { return $v; }
+      }
+
+  - path: src/Http/UserController.php
+    content: |
+      <?php
+      namespace App\Http;
+
+      use App\Support\Logger;
+
+      class UserController {
+          #[Route(path: '/list', rate: Logger::level())]
+          public function list(): array {
+              return [];
+          }
+
+          #[Route(path: '/show')]
+          public function show(int $id): string {
+              return (string) $id;
+          }
+      }
+
+  - path: src/Boot.php
+    content: |
+      <?php
+      namespace App;
+
+      use App\Http\Router;
+      use App\Domain\Dispatcher;
+
+      function boot(int $code): string {
+          $r = new Router();
+          $d = new Dispatcher();
+          return match (true) {
+              $code < 400 => $r->route($code),
+              default     => $d->pick('c'),
+          };
+      }
+
+tests:
+  # ── Definitions ────────────────────────────────────────────────
+  - name: "Router class indexed with namespaced FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Http\Router'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Class } }
+
+  - name: "Match-bearing method indexed under Router"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Http\Router\route'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: Method } }
+
+  - name: "Method decorated with attribute is still indexed normally"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Http\UserController\list', 'App\Http\UserController\show']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: 'App\Http\UserController\list', type: Method } }
+      - { row: { fqn: 'App\Http\UserController\show', type: Method } }
+
+  - name: "Enum cases survive when enum body contains match"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumCase'
+        AND d.fqn IN ['App\Domain\Status\Active', 'App\Domain\Status\Archived']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  # ── Extends ────────────────────────────────────────────────────
+  - name: "Backed enum implements interface (Extends edge)"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Domain\Status'
+        AND p.fqn = 'App\Contracts\Labeled'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "ApiRouter extends Router (so parent:: resolves)"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Http\ApiRouter'
+        AND p.fqn = 'App\Http\Router'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Calls inside match arms ────────────────────────────────────
+  - name: "Match arm: \\$this->ok() resolves to Router.ok"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Router\route'
+        AND callee.fqn = 'App\Http\Router\ok'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match arm: self::redirect() resolves to Router.redirect"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Router\route'
+        AND callee.fqn = 'App\Http\Router\redirect'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match arm: static::missing() resolves to Router.missing"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Router\route'
+        AND callee.fqn = 'App\Http\Router\missing'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match default arm: \\$this->fallback() resolves to Router.fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Router\route'
+        AND callee.fqn = 'App\Http\Router\fallback'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match arm: parent::fallback() resolves to inherited Router.fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
+        AND callee.fqn = 'App\Http\Router\fallback'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match arm: \\$this->client(\\$code) resolves on subclass"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\ApiRouter\dispatch'
+        AND callee.fqn = 'App\Http\ApiRouter\client'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── throw-as-expression (PHP 8.0) ──────────────────────────────
+  - name: "Match arm: throw Errors::code(500) -> Errors.code Calls edge"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
+        AND callee.fqn = 'App\Errors\Errors\code'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Match arm: \\$this->handleA() resolves alongside throw arms"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Dispatcher\pick'
+        AND callee.fqn = 'App\Domain\Dispatcher\handleA'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Null-coalesce throw expression does not break method indexing"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Domain\Validator\require'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Enum body match arms ───────────────────────────────────────
+  # Both match arms call self::format(), so the edge resolves (once per arm).
+  - name: "Enum method match arm: self::format resolves to Status.format"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Domain\Status\label'
+        AND callee.fqn = 'App\Domain\Status\format'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row: { c: 'App\Domain\Status\label' } }
+
+  # ── Attributes ─────────────────────────────────────────────────
+  - name: "Method with #[Route] attribute keeps its parameters / body indexed (no parse error)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Http\UserController\show'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Call inside attribute argument: list() -> Logger.level via Logger::level()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\UserController\list'
+        AND callee.fqn = 'App\Support\Logger\level'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Cross-file calls through match ─────────────────────────────
+  - name: "boot() match arm: new Router() resolves to App\\Http\\Router"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\boot'
+        AND callee.fqn = 'App\Http\Router'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "boot() match arm: new Dispatcher() resolves to App\\Domain\\Dispatcher"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\boot'
+        AND callee.fqn = 'App\Domain\Dispatcher'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }

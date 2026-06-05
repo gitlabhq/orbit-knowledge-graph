@@ -101,7 +101,7 @@ Orbit indexes two categories of data:
 - Source code from your repositories: files, directories, function and class definitions, and
   cross-file import references. Code is indexed from the default branch only.
 
-Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, and C++.
+Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, and PHP.
 
 [Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
 

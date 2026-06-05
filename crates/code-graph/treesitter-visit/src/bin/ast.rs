@@ -25,6 +25,7 @@ fn main() {
         "cs" => SupportLang::CSharp,
         "ts" | "tsx" => SupportLang::TypeScript,
         "js" | "jsx" => SupportLang::JavaScript,
+        "php" | "phtml" => SupportLang::Php,
         _ => {
             eprintln!("unknown extension: {ext}");
             std::process::exit(1);

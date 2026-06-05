@@ -322,6 +322,17 @@ fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
     }
 }
 
+/// Reference DDL emitted to `config/graph.sql` always assumes a local `default`
+/// ClickHouse user; the indexer substitutes the deployment's configured
+/// credentials at migration time.
+fn local_dictionary_source() -> query_engine::compiler::DictionarySource<'static> {
+    query_engine::compiler::DictionarySource {
+        database: "default",
+        user: "default",
+        password: None,
+    }
+}
+
 fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
     let ont = match ontology_path {
         Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
@@ -350,9 +361,21 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
         };
         format!(
             "{};\n",
-            query_engine::compiler::emit_create_dictionary(&d, "default")
+            query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
         )
     }));
+
+    let views = if prefix.is_empty() {
+        query_engine::compiler::generate_graph_materialized_views(&ont)
+    } else {
+        query_engine::compiler::generate_graph_materialized_views_with_prefix(&ont, &prefix)
+    };
+    for mv in &views {
+        generated.push(format!(
+            "{};\n",
+            query_engine::compiler::emit_create_materialized_view(mv)
+        ));
+    }
 
     let schema_version = include_str!("../../../config/SCHEMA_VERSION").trim();
 
@@ -370,8 +393,10 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
     }
 }
 
-/// Extracts `CREATE TABLE IF NOT EXISTS` statements from SQL, keyed by table name.
-/// Splits on top-level semicolons and extracts the table name from each statement.
+/// Extracts DDL statements from SQL, keyed by object name.
+/// Handles both `CREATE TABLE IF NOT EXISTS` and
+/// `CREATE MATERIALIZED VIEW IF NOT EXISTS` statements.
+/// Splits on top-level semicolons and extracts the object name from each.
 fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, String> {
     let mut tables = std::collections::BTreeMap::new();
     let mut depth = 0i32;
@@ -388,7 +413,7 @@ fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, Stri
             ';' if !in_string && depth == 0 => {
                 let stmt = sql[start..=i].trim();
                 if let Some(name) =
-                    extract_create_table_name(stmt).or_else(|| extract_create_dictionary_name(stmt))
+                    extract_ddl_object_name(stmt).or_else(|| extract_create_dictionary_name(stmt))
                 {
                     tables.insert(name, strip_leading_comments(stmt).to_string());
                 }
@@ -419,20 +444,26 @@ fn strip_leading_comments(stmt: &str) -> &str {
     }
 }
 
-/// Extracts the table name from a `CREATE TABLE IF NOT EXISTS <name>` statement.
-fn extract_create_table_name(stmt: &str) -> Option<String> {
+/// Extracts the object name from a `CREATE TABLE IF NOT EXISTS <name>` or
+/// `CREATE MATERIALIZED VIEW IF NOT EXISTS <name>` statement.
+fn extract_ddl_object_name(stmt: &str) -> Option<String> {
     let upper = stmt.to_uppercase();
-    let marker = "CREATE TABLE IF NOT EXISTS ";
-    let pos = upper.find(marker)?;
-    let after = &stmt[pos + marker.len()..];
-    let name = after
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()?;
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
+    let markers = [
+        "CREATE MATERIALIZED VIEW IF NOT EXISTS ",
+        "CREATE TABLE IF NOT EXISTS ",
+    ];
+    for marker in markers {
+        if let Some(pos) = upper.find(marker) {
+            let after = &stmt[pos + marker.len()..];
+            let name = after
+                .split(|c: char| c.is_whitespace() || c == '(')
+                .next()?;
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
     }
+    None
 }
 
 fn extract_create_dictionary_name(stmt: &str) -> Option<String> {

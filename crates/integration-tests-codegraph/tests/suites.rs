@@ -263,6 +263,34 @@ yaml_test!(cpp_resolution, "cpp/resolution.yaml");
 yaml_test!(cpp_cross_language, "cpp/cross_language.yaml");
 yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
 
+// PHP
+yaml_test!(php_resolution, "php/resolution.yaml");
+yaml_test!(php_hardcore, "php/hardcore.yaml");
+yaml_test!(php_oop_core, "php/oop_core.yaml");
+yaml_test!(php_traits, "php/traits.yaml");
+yaml_test!(php_enums_versioned, "php/enums_versioned.yaml");
+yaml_test!(php_namespaces_imports, "php/namespaces_imports.yaml");
+yaml_test!(php_functions_closures, "php/functions_closures.yaml");
+yaml_test!(php_promotion_readonly, "php/promotion_readonly.yaml");
+yaml_test!(php_type_system, "php/type_system.yaml");
+yaml_test!(php_calls_static_nullsafe, "php/calls_static_nullsafe.yaml");
+yaml_test!(php_match_attributes, "php/match_attributes.yaml");
+yaml_test!(php_magic_late_static, "php/magic_late_static.yaml");
+yaml_test!(php_cross_file, "php/cross_file_resolution.yaml");
+yaml_test!(php_frameworks, "php/frameworks_patterns.yaml");
+yaml_test!(
+    php_cross_file_di_self_parent_instanceof,
+    "php/cross_file_di_self_parent_instanceof.yaml"
+);
+yaml_test!(
+    php_cross_file_aliased_parent_catch,
+    "php/cross_file_aliased_parent_catch.yaml"
+);
+yaml_test!(
+    php_cross_file_class_const_singleton,
+    "php/cross_file_class_const_singleton.yaml"
+);
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(

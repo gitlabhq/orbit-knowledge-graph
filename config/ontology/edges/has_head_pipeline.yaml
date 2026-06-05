@@ -7,4 +7,5 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
     fk_column: head_pipeline_id
+    scope: same_namespace
     description: "Merge request has head pipeline."

@@ -62,7 +62,25 @@ pub(super) struct SettingsYaml {
     #[serde(default)]
     pub auxiliary_tables: Vec<AuxiliaryTableYaml>,
     #[serde(default)]
+    pub materialized_views: Vec<MaterializedViewYaml>,
+    #[serde(default)]
     pub auxiliary_dictionaries: Vec<AuxiliaryDictionaryYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct MaterializedViewYaml {
+    pub name: String,
+    #[serde(default)]
+    pub to_table: Option<String>,
+    pub select_query: String,
+    #[serde(default)]
+    pub engine: Option<String>,
+    #[serde(default)]
+    pub engine_args: Vec<String>,
+    #[serde(default)]
+    pub order_by: Vec<String>,
+    #[serde(default)]
+    pub populate: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

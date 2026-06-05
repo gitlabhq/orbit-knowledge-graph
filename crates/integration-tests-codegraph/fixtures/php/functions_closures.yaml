@@ -1,0 +1,295 @@
+name: "PHP functions & closures — top-level, closures, arrows, first-class callables, variadics, named args, defaults"
+
+fixtures:
+  - path: src/lib.php
+    content: |
+      <?php
+      namespace App\Lib;
+
+      function add(int $a, int $b): int {
+          return $a + $b;
+      }
+
+      function shout(string $s): string {
+          return strtoupper($s);
+      }
+
+      function variadic_sum(int ...$nums): int {
+          return array_sum($nums);
+      }
+
+      function with_defaults(int $a = 1, string $b = 'x'): string {
+          return $b;
+      }
+
+      function with_default_call(int $n = 0, string $tag = 'tag'): string {
+          return shout($tag);
+      }
+
+  - path: src/closures.php
+    content: |
+      <?php
+      namespace App\Closures;
+
+      use function App\Lib\add;
+      use function App\Lib\shout;
+
+      function make_adder(int $x): callable {
+          return function(int $y) use ($x): int {
+              return add($x, $y);
+          };
+      }
+
+      function arrow_caller(int $z): callable {
+          return fn(int $w) => add($z, $w);
+      }
+
+      function calls_via_local_closure(): int {
+          $f = function(int $a) {
+              return add($a, 1);
+          };
+          return $f(5);
+      }
+
+      function nested_closures(int $base): int {
+          $outer = function(int $a) use ($base) {
+              $inner = fn(int $b) => add($base, $a + $b);
+              return $inner(10);
+          };
+          return $outer(2);
+      }
+
+      function loud(string $s): string {
+          return shout($s);
+      }
+
+  - path: src/first_class.php
+    content: |
+      <?php
+      namespace App\Fcc;
+
+      use function App\Lib\shout;
+      use function App\Lib\add;
+
+      class Util {
+          public static function format(string $s): string {
+              return $s;
+          }
+
+          public function run(int $x): int {
+              return $x;
+          }
+      }
+
+      function as_callables(): void {
+          $a = shout(...);
+          $b = strlen(...);
+          $c = Util::format(...);
+          $u = new Util();
+          $d = $u->run(...);
+          $e = add(...);
+      }
+
+  - path: src/named_args.php
+    content: |
+      <?php
+      namespace App\Named;
+
+      use function App\Lib\add;
+
+      function greet(string $name, string $greeting = 'Hello'): string {
+          return $greeting . ' ' . $name;
+      }
+
+      function uses_named(): string {
+          return greet(name: 'World', greeting: 'Hi');
+      }
+
+      function uses_named_add(): int {
+          return add(a: 1, b: 2);
+      }
+
+  - path: src/variadics.php
+    content: |
+      <?php
+      namespace App\Var;
+
+      use function App\Lib\variadic_sum;
+
+      function calls_variadic(): int {
+          return variadic_sum(1, 2, 3, 4);
+      }
+
+      function spread_variadic(): int {
+          $xs = [1, 2, 3];
+          return variadic_sum(...$xs);
+      }
+
+tests:
+  - name: "Top-level functions are indexed with namespace-qualified FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { no_nulls: fqn }
+      - { row: { fqn: 'App\Lib\add' } }
+      - { row: { fqn: 'App\Lib\shout' } }
+      - { row: { fqn: 'App\Lib\variadic_sum' } }
+      - { row: { fqn: 'App\Lib\with_defaults' } }
+      - { row: { fqn: 'App\Lib\with_default_call' } }
+      - { row: { fqn: 'App\Closures\make_adder' } }
+      - { row: { fqn: 'App\Closures\arrow_caller' } }
+      - { row: { fqn: 'App\Closures\calls_via_local_closure' } }
+      - { row: { fqn: 'App\Closures\nested_closures' } }
+      - { row: { fqn: 'App\Closures\loud' } }
+      - { row: { fqn: 'App\Fcc\as_callables' } }
+      - { row: { fqn: 'App\Named\greet' } }
+      - { row: { fqn: 'App\Named\uses_named' } }
+      - { row: { fqn: 'App\Named\uses_named_add' } }
+      - { row: { fqn: 'App\Var\calls_variadic' } }
+      - { row: { fqn: 'App\Var\spread_variadic' } }
+
+  - name: "Closures and arrow functions are NOT indexed as standalone definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 16 }
+
+  - name: "Closure body call resolves to the cross-file target (make_adder -> add)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Closures\make_adder'
+        AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Arrow function body call resolves (arrow_caller -> add)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Closures\arrow_caller'
+        AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Nested closure + arrow body calls attach to the outer function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Closures\nested_closures'
+        AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Local-variable closure body call resolves to add"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Closures\calls_via_local_closure'
+        AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Imported function via `use function` resolves (loud -> shout)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Closures\loud'
+        AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "First-class callable syntax records a Calls edge to the referenced function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Fcc\as_callables'
+        AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "First-class callable for static method resolves to the method"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Fcc\as_callables'
+        AND callee.fqn = 'App\Fcc\Util\format'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Named-argument call still resolves to the target function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Named\uses_named'
+        AND callee.fqn = 'App\Named\greet'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Named-argument cross-namespace call resolves (uses_named_add -> add)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Named\uses_named_add'
+        AND callee.fqn = 'App\Lib\add'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Variadic call resolves to the variadic-parameter function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Var\calls_variadic'
+        AND callee.fqn = 'App\Lib\variadic_sum'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Spread-argument call (...$xs) still resolves to the variadic function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Var\spread_variadic'
+        AND callee.fqn = 'App\Lib\variadic_sum'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Function body call resolves through scalar defaults (with_default_call -> shout)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Lib\with_default_call'
+        AND callee.fqn = 'App\Lib\shout'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Util class is indexed with FQN under its namespace"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Fcc\Util' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "All fixture PHP files are discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }

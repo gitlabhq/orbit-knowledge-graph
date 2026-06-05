@@ -94,6 +94,31 @@ pub struct EdgeTableStorage {
     pub settings: BTreeMap<String, String>,
 }
 
+/// A materialized view definition from the ontology settings.
+///
+/// Materialized views act as ClickHouse insert triggers that transform
+/// incoming data and write it to a destination. The `select_query` uses
+/// `{table_name}` placeholders for table references so that schema-version
+/// prefixes can be resolved at DDL generation time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaterializedViewDefinition {
+    pub name: String,
+    /// Target table for the `TO` clause. When set, the view writes into this
+    /// pre-existing table. Table name uses the logical name (without prefix).
+    pub to_table: Option<String>,
+    /// The `SELECT ...` query. Table references use `{table_name}` placeholders.
+    pub select_query: String,
+    /// Engine name for implicit storage (e.g. `"AggregatingMergeTree"`).
+    /// Ignored when `to_table` is set.
+    pub engine: Option<String>,
+    /// Engine arguments (e.g. `["_version"]`).
+    pub engine_args: Vec<String>,
+    /// ORDER BY columns for implicit storage. Ignored when `to_table` is set.
+    pub order_by: Vec<String>,
+    /// Whether to backfill the view with existing data on creation.
+    pub populate: bool,
+}
+
 /// A non-ontology auxiliary table definition (checkpoint, etc.).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxiliaryTable {
@@ -296,6 +321,34 @@ impl fmt::Display for NodeEntity {
     }
 }
 
+/// Namespace scope relationship between the two endpoints of an edge variant.
+///
+/// Controls whether a resolved `traversal_path` prefix can propagate across
+/// this edge during query compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeVariantScope {
+    /// Source entity's namespace-of-record FK points to the target, which is a
+    /// namespace anchor (`Project`/`Group`). Enables both prefix propagation
+    /// and anchor FK resolution for scope keys (e.g. `project_id` filter on
+    /// `MergeRequest` resolves to the `Project` anchor's `traversal_path`).
+    NamespaceAnchor,
+    /// Both endpoints are guaranteed to live in the same namespace subtree
+    /// (structural containment, project-local association, or intra-repo
+    /// reference). A resolved prefix on either endpoint applies to the other.
+    SameNamespace,
+}
+
+impl EdgeVariantScope {
+    /// Whether this scope value allows `traversal_path` prefix propagation.
+    #[must_use]
+    pub fn is_scope_preserving(self) -> bool {
+        match self {
+            Self::NamespaceAnchor | Self::SameNamespace => true,
+        }
+    }
+}
+
 /// An edge entity representing a relationship between nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
@@ -315,6 +368,9 @@ pub struct EdgeEntity {
     /// relationship (e.g. "project_id", "author_id"). When present, the
     /// compiler can join node tables directly instead of scanning the edge table.
     pub fk_column: Option<String>,
+    /// Namespace scope relationship. When set, the compiler may propagate a
+    /// resolved `traversal_path` prefix across this edge variant.
+    pub scope: Option<EdgeVariantScope>,
 }
 
 /// ETL configuration for edges sourced from join tables.

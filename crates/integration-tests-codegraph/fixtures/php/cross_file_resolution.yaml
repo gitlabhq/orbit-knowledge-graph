@@ -1,0 +1,292 @@
+name: "PHP cross-file — extends/implements/use/DI across many files and namespaces"
+
+fixtures:
+  - path: src/Base/Repository.php
+    content: |
+      <?php
+      namespace App\Base;
+
+      abstract class Repository {
+          public function boot(): void {
+              $this->touch();
+          }
+
+          public function touch(): void {}
+      }
+
+  - path: src/Contract/Identifiable.php
+    content: |
+      <?php
+      namespace App\Contract;
+
+      interface Identifiable {
+          public function id(): int;
+      }
+
+  - path: src/Contract/Persistable.php
+    content: |
+      <?php
+      namespace App\Contract;
+
+      use App\Contract\Identifiable;
+
+      interface Persistable extends Identifiable {
+          public function persist(): bool;
+      }
+
+  - path: src/Mixin/Loggable.php
+    content: |
+      <?php
+      namespace App\Mixin;
+
+      trait Loggable {
+          public function log(string $msg): void {
+              $this->writeLog($msg);
+          }
+
+          public function writeLog(string $msg): void {}
+      }
+
+  - path: src/Repo/OrderRepo.php
+    content: |
+      <?php
+      namespace App\Repo;
+
+      use App\Base\Repository;
+      use App\Contract\Persistable;
+
+      class OrderRepo extends Repository implements Persistable {
+          private int $count = 0;
+
+          public function id(): int {
+              return $this->count;
+          }
+
+          public function persist(): bool {
+              return true;
+          }
+
+          public function find(int $id): bool {
+              return $this->persist();
+          }
+      }
+
+  - path: src/Mailer/OrderMailer.php
+    content: |
+      <?php
+      namespace App\Mailer;
+
+      class OrderMailer {
+          public function sendConfirmation(int $orderId): void {}
+      }
+
+  - path: src/Service/OrderService.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Base\Repository;
+      use App\Contract\Persistable;
+      use App\Mixin\Loggable;
+      use App\Repo\OrderRepo;
+      use App\Mailer\OrderMailer as Mailer;
+
+      class OrderService extends Repository implements Persistable {
+          use Loggable;
+
+          private OrderRepo $repo;
+          private Mailer $mailer;
+
+          public function __construct(OrderRepo $repo, Mailer $mailer) {
+              $this->repo = $repo;
+              $this->mailer = $mailer;
+          }
+
+          public function id(): int {
+              return 1;
+          }
+
+          public function persist(): bool {
+              return $this->repo->persist();
+          }
+
+          public function run(int $orderId): void {
+              $this->repo->find($orderId);
+              $this->mailer->sendConfirmation($orderId);
+              $this->log('ran');
+              parent::boot();
+          }
+      }
+
+  - path: src/Service/Bootstrap.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Repo\OrderRepo;
+      use App\Mailer\OrderMailer;
+
+      function bootstrap(): OrderService {
+          $repo = new OrderRepo();
+          $mailer = new OrderMailer();
+          $svc = new OrderService($repo, $mailer);
+          $svc->run(42);
+          return $svc;
+      }
+
+tests:
+  - name: "All eight files indexed"
+    query: |
+      MATCH (f:File) RETURN f.path AS path
+    assert:
+      - { row_count: 8 }
+      - { unique: path }
+
+  - name: "Cross-file class extension: OrderService extends Repository"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Service\OrderService'
+        AND parent.fqn = 'App\Base\Repository'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file interface implementation: OrderService implements Persistable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Service\OrderService'
+        AND parent.fqn = 'App\Contract\Persistable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file trait use: OrderService uses Loggable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Service\OrderService'
+        AND parent.fqn = 'App\Mixin\Loggable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file class extension: OrderRepo extends Repository"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Repo\OrderRepo'
+        AND parent.fqn = 'App\Base\Repository'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file interface implementation: OrderRepo implements Persistable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Repo\OrderRepo'
+        AND parent.fqn = 'App\Contract\Persistable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file interface inheritance: Persistable extends Identifiable"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Contract\Persistable'
+        AND parent.fqn = 'App\Contract\Identifiable'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file DI call: OrderService.run -> OrderRepo.find via $this->repo"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Repo\OrderRepo\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file DI call: OrderService.run -> OrderMailer.sendConfirmation via aliased import"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Mailer\OrderMailer\sendConfirmation'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file DI call: OrderService.persist -> OrderRepo.persist"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\persist'
+        AND callee.fqn = 'App\Repo\OrderRepo\persist'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file parent:: call: OrderService.run -> Repository.boot"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Base\Repository\boot'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait-inherited call: OrderService.run -> Loggable.log via $this->log"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Mixin\Loggable\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Trait-internal call: Loggable.log -> Loggable.writeLog"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Mixin\Loggable\log'
+        AND callee.fqn = 'App\Mixin\Loggable\writeLog'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Bootstrap function FQN under namespace"
+    query: |
+      MATCH (d:Definition) WHERE d.definition_type = 'Function' RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Service\bootstrap' } }
+
+  - name: "Cross-file new-call from function: bootstrap -> OrderService.run"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\bootstrap'
+        AND callee.fqn = 'App\Service\OrderService\run'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Classes and interfaces across namespaces"
+    query: |
+      MATCH (d:Definition) WHERE d.definition_type = 'Interface' RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Contract\Identifiable' } }
+      - { row: { fqn: 'App\Contract\Persistable' } }
+
+  - name: "Trait indexed as a class-kind container with correct FQN"
+    query: |
+      MATCH (d:Definition) WHERE d.definition_type = 'Trait' RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Mixin\Loggable' } }

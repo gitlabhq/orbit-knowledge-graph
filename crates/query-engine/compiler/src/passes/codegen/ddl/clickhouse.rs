@@ -2,7 +2,10 @@
 //!
 //! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST.
 
-use crate::ast::ddl::{Codec, ColumnType, CreateDictionary, CreateTable, IndexType, ProjectionDef};
+use crate::ast::ddl::{
+    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
+    ProjectionDef,
+};
 use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
 /// ClickHouse reserved words that must be backtick-quoted when used as column identifiers.
@@ -166,7 +169,62 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     parts.join("\n")
 }
 
-pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> String {
+/// Emits a complete `CREATE MATERIALIZED VIEW IF NOT EXISTS` statement for ClickHouse.
+///
+/// The `select_query` must already have `{table_name}` placeholders resolved
+/// (see [`CreateMaterializedView::with_prefix`]).
+pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
+    let mut parts = Vec::new();
+
+    let mut header = format!("CREATE MATERIALIZED VIEW IF NOT EXISTS {}", mv.name);
+
+    if let Some(ref to_table) = mv.to_table {
+        header.push_str(&format!("\nTO {to_table}"));
+    } else {
+        let engine = mv.engine.as_ref().unwrap_or_else(|| {
+            panic!(
+                "materialized view '{}' uses implicit storage but has no engine; \
+                 either set `to_table` or `engine`",
+                mv.name
+            )
+        });
+        let engine_args = if engine.args.is_empty() {
+            String::new()
+        } else {
+            format!("({})", engine.args.join(", "))
+        };
+        header.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
+        if !mv.order_by.is_empty() {
+            header.push_str(&format!("\nORDER BY ({})", mv.order_by.join(", ")));
+        }
+    }
+
+    if mv.populate {
+        header.push_str("\nPOPULATE");
+    }
+
+    parts.push(header);
+    parts.push(format!("AS {}", mv.select_query));
+
+    parts.join("\n")
+}
+
+/// Connection identity for a dictionary's local `CLICKHOUSE` source. ClickHouse
+/// rejects a `SOURCE(CLICKHOUSE(...))` that omits the user when the user loading
+/// the dictionary isn't `default` (BAD_ARGUMENTS), so the user is always emitted
+/// and the password is emitted whenever one is configured.
+pub struct DictionarySource<'a> {
+    pub database: &'a str,
+    pub user: &'a str,
+    pub password: Option<&'a str>,
+}
+
+/// Escapes a value for a single-quoted ClickHouse string literal.
+fn quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource) -> String {
     let key_type = dict
         .attributes
         .iter()
@@ -207,10 +265,19 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> Strin
         "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
         outer = outer_selects.join(", "),
         inner = inner_selects.join(", "),
-        db = source_db,
+        db = source.database,
         table = dict.source_table,
         key = dict.key,
     );
+
+    let credentials = match source.password {
+        Some(password) => format!(
+            "USER {} PASSWORD {} ",
+            quote_literal(source.user),
+            quote_literal(password)
+        ),
+        None => format!("USER {} ", quote_literal(source.user)),
+    };
 
     let layout = match dict.layout.size_in_cells {
         Some(n) => format!("{}(SIZE_IN_CELLS {n})", dict.layout.kind.to_uppercase()),
@@ -220,7 +287,7 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> Strin
     // $q$...$q$ is a ClickHouse heredoc (dollar-quoted string literal), so the backtick-quoted
     // identifiers in `query` need no escaping; the body is schema-derived and never contains $q$.
     format!(
-        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE(QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
+        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE({credentials}QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
         name = dict.name,
         body = body.join(",\n"),
         key = dict.key,
@@ -563,6 +630,62 @@ mod tests {
     }
 
     #[test]
+    fn emit_materialized_view_with_to_table() {
+        let mv = CreateMaterializedView {
+            name: "mv_edge_summary".into(),
+            to_table: Some("gl_edge_summary".into()),
+            select_query:
+                "SELECT traversal_path, count() AS cnt FROM gl_edge GROUP BY traversal_path".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        };
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_edge_summary"));
+        assert!(sql.contains("TO gl_edge_summary"));
+        assert!(sql.contains("AS SELECT traversal_path, count()"));
+        assert!(!sql.contains("ENGINE"));
+        assert!(!sql.contains("POPULATE"));
+    }
+
+    #[test]
+    fn emit_materialized_view_with_implicit_storage() {
+        let mv = CreateMaterializedView {
+            name: "mv_counts".into(),
+            to_table: None,
+            select_query: "SELECT source_kind, count() AS cnt FROM gl_edge GROUP BY source_kind"
+                .into(),
+            engine: Some(Engine {
+                name: "AggregatingMergeTree".into(),
+                args: vec![],
+            }),
+            order_by: vec!["source_kind".into()],
+            populate: true,
+        };
+        let sql = emit_create_materialized_view(&mv);
+        assert!(sql.contains("CREATE MATERIALIZED VIEW IF NOT EXISTS mv_counts"));
+        assert!(sql.contains("ENGINE = AggregatingMergeTree"));
+        assert!(sql.contains("ORDER BY (source_kind)"));
+        assert!(sql.contains("POPULATE"));
+        assert!(sql.contains("AS SELECT source_kind"));
+        assert!(!sql.contains("TO "));
+    }
+
+    #[test]
+    #[should_panic(expected = "implicit storage but has no engine")]
+    fn emit_materialized_view_panics_without_engine_or_to_table() {
+        let mv = CreateMaterializedView {
+            name: "mv_bad".into(),
+            to_table: None,
+            select_query: "SELECT 1".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        };
+        emit_create_materialized_view(&mv);
+    }
+
+    #[test]
     fn emit_bloom_filter_stable_precision() {
         let idx = IndexDef {
             name: "idx_id".into(),
@@ -588,6 +711,51 @@ mod tests {
         assert!(
             sql.contains("bloom_filter(0.01)"),
             "bloom_filter precision should be stable: {sql}"
+        );
+    }
+
+    fn dict() -> CreateDictionary {
+        CreateDictionary {
+            name: "gl_project_traversal_paths_dict".into(),
+            source_table: "gl_project".into(),
+            key: "id".into(),
+            attributes: vec![
+                ColumnDef::new("id", ColumnType::Int64),
+                ColumnDef::new("traversal_path", ColumnType::String),
+            ],
+            layout: DictLayout {
+                kind: "hashed".into(),
+                size_in_cells: None,
+            },
+            lifetime_min: 60,
+            lifetime_max: 300,
+        }
+    }
+
+    #[test]
+    fn dictionary_source_emits_user_without_password() {
+        let source = DictionarySource {
+            database: "graph",
+            user: "gkg",
+            password: None,
+        };
+        let sql = emit_create_dictionary(&dict(), &source);
+        assert!(sql.contains("SOURCE(CLICKHOUSE(USER 'gkg' QUERY"), "{sql}");
+        assert!(!sql.contains("PASSWORD"), "{sql}");
+        assert!(sql.contains("FROM `graph`.gl_project"), "{sql}");
+    }
+
+    #[test]
+    fn dictionary_source_emits_user_and_password() {
+        let source = DictionarySource {
+            database: "graph",
+            user: "gkg",
+            password: Some("s3cr't\\x"),
+        };
+        let sql = emit_create_dictionary(&dict(), &source);
+        assert!(
+            sql.contains(r"SOURCE(CLICKHOUSE(USER 'gkg' PASSWORD 's3cr\'t\\x' QUERY"),
+            "{sql}"
         );
     }
 }

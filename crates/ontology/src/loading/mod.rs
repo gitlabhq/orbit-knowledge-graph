@@ -506,6 +506,56 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    // Load and validate materialized views.
+    let all_table_names: std::collections::HashSet<String> = ontology
+        .auxiliary_tables
+        .iter()
+        .map(|t| t.name.clone())
+        .chain(ontology.nodes.values().map(|n| n.destination_table.clone()))
+        .chain(ontology.edge_table_configs.keys().cloned())
+        .collect();
+
+    ontology.materialized_views = schema
+        .settings
+        .materialized_views
+        .into_iter()
+        .map(|mv| {
+            match (&mv.to_table, &mv.engine) {
+                (None, None) => {
+                    return Err(OntologyError::Validation(format!(
+                        "materialized_view '{}': must set either `to_table` or `engine`",
+                        mv.name
+                    )));
+                }
+                (Some(_), Some(_)) => {
+                    return Err(OntologyError::Validation(format!(
+                        "materialized_view '{}': `to_table` and `engine` are mutually exclusive",
+                        mv.name
+                    )));
+                }
+                _ => {}
+            }
+            if let Some(ref to_table) = mv.to_table
+                && !all_table_names.contains(to_table)
+            {
+                return Err(OntologyError::Validation(format!(
+                    "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
+                     it would be orphaned during schema version cleanup",
+                    mv.name, to_table
+                )));
+            }
+            Ok(crate::entities::MaterializedViewDefinition {
+                name: mv.name,
+                to_table: mv.to_table,
+                select_query: mv.select_query,
+                engine: mv.engine,
+                engine_args: mv.engine_args,
+                order_by: mv.order_by,
+                populate: mv.populate,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     ontology.auxiliary_dictionaries = schema
         .settings
         .auxiliary_dictionaries
@@ -559,6 +609,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
+    validate_edge_scope_annotations(&ontology)?;
 
     Ok(ontology)
 }
@@ -669,6 +720,48 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
                     "{}: property '{}' has no matching storage column",
                     node.name, prop
                 )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// `namespace_anchor` variants must have an FK column and must target a
+/// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
+/// that the same FK column name always maps to the same anchor entity.
+fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    use crate::entities::EdgeVariantScope;
+    use std::collections::HashMap;
+
+    let mut fk_to_anchor: HashMap<&str, &str> = HashMap::new();
+
+    for edge in ontology.edges() {
+        if edge.scope == Some(EdgeVariantScope::NamespaceAnchor) {
+            if edge.fk_column.is_none() {
+                return Err(OntologyError::Validation(format!(
+                    "{} ({}→{}): scope 'namespace_anchor' requires fk_column",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind
+                )));
+            }
+            if !ontology.is_anchor(&edge.target_kind) {
+                return Err(OntologyError::Validation(format!(
+                    "{} ({}→{}): scope 'namespace_anchor' requires target '{}' \
+                     to be a namespace anchor (have a traversal_path_lookup)",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind, edge.target_kind
+                )));
+            }
+            if let Some(fk) = edge.fk_column.as_deref() {
+                if let Some(&existing) = fk_to_anchor.get(fk) {
+                    if existing != edge.target_kind.as_str() {
+                        return Err(OntologyError::Validation(format!(
+                            "FK column '{}' maps to both '{}' and '{}' as namespace_anchor targets",
+                            fk, existing, edge.target_kind
+                        )));
+                    }
+                } else {
+                    fk_to_anchor.insert(fk, &edge.target_kind);
+                }
             }
         }
     }

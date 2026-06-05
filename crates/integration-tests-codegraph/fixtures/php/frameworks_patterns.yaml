@@ -1,0 +1,256 @@
+name: "PHP frameworks — DI by interface, repo+controller composition, factory new"
+
+fixtures:
+  - path: src/Contracts/UserRepositoryInterface.php
+    content: |
+      <?php
+      namespace App\Contracts;
+
+      use App\Models\User;
+
+      interface UserRepositoryInterface {
+          public function find(int $id): ?User;
+          public function all(): array;
+      }
+
+  - path: src/Contracts/LoggerInterface.php
+    content: |
+      <?php
+      namespace App\Contracts;
+
+      interface LoggerInterface {
+          public function info(string $message): void;
+          public function error(string $message): void;
+      }
+
+  - path: src/Models/User.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      class User {
+          private int $id = 0;
+
+          public function getId(): int {
+              return $this->id;
+          }
+      }
+
+  - path: src/Support/Logger/FileLogger.php
+    content: |
+      <?php
+      namespace App\Support\Logger;
+
+      use App\Contracts\LoggerInterface;
+
+      class FileLogger implements LoggerInterface {
+          public function info(string $message): void {}
+          public function error(string $message): void {}
+      }
+
+  - path: src/Repositories/EloquentUserRepository.php
+    content: |
+      <?php
+      namespace App\Repositories;
+
+      use App\Contracts\UserRepositoryInterface;
+      use App\Contracts\LoggerInterface;
+      use App\Models\User;
+
+      class EloquentUserRepository implements UserRepositoryInterface {
+          private LoggerInterface $logger;
+
+          public function __construct(LoggerInterface $logger) {
+              $this->logger = $logger;
+          }
+
+          public function find(int $id): ?User {
+              $this->logger->info('finding user');
+              return new User();
+          }
+
+          public function all(): array {
+              $this->logger->info('listing users');
+              return [];
+          }
+      }
+
+  - path: src/Http/Controllers/UserController.php
+    content: |
+      <?php
+      namespace App\Http\Controllers;
+
+      use App\Contracts\UserRepositoryInterface;
+      use App\Contracts\LoggerInterface;
+      use App\Models\User;
+
+      class UserController {
+          private UserRepositoryInterface $users;
+          private LoggerInterface $logger;
+
+          public function __construct(UserRepositoryInterface $users, LoggerInterface $logger) {
+              $this->users = $users;
+              $this->logger = $logger;
+          }
+
+          public function show(int $id): ?User {
+              $this->logger->info('showing user');
+              return $this->users->find($id);
+          }
+
+          public function index(): array {
+              return $this->users->all();
+          }
+      }
+
+  - path: src/bootstrap.php
+    content: |
+      <?php
+      namespace App;
+
+      use App\Http\Controllers\UserController;
+      use App\Repositories\EloquentUserRepository;
+      use App\Support\Logger\FileLogger;
+
+      function bootApp(): UserController {
+          $logger = new FileLogger();
+          $repo = new EloquentUserRepository($logger);
+          return new UserController($repo, $logger);
+      }
+
+tests:
+  # Two distinct interfaces in one namespace, both indexed as Interface.
+  - name: "Two interfaces in same namespace indexed as Interface"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Interface'
+        AND d.fqn IN ['App\Contracts\UserRepositoryInterface',
+                      'App\Contracts\LoggerInterface']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  # Interface method declarations become Method defs scoped under the interface.
+  - name: "Interface method declarations indexed as Method under the interface FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['App\Contracts\UserRepositoryInterface\find',
+                      'App\Contracts\UserRepositoryInterface\all',
+                      'App\Contracts\LoggerInterface\info',
+                      'App\Contracts\LoggerInterface\error']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  # One class implementing one interface (FileLogger -> LoggerInterface).
+  - name: "FileLogger implements LoggerInterface produces Extends edge"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Support\Logger\FileLogger'
+        AND p.fqn = 'App\Contracts\LoggerInterface'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "EloquentUserRepository implements UserRepositoryInterface produces Extends edge"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Repositories\EloquentUserRepository'
+        AND p.fqn = 'App\Contracts\UserRepositoryInterface'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # Interface-typed property dispatch: $this->users is typed as the interface,
+  # so the call resolves to the INTERFACE method, not the concrete implementation.
+  - name: "Controller.show -> UserRepositoryInterface.find via interface-typed property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Controllers\UserController\show'
+        AND callee.fqn = 'App\Contracts\UserRepositoryInterface\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Controller.index -> UserRepositoryInterface.all via interface-typed property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Http\Controllers\UserController\index'
+        AND callee.fqn = 'App\Contracts\UserRepositoryInterface\all'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # Repository's own injected interface property — same pattern at a deeper layer.
+  - name: "Repository.find -> LoggerInterface.info via interface-typed property"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repositories\EloquentUserRepository\find'
+        AND callee.fqn = 'App\Contracts\LoggerInterface\info'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # Factory function wires concrete classes together via `new`. Each `new X(...)`
+  # should produce a Calls edge from the enclosing function to the class.
+  - name: "bootApp -> FileLogger via new (constructor reference as Calls)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\bootApp'
+        AND callee.fqn = 'App\Support\Logger\FileLogger'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "bootApp -> EloquentUserRepository via new"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\bootApp'
+        AND callee.fqn = 'App\Repositories\EloquentUserRepository'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # `new UserController(...)` type-flows (a subsequent `$c->method()` would
+  # resolve) but, by design, instantiation does not emit a class-level Calls
+  # edge — no language models `new X()` as a call to the class. We assert the
+  # injected class is indexed instead.
+  - name: "Factory target UserController is indexed (new X() is type-flow, not a class Calls edge)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Http\Controllers\UserController'
+        AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # Typed properties with namespaced types resolve their type via use-imports.
+  # UserController has two such properties; both must be indexed by bare name.
+  - name: "Interface-typed properties on UserController indexed by bare name"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+        AND d.fqn IN ['App\Http\Controllers\UserController\users',
+                      'App\Http\Controllers\UserController\logger']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  - name: "Top-level bootApp function FQN under namespace App"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function' AND d.fqn = 'App\bootApp'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }

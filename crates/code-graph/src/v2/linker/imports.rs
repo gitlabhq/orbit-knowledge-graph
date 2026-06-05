@@ -94,9 +94,10 @@ impl<'a> ImportResolver<'a> {
             return vec![];
         }
 
+        // Rebuild the imported symbol's FQN from `name`; the alias is only the local handle.
         let symbol_name = import
-            .alias
-            .or(import.name)
+            .name
+            .or(import.alias)
             .map(|id| self.graph.str(id))
             .unwrap_or("");
 

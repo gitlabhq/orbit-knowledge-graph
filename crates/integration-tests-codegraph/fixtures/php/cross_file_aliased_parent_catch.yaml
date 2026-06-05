@@ -1,0 +1,135 @@
+name: "PHP cross-file — aliased import DI, parent:: dispatch, catch type reference"
+
+fixtures:
+  - path: src/Error/RepositoryException.php
+    content: |
+      <?php
+      namespace App\Error;
+
+      class RepositoryException {
+          public function context(): array { return []; }
+      }
+
+  - path: src/Base/Repository.php
+    content: |
+      <?php
+      namespace App\Base;
+
+      abstract class Repository {
+          public function boot(): void {}
+      }
+
+  - path: src/Repo/OrderRepo.php
+    content: |
+      <?php
+      namespace App\Repo;
+
+      use App\Base\Repository;
+
+      class OrderRepo extends Repository {
+          public function persist(): bool { return true; }
+      }
+
+  - path: src/Mailer/OrderMailer.php
+    content: |
+      <?php
+      namespace App\Mailer;
+
+      class OrderMailer {
+          public function send(int $id): void {}
+      }
+
+  - path: src/Service/OrderService.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Base\Repository;
+      use App\Repo\OrderRepo;
+      use App\Mailer\OrderMailer as Mailer;
+      use App\Error\RepositoryException;
+
+      class OrderService extends Repository {
+          public function __construct(
+              private OrderRepo $repo,
+              private Mailer $mailer,
+          ) {}
+
+          public function run(int $id): void {
+              try {
+                  $this->repo->persist();
+                  $this->mailer->send($id);
+              } catch (RepositoryException $e) {
+                  $e->context();
+              }
+              parent::boot();
+          }
+      }
+
+tests:
+  - name: "All five files indexed"
+    query: |
+      MATCH (f:File) RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }
+
+  - name: "Cross-file class extension: OrderService extends Repository"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Service\OrderService'
+        AND parent.fqn = 'App\Base\Repository'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file class extension: OrderRepo extends Repository"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Repo\OrderRepo'
+        AND parent.fqn = 'App\Base\Repository'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file DI via aliased import: OrderService.run -> OrderMailer.send"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Mailer\OrderMailer\send'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file DI via promoted typed param: OrderService.run -> OrderRepo.persist"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Repo\OrderRepo\persist'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file parent:: dispatch: OrderService.run -> Repository.boot"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Base\Repository\boot'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cross-file catch type reference: OrderService.run references RepositoryException"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\OrderService\run'
+        AND callee.fqn = 'App\Error\RepositoryException'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 1 }

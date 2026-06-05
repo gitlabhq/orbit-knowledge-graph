@@ -1,0 +1,164 @@
+name: "PHP resolution — namespaces, inheritance, traits, calls"
+
+fixtures:
+  - path: app/Models/Model.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      abstract class Model {
+          public function save(): bool {
+              return $this->persist();
+          }
+
+          public function persist(): bool {
+              return true;
+          }
+      }
+
+  - path: app/Support/Logger.php
+    content: |
+      <?php
+      namespace App\Support;
+
+      class Logger {
+          public function log(string $msg): void {}
+      }
+
+  - path: app/Models/User.php
+    content: |
+      <?php
+      namespace App\Models;
+
+      use App\Support\Logger;
+
+      class User extends Model {
+          private Logger $logger;
+
+          public function __construct(Logger $logger) {
+              $this->logger = $logger;
+          }
+
+          public function save(): bool {
+              $this->logger->log('saving');
+              return parent::save();
+          }
+
+          public function rename(string $name): void {
+              $this->save();
+          }
+      }
+
+  - path: app/main.php
+    content: |
+      <?php
+      namespace App;
+
+      use App\Models\User;
+      use App\Support\Logger;
+
+      function bootstrap(): User {
+          $logger = new Logger();
+          $user = new User($logger);
+          $user->save();
+          return $user;
+      }
+
+tests:
+  - name: "Classes carry namespace-qualified FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { no_nulls: fqn }
+      - { row: { fqn: 'App\Models\Model' } }
+      - { row: { fqn: 'App\Models\User' } }
+      - { row: { fqn: 'App\Support\Logger' } }
+
+  - name: "Methods are scoped under their class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\Models\Model\save' } }
+      - { row: { fqn: 'App\Models\Model\persist' } }
+      - { row: { fqn: 'App\Models\User\save' } }
+      - { row: { fqn: 'App\Models\User\__construct' } }
+      - { row: { fqn: 'App\Support\Logger\log' } }
+
+  - name: "Top-level function FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: 'App\bootstrap' } }
+
+  - name: "User extends Model"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'App\Models\User'
+        AND parent.fqn = 'App\Models\Model'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "Same-class call: Model.save -> Model.persist via \\$this"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\Model\save'
+        AND callee.fqn = 'App\Models\Model\persist'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\Model\save', callee: 'App\Models\Model\persist' } }
+
+  - name: "Parent call: User.save -> Model.save via parent::"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\User\save'
+        AND callee.fqn = 'App\Models\Model\save'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\User\save', callee: 'App\Models\Model\save' } }
+
+  - name: "Typed-property call: User.save -> Logger.log via \\$this->logger"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\User\save'
+        AND callee.fqn = 'App\Support\Logger\log'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\User\save', callee: 'App\Support\Logger\log' } }
+
+  - name: "Same-class call: User.rename -> User.save"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Models\User\rename'
+        AND callee.fqn = 'App\Models\User\save'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "All four PHP files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 4 }
+      - { unique: path }

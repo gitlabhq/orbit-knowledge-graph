@@ -13,6 +13,7 @@ use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
 use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
+use crate::v2::langs::generic::php::{PhpDsl, PhpRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
@@ -103,6 +104,7 @@ register_v2_pipelines! {
     CSharp  => [GenericPipeline<CSharpDsl, CSharpRules>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
+    Php     => [GenericPipeline<PhpDsl, PhpRules>],
     Rust    => [RustPipeline],
     Tag("js") => [JsPipeline],
 }

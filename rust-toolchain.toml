@@ -1,3 +1,4 @@
+# Generated from mise.toml. Run: mise run toolchain:generate
 [toolchain]
-channel = "stable"
+channel = "1.95.0"
 components = ["rustfmt", "clippy"]

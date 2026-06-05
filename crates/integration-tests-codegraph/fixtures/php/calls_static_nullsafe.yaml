@@ -1,0 +1,365 @@
+name: "PHP calls — static, nullsafe, chained, ::class, first-class callable"
+
+fixtures:
+  - path: src/Logging/Logger.php
+    content: |
+      <?php
+      namespace App\Logging;
+
+      class Logger {
+          public static function default(): Logger {
+              return new Logger();
+          }
+
+          public function write(string $line): void {}
+
+          public function with(string $tag): Logger {
+              return $this;
+          }
+      }
+
+  - path: src/Query/Builder.php
+    content: |
+      <?php
+      namespace App\Query;
+
+      class Builder {
+          public function where(string $col, string $val): Builder {
+              return $this;
+          }
+
+          public function limit(int $n): Builder {
+              return $this;
+          }
+
+          public function first(): ?string {
+              return null;
+          }
+      }
+
+  - path: src/Repo/UserRepo.php
+    content: |
+      <?php
+      namespace App\Repo;
+
+      use App\Query\Builder;
+      use App\Logging\Logger;
+
+      class UserRepo {
+          private Builder $builder;
+          private ?Logger $logger;
+
+          public function __construct(Builder $builder, ?Logger $logger) {
+              $this->builder = $builder;
+              $this->logger = $logger;
+          }
+
+          public function find(string $id): ?string {
+              return $this->builder->where('id', $id)->limit(1)->first();
+          }
+
+          public function findSafe(string $id): ?string {
+              return $this->builder?->where('id', $id)?->limit(1)?->first();
+          }
+
+          public function announce(string $tag): void {
+              $this->logger?->with($tag)->write('hello');
+          }
+      }
+
+  - path: src/Service/Inheritance.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      class Base {
+          public static function tag(): string {
+              return static::class;
+          }
+
+          public function describe(): string {
+              return self::tag();
+          }
+
+          public function shout(): string {
+              return static::tag();
+          }
+      }
+
+      class Child extends Base {
+          public function announce(): string {
+              return parent::tag();
+          }
+      }
+
+  - path: src/Service/CallSites.php
+    content: |
+      <?php
+      namespace App\Service;
+
+      use App\Logging\Logger;
+      use App\Query\Builder;
+      use App\Repo\UserRepo;
+
+      class CallSites {
+          public function staticUnqualified(): void {
+              Logger::default();
+          }
+
+          public function staticFullyQualified(): void {
+              \App\Logging\Logger::default();
+          }
+
+          public function classConstant(): string {
+              return Logger::class;
+          }
+
+          public function chainedOnNew(): ?string {
+              return (new Builder())->where('id', '1')->limit(1)->first();
+          }
+
+          public function firstClassStatic(): void {
+              $fn = Logger::default(...);
+          }
+
+          public function firstClassInstance(Logger $logger): void {
+              $fn = $logger->write(...);
+          }
+
+          public function nullsafeOnReturn(?UserRepo $repo): ?string {
+              return $repo?->find('1');
+          }
+      }
+
+tests:
+  # ── Definitions ────────────────────────────────────────────────
+  - name: "Static method definitions captured with correct FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Logging\Logger\default',
+                      'App\Service\Base\tag',
+                      'App\Service\Base\describe',
+                      'App\Service\Child\announce']
+      RETURN d.fqn AS fqn, d.definition_type AS t
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+      - { row: { fqn: 'App\Logging\Logger\default', t: Method } }
+      - { row: { fqn: 'App\Service\Base\tag', t: Method } }
+
+  - name: "Chained-call source classes are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['App\Query\Builder', 'App\Logging\Logger',
+                      'App\Repo\UserRepo']
+        AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  # ── Static calls (scoped_call_expression) ──────────────────────
+  - name: "Unqualified static call: CallSites.staticUnqualified -> Logger.default"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\staticUnqualified'
+        AND callee.fqn = 'App\Logging\Logger\default'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Fully-qualified static call: CallSites.staticFullyQualified -> Logger.default"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\staticFullyQualified'
+        AND callee.fqn = 'App\Logging\Logger\default'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── self::/parent::/static:: ───────────────────────────────────
+  - name: "self:: call: Base.describe -> Base.tag"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\Base\describe'
+        AND callee.fqn = 'App\Service\Base\tag'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "static:: call resolves to the enclosing class: Base.shout -> Base.tag"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\Base\shout'
+        AND callee.fqn = 'App\Service\Base\tag'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "parent:: call: Child.announce -> Base.tag"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\Child\announce'
+        AND callee.fqn = 'App\Service\Base\tag'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Child extends Base"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE c.fqn = 'App\Service\Child' AND p.fqn = 'App\Service\Base'
+        AND e.edge_kind = 'Extends'
+      RETURN c.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── Chained instance calls (no nullsafe) ───────────────────────
+  - name: "Chained call head resolves through typed property: UserRepo.find -> Builder.where"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\find'
+        AND callee.fqn = 'App\Query\Builder\where'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Chained call middle (fluent self return): UserRepo.find -> Builder.limit"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\find'
+        AND callee.fqn = 'App\Query\Builder\limit'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Chained call tail: UserRepo.find -> Builder.first"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\find'
+        AND callee.fqn = 'App\Query\Builder\first'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # KNOWN GAP: inline `(new Builder())->where()` does not resolve (needs
+  # constructor type-flow through the chain walker). The non-inline form
+  # `$b = new Builder(); $b->where()` for imported names DOES resolve.
+  - name: "Known gap: chained call on inline new (new Builder())->where()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\chainedOnNew'
+        AND callee.fqn = 'App\Query\Builder\where'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { empty: true }
+
+  # ── Nullsafe (?->) calls (PHP 8.0) ─────────────────────────────
+  - name: "Nullsafe call head: UserRepo.findSafe -> Builder.where"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
+        AND callee.fqn = 'App\Query\Builder\where'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Nullsafe chained middle: UserRepo.findSafe -> Builder.limit"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
+        AND callee.fqn = 'App\Query\Builder\limit'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Nullsafe chained tail: UserRepo.findSafe -> Builder.first"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\findSafe'
+        AND callee.fqn = 'App\Query\Builder\first'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Mixed nullsafe + plain chain: UserRepo.announce -> Logger.with"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\announce'
+        AND callee.fqn = 'App\Logging\Logger\with'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Mixed nullsafe + plain chain tail: UserRepo.announce -> Logger.write"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Repo\UserRepo\announce'
+        AND callee.fqn = 'App\Logging\Logger\write'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "Nullsafe on parameter: CallSites.nullsafeOnReturn -> UserRepo.find"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\nullsafeOnReturn'
+        AND callee.fqn = 'App\Repo\UserRepo\find'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── First-class callable syntax (PHP 8.1) ──────────────────────
+  - name: "First-class static callable: CallSites.firstClassStatic -> Logger.default"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\firstClassStatic'
+        AND callee.fqn = 'App\Logging\Logger\default'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  - name: "First-class instance callable: CallSites.firstClassInstance -> Logger.write"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\firstClassInstance'
+        AND callee.fqn = 'App\Logging\Logger\write'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 1 }
+
+  # ── ::class constant ───────────────────────────────────────────
+  - name: "Foo::class is a constant expression, not a call (no Calls edge from classConstant to Logger.default)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'App\Service\CallSites\classConstant'
+        AND callee.fqn = 'App\Logging\Logger\default'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS c
+    assert:
+      - { row_count: 0 }
+
+  # ── Files ──────────────────────────────────────────────────────
+  - name: "All five PHP fixture files discovered"
+    query: |
+      MATCH (f:File) RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }

@@ -1,0 +1,358 @@
+name: "PHP OOP core — deep inheritance, abstract/final, interface chains, constants, static"
+
+fixtures:
+  - path: src/Animal.php
+    content: |
+      <?php
+      namespace App\Zoo;
+
+      abstract class Animal {
+          public function kingdom(): string {
+              return 'Animalia';
+          }
+
+          abstract public function speak(): string;
+      }
+
+  - path: src/Mammal.php
+    content: |
+      <?php
+      namespace App\Zoo;
+
+      abstract class Mammal extends Animal {
+          public function warmBlooded(): bool {
+              return true;
+          }
+
+          abstract public function legs(): int;
+      }
+
+  - path: src/Canine.php
+    content: |
+      <?php
+      namespace App\Zoo;
+
+      abstract class Canine extends Mammal {
+          public function legs(): int {
+              return 4;
+          }
+
+          public function pack(): string {
+              return 'pack';
+          }
+      }
+
+  - path: src/Dog.php
+    content: |
+      <?php
+      namespace App\Zoo;
+
+      final class Dog extends Canine {
+          public function speak(): string {
+              return 'woof';
+          }
+
+          public function describe(): string {
+              return $this->kingdom() . ':' . $this->pack() . ':' . $this->legs();
+          }
+      }
+
+  - path: src/Io.php
+    content: |
+      <?php
+      namespace App\Io;
+
+      interface Readable {
+          public function read(): string;
+      }
+
+      interface Writable {
+          public function write(string $s): void;
+      }
+
+      interface Closable {
+          public function close(): void;
+      }
+
+      interface ReadWrite extends Readable, Writable {
+      }
+
+      interface Stream extends ReadWrite, Closable {
+          public function flush(): void;
+      }
+
+      class File implements Stream {
+          public function read(): string {
+              return '';
+          }
+
+          public function write(string $s): void {
+          }
+
+          public function close(): void {
+          }
+
+          public function flush(): void {
+          }
+      }
+
+  - path: src/Config.php
+    content: |
+      <?php
+      namespace App\Conf;
+
+      class Config {
+          public const VERSION = '1.0';
+          protected const SECRET = 'shh';
+          private const KEY = 42;
+          public const string TYPED = 'php83';
+          final public const FINAL_CONST = 'no override';
+
+          public function tag(): string {
+              return self::VERSION;
+          }
+      }
+
+  - path: src/Counter.php
+    content: |
+      <?php
+      namespace App\Util;
+
+      class Counter {
+          private static int $count = 0;
+
+          public static function increment(): void {
+              self::$count++;
+          }
+
+          public static function reset(): void {
+              self::$count = 0;
+          }
+
+          public static function value(): int {
+              return self::$count;
+          }
+
+          public function bump(): void {
+              self::increment();
+              static::reset();
+          }
+      }
+
+  - path: src/Locked.php
+    content: |
+      <?php
+      namespace App\Locks;
+
+      class Base {
+          final public function locked(): string {
+              return 'locked';
+          }
+
+          public function open(): string {
+              return $this->locked();
+          }
+      }
+
+      class Sub extends Base {
+          public function open(): string {
+              return $this->locked();
+          }
+      }
+
+tests:
+  - name: "Deep inheritance — every abstract/final class is indexed with correct FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+        AND (d.fqn = 'App\Zoo\Animal'
+          OR d.fqn = 'App\Zoo\Mammal'
+          OR d.fqn = 'App\Zoo\Canine'
+          OR d.fqn = 'App\Zoo\Dog')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+
+  - name: "Three-level Extends chain: Mammal->Animal, Canine->Mammal, Dog->Canine"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE e.edge_kind = 'Extends'
+        AND ((c.fqn = 'App\Zoo\Mammal' AND p.fqn = 'App\Zoo\Animal')
+          OR (c.fqn = 'App\Zoo\Canine' AND p.fqn = 'App\Zoo\Mammal')
+          OR (c.fqn = 'App\Zoo\Dog' AND p.fqn = 'App\Zoo\Canine'))
+      RETURN c.fqn AS child, p.fqn AS parent
+    assert:
+      - { row_count: 3 }
+      - { no_nulls: child }
+      - { no_nulls: parent }
+      - { row: { child: 'App\Zoo\Mammal', parent: 'App\Zoo\Animal' } }
+      - { row: { child: 'App\Zoo\Canine', parent: 'App\Zoo\Mammal' } }
+      - { row: { child: 'App\Zoo\Dog', parent: 'App\Zoo\Canine' } }
+
+  - name: "Grandparent call: Dog.describe -> Animal.kingdom via inherited \\$this"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Zoo\Dog\describe'
+        AND b.fqn = 'App\Zoo\Animal\kingdom'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS caller, b.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Parent-level call: Dog.describe -> Canine.pack via inherited \\$this"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Zoo\Dog\describe'
+        AND b.fqn = 'App\Zoo\Canine\pack'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Abstract method indexed and overridden — Dog.speak and Animal.speak both exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND (d.fqn = 'App\Zoo\Animal\speak' OR d.fqn = 'App\Zoo\Dog\speak')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+
+  - name: "Interface-extends-interface chains (multi-iface): ReadWrite extends Readable AND Writable"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE e.edge_kind = 'Extends'
+        AND c.fqn = 'App\Io\ReadWrite'
+        AND (p.fqn = 'App\Io\Readable' OR p.fqn = 'App\Io\Writable')
+      RETURN p.fqn AS parent
+    assert:
+      - { row_count: 2 }
+      - { unique: parent }
+
+  - name: "Interface extends two interfaces (one transitive): Stream -> ReadWrite, Stream -> Closable"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE e.edge_kind = 'Extends'
+        AND c.fqn = 'App\Io\Stream'
+        AND (p.fqn = 'App\Io\ReadWrite' OR p.fqn = 'App\Io\Closable')
+      RETURN p.fqn AS parent
+    assert:
+      - { row_count: 2 }
+      - { unique: parent }
+
+  - name: "Class implements interface chain root: File -> Stream"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(p:Definition)
+      WHERE e.edge_kind = 'Extends'
+        AND c.fqn = 'App\Io\File'
+        AND p.fqn = 'App\Io\Stream'
+      RETURN p.fqn AS parent
+    assert:
+      - { row_count: 1 }
+
+  - name: "Interfaces are tagged as Interface, not Class"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Interface'
+        AND (d.fqn = 'App\Io\Readable'
+          OR d.fqn = 'App\Io\Writable'
+          OR d.fqn = 'App\Io\Closable'
+          OR d.fqn = 'App\Io\ReadWrite'
+          OR d.fqn = 'App\Io\Stream')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+
+  - name: "Class constants indexed regardless of visibility (public/protected/private)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND (d.fqn = 'App\Conf\Config\VERSION'
+          OR d.fqn = 'App\Conf\Config\SECRET'
+          OR d.fqn = 'App\Conf\Config\KEY')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "Typed constant (PHP 8.3) indexed under Config"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND d.fqn = 'App\Conf\Config\TYPED'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Final constant (PHP 8.1) indexed under Config"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND d.fqn = 'App\Conf\Config\FINAL_CONST'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Static properties indexed: Counter.count"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+        AND d.fqn = 'App\Util\Counter\count'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Static methods indexed: Counter.{increment, reset, value}"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND (d.fqn = 'App\Util\Counter\increment'
+          OR d.fqn = 'App\Util\Counter\reset'
+          OR d.fqn = 'App\Util\Counter\value')
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "self:: static call resolves: Counter.bump -> Counter.increment"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Util\Counter\bump'
+        AND b.fqn = 'App\Util\Counter\increment'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "static:: late-static call resolves: Counter.bump -> Counter.reset"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Util\Counter\bump'
+        AND b.fqn = 'App\Util\Counter\reset'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Final method on Base is callable through subclass \\$this: Sub.open -> Base.locked"
+    query: |
+      MATCH (a:Definition)-[e:DefinitionToDefinition]->(b:Definition)
+      WHERE a.fqn = 'App\Locks\Sub\open'
+        AND b.fqn = 'App\Locks\Base\locked'
+        AND e.edge_kind = 'Calls'
+      RETURN a.fqn AS caller
+    assert:
+      - { row_count: 1 }
+
+  - name: "Final class Dog is still indexed and overrides abstract speak"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'App\Zoo\Dog\speak'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }

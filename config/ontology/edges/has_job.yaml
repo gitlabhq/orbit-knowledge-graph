@@ -7,9 +7,11 @@ variants:
   - from_node: { type: Stage, id: id }
     to_node: { type: Job, id: id }
     fk_column: stage_id
+    scope: same_namespace
     description: "Stage contains job."
 
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Job, id: id }
     fk_column: pipeline_id
+    scope: same_namespace
     description: "Pipeline contains job (skips the Stage hop, matches the natural CI mental model)."

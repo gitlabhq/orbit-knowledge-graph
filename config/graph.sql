@@ -1198,7 +1198,7 @@ CREATE DICTIONARY IF NOT EXISTS gl_project_traversal_paths_dict (
     traversal_path String
 )
 PRIMARY KEY id
-SOURCE(CLICKHOUSE(QUERY $q$SELECT id, traversal_path FROM (SELECT id, argMax(traversal_path, _version) AS traversal_path FROM `default`.gl_project GROUP BY id HAVING argMax(_deleted, _version) = false)$q$))
+SOURCE(CLICKHOUSE(USER 'default' QUERY $q$SELECT id, traversal_path FROM (SELECT id, argMax(traversal_path, _version) AS traversal_path FROM `default`.gl_project GROUP BY id HAVING argMax(_deleted, _version) = false)$q$))
 LIFETIME(MIN 60 MAX 300)
 LAYOUT(HASHED());
 
@@ -1207,7 +1207,7 @@ CREATE DICTIONARY IF NOT EXISTS gl_group_traversal_paths_dict (
     traversal_path String
 )
 PRIMARY KEY id
-SOURCE(CLICKHOUSE(QUERY $q$SELECT id, traversal_path FROM (SELECT id, argMax(traversal_path, _version) AS traversal_path FROM `default`.gl_group GROUP BY id HAVING argMax(_deleted, _version) = false)$q$))
+SOURCE(CLICKHOUSE(USER 'default' QUERY $q$SELECT id, traversal_path FROM (SELECT id, argMax(traversal_path, _version) AS traversal_path FROM `default`.gl_group GROUP BY id HAVING argMax(_deleted, _version) = false)$q$))
 LIFETIME(MIN 60 MAX 300)
 LAYOUT(HASHED());
 
