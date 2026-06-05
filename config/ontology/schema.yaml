@@ -227,7 +227,9 @@ settings:
     histogram_buckets: 16
     top_k_tokens: 100
     # Stats are partitioned by this column for namespace-level granularity.
-    # Entities without this column (User, Runner) are skipped entirely.
+    # Entities without this column (User, Runner) use an empty partition
+    # key for global stats. Total row count per entity comes from the
+    # histogram table's id column.
     partition_key: traversal_path
     # All filterable properties on all entities are auto-tracked.
     # Categorization is derived from property types:
