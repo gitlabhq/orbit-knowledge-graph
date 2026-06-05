@@ -2,6 +2,26 @@
   "$generated_by": "cargo xtask metrics-catalog - do not edit",
   "metrics": [
     {
+      "otel_name": "gkg.billing.events.delivered",
+      "prom_name": "gkg_billing_events_delivered_total",
+      "description": "Billing events confirmed handed over to the Snowplow collector (HTTP 2xx), reported by the emitter's on_success callback. Unlike `emitted` (which counts enqueues), this counts events that actually reached the collector after retries.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.delivery_failed",
+      "prom_name": "gkg_billing_events_delivery_failed_total",
+      "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, or auth failure.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
       "otel_name": "gkg.billing.events.dropped",
       "prom_name": "gkg_billing_events_dropped_total",
       "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",

@@ -199,8 +199,9 @@ impl PipelineObserver for BillingObserver {
             )
             .entered();
             match tracker.track(event) {
-                Ok(()) => {
+                Ok(event_id) => {
                     tracing::info!(
+                        event_id = %event_id,
                         user_id = self.inputs.user_id,
                         realm = realm,
                         source_type = %self.inputs.source_type,

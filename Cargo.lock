@@ -5119,6 +5119,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -6695,7 +6696,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49edd4c813edb88e711f1cc125d990909f#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "axum",
  "futures-util",
@@ -6726,7 +6727,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49edd4c813edb88e711f1cc125d990909f#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6744,7 +6745,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49edd4c813edb88e711f1cc125d990909f#1e235f49edd4c813edb88e711f1cc125d990909f"
 
 [[package]]
 name = "lance"
