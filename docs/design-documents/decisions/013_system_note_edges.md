@@ -33,9 +33,9 @@ This ADR proposes a Rust extraction handler running inside the SDLC indexer, wit
 
 ## Decision
 
-Build a dedicated Rust system-notes handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`. Read `siphon_notes` joined to `siphon_system_note_metadata` on `note_id` (Mode A) or fall back to body-text filtering (Mode B) when the join target is unavailable. Parse the Rails `TYPES_WITH_CROSS_REFERENCES` subset (10 actions) plus `commit` (Markdown SHA list) and `merge` (auto-merge inline SHA, MR-ref fallback).
+Build a dedicated Rust system-notes handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`. Read `siphon_notes` joined to `siphon_system_note_metadata` on `note_id` (Mode A) or fall back to body-text filtering (Mode B) when the join target is unavailable. Parse the Rails `TYPES_WITH_CROSS_REFERENCES` subset plus selected EE cross-reference actions, `commit` (Markdown SHA list), and `merge` (auto-merge inline SHA, MR-ref fallback).
 
-Resolve targets with two batched IN-list queries against `siphon_routes` and the entity tables (`siphon_merge_requests`, `siphon_issues`, `siphon_work_items`). Emit `MENTIONS`, `RELATED_TO` (supplemental), `ADDS_COMMIT`, `MERGED_AT_COMMIT`, `CLOSED` (supplemental), `MERGED` (supplemental), and a new `REOPENED` edge kind via the standard `gl_edge` writer.
+Resolve targets with two batched IN-list queries against `siphon_routes` and the entity tables (`siphon_merge_requests`, `siphon_issues`, `siphon_work_items`). Emit `MENTIONS`, `CONTAINS` (supplemental), `RELATED_TO` (supplemental), `ADDS_COMMIT`, `MERGED_AT_COMMIT`, `CLOSED` (supplemental), `MERGED` (supplemental), and a new `REOPENED` edge kind via the standard `gl_edge` writer.
 
 Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/check-goon-format-version.sh`. Ship behind a feature flag with staging benchmarks 2–5 (lookup latency, end-to-end pass, edge-density gain) as the gate to GA.
 
@@ -46,6 +46,7 @@ Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/ch
 | `MENTIONS` | MergeRequest / WorkItem / Commit → same (cross-typed) | `cross_reference` | GFM ref after `"mentioned in "` |
 | `RELATED_TO` (supplement) | WorkItem <-> WorkItem | `relate`, `unrelate` | GFM ref after `"marked … as related to"` / `"removed the relation with"` |
 | `MENTIONS` (parent/child) | WorkItem → WorkItem | `relate_to_parent`, `relate_to_child`, `unrelate_from_parent`, `unrelate_from_child` | GFM ref + relation type |
+| `CONTAINS` (supplement) | WorkItem → WorkItem | `epic_issue_added`, `issue_added_to_epic`, `epic_issue_moved`, hierarchy-shaped `task` notes | GFM ref for the epic/issue or parent task |
 | `MENTIONS` (lifecycle moves) | WorkItem → WorkItem | `moved`, `cloned`, `duplicate` | GFM ref after verb phrase |
 | `ADDS_COMMIT` | MergeRequest → Commit | `commit` | Markdown list of SHAs |
 | `MERGED_AT_COMMIT` | MergeRequest → Commit | `merge` (auto-merge variant) | SHA inline |

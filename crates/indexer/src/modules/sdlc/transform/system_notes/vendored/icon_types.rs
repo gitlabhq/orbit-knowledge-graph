@@ -31,6 +31,10 @@ pub const HANDLED_CROSS_REFERENCE_ACTIONS: &[&str] = &[
     "moved",
     "cloned",
     "duplicate",
+    "epic_issue_added",
+    "issue_added_to_epic",
+    "epic_issue_moved",
+    "task",
     "commit",
     "merge",
 ];

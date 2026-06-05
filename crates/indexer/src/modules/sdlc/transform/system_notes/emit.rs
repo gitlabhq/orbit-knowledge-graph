@@ -65,6 +65,7 @@ impl From<RefKind> for NoteableKind {
 /// Relationship kind constants for the system-notes handler. Mirror the
 /// edge YAML filenames under `config/ontology/edges/`.
 pub mod edge_kinds {
+    pub const CONTAINS: &str = "CONTAINS";
     pub const MENTIONS: &str = "MENTIONS";
     pub const REOPENED: &str = "REOPENED";
     pub const CLOSED: &str = "CLOSED";
@@ -152,6 +153,42 @@ where
             // who opened, and the entity's `created_at` already covers the
             // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
+
+            Action::EpicIssueAdded
+            | Action::IssueAddedToEpic
+            | Action::EpicIssueMoved
+            | Action::Task => {
+                if row.noteable_kind != NoteableKind::WorkItem {
+                    continue;
+                }
+                for r in &row.references {
+                    let target_kind = NoteableKind::from(r.kind);
+                    if target_kind != NoteableKind::WorkItem {
+                        continue;
+                    }
+                    let Some(resolved) = resolve(r, row.default_project.as_str()) else {
+                        continue;
+                    };
+                    if resolved.id == row.noteable_id {
+                        continue;
+                    }
+                    let (source_id, target_id) = match row.action {
+                        Action::EpicIssueAdded | Action::EpicIssueMoved => {
+                            (row.noteable_id, resolved.id)
+                        }
+                        Action::IssueAddedToEpic | Action::Task => (resolved.id, row.noteable_id),
+                        _ => unreachable!(),
+                    };
+                    edges.push(EmittedEdge {
+                        traversal_path: resolved.traversal_path.clone(),
+                        relationship_kind: edge_kinds::CONTAINS,
+                        source_id,
+                        source_kind: NoteableKind::WorkItem.as_str(),
+                        target_id,
+                        target_kind: NoteableKind::WorkItem.as_str(),
+                    });
+                }
+            }
 
             // Cross-reference / relate / hierarchy: Noteable → Target.
             // All collapse to MENTIONS edges in v1; link-type taxonomy is
@@ -280,6 +317,82 @@ mod tests {
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "REOPENED");
         assert_eq!(edges[0].target_kind, "MergeRequest");
+    }
+
+    #[test]
+    fn epic_issue_added_emits_contains_from_epic_to_issue() {
+        let row = row_for(
+            Action::EpicIssueAdded,
+            "added issue #456",
+            NoteableKind::WorkItem,
+            100,
+        );
+        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        let e = &edges[0];
+        assert_eq!(e.relationship_kind, "CONTAINS");
+        assert_eq!(e.source_id, 100);
+        assert_eq!(e.source_kind, "WorkItem");
+        assert_eq!(e.target_id, 456);
+        assert_eq!(e.target_kind, "WorkItem");
+    }
+
+    #[test]
+    fn issue_added_to_epic_emits_contains_from_epic_to_issue() {
+        let row = row_for(
+            Action::IssueAddedToEpic,
+            "added to epic #100",
+            NoteableKind::WorkItem,
+            456,
+        );
+        let edges = build_edges(&[row], always_resolve(100, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        let e = &edges[0];
+        assert_eq!(e.relationship_kind, "CONTAINS");
+        assert_eq!(e.source_id, 100);
+        assert_eq!(e.target_id, 456);
+    }
+
+    #[test]
+    fn epic_issue_moved_emits_contains_from_new_epic_to_issue() {
+        let row = row_for(
+            Action::EpicIssueMoved,
+            "moved issue #456 from another epic",
+            NoteableKind::WorkItem,
+            100,
+        );
+        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].relationship_kind, "CONTAINS");
+        assert_eq!(edges[0].source_id, 100);
+        assert_eq!(edges[0].target_id, 456);
+    }
+
+    #[test]
+    fn task_hierarchy_emits_contains_from_parent_to_child() {
+        let row = row_for(
+            Action::Task,
+            "added parent task #100",
+            NoteableKind::WorkItem,
+            456,
+        );
+        let edges = build_edges(&[row], always_resolve(100, "1/2/"));
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].relationship_kind, "CONTAINS");
+        assert_eq!(edges[0].source_id, 100);
+        assert_eq!(edges[0].target_id, 456);
+    }
+
+    #[test]
+    fn epic_contains_action_with_mr_reference_is_dropped() {
+        let row = row_for(
+            Action::EpicIssueAdded,
+            "added issue !456",
+            NoteableKind::WorkItem,
+            100,
+        );
+        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
+        assert!(edges.is_empty());
     }
 
     #[test]
