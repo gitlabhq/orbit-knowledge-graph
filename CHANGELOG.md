@@ -1,3 +1,31 @@
+## [0.71.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.70.1...v0.71.0) (2026-06-05)
+
+### Features
+
+* **analytics:** emit query dimensions, exec metrics, and system versions in orbit_query context ([0a7f39d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0a7f39d25955b074532beb345d2b18b453197ddb)) by Michael Usachenko
+* **code-graph:** add PHP language support (7.4-8.4) ([14449a6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14449a6bebcddb919407e50c42cce09fa3dd6cb2)) by Michael Angelo Rivera
+* **ddl:** add materialized view support in DDL generation ([d3a0e72](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d3a0e726cc52cc2cdd66a5e122d8b8d210919a5f)) by Michael Usachenko
+* **ontology:** add scope annotation to edge variants for traversal_path propagation ([130a2c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/130a2c54ccae104caacd8bcebec17acde6d8275c)) by Michael Usachenko
+* **ontology:** add statistics schema config for cost-based query planning ([bbe2a8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bbe2a8d0e129fadc819eefc2f15e936832b6a294)) by Michael Usachenko
+
+### Fixes
+
+* **billing:** send Snowplow events to the authenticated collector path ([1265746](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/12657468948e801ab760a617f373392dae05b915)) by Mark Mishaev
+* **ci:** extract [secure] skip-check logic into ci-skip-utils.sh ([f679899](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f679899fbe3007f07e31f015bfea011ac51a72a4)) by Michael Usachenko
+* **indexer:** chunk system_notes resolve lookups to avoid URI overflow ([10af145](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10af145e8ce7d0de355261b4fbbe57905503b0b0)) by Dmitry Gruzd
+* **query:** denorm-tag filters and path_finding silently returning zero rows ([392e149](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/392e14990043d31867a995affd5ccde99274631a)) by Michael Angelo Rivera
+
+### Performance
+
+* **query:** scope multi-edge traversals to project/group via ontology scope annotations ([a2beaec](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2beaec88e4eb8a69d463bbf9b146c39f5b49a61)) by Michael Angelo Rivera
+
+### Other
+
+* bump SCHEMA_VERSION to 56 to trigger reindex ([7d6b619](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7d6b6194c77a51c6282e364a65331e8b5d9c6ab3)) by Bohdan Parkhomchuk
+* **deps:** update rust crate uuid to v1.23.2 ([d522539](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d522539886601b690ef9ba14b7b7eba97073fc1f)) by GitLab Renovate Bot
+* revamp README into a GitLab Orbit product README ([4cfc216](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4cfc216a2289c4f3a84e223e583336182d89e9cd)) by Michael Angelo Rivera
+* sync rust toolchain from mise ([356b5dd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/356b5ddf8a6a4882f2713a0012c526c4d6c263d9)) by Dmitry Gruzd
+
 ## [0.70.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.70.0...v0.70.1) (2026-06-05)
 
 ### Fixes

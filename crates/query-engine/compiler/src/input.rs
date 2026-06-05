@@ -149,6 +149,10 @@ pub struct CompilerMetadata {
     /// Populated by normalize from ontology denormalized properties.
     /// Example: ("Pipeline", "status", "source") → ("source_tags", "status")
     pub denormalized_columns: HashMap<(String, String, String), (String, String)>,
+    /// (node_kind, property, direction) → relationship kinds whose edge writes
+    /// that denorm tag. A filter is only pushed onto a hop whose relationship
+    /// is in this set.
+    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
     /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
     /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
     /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
@@ -183,6 +187,7 @@ impl Default for CompilerMetadata {
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
             denormalized_columns: HashMap::new(),
+            denorm_rel_kinds: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
             table_columns: HashMap::new(),
@@ -569,6 +574,12 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
+    /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
+    /// `restrict` when both endpoints resolve to the same project/group scope, so
+    /// the edge scan inherits the PK prefix instead of the broad org-wide one.
+    /// Lossless because an edge row's `traversal_path` is its source entity's.
+    #[serde(skip)]
+    pub scope_prefix: Option<String>,
 }
 
 fn default_hops() -> u32 {

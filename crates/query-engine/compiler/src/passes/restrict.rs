@@ -196,12 +196,50 @@ fn validate_traversal_path_within_scope(
     )))
 }
 
+/// Confine edge scans to a tight `traversal_path` prefix when the traversal is
+/// pinned to a project/group. An edge row's `traversal_path` is its source
+/// entity's, so an edge whose two endpoints both resolve to the same scope can
+/// only hold rows under that scope; scoping it is lossless and restores the
+/// edge PK prefix that the broad org-wide authorization filter erases (#601941).
+///
+/// The endpoint prefixes come from the ontology's scope-annotation taint walk
+/// ([`Ontology::propagate_scope_prefixes`]) seeded with the prefixes the path
+/// resolver already attached to `scope_prefixes`. The node-table scans are
+/// scoped separately via `scope_prefixes` in the security pass; this stamps the
+/// edges the lowerer emits.
+fn stamp_edge_scope_prefixes(
+    input: &mut Input,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) {
+    if security_ctx.scope_prefixes.is_empty() {
+        return;
+    }
+
+    let node_prefix = {
+        let edges = crate::scope::scope_edges(input);
+        ontology.propagate_scope_prefixes(&edges, &security_ctx.scope_prefixes)
+    };
+
+    // Scope an edge only when both endpoints share one prefix: then the edge's
+    // traversal_path (its source side) is under that prefix regardless of which
+    // endpoint storage treats as the source.
+    for rel in &mut input.relationships {
+        if let (Some(pf), Some(pt)) = (node_prefix.get(&rel.from), node_prefix.get(&rel.to))
+            && pf == pt
+        {
+            rel.scope_prefix = Some(pf.clone());
+        }
+    }
+}
+
 pub fn restrict(
     input: &mut Input,
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
+    stamp_edge_scope_prefixes(input, ontology, security_ctx);
 
     if security_ctx.admin {
         return Ok(());
@@ -324,6 +362,7 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
+            scope_prefix: None,
         }
     }
 

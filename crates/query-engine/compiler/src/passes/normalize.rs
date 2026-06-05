@@ -141,14 +141,21 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             ontology::DenormDirection::Source => "source",
             ontology::DenormDirection::Target => "target",
         };
-        input.compiler.denormalized_columns.insert(
-            (
-                dp.node_kind.clone(),
-                dp.property_name.clone(),
-                dir_prefix.to_string(),
-            ),
-            (dp.edge_column.clone(), dp.tag_key.clone()),
+        let key = (
+            dp.node_kind.clone(),
+            dp.property_name.clone(),
+            dir_prefix.to_string(),
         );
+        input
+            .compiler
+            .denormalized_columns
+            .insert(key.clone(), (dp.edge_column.clone(), dp.tag_key.clone()));
+        input
+            .compiler
+            .denorm_rel_kinds
+            .entry(key)
+            .or_default()
+            .push(dp.relationship_kind.clone());
     }
 
     // Populate text index metadata from the ontology's StorageIndex entries.
