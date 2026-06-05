@@ -535,14 +535,14 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 }
                 _ => {}
             }
-            if let Some(ref to_table) = mv.to_table {
-                if !all_table_names.contains(to_table) {
-                    return Err(OntologyError::Validation(format!(
-                        "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
-                         it would be orphaned during schema version cleanup",
-                        mv.name, to_table
-                    )));
-                }
+            if let Some(ref to_table) = mv.to_table
+                && !all_table_names.contains(to_table)
+            {
+                return Err(OntologyError::Validation(format!(
+                    "materialized_view '{}': to_table '{}' is not an ontology-tracked table; \
+                     it would be orphaned during schema version cleanup",
+                    mv.name, to_table
+                )));
             }
             Ok(crate::entities::MaterializedViewDefinition {
                 name: mv.name,
