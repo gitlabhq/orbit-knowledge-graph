@@ -633,6 +633,12 @@ mod tests {
     }
 
     #[test]
+    fn task_hierarchy_extracts_task_parent_word_order() {
+        let refs = extract(Action::Task, "set task parent to group/project#11");
+        assert_eq!(refs, vec![issue_ref(Some("group/project"), 11)]);
+    }
+
+    #[test]
     fn task_checklist_status_extracts_nothing() {
         let refs = extract(
             Action::Task,

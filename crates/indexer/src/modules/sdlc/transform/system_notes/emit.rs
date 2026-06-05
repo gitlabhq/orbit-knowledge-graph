@@ -179,8 +179,15 @@ where
                         Action::IssueAddedToEpic | Action::Task => (resolved.id, row.noteable_id),
                         _ => unreachable!(),
                     };
+                    let traversal_path = match row.action {
+                        Action::EpicIssueAdded | Action::EpicIssueMoved => {
+                            resolved.traversal_path.clone()
+                        }
+                        Action::IssueAddedToEpic | Action::Task => row.traversal_path.clone(),
+                        _ => unreachable!(),
+                    };
                     edges.push(EmittedEdge {
-                        traversal_path: resolved.traversal_path.clone(),
+                        traversal_path,
                         relationship_kind: edge_kinds::CONTAINS,
                         source_id,
                         source_kind: NoteableKind::WorkItem.as_str(),
@@ -351,6 +358,7 @@ mod tests {
         assert_eq!(e.relationship_kind, "CONTAINS");
         assert_eq!(e.source_id, 100);
         assert_eq!(e.target_id, 456);
+        assert_eq!(e.traversal_path, "1/2/");
     }
 
     #[test]
@@ -366,6 +374,7 @@ mod tests {
         assert_eq!(edges[0].relationship_kind, "CONTAINS");
         assert_eq!(edges[0].source_id, 100);
         assert_eq!(edges[0].target_id, 456);
+        assert_eq!(edges[0].traversal_path, "1/2/");
     }
 
     #[test]
@@ -381,6 +390,22 @@ mod tests {
         assert_eq!(edges[0].relationship_kind, "CONTAINS");
         assert_eq!(edges[0].source_id, 100);
         assert_eq!(edges[0].target_id, 456);
+        assert_eq!(edges[0].traversal_path, "1/2/");
+    }
+
+    #[test]
+    fn issue_added_to_epic_uses_noteable_traversal_path() {
+        let row = row_for(
+            Action::IssueAddedToEpic,
+            "added to epic #100",
+            NoteableKind::WorkItem,
+            456,
+        );
+        let edges = build_edges(&[row], always_resolve(100, "1/parent/"));
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].source_id, 100);
+        assert_eq!(edges[0].target_id, 456);
+        assert_eq!(edges[0].traversal_path, "1/2/");
     }
 
     #[test]
