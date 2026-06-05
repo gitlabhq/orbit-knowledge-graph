@@ -192,13 +192,8 @@ fn hcl_on_scope(
         Some("locals") => {
             // Extract each attribute inside the locals block body as a Local def.
             if let Some(body) = node.children().find(|c| c.kind().as_ref() == "body") {
-                for attr in body
-                    .children()
-                    .filter(|c| c.kind().as_ref() == "attribute")
-                {
-                    if let Some(id) =
-                        attr.children().find(|c| c.kind().as_ref() == "identifier")
-                    {
+                for attr in body.children().filter(|c| c.kind().as_ref() == "attribute") {
+                    if let Some(id) = attr.children().find(|c| c.kind().as_ref() == "identifier") {
                         let name = id.text().to_string();
                         let fqn = Fqn::from_scope(scope_stack, &name, sep);
                         defs.push(crate::v2::types::CanonicalDefinition {
