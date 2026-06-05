@@ -34,9 +34,8 @@ pub use entities::{
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
     NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
-    StatisticsExclude, StorageColumn, StorageIndex,
-    StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
-    VirtualSource,
+    StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
+    TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
