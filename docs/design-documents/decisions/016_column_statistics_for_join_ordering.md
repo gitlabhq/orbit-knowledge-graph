@@ -41,6 +41,31 @@ join order minimizes intermediate result sizes.
 
 ## Decision
 
+### Query types affected
+
+Join ordering applies to any query that joins two or more tables. In the current
+compiler, that is every query type except bare single-node searches:
+
+| Query type | Tables joined | Current join strategy |
+|---|---|---|
+| Traversal (single-hop) | 1 edge + 1-2 nodes | Edge-first, nodes JOINed |
+| Traversal (multi-hop) | N edges + N+1 nodes | Edge-first, each hop JOINed sequentially |
+| Aggregation | Same as traversal + GROUP BY | Same as traversal |
+| FK-star | Center node + N target nodes (no edges) | Center-first via FK columns |
+| Neighbors | 1 center node + 1 edge scan | Center-first |
+| PathFinding | 2 anchor nodes + recursive edge CTEs | Anchor CTEs, then edge expansion |
+
+For single-hop traversals, the choice is: start from the edge table or start from
+the more selective node and join to the edge. For multi-hop, the direction of each
+hop matters. For FK-star, the order of target JOINs matters (join the smallest
+target first to narrow the pipeline early). For neighbors, the choice between center
+scan vs edge scan depends on whether the center has selective filters beyond the
+pinned IDs.
+
+PathFinding is partially constrained by its recursive CTE structure, but the anchor
+selection (which endpoint to expand from first, forward vs backward depth split)
+is a join ordering decision.
+
 ### Stat types
 
 Three stat types, each in its own AggregatingMergeTree table:
@@ -84,18 +109,73 @@ and passes them into `CompilerMetadata`.
 The planner estimates rows after filtering:
 
 ```
-estimated_rows = total_row_count * product(filter_selectivity)
+estimated_rows = total_row_count * product(selectivity_per_filter)
 ```
 
-Filter selectivity per type:
+Where `total_row_count` comes from the histogram table's `id` column
+(`uniqMerge(row_count)` across all buckets for the entity's `id` field).
 
-- Equality: `value_count / total_row_count` (from value frequency table)
-- IN list: sum of matching value counts / total
-- Range: sum of histogram buckets in range / total
-- Contains/starts_with/ends_with: token frequency lookup, fallback 0.05
-- No filter: 1.0
+**Selectivity per filter type:**
 
-Independence between filters is assumed (standard in all query planners).
+| DSL filter op | Stat source | Selectivity formula |
+|---|---|---|
+| `eq` | Value frequency | `value_count / total_row_count` |
+| `in` | Value frequency | `sum(matching value_counts) / total_row_count` |
+| `gt`, `lt`, `gte`, `lte` | Histogram | `sum(buckets in range) / total_row_count` |
+| `contains` | Token frequency | `token_count / total_row_count`, fallback 0.05 |
+| `starts_with` | Token frequency | same as `contains` |
+| `ends_with` | Token frequency | same as `contains` |
+| `is_null` | Value frequency | `null_value_count / total_row_count`, fallback 0.01 |
+| (no filter) | -- | 1.0 |
+| (pinned IDs) | -- | `min(len(node_ids), total_row_count) / total_row_count` |
+| (id_range) | Histogram | `sum(buckets in range) / total_row_count` |
+
+When multiple filters apply to the same node, their selectivities are multiplied
+(independence assumption). This is the standard approach in PostgreSQL, MySQL, and
+every other query planner. Correlated filters (e.g., `city = 'Paris' AND country =
+'France'`) produce overestimates, but in the GKG ontology most filter columns are
+genuinely independent.
+
+**Join output estimation** uses the FK-join formula:
+
+```
+join_output = left_rows * right_rows / max(ndv_left_key, ndv_right_key)
+```
+
+For edge-to-node joins, the join key is `id` on the node side and `source_id` or
+`target_id` on the edge side. The NDV of the join key comes from the histogram table.
+
+**Example:**
+
+```
+Query: User(node_ids=[1]) --AUTHORED--> MR(source_branch="main") --IN_PROJECT--> Project
+
+Stats for namespace 1/9970/:
+  gl_merge_request: total=82K, source_branch NDV=4200
+  gl_edge (AUTHORED, source_kind=User): ~500K rows
+  gl_project: total=200
+
+Entry point estimates:
+  User:    1 row (pinned)
+  MR:      82K * (1/4200) = ~20 rows
+  Edge:    500K * (1/82K) = ~6 rows (narrowed by source_id=1)
+
+Ordering 1: User → edge → MR → edge → Project
+  Step 1: 1 user
+  Step 2: ~6 edges (source_id=1, rel=AUTHORED)
+  Step 3: ~6 MRs joined, ~1 passes source_branch filter
+  Step 4: 1 FK lookup to Project
+  Total work: ~13 rows processed
+
+Ordering 2: MR(source_branch=main) → edge → User → edge → Project
+  Step 1: ~20 MRs
+  Step 2: ~20 edges joined
+  Step 3: 1 user matches (pinned)
+  Step 4: ~1 FK lookup
+  Total work: ~42 rows processed
+
+Planner picks ordering 1.
+```
 
 ### Join order selection
 
@@ -106,6 +186,36 @@ using the cardinality model. It picks the ordering with the lowest estimated tot
 The search space is small: the DSL caps at 5 nodes and 4 relationships, producing
 10-20 valid orderings. Brute-force evaluation is sub-microsecond. No dynamic
 programming is needed.
+
+### Pipeline placement
+
+The server query pipeline currently runs these stages in order:
+
+```
+Security → PathResolution → Compilation → ClickHouse → Extraction →
+Authorization → Redaction → Hydration → Output
+```
+
+Stats fetching runs **after PathResolution and before Compilation**. At that point
+the server has:
+
+- The user's resolved traversal paths (from PathResolution)
+- The parsed query input with node entities and filters (from Security/validation)
+- The ontology (loaded at startup)
+
+It does not yet have compiled SQL. This is the right moment because the compiler
+needs the stats to make join ordering decisions during the plan pass.
+
+The stats fetch is a single `dictGet` call (or a small batch) to the ClickHouse
+dictionary, returning stats for the query's node tables scoped to the user's
+traversal paths. Results are cached in-process with a 2-5 minute TTL keyed by
+`(table, column, traversal_path)`. For most requests the stats come from the cache
+with zero ClickHouse round-trips.
+
+The stats are passed into `CompilerMetadata` as a `HashMap<(table, column), ColumnStats>`
+where `ColumnStats` holds value frequencies, token frequencies, or histogram buckets
+depending on column type. The compiler's plan pass reads this map during
+`optimize_join_order`.
 
 ### Schema configuration
 
