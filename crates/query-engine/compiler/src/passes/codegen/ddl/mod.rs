@@ -682,9 +682,9 @@ pub fn generate_statistics_ddl_with_prefix(
             // with_prefix resolves it to the prefixed name.
             let select = format!(
                 "SELECT \
-                 '{{{table}}}' AS table_name, \
-                 col.1 AS column_name, \
-                 {pk_expr} AS partition_key, \
+                 toLowCardinality('{{{table}}}') AS table_name, \
+                 toLowCardinality(col.1) AS column_name, \
+                 toLowCardinality({pk_expr}) AS partition_key, \
                  col.2 AS value, \
                  uniqState(id) AS row_count \
                  FROM {{{table}}} \
@@ -717,9 +717,9 @@ pub fn generate_statistics_ddl_with_prefix(
             };
             let select = format!(
                 "SELECT \
-                 '{{{table}}}' AS table_name, \
-                 col.1 AS column_name, \
-                 {pk_expr} AS partition_key, \
+                 toLowCardinality('{{{table}}}') AS table_name, \
+                 toLowCardinality(col.1) AS column_name, \
+                 toLowCardinality({pk_expr}) AS partition_key, \
                  col.2 AS value, \
                  uniqState(id) AS row_count, \
                  col.2 AS min_value, \
@@ -754,9 +754,9 @@ pub fn generate_statistics_ddl_with_prefix(
             };
             let select = format!(
                 "SELECT \
-                 '{{{table}}}' AS table_name, \
-                 col.1 AS column_name, \
-                 {pk_expr} AS partition_key, \
+                 toLowCardinality('{{{table}}}') AS table_name, \
+                 toLowCardinality(col.1) AS column_name, \
+                 toLowCardinality({pk_expr}) AS partition_key, \
                  col.2 AS token, \
                  uniqState(id) AS row_count \
                  FROM {{{table}}} \
