@@ -1,1 +1,46 @@
-<svg width="96" height="96" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GitLab Orbit"><path d="M4.938.61a8 8 0 0 1 5.113-.342.75.75 0 0 1-.385 1.449 6.502 6.502 0 0 0-6.297 10.845 6.5 6.5 0 0 0 10.939-6.133.75.75 0 1 1 1.455-.363A8 8 0 1 1 4.938.61Zm2.634 2.409a5 5 0 1 1 .858 9.963 5 5 0 0 1-.858-9.963Zm1.486 1.645a3.501 3.501 0 0 0-3.736 1.082 3.5 3.5 0 1 0 3.736-1.082ZM14 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z" fill="#FC6D26"/></svg>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GitLab Orbit">
+  <defs>
+    <radialGradient id="base" cx="44%" cy="36%" r="74%">
+      <stop offset="0%" stop-color="#6A98FF"/>
+      <stop offset="42%" stop-color="#3F5BF0"/>
+      <stop offset="100%" stop-color="#2B2FA6"/>
+    </radialGradient>
+    <linearGradient id="hue" x1="38%" y1="0%" x2="58%" y2="100%">
+      <stop offset="0%" stop-color="#5BE6DA" stop-opacity="0.95"/>
+      <stop offset="26%" stop-color="#4FC9E8" stop-opacity="0"/>
+      <stop offset="60%" stop-color="#C24FCB" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#EF5BB0" stop-opacity="0.97"/>
+    </linearGradient>
+    <radialGradient id="purple" cx="76%" cy="24%" r="42%">
+      <stop offset="0%" stop-color="#9466FF" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#9466FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreglow" cx="44%" cy="40%" r="38%">
+      <stop offset="0%" stop-color="#9CC2FF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#9CC2FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="glyphFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#C9D8FF"/>
+    </linearGradient>
+    <filter id="halo" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="haloSoft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+    <path id="blob" d="M256 60 C356 60 442 138 450 248 C456 332 404 404 318 438 C268 458 214 460 168 436 C92 396 58 326 60 246 C62 138 156 60 256 60 Z"/>
+  </defs>
+
+  <use href="#blob" fill="#EAF1FF" opacity="0.30" filter="url(#haloSoft)" transform="translate(256 255) scale(1.16) translate(-256 -255)"/>
+  <use href="#blob" fill="#FFFFFF" opacity="0.60" filter="url(#halo)" transform="translate(256 255) scale(1.075) translate(-256 -255)"/>
+
+  <use href="#blob" fill="url(#base)"/>
+  <use href="#blob" fill="url(#hue)"/>
+  <use href="#blob" fill="url(#purple)"/>
+  <use href="#blob" fill="url(#coreglow)"/>
+
+  <g transform="translate(135 137) scale(15.25)" fill="url(#glyphFill)" opacity="0.96">
+    <path d="M4.938.61a8 8 0 0 1 5.113-.342.75.75 0 0 1-.385 1.449 6.502 6.502 0 0 0-6.297 10.845 6.5 6.5 0 0 0 10.939-6.133.75.75 0 1 1 1.455-.363A8 8 0 1 1 4.938.61Zm2.634 2.409a5 5 0 1 1 .858 9.963 5 5 0 0 1-.858-9.963Zm1.486 1.645a3.501 3.501 0 0 0-3.736 1.082 3.5 3.5 0 1 0 3.736-1.082ZM14 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z"/>
+  </g>
+</svg>
