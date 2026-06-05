@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD041 -->
 <div align="center">
 
-<img src="docs/assets/orbit-logo.png" width="200" height="216" alt="GitLab Orbit logo">
+<img src="docs/assets/orbit-logo.png" width="200" height="200" alt="GitLab Orbit logo">
 
 # GitLab Orbit
 
@@ -13,7 +13,7 @@
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 [![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Local](docs/source/local/getting-started.md) · [Orbit Remote](docs/source/remote/getting-started.md) · [AI coding agents](docs/source/ai_coding_agents.md)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Local](https://docs.gitlab.com/orbit/local/getting-started/) · [Orbit Remote](https://docs.gitlab.com/orbit/remote/getting-started/) · [AI coding agents](https://docs.gitlab.com/orbit/ai_coding_agents/)
 
 </div>
 
