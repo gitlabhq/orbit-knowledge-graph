@@ -19,7 +19,12 @@ schema_files_changed() {
 
 skip_requested() {
     [[ "${SKIP_SCHEMA_VERSION_CHECK:-}" == "1" ]] && return 0
-    [[ "${CI_MERGE_REQUEST_DESCRIPTION:-}" == *"[skip schema-version-check]"* ]]
+    [[ "${CI_MERGE_REQUEST_DESCRIPTION:-}" == *"[skip schema-version-check]"* ]] && return 0
+    [[ "${CI_MERGE_REQUEST_TITLE:-}" == *"[skip schema-version-check]"* ]] && return 0
+    # Check commit messages in the MR range as a last resort. The MR
+    # description variable is set at pipeline creation and may be stale
+    # if the description was edited after the push.
+    git log "$BASE_REF"...HEAD --format=%B 2>/dev/null | grep -q '\[skip schema-version-check\]'
 }
 
 version_bumped() {
