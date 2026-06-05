@@ -45,6 +45,22 @@ use std::path::Path;
 
 use loading::EtlSettings;
 
+/// A query-graph edge for [`Ontology::propagate_scope_prefixes`]. Abstracts
+/// over compiler-specific types so the taint walk lives in the ontology crate.
+#[derive(Debug)]
+pub struct ScopeEdge<'a> {
+    /// DSL alias of the source node (e.g. `"mr"`).
+    pub from: &'a str,
+    /// DSL alias of the target node (e.g. `"diff"`).
+    pub to: &'a str,
+    /// Relationship kind(s) on this edge (e.g. `["HAS_DIFF"]`).
+    pub types: &'a [String],
+    /// Entity type of the source (e.g. `"MergeRequest"`).
+    pub source_kind: &'a str,
+    /// Entity type of the target (e.g. `"MergeRequestDiff"`).
+    pub target_kind: &'a str,
+}
+
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
 pub enum OntologyError {
@@ -900,6 +916,96 @@ impl Ontology {
                         result.push((fk, v.target_kind.as_str()));
                     }
                 }
+            }
+        }
+        result
+    }
+
+    /// Whether the specific `(relationship_kind, source_kind, target_kind)`
+    /// triple is scope-preserving. Unlike [`has_scope_preserving_variant`],
+    /// this resolves to the exact variant and is safe for mixed-variant edges
+    /// like `CONTAINS`.
+    #[must_use]
+    pub fn is_scope_preserving_triple(&self, kind: &str, source: &str, target: &str) -> bool {
+        self.edges.get(kind).is_some_and(|variants| {
+            variants.iter().any(|v| {
+                v.source_kind == source
+                    && v.target_kind == target
+                    && v.scope.is_some_and(|s| s.is_scope_preserving())
+            })
+        })
+    }
+
+    /// Flood resolved `traversal_path` prefixes across scope-preserving edges
+    /// using a two-pass taint walk.
+    ///
+    /// **Pass A (taint):** marks every alias reachable from a seed node only
+    /// through a non-scope-preserving edge — these must never receive a prefix.
+    ///
+    /// **Pass B (BFS):** from the seed aliases, walks scope-preserving edges
+    /// and copies the prefix to untainted neighbours.
+    ///
+    /// Pure: no DB calls, no widening past the seed.
+    #[must_use]
+    pub fn propagate_scope_prefixes(
+        &self,
+        edges: &[ScopeEdge<'_>],
+        seed: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        use std::collections::{HashMap, HashSet};
+
+        if seed.is_empty() {
+            return HashMap::new();
+        }
+
+        let scope_preserving: Vec<bool> = edges
+            .iter()
+            .map(|e| {
+                e.types
+                    .iter()
+                    .all(|t| self.is_scope_preserving_triple(t, e.source_kind, e.target_kind))
+            })
+            .collect();
+
+        // Pass A: taint aliases reachable only through non-scope-preserving edges.
+        let mut tainted: HashSet<&str> = HashSet::new();
+        loop {
+            let mut changed = false;
+            for (i, e) in edges.iter().enumerate() {
+                if scope_preserving[i] {
+                    continue;
+                }
+                for (from, to) in [(e.from, e.to), (e.to, e.from)] {
+                    if (seed.contains_key(from) || tainted.contains(from)) && tainted.insert(to) {
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Pass B: flood prefixes across scope-preserving edges, skipping tainted.
+        let mut result = seed.clone();
+        loop {
+            let mut changed = false;
+            for (i, e) in edges.iter().enumerate() {
+                if !scope_preserving[i] {
+                    continue;
+                }
+                let propagation = match (result.get(e.from).cloned(), result.get(e.to).cloned()) {
+                    (Some(p), None) if !tainted.contains(e.to) => Some((e.to.to_string(), p)),
+                    (None, Some(p)) if !tainted.contains(e.from) => Some((e.from.to_string(), p)),
+                    _ => None,
+                };
+                if let Some((alias, prefix)) = propagation {
+                    result.insert(alias, prefix);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
             }
         }
         result
@@ -2797,5 +2903,107 @@ properties:
                 "{kind} should be same-namespace (CI entities share project scope)"
             );
         }
+    }
+
+    #[test]
+    fn is_scope_preserving_triple_resolves_mixed_variants() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(o.is_scope_preserving_triple("CONTAINS", "Group", "Project"));
+        assert!(!o.is_scope_preserving_triple("CONTAINS", "User", "Project"));
+        assert!(!o.is_scope_preserving_triple("CONTAINS", "WorkItem", "WorkItem"));
+        assert!(o.is_scope_preserving_triple("CALLS", "Definition", "Definition"));
+        assert!(!o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"));
+    }
+
+    #[test]
+    fn propagate_floods_across_same_namespace_edges() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_diff = vec!["HAS_DIFF".to_string()];
+        let types_file = vec!["HAS_FILE".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "diff",
+                types: &types_diff,
+                source_kind: "MergeRequest",
+                target_kind: "MergeRequestDiff",
+            },
+            ScopeEdge {
+                from: "diff",
+                to: "df",
+                types: &types_file,
+                source_kind: "MergeRequestDiff",
+                target_kind: "MergeRequestDiffFile",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/15846663/")
+        );
+        assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
+    }
+
+    #[test]
+    fn propagate_stops_at_cross_namespace_edge() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_closes = vec!["CLOSES".to_string()];
+        let types_label = vec!["HAS_LABEL".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "wi",
+                types: &types_closes,
+                source_kind: "MergeRequest",
+                target_kind: "WorkItem",
+            },
+            ScopeEdge {
+                from: "wi",
+                to: "lab",
+                types: &types_label,
+                source_kind: "WorkItem",
+                target_kind: "Label",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert!(!got.contains_key("wi"));
+        assert!(!got.contains_key("lab"));
+    }
+
+    // Diamond: node X reachable via both a scope-preserving and a
+    // cross-namespace path. Taint from pass A must block propagation.
+    #[test]
+    fn propagate_taints_diamond_reachable_node() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_diff = vec!["HAS_DIFF".to_string()];
+        let types_closes = vec!["CLOSES".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "diff",
+                types: &types_diff,
+                source_kind: "MergeRequest",
+                target_kind: "MergeRequestDiff",
+            },
+            ScopeEdge {
+                from: "mr",
+                to: "wi",
+                types: &types_closes,
+                source_kind: "MergeRequest",
+                target_kind: "WorkItem",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/15846663/")
+        );
+        assert!(!got.contains_key("wi"), "tainted via CLOSES");
     }
 }
