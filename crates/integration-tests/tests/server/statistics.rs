@@ -3,7 +3,7 @@
 //! Verifies that AggregatingMergeTree MVs fire on INSERT into node tables
 //! and populate the stats tables with correct value frequencies.
 
-use arrow::array::{RecordBatch, StringArray, UInt64Array};
+use arrow::array::{Array, RecordBatch, StringArray, UInt64Array};
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, generate_statistics_ddl_with_prefix,
