@@ -22,7 +22,7 @@ use std::time::Duration;
 use query_engine::compiler::{
     DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
     generate_graph_dictionaries_with_prefix, generate_graph_materialized_views_with_prefix,
-    generate_graph_tables_with_prefix,
+    generate_graph_tables_with_prefix, generate_statistics_ddl_with_prefix,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -271,10 +271,51 @@ async fn create_prefixed_tables(
             })?;
     }
 
+    // Statistics collection: tables, dictionary, then MVs (MVs depend on
+    // both the source node tables and the stats destination tables).
+    let mut stats_count = (0usize, 0usize, 0usize);
+    if let Some(stats) = generate_statistics_ddl_with_prefix(ontology, &new_prefix) {
+        for t in &stats.tables {
+            info!(table = %t.name, "creating statistics table");
+            graph
+                .execute(&emit_create_table(t))
+                .await
+                .map_err(|e| MigrationError::Ddl {
+                    table: t.name.clone(),
+                    reason: e.to_string(),
+                })?;
+        }
+        for d in &stats.dictionaries {
+            info!(dictionary = %d.name, "creating statistics dictionary");
+            graph
+                .execute(&emit_create_dictionary(d, source))
+                .await
+                .map_err(|e| MigrationError::Ddl {
+                    table: d.name.clone(),
+                    reason: e.to_string(),
+                })?;
+        }
+        for mv in &stats.views {
+            info!(view = %mv.name, "creating statistics materialized view");
+            graph
+                .execute(&emit_create_materialized_view(mv))
+                .await
+                .map_err(|e| MigrationError::Ddl {
+                    table: mv.name.clone(),
+                    reason: e.to_string(),
+                })?;
+        }
+        stats_count = (
+            stats.tables.len(),
+            stats.dictionaries.len(),
+            stats.views.len(),
+        );
+    }
+
     info!(
-        tables = tables.len(),
-        dictionaries = dicts.len(),
-        views = views.len(),
+        tables = tables.len() + stats_count.0,
+        dictionaries = dicts.len() + stats_count.1,
+        views = views.len() + stats_count.2,
         prefix = %new_prefix,
         "new-prefix tables, dictionaries, and materialized views created"
     );

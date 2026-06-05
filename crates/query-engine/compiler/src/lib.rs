@@ -62,6 +62,7 @@ pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query,
     codegen,
+    ddl::StatisticsDdl,
     ddl::clickhouse::emit_create_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
@@ -72,6 +73,8 @@ pub use passes::codegen::{
     ddl::generate_graph_tables,
     ddl::generate_graph_tables_with_prefix,
     ddl::generate_local_tables,
+    ddl::generate_statistics_ddl,
+    ddl::generate_statistics_ddl_with_prefix,
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{

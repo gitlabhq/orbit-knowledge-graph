@@ -377,6 +377,31 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
         ));
     }
 
+    if let Some(stats) = if prefix.is_empty() {
+        query_engine::compiler::generate_statistics_ddl(&ont)
+    } else {
+        query_engine::compiler::generate_statistics_ddl_with_prefix(&ont, &prefix)
+    } {
+        for t in &stats.tables {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_table(t)
+            ));
+        }
+        for d in &stats.dictionaries {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_dictionary(d, &local_dictionary_source())
+            ));
+        }
+        for mv in &stats.views {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_materialized_view(mv)
+            ));
+        }
+    }
+
     let schema_version = include_str!("../../../config/SCHEMA_VERSION").trim();
 
     match diff {

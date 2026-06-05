@@ -19,6 +19,7 @@ use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, Schema
 use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::{
     generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
+    generate_statistics_ddl,
 };
 use tracing::{info, warn};
 
@@ -591,6 +592,38 @@ impl MigrationCompletionChecker {
                 .execute(&ddl)
                 .await
                 .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
+        }
+
+        // Drop statistics MVs, dictionaries, then tables (MVs depend on
+        // both source node tables and stats destination tables).
+        if let Some(stats) = generate_statistics_ddl(&self.ontology) {
+            for mv in &stats.views {
+                let prefixed = format!("{prefix}{}", mv.name);
+                let ddl = format!("DROP VIEW IF EXISTS {prefixed}");
+                info!(version, view = %prefixed, "dropping statistics view");
+                self.graph
+                    .execute(&ddl)
+                    .await
+                    .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
+            }
+            for d in &stats.dictionaries {
+                let prefixed = format!("{prefix}{}", d.name);
+                let ddl = format!("DROP DICTIONARY IF EXISTS {prefixed}");
+                info!(version, dictionary = %prefixed, "dropping statistics dictionary");
+                self.graph
+                    .execute(&ddl)
+                    .await
+                    .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
+            }
+            for t in &stats.tables {
+                let prefixed = format!("{prefix}{}", t.name);
+                let ddl = format!("DROP TABLE IF EXISTS {prefixed}");
+                info!(version, table = %prefixed, "dropping statistics table");
+                self.graph
+                    .execute(&ddl)
+                    .await
+                    .map_err(|e| format!("DROP TABLE {prefixed}: {e}"))?;
+            }
         }
 
         let tables: Vec<String> = generate_graph_tables(&self.ontology)
