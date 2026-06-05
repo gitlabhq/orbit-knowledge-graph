@@ -576,10 +576,7 @@ pub fn generate_statistics_ddl_with_prefix(
     let build_stats_table =
         |name: &str, value_col: &str, extra_cols: Vec<ColumnDef>| -> CreateTable {
             let mut columns = base_columns.clone();
-            columns.push(ColumnDef::new(
-                value_col,
-                parse_column_type("Nullable(String)"),
-            ));
+            columns.push(ColumnDef::new(value_col, parse_column_type("String")));
             columns.push(uniq_row_count.clone());
             columns.extend(extra_cols);
 
@@ -606,11 +603,11 @@ pub fn generate_statistics_ddl_with_prefix(
             vec![
                 ColumnDef::new(
                     "min_value",
-                    parse_column_type("SimpleAggregateFunction(min, Nullable(String))"),
+                    parse_column_type("SimpleAggregateFunction(min, String)"),
                 ),
                 ColumnDef::new(
                     "max_value",
-                    parse_column_type("SimpleAggregateFunction(max, Nullable(String))"),
+                    parse_column_type("SimpleAggregateFunction(max, String)"),
                 ),
             ],
         )
@@ -630,7 +627,7 @@ pub fn generate_statistics_ddl_with_prefix(
 
         let array_join = |cols: &[&str]| -> String {
             cols.iter()
-                .map(|col| format!("('{col}', toString({col}))"))
+                .map(|col| format!("('{col}', toString(ifNull({col}, '')))"))
                 .collect::<Vec<_>>()
                 .join(", ")
         };
