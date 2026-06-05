@@ -25,15 +25,15 @@ Index your GitLab SDLC and source code as one property graph, then query it from
 
 ### Orbit Local
 
-Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only property graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
+Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only call graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
 
-What it indexes: directories, files, function and class definitions, and cross-file import references. Same 11 languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
+What it indexes: directories, files, function and class definitions, and cross-file import references. Same 11+ languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
 
-| Access method | Use for | Billing |
-|---|---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today | None |
-| [`glab orbit local`](docs/source/local/access/glab.md) (planned) | Drive Orbit Local through `glab` | None |
-| [MCP](docs/source/local/access/mcp.md) (planned) | Expose the local graph to AI coding agents | None |
+| Access method | Use for |
+|---|---|
+| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today |
+| [`glab orbit local`](docs/source/local/access/glab.md) (planned) | Drive Orbit Local through `glab` |
+| [MCP](docs/source/local/access/mcp.md) (planned) | Expose the local graph to AI coding agents |
 
 Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
@@ -41,14 +41,14 @@ Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
 Enable Orbit on a top-level GitLab.com group. Orbit indexes your SDLC and source code into a managed property graph.
 
-What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, and C++.
+What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 11+ languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, and C++.
 
-| Access method | Use for | Billing |
-|---|---|---|
-| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Natural-language questions in the GitLab UI | Zero-rated |
-| [MCP](docs/source/remote/access/mcp.md) | Claude Code, Codex, Cursor, opencode, Gemini CLI | GitLab Credits |
-| [`glab orbit remote`](docs/source/remote/access/glab.md) | Typed CLI subcommands for scripts and discovery | GitLab Credits |
-| [REST API](docs/source/remote/access/api.md) | Pipelines, custom tooling, scripts | GitLab Credits |
+| Access method | Use for |
+|---|---|
+| [GitLab Duo Agent Platform](docs/source/remote/access/duo.md) | Natural-language questions in the GitLab UI |
+| [MCP](docs/source/remote/access/mcp.md) | Claude Code, Codex, Cursor, opencode, Gemini CLI |
+| [`glab orbit remote`](docs/source/remote/access/glab.md) | Typed CLI subcommands for scripts and discovery |
+| [REST API](docs/source/remote/access/api.md) | Pipelines, custom tooling, scripts |
 
 Start with [Orbit Remote getting started](docs/source/remote/getting-started.md).
 
