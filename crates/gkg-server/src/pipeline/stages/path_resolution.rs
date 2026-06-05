@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use query_engine::compiler::{
-    DEFAULT_PATH_ACCESS_LEVEL, PathResolutionKey, QueryType, scope_keys, validate_normalize,
+    DEFAULT_PATH_ACCESS_LEVEL, PathResolutionKey, QueryType, scope_edges, scope_keys,
+    validate_normalize,
 };
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -46,11 +47,12 @@ impl PipelineStage for PathResolutionStage {
             return Ok(());
         }
 
+        let anchor_fks = ctx.ontology.anchor_fk_mappings();
         let mut wanted = Vec::new();
         let mut seen = HashSet::new();
         let mut aliases_by_key: HashMap<PathResolutionKey, Vec<String>> = HashMap::new();
         for node in &input.nodes {
-            for key in scope_keys(node) {
+            for key in scope_keys(node, &anchor_fks) {
                 if ctx
                     .ontology
                     .traversal_path_lookup(&key.entity, key.kind)
@@ -80,6 +82,19 @@ impl PipelineStage for PathResolutionStage {
                     scope_prefixes.insert(alias.clone(), path.clone());
                 }
             }
+        }
+
+        // Flood each resolved prefix to scope-preserving-reachable nodes (e.g. a
+        // MergeRequest's diffs and diff files, or a Project's work items) so
+        // their node-table scans inherit the anchor PK prefix too, not just the
+        // directly-pinned node. The ontology taint walk skips any alias reachable
+        // through a cross-namespace edge. Edge scans are scoped separately in the
+        // compiler's restrict pass.
+        if !scope_prefixes.is_empty() {
+            let edges = scope_edges(&input);
+            scope_prefixes = ctx
+                .ontology
+                .propagate_scope_prefixes(&edges, &scope_prefixes);
         }
 
         if !scope_prefixes.is_empty()
@@ -122,8 +137,63 @@ mod tests {
             .unwrap()
     }
 
+    #[test]
+    fn flood_reaches_diff_and_file_with_embedded_ontology() {
+        use std::collections::HashMap;
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 278964}}},
+                {"id": "diff", "entity": "MergeRequestDiff"},
+                {"id": "df", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
+                {"type": "HAS_FILE", "from": "diff", "to": "df"}
+            ],
+            "limit": 50
+        }"#;
+        let input = parse_input(json).unwrap();
+        let seed = HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/15846663/")
+        );
+        assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
+    }
+
+    #[test]
+    fn flood_keeps_distinct_anchor_prefixes_separate() {
+        use std::collections::HashMap;
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr_a", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1000}}},
+                {"id": "diff_a", "entity": "MergeRequestDiff"},
+                {"id": "mr_b", "entity": "MergeRequest", "filters": {"project_id": {"op": "eq", "value": 1001}}},
+                {"id": "diff_b", "entity": "MergeRequestDiff"}
+            ],
+            "relationships": [
+                {"type": "HAS_DIFF", "from": "mr_a", "to": "diff_a"},
+                {"type": "HAS_DIFF", "from": "mr_b", "to": "diff_b"}
+            ],
+            "limit": 50
+        }"#;
+        let input = parse_input(json).unwrap();
+        let seed = HashMap::from([
+            ("mr_a".to_string(), "1/100/1000/".to_string()),
+            ("mr_b".to_string(), "1/101/1001/".to_string()),
+        ]);
+        let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
+        assert_eq!(got.get("mr_a").map(String::as_str), Some("1/100/1000/"));
+        assert_eq!(got.get("diff_a").map(String::as_str), Some("1/100/1000/"));
+        assert_eq!(got.get("mr_b").map(String::as_str), Some("1/101/1001/"));
+        assert_eq!(got.get("diff_b").map(String::as_str), Some("1/101/1001/"));
+    }
+
     fn ontology_keys(node: &InputNode, ontology: &Ontology) -> Vec<PathResolutionKey> {
-        scope_keys(node)
+        scope_keys(node, &ontology.anchor_fk_mappings())
             .into_iter()
             .filter(|k| ontology.traversal_path_lookup(&k.entity, k.kind).is_some())
             .collect()
@@ -233,10 +303,11 @@ mod tests {
             r#"{"query_type": "traversal", "node": {"id": "g", "entity": "Group", "node_ids": [9]}, "limit": 1}"#,
         );
 
+        let anchor_fks = o.anchor_fk_mappings();
         let mut wanted = Vec::new();
         let mut seen = HashSet::new();
         for n in [&project, &group, &project] {
-            for key in scope_keys(n) {
+            for key in scope_keys(n, &anchor_fks) {
                 if o.traversal_path_lookup(&key.entity, key.kind).is_none()
                     || !seen.insert(key.clone())
                 {

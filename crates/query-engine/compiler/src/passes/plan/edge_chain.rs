@@ -40,6 +40,9 @@ pub struct Hop {
     /// Pre-resolved join columns for connecting to the previous hop.
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
+    /// Tight `traversal_path` prefix to confine this hop's edge scan to,
+    /// carried over from the originating `InputRelationship`.
+    pub scope_prefix: Option<String>,
 }
 
 /// Pre-resolved join columns for connecting a hop to the previous hop.
@@ -285,6 +288,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                     .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
                     .collect(),
                 join_prev: None,
+                scope_prefix: rel.scope_prefix.clone(),
             }
         })
         .collect()

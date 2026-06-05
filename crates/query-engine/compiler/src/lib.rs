@@ -81,7 +81,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::{PathResolutionKey, PathScopeId, scope_keys};
+pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
 pub use types::{
     AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
     is_valid_traversal_path,
@@ -205,12 +205,6 @@ mod tests {
             .render()
     }
 
-    /// Regression: pipeline-execution errors must reach `count_err`. Before
-    /// this fix the body was `pipeline.execute(...)?.into_output().count_err()`,
-    /// where the `?` propagated `QueryError` past `count_err`, so the counter
-    /// was never incremented. Asserting the test-only `COUNT_ERR_HITS` side
-    /// channel ensures the regression cannot return undetected; asserting on
-    /// the error variant alone would have passed against the buggy code.
     #[test]
     fn malformed_query_increments_compiler_rejected() {
         use std::sync::atomic::Ordering;
