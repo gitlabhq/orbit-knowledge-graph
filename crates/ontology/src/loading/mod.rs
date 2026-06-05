@@ -319,6 +319,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 ))
             })?;
         let enum_values = field.enum_values.clone();
+        let field_column = field
+            .column_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| entry.property.clone());
 
         let tag_key = entry
             .column_alias
@@ -336,6 +340,17 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
+                    // Declare the denorm only on edges whose ETL writes it, so
+                    // the compiler never pushes a tag onto an edge with empty
+                    // tags. See `edge_writes_denorm`.
+                    if !edge_writes_denorm(
+                        &ontology.edge_etl_configs,
+                        edge_name,
+                        &direction,
+                        &field_column,
+                    ) {
+                        continue;
+                    }
                     let edge_column = match direction {
                         crate::entities::DenormDirection::Source => "source_tags",
                         crate::entities::DenormDirection::Target => "target_tags",
@@ -612,6 +627,33 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_edge_scope_annotations(&ontology)?;
 
     Ok(ontology)
+}
+
+// Mirrors the indexer's denorm gating: FK edges (no standalone ETL) write every
+// property of their node; standalone edges write a tag only when the matching
+// endpoint is a fixed `Literal` type whose `enrich` list carries the column.
+fn edge_writes_denorm(
+    edge_etl_configs: &std::collections::BTreeMap<
+        String,
+        Vec<crate::entities::EdgeSourceEtlConfig>,
+    >,
+    edge_name: &str,
+    direction: &crate::entities::DenormDirection,
+    field_column: &str,
+) -> bool {
+    let Some(etls) = edge_etl_configs.get(edge_name) else {
+        return true;
+    };
+    etls.iter().any(|etl| {
+        let endpoint = match direction {
+            crate::entities::DenormDirection::Source => &etl.from,
+            crate::entities::DenormDirection::Target => &etl.to,
+        };
+        matches!(
+            endpoint.node_type,
+            crate::entities::EdgeEndpointType::Literal(_)
+        ) && endpoint.enrich.iter().any(|c| c == field_column)
+    })
 }
 
 fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), OntologyError> {

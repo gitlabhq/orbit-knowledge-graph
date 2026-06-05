@@ -32,6 +32,9 @@ pub struct Plan {
     pub cursor: Option<InputCursor>,
     pub node_edge_mappings: HashMap<String, (String, String)>,
     pub denorm_columns: HashMap<(String, String, String), (String, String)>,
+    /// Relationship kinds whose edge writes each denorm tag, keyed like
+    /// `denorm_columns`.
+    pub denorm_rel_kinds: HashMap<(String, String, String), Vec<String>>,
     /// Per-table column sets from the ontology. Used by the lowerer to
     /// push node-level filters (e.g. project_id, branch) down to edge
     /// scans when the edge table has those columns.

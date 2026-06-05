@@ -170,7 +170,7 @@ pub fn plan(input: &mut Input) -> Plan {
     }
 
     for node_plan in nodes.values_mut() {
-        node_plan.hydration = determine_hydration(node_plan, input);
+        node_plan.hydration = determine_hydration(node_plan, input, &hops);
     }
 
     let strategy = if hops.is_empty() {
@@ -216,6 +216,7 @@ pub fn plan(input: &mut Input) -> Plan {
         cursor: input.cursor,
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
+        denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
         table_columns: input.compiler.table_columns.clone(),
         table_sort_keys: input.compiler.table_sort_keys.clone(),
         body,
@@ -453,7 +454,7 @@ fn reorder_by_selectivity(
     }
 }
 
-fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
+fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
     let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
@@ -474,17 +475,51 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
         return HydrationStrategy::Join;
     }
 
-    let has_non_denorm_filters = crate::passes::shared::has_non_denorm_filters(
-        node_plan.entity.as_deref().unwrap_or(""),
-        &node_plan.filters,
-        &input.compiler.denormalized_columns,
-    );
+    // Skip the node table only when every filter is carried by a hop's edge
+    // tag; an uncovered filter stays on the node table so it isn't dropped.
+    let entity = node_plan.entity.as_deref().unwrap_or("");
+    let has_uncovered_filter = node_plan.filters.iter().any(|(prop, _)| {
+        !filter_covered_by_denorm(entity, prop, alias, hops, &input.compiler.denorm_rel_kinds)
+    });
 
-    if has_non_denorm_filters {
+    if has_uncovered_filter {
         return HydrationStrategy::FilterOnly;
     }
 
     HydrationStrategy::Skip
+}
+
+// Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag
+// push must agree on which hop carries a denorm.
+fn filter_covered_by_denorm(
+    entity: &str,
+    prop: &str,
+    alias: &str,
+    hops: &[Hop],
+    denorm_rel_kinds: &HashMap<(String, String, String), Vec<String>>,
+) -> bool {
+    hops.iter().any(|hop| {
+        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+            return false;
+        }
+        let (start_col, end_col) = hop.direction.edge_columns();
+        [(&hop.from_node, start_col), (&hop.to_node, end_col)]
+            .iter()
+            .any(|(node, id_col)| {
+                if node.as_str() != alias {
+                    return false;
+                }
+                let dir = if *id_col == SOURCE_ID_COLUMN {
+                    "source"
+                } else {
+                    "target"
+                };
+                let key = (entity.to_string(), prop.to_string(), dir.to_string());
+                denorm_rel_kinds
+                    .get(&key)
+                    .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
+            })
+    })
 }
 
 /// Pre-resolve join columns for each hop based on shared-node topology
