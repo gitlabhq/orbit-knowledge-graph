@@ -6,10 +6,12 @@ table: gl_code_edge
 variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
+    scope: same_namespace
     description: "Definition calls another definition (method/function invocation)."
 
   - from_node: { type: File, id: id }
     to_node: { type: Definition, id: id }
+    scope: same_namespace
     description: "File contains a top-level call to a definition (call site outside any enclosing definition)."
 
   - from_node: { type: Definition, id: id }

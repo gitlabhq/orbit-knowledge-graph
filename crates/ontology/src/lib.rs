@@ -32,8 +32,8 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition, NodeEntity,
-    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
+    EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
+    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn, StorageIndex,
     StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
     VirtualSource,
 };
@@ -818,6 +818,77 @@ impl Ontology {
             .and_then(|variants| variants.first())
             .map(|e| e.destination_table.as_str())
             .unwrap_or(&self.default_edge_table)
+    }
+
+    /// Whether a relationship kind has at least one scope-preserving variant
+    /// (i.e. a variant with `scope: namespace_anchor` or `scope: same_namespace`).
+    /// Fail-closed: unknown or unannotated edges return false.
+    #[must_use]
+    pub fn is_same_namespace_relationship(&self, relationship_kind: &str) -> bool {
+        self.edges.get(relationship_kind).is_some_and(|variants| {
+            variants
+                .iter()
+                .any(|v| v.scope.is_some_and(|s| s.is_scope_preserving()))
+        })
+    }
+
+    /// True when `entity` declares a `traversal_path_lookup`, i.e. it is a
+    /// namespace anchor whose `traversal_path` can be resolved from an
+    /// `id`/`full_path` filter. Exactly `Project` and `Group` today.
+    #[must_use]
+    pub fn is_anchor(&self, entity: &str) -> bool {
+        self.traversal_path_lookups
+            .iter()
+            .any(|l| l.entity == entity)
+    }
+
+    /// True when a `startsWith(traversal_path, P)` predicate prunes granules
+    /// on this node's table: the table has a `traversal_path` column, its
+    /// dedup key leads with it, and the node is not global-scoped.
+    #[must_use]
+    pub fn is_path_scopable(&self, entity: &str) -> bool {
+        let Some(node) = self.nodes.get(entity) else {
+            return false;
+        };
+        if !node.has_traversal_path {
+            return false;
+        }
+        if node
+            .etl
+            .as_ref()
+            .is_some_and(|e| e.scope() == EtlScope::Global)
+        {
+            return false;
+        }
+        let key = node
+            .storage
+            .primary_key
+            .as_deref()
+            .unwrap_or(&node.sort_key);
+        key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+    }
+
+    /// Returns `(fk_column, anchor_entity)` pairs derived from
+    /// `namespace_anchor` edge variants. When a query filters an entity by
+    /// one of these FK columns, the compiler can resolve the anchor's
+    /// `traversal_path` and scope the query.
+    ///
+    /// Example: `MergeRequest.project_id` → `("project_id", "Project")`.
+    #[must_use]
+    pub fn anchor_fk_mappings(&self) -> Vec<(&str, &str)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        for variants in self.edges.values() {
+            for v in variants {
+                if v.scope == Some(EdgeVariantScope::NamespaceAnchor)
+                    && let Some(fk) = v.fk_column.as_deref()
+                    && seen.insert(fk)
+                {
+                    result.push((fk, v.target_kind.as_str()));
+                }
+            }
+        }
+        result
     }
 
     /// Prefix for internal columns injected by the compiler.
@@ -2554,5 +2625,163 @@ properties:
             "SystemNote extract is a JOIN (query ETL)"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
+    }
+
+    // --- Scope annotation tests ---
+
+    #[test]
+    fn is_anchor_tracks_traversal_path_lookups() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in ["Project", "Group"] {
+            assert!(o.is_anchor(entity), "{entity} declares a lookup");
+        }
+        for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {
+            assert!(!o.is_anchor(entity), "{entity} declares no lookup");
+        }
+        assert!(
+            o.traversal_path_lookups()
+                .iter()
+                .all(|l| o.is_anchor(&l.entity)),
+            "is_anchor must accept every lookup entity"
+        );
+    }
+
+    #[test]
+    fn is_path_scopable_accepts_namespaced_traversal_path_entities() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in [
+            "WorkItem",
+            "MergeRequest",
+            "Note",
+            "Vulnerability",
+            "Pipeline",
+            "Job",
+            "Definition",
+            "File",
+            "Project",
+            "Group",
+        ] {
+            assert!(
+                o.is_path_scopable(entity),
+                "{entity} leads its key with traversal_path"
+            );
+        }
+        for entity in ["User", "Runner", "Nonexistent"] {
+            assert!(
+                !o.is_path_scopable(entity),
+                "{entity} is global / has no traversal_path"
+            );
+        }
+    }
+
+    #[test]
+    fn same_namespace_edges_loaded_from_yaml() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in [
+            "HAS_DIFF",
+            "HAS_FILE",
+            "HAS_LATEST_DIFF",
+            "CONTAINS",
+            "DEFINES",
+        ] {
+            assert!(
+                o.is_same_namespace_relationship(kind),
+                "{kind} should be same-namespace"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_namespace_edges_not_marked() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in [
+            "CLOSES",
+            "RELATED_TO",
+            "FIXES",
+            "MENTIONS",
+            "SOURCE_PROJECT",
+            "IMPORTS",
+        ] {
+            assert!(
+                !o.is_same_namespace_relationship(kind),
+                "{kind} should NOT be same-namespace"
+            );
+        }
+    }
+
+    #[test]
+    fn namespace_anchor_edges_are_in_project_and_in_group() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in ["IN_PROJECT", "IN_GROUP"] {
+            let variants = o.edges.get(kind).expect(kind);
+            assert!(
+                variants
+                    .iter()
+                    .all(|v| v.scope == Some(EdgeVariantScope::NamespaceAnchor)),
+                "all {kind} variants must be namespace_anchor"
+            );
+        }
+    }
+
+    #[test]
+    fn contains_user_project_and_workitem_workitem_not_scope_preserving() {
+        let o = Ontology::load_embedded().unwrap();
+        let contains = o.edges.get("CONTAINS").expect("CONTAINS");
+        let user_project = contains
+            .iter()
+            .find(|v| v.source_kind == "User" && v.target_kind == "Project");
+        assert_eq!(
+            user_project.and_then(|v| v.scope),
+            None,
+            "User→Project crosses global/namespaced boundary"
+        );
+        let wi_wi = contains
+            .iter()
+            .find(|v| v.source_kind == "WorkItem" && v.target_kind == "WorkItem");
+        assert_eq!(
+            wi_wi.and_then(|v| v.scope),
+            None,
+            "WorkItem→WorkItem (epic→issue) may cross namespaces"
+        );
+    }
+
+    #[test]
+    fn calls_imported_symbol_variant_not_scope_preserving() {
+        let o = Ontology::load_embedded().unwrap();
+        let calls = o.edges.get("CALLS").expect("CALLS");
+        let def_import = calls
+            .iter()
+            .find(|v| v.target_kind == "ImportedSymbol")
+            .expect("Definition→ImportedSymbol variant");
+        assert_eq!(
+            def_import.scope, None,
+            "ImportedSymbol is the cross-repo resolution boundary"
+        );
+    }
+
+    #[test]
+    fn anchor_fk_mappings_includes_project_id_and_group_id() {
+        let o = Ontology::load_embedded().unwrap();
+        let mappings = o.anchor_fk_mappings();
+        assert!(
+            mappings.contains(&("project_id", "Project")),
+            "project_id → Project must be in anchor_fk_mappings: {mappings:?}"
+        );
+        // IN_GROUP uses group_id on Milestone/Label and namespace_id on WorkItem.
+        assert!(
+            mappings.iter().any(|(_, anchor)| *anchor == "Group"),
+            "at least one Group anchor FK must be present: {mappings:?}"
+        );
+    }
+
+    #[test]
+    fn ci_domain_edges_are_same_namespace() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in ["HAS_STAGE", "HAS_JOB", "HAS_HEAD_PIPELINE", "IN_PIPELINE"] {
+            assert!(
+                o.is_same_namespace_relationship(kind),
+                "{kind} should be same-namespace (CI entities share project scope)"
+            );
+        }
     }
 }

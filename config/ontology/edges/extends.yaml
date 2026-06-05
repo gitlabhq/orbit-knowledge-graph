@@ -6,4 +6,5 @@ table: gl_code_edge
 variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
+    scope: same_namespace
     description: "Definition declares a supertype relationship to another definition. Covers class extension, interface implementation, struct embedding, and mixin composition."

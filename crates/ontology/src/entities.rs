@@ -321,6 +321,34 @@ impl fmt::Display for NodeEntity {
     }
 }
 
+/// Namespace scope relationship between the two endpoints of an edge variant.
+///
+/// Controls whether a resolved `traversal_path` prefix can propagate across
+/// this edge during query compilation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeVariantScope {
+    /// Source entity's namespace-of-record FK points to the target, which is a
+    /// namespace anchor (`Project`/`Group`). Enables both prefix propagation
+    /// and anchor FK resolution for scope keys (e.g. `project_id` filter on
+    /// `MergeRequest` resolves to the `Project` anchor's `traversal_path`).
+    NamespaceAnchor,
+    /// Both endpoints are guaranteed to live in the same namespace subtree
+    /// (structural containment, project-local association, or intra-repo
+    /// reference). A resolved prefix on either endpoint applies to the other.
+    SameNamespace,
+}
+
+impl EdgeVariantScope {
+    /// Whether this scope value allows `traversal_path` prefix propagation.
+    #[must_use]
+    pub fn is_scope_preserving(self) -> bool {
+        match self {
+            Self::NamespaceAnchor | Self::SameNamespace => true,
+        }
+    }
+}
+
 /// An edge entity representing a relationship between nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
@@ -340,6 +368,9 @@ pub struct EdgeEntity {
     /// relationship (e.g. "project_id", "author_id"). When present, the
     /// compiler can join node tables directly instead of scanning the edge table.
     pub fk_column: Option<String>,
+    /// Namespace scope relationship. When set, the compiler may propagate a
+    /// resolved `traversal_path` prefix across this edge variant.
+    pub scope: Option<EdgeVariantScope>,
 }
 
 /// ETL configuration for edges sourced from join tables.

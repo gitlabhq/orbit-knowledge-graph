@@ -848,6 +848,12 @@
       "additionalProperties": false
     },
 
+    "edgeVariantScope": {
+      "type": "string",
+      "enum": ["namespace_anchor", "same_namespace"],
+      "description": "Namespace scope relationship between the two endpoints. Controls whether a resolved traversal_path prefix can propagate across this edge during query compilation. 'namespace_anchor': the source entity's namespace-of-record FK points to the target, which is a namespace anchor (Project/Group) — also enables anchor FK resolution for scope keys. 'same_namespace': both endpoints are guaranteed to live in the same namespace subtree (structural containment, project-local association, or intra-repo reference) — prefix propagates but no anchor FK resolution. Omitted (default): no namespace guarantee, fail-closed — prefix must not propagate."
+    },
+
     "edgeVariant": {
       "type": "object",
       "description": "A specific source-target pair for an edge relationship.",
@@ -857,6 +863,10 @@
         "fk_column": {
           "type": "string",
           "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+        },
+        "scope": {
+          "$ref": "#/definitions/edgeVariantScope",
+          "description": "Namespace scope relationship between endpoints. See edgeVariantScope for values."
         },
         "description": {
           "type": "string",

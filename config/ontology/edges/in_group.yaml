@@ -6,14 +6,17 @@ variants:
   - from_node: { type: Milestone, id: id }
     to_node: { type: Group, id: id }
     fk_column: group_id
+    scope: namespace_anchor
     description: "Milestone belongs to group."
 
   - from_node: { type: Label, id: id }
     to_node: { type: Group, id: id }
     fk_column: group_id
+    scope: namespace_anchor
     description: "Label belongs to group."
 
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Group, id: id }
     fk_column: namespace_id
+    scope: namespace_anchor
     description: "Work item belongs to group."
