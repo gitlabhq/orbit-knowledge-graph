@@ -144,6 +144,10 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
     // Count tables created (excluding the version control table).
     let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let stats_ddl = generate_statistics_ddl_with_prefix(&ontology, &prefix);
+    let stats_extra = stats_ddl
+        .as_ref()
+        .map_or(0, |s| s.tables.len() + s.views.len());
 
     let result = ctx
         .query(
@@ -155,11 +159,12 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
         .await;
     let created_names = String::extract_column(&result, 0).unwrap();
 
+    let expected_count = expected_tables.len() + stats_extra;
     assert_eq!(
         created_names.len(),
-        expected_tables.len(),
-        "expected {} tables from ontology, got {}: {created_names:?}",
-        expected_tables.len(),
+        expected_count,
+        "expected {} tables+views from ontology, got {}: {created_names:?}",
+        expected_count,
         created_names.len(),
     );
 
