@@ -916,6 +916,7 @@ mod tests {
     fn scope_prefix_ands_tight_filter_on_scoped_alias_only() {
         let mut prefixes = std::collections::HashMap::new();
         prefixes.insert("p".to_string(), "1/24/23/".to_string());
+        prefixes.insert("wi".to_string(), "1/24/23/".to_string());
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
             .with_scope_prefixes(prefixes);
@@ -927,9 +928,14 @@ mod tests {
             }],
             from: TableRef::join(
                 JoinType::Inner,
-                TableRef::scan("gl_project", "p"),
-                TableRef::scan("gl_work_item", "wi"),
-                Expr::eq(Expr::col("p", "id"), Expr::col("wi", "project_id")),
+                TableRef::join(
+                    JoinType::Inner,
+                    TableRef::scan("gl_project", "p"),
+                    TableRef::scan("gl_work_item", "wi"),
+                    Expr::eq(Expr::col("p", "id"), Expr::col("wi", "project_id")),
+                ),
+                TableRef::scan("gl_security_scan", "ss"),
+                Expr::eq(Expr::col("p", "id"), Expr::col("ss", "project_id")),
             ),
             limit: Some(10),
             ..Default::default()
@@ -948,8 +954,13 @@ mod tests {
         );
         assert_eq!(
             starts_with_paths_for_alias(where_clause, "wi"),
+            vec!["1/".to_string(), "1/24/23/".to_string()],
+            "a second scope_prefixes entry is honored independently"
+        );
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause, "ss"),
             vec!["1/".to_string()],
-            "neighbor alias gets broad authz only, never the tight prefix"
+            "an alias with no scope_prefixes entry gets broad authz only"
         );
     }
 

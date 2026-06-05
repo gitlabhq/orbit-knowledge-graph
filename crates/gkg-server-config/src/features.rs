@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 pub enum Feature {
     /// SystemNotes derived-entity indexing (system-note reference edges).
     SystemNotes,
+    /// Propagate an anchor's resolved traversal_path prefix onto same-scope payload
+    /// aliases for granule pruning. Independent of (and separately killable from)
+    /// anchor scoping, which is unflagged.
+    TraversalPathPayloadScoping,
 }
 
 /// Feature flag states, deserialized from the `features:` config section.
@@ -23,12 +27,14 @@ pub enum Feature {
 #[serde(default, deny_unknown_fields)]
 pub struct FeaturesConfig {
     pub system_notes: bool,
+    pub traversal_path_payload_scoping: bool,
 }
 
 impl FeaturesConfig {
     fn is_enabled(&self, feature: Feature) -> bool {
         match feature {
             Feature::SystemNotes => self.system_notes,
+            Feature::TraversalPathPayloadScoping => self.traversal_path_payload_scoping,
         }
     }
 }
@@ -60,7 +66,10 @@ mod tests {
 
     #[test]
     fn reads_an_enabled_flag() {
-        let features = FeaturesConfig { system_notes: true };
+        let features = FeaturesConfig {
+            system_notes: true,
+            ..Default::default()
+        };
         assert!(features.is_enabled(Feature::SystemNotes));
     }
 
@@ -80,5 +89,26 @@ mod tests {
     fn unknown_flag_is_rejected() {
         let result = serde_yaml::from_str::<FeaturesConfig>("not_a_real_flag: true");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn payload_scoping_defaults_off() {
+        assert!(!FeaturesConfig::default().is_enabled(Feature::TraversalPathPayloadScoping));
+    }
+
+    #[test]
+    fn reads_enabled_payload_scoping_flag() {
+        let features = FeaturesConfig {
+            traversal_path_payload_scoping: true,
+            ..Default::default()
+        };
+        assert!(features.is_enabled(Feature::TraversalPathPayloadScoping));
+    }
+
+    #[test]
+    fn deserializes_payload_scoping_flag_from_yaml() {
+        let features: FeaturesConfig =
+            serde_yaml::from_str("traversal_path_payload_scoping: true").unwrap();
+        assert!(features.traversal_path_payload_scoping);
     }
 }

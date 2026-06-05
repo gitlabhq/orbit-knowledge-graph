@@ -168,3 +168,4 @@ billing:
 
 features:
   system_notes: false
+  traversal_path_payload_scoping: false

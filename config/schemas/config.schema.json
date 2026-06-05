@@ -95,7 +95,8 @@
     "features": {
       "$ref": "#/$defs/FeaturesConfig",
       "default": {
-        "system_notes": false
+        "system_notes": false,
+        "traversal_path_payload_scoping": false
       }
     },
     "gitlab": {
@@ -617,6 +618,10 @@
       "type": "object",
       "properties": {
         "system_notes": {
+          "type": "boolean",
+          "default": false
+        },
+        "traversal_path_payload_scoping": {
           "type": "boolean",
           "default": false
         }

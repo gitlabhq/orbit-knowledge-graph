@@ -901,6 +901,141 @@ impl Ontology {
             .find(|l| l.entity == entity && l.kind == kind)
     }
 
+    /// True when `entity` declares a traversal_path lookup, i.e. it can anchor a
+    /// resolved prefix. Exactly the set the PathResolver resolves against
+    /// (`Project`, `Group` today); any future node declaring a lookup joins it.
+    #[must_use]
+    pub fn is_anchor(&self, entity: &str) -> bool {
+        self.traversal_path_lookups
+            .iter()
+            .any(|l| l.entity == entity)
+    }
+
+    /// True when a constant `startsWith(traversal_path, P)` predicate prunes
+    /// granules on this node's table: the table carries a `traversal_path`
+    /// column and its dedup key leads with it. Covers Siphon nodes
+    /// (`storage.primary_key = [traversal_path, …]`) and code-graph nodes
+    /// (`sort_key = [traversal_path, …]`), and never a `global`-scope node.
+    #[must_use]
+    pub fn is_path_scopable(&self, entity: &str) -> bool {
+        let Some(node) = self.nodes.get(entity) else {
+            return false;
+        };
+        if !node.has_traversal_path {
+            return false;
+        }
+        if node
+            .etl
+            .as_ref()
+            .is_some_and(|e| e.scope() == EtlScope::Global)
+        {
+            return false;
+        }
+        let key = node
+            .storage
+            .primary_key
+            .as_deref()
+            .unwrap_or(&node.sort_key);
+        key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+    }
+
+    /// Derives the `(relationship_kind, source_kind, target_kind)` triples whose
+    /// traversal cannot leave a namespace subtree, so a tight `startsWith`
+    /// prefix can ride across them. Two ontology-grounded forms:
+    ///
+    /// 1. **Namespace-of-record FK.** A scopable child points at an anchor via
+    ///    an FK whose relationship kind is a *namespace-container kind* — a kind
+    ///    that recurs as an outgoing FK-to-anchor across more than one namespaced
+    ///    node (`IN_PROJECT`, `IN_GROUP`). A single-node FK to an anchor
+    ///    (`SOURCE_PROJECT`, `SCANS`) is a domain association, not the path of
+    ///    record, and is excluded.
+    /// 2. **Structural downward containment.** A non-FK edge between two
+    ///    anchor-or-code-graph endpoints that does not climb the storage key
+    ///    hierarchy (the namespace tree `Group→Group/Project→Branch` and the
+    ///    in-repo source tree `Branch→Directory→File→Definition`, plus the
+    ///    lexical `DEFINES`/`EXTENDS`/`CALLS` between definitions).
+    ///
+    /// `ImportedSymbol` is excluded as a documented conservative under-prune:
+    /// it is the cross-repo resolution boundary where a child's traversal_path
+    /// may belong to a different namespace, and the ontology carries no machine
+    /// signal for that hop. The closed default leaves every other edge
+    /// broad-only.
+    #[must_use]
+    pub fn scope_preserving_edge_triples(
+        &self,
+    ) -> std::collections::HashSet<(String, String, String)> {
+        use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+        let mut container_children: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        for node in self.nodes.values() {
+            let Some(etl) = node.etl.as_ref() else {
+                continue;
+            };
+            if etl.scope() != EtlScope::Namespaced {
+                continue;
+            }
+            for (_col, mapping) in etl.edge_mappings() {
+                if mapping.direction != EdgeDirection::Outgoing {
+                    continue;
+                }
+                if let EdgeTarget::Literal(target) = &mapping.target
+                    && self.is_anchor(target)
+                {
+                    container_children
+                        .entry(mapping.relationship_kind.as_str())
+                        .or_default()
+                        .insert(node.name.as_str());
+                }
+            }
+        }
+        let container_kinds: HashSet<&str> = container_children
+            .into_iter()
+            .filter(|(_, children)| children.len() > 1)
+            .map(|(kind, _)| kind)
+            .collect();
+
+        let effective_key = |entity: &str| -> usize {
+            self.nodes
+                .get(entity)
+                .map(|n| {
+                    n.storage
+                        .primary_key
+                        .as_deref()
+                        .unwrap_or(&n.sort_key)
+                        .len()
+                })
+                .unwrap_or(0)
+        };
+        let code_or_anchor = |entity: &str| -> bool {
+            self.is_anchor(entity) || self.nodes.get(entity).is_some_and(|n| n.etl.is_none())
+        };
+
+        let mut triples = HashSet::new();
+        for variant in self.edges.values().flatten() {
+            let (src, tgt) = (variant.source_kind.as_str(), variant.target_kind.as_str());
+            let preserving = if variant.fk_column.is_some() {
+                self.is_path_scopable(src)
+                    && !self.is_anchor(src)
+                    && self.is_anchor(tgt)
+                    && container_kinds.contains(variant.relationship_kind.as_str())
+            } else {
+                src != "ImportedSymbol"
+                    && tgt != "ImportedSymbol"
+                    && code_or_anchor(src)
+                    && code_or_anchor(tgt)
+                    && effective_key(tgt) >= effective_key(src)
+            };
+            if preserving {
+                triples.insert((
+                    variant.relationship_kind.clone(),
+                    src.to_string(),
+                    tgt.to_string(),
+                ));
+            }
+        }
+        triples
+    }
+
     /// Returns all denormalized property declarations.
     #[must_use]
     pub fn denormalized_properties(&self) -> &[DenormalizedProperty] {
@@ -1165,6 +1300,96 @@ mod tests {
         let from_dir = Ontology::load_from_dir(fixtures_dir()).expect("should load from dir");
 
         assert_eq!(embedded, from_dir);
+    }
+
+    #[test]
+    fn is_anchor_tracks_traversal_path_lookups() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in ["Project", "Group"] {
+            assert!(o.is_anchor(entity), "{entity} declares a lookup");
+        }
+        for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {
+            assert!(!o.is_anchor(entity), "{entity} declares no lookup");
+        }
+        assert!(
+            o.traversal_path_lookups()
+                .iter()
+                .all(|l| o.is_anchor(&l.entity)),
+            "is_anchor must accept every lookup entity"
+        );
+    }
+
+    #[test]
+    fn is_path_scopable_keys_on_traversal_path_leading_key() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in [
+            "WorkItem",
+            "MergeRequest",
+            "Note",
+            "Vulnerability",
+            "Pipeline",
+            "Job",
+            "Definition",
+            "File",
+            "Project",
+            "Group",
+        ] {
+            assert!(
+                o.is_path_scopable(entity),
+                "{entity} leads its key with traversal_path"
+            );
+        }
+        for entity in ["User", "Runner", "Nonexistent"] {
+            assert!(
+                !o.is_path_scopable(entity),
+                "{entity} is global / has no traversal_path"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_preserving_triples_cover_namespace_of_record_and_structural_containment() {
+        let o = Ontology::load_embedded().unwrap();
+        let triples = o.scope_preserving_edge_triples();
+        let has = |k: &str, s: &str, t: &str| {
+            triples.contains(&(k.to_string(), s.to_string(), t.to_string()))
+        };
+
+        assert!(has("IN_PROJECT", "WorkItem", "Project"));
+        assert!(has("IN_PROJECT", "Vulnerability", "Project"));
+        assert!(has("IN_GROUP", "WorkItem", "Group"));
+        assert!(has("CONTAINS", "Group", "Group"));
+        assert!(has("CONTAINS", "Group", "Project"));
+        assert!(has("CONTAINS", "Project", "Branch"));
+        assert!(has("CONTAINS", "Directory", "File"));
+        assert!(has("DEFINES", "File", "Definition"));
+    }
+
+    #[test]
+    fn scope_preserving_triples_exclude_associations_and_resolution_boundary() {
+        let o = Ontology::load_embedded().unwrap();
+        let triples = o.scope_preserving_edge_triples();
+        let has_kind = |k: &str| triples.iter().any(|(kind, _, _)| kind == k);
+
+        // Secondary FKs to an anchor that are not the namespace of record.
+        assert!(!has_kind("SOURCE_PROJECT"));
+        assert!(!has_kind("SCANS"));
+        // Link-table / cross-namespace associations.
+        for kind in [
+            "RELATED_TO",
+            "CLOSES",
+            "FIXES",
+            "HAS_NOTE",
+            "OCCURRENCE_OF",
+            "HAS_FINDING",
+        ] {
+            assert!(!has_kind(kind), "{kind} must not preserve scope");
+        }
+        // The WorkItem→WorkItem CONTAINS variant rides a link table across namespaces.
+        assert!(!triples.contains(&("CONTAINS".into(), "WorkItem".into(), "WorkItem".into())));
+        // Cross-repo resolution boundary and the upward ON_BRANCH hop.
+        assert!(!has_kind("IMPORTS"));
+        assert!(!has_kind("ON_BRANCH"));
     }
 
     #[test]
