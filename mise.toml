@@ -379,9 +379,9 @@ description = "Regenerate config/graph.sql (ClickHouse) and config/graph_local.s
 [tasks."schema:generate:migration"]
 run = """
 mkdir -p config/migrations
-cargo run --bin orbit -- debug migration 2>/dev/null > config/migrations/0001_baseline.sql.tmp && mv config/migrations/0001_baseline.sql.tmp config/migrations/0001_baseline.sql
+cargo run --bin orbit -- debug migration 2>/dev/null > config/migrations/20260604000000_baseline.sql.tmp && mv config/migrations/20260604000000_baseline.sql.tmp config/migrations/20260604000000_baseline.sql
 """
-description = "Generate the baseline (first) migration config/migrations/0001_baseline.sql from the ontology"
+description = "Generate the baseline (first) migration from the ontology (config/migrations/<timestamp>_baseline.sql)"
 
 [tasks."lint:markdown"]
 run = "markdownlint-cli2 README.md 'docs/**/*.md'"
