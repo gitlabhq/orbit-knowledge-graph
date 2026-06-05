@@ -587,27 +587,49 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
-    ontology.statistics = schema.settings.statistics.map(|s| {
-        crate::entities::StatisticsConfig {
-            stats_table: s.stats_table,
-            histogram_table: s.histogram_table,
-            token_table: s.token_table,
-            dictionary: s.dictionary,
-            lifetime_min: s.lifetime.min,
-            lifetime_max: s.lifetime.max,
-            histogram_buckets: s.histogram_buckets,
-            top_k_tokens: s.top_k_tokens,
-            partition_key: s.partition_key,
-            exclude: s
-                .exclude
-                .into_iter()
-                .map(|e| crate::entities::StatisticsExclude {
-                    node: e.node,
-                    columns: e.columns,
-                })
-                .collect(),
-        }
-    });
+    ontology.statistics = schema
+        .settings
+        .statistics
+        .map(|s| -> Result<_, OntologyError> {
+            for entry in &s.exclude {
+                let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
+                    OntologyError::Validation(format!(
+                        "statistics.exclude: unknown node '{}'",
+                        entry.node
+                    ))
+                })?;
+                let field_names: std::collections::HashSet<&str> =
+                    node.fields.iter().map(|f| f.name.as_str()).collect();
+                for col in &entry.columns {
+                    if !field_names.contains(col.as_str()) {
+                        return Err(OntologyError::Validation(format!(
+                            "statistics.exclude: unknown column '{}' on node '{}'",
+                            col, entry.node
+                        )));
+                    }
+                }
+            }
+            Ok(crate::entities::StatisticsConfig {
+                stats_table: s.stats_table,
+                histogram_table: s.histogram_table,
+                token_table: s.token_table,
+                dictionary: s.dictionary,
+                lifetime_min: s.lifetime.min,
+                lifetime_max: s.lifetime.max,
+                histogram_buckets: s.histogram_buckets,
+                top_k_tokens: s.top_k_tokens,
+                partition_key: s.partition_key,
+                exclude: s
+                    .exclude
+                    .into_iter()
+                    .map(|e| crate::entities::StatisticsExclude {
+                        node: e.node,
+                        columns: e.columns,
+                    })
+                    .collect(),
+            })
+        })
+        .transpose()?;
 
     ontology.traversal_path_lookups = ontology
         .nodes

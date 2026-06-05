@@ -33,7 +33,8 @@ pub use entities::{
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
     EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition, NodeEntity,
-    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig, StorageColumn,
+    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig, StatisticsExclude,
+    StorageColumn,
     StorageIndex,
     StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
     VirtualSource,
@@ -563,6 +564,13 @@ impl Ontology {
             }
         }
 
+        if let Some(ref mut stats) = self.statistics {
+            stats.stats_table = format!("{prefix}{}", stats.stats_table);
+            stats.histogram_table = format!("{prefix}{}", stats.histogram_table);
+            stats.token_table = format!("{prefix}{}", stats.token_table);
+            stats.dictionary = format!("{prefix}{}", stats.dictionary);
+        }
+
         self
     }
 
@@ -917,6 +925,9 @@ impl Ontology {
     /// Skips: uuid, virtual, filterable:false, and excluded columns.
     #[must_use]
     pub fn stats_columns_for(&self, entity: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+        if self.statistics.is_none() {
+            return (vec![], vec![], vec![]);
+        }
         let excluded: std::collections::HashSet<&str> = self
             .statistics
             .as_ref()
