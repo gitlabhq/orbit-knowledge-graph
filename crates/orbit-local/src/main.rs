@@ -322,6 +322,17 @@ fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
     }
 }
 
+/// Reference DDL emitted to `config/graph.sql` always assumes a local `default`
+/// ClickHouse user; the indexer substitutes the deployment's configured
+/// credentials at migration time.
+fn local_dictionary_source() -> query_engine::compiler::DictionarySource<'static> {
+    query_engine::compiler::DictionarySource {
+        database: "default",
+        user: "default",
+        password: None,
+    }
+}
+
 fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
     let ont = match ontology_path {
         Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
@@ -350,7 +361,7 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
         };
         format!(
             "{};\n",
-            query_engine::compiler::emit_create_dictionary(&d, "default")
+            query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
         )
     }));
 

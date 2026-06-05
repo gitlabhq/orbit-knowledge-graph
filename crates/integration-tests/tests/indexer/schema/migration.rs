@@ -12,8 +12,16 @@ use indexer::schema::version::{
 use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
 use query_engine::compiler::{
-    generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
+    DictionarySource, generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
 };
+
+fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
+    DictionarySource {
+        database: &config.database,
+        user: &config.username,
+        password: config.password.as_deref(),
+    }
+}
 
 async fn setup() -> (TestContext, ontology::Ontology, MigrationMetrics) {
     let ctx = TestContext::new(&[]).await;
@@ -41,7 +49,7 @@ async fn fresh_install_creates_tables_and_records_version() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -95,7 +103,7 @@ async fn matching_version_is_noop() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -118,7 +126,7 @@ async fn mismatch_creates_all_ontology_tables_and_marks_migrating() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -177,7 +185,7 @@ async fn created_tables_have_correct_columns() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -215,7 +223,7 @@ async fn idempotent_rerun_succeeds() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -228,7 +236,7 @@ async fn idempotent_rerun_succeeds() {
     // It will re-run CREATE TABLE IF NOT EXISTS (idempotent).
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -249,7 +257,7 @@ async fn lock_released_after_migration() {
 
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -276,7 +284,7 @@ async fn held_lock_causes_timeout() {
 
     let result = migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock_svc,
         &ontology,
         &metrics,
@@ -300,7 +308,7 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
     let migrating_campaign = campaign();
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
@@ -320,7 +328,7 @@ async fn mismatch_opens_campaign_steady_state_does_not() {
         .unwrap();
     migration::run_if_needed(
         &client,
-        &ctx.config.database,
+        &dictionary_source(&ctx.config),
         &lock(),
         &ontology,
         &metrics,
