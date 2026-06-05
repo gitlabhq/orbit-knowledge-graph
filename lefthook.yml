@@ -32,6 +32,11 @@ pre-commit:
       glob:
         - "docs/source/remote/queries/query-language.md"
         - "skills/orbit/references/query_language.md"
+    - name: rust-toolchain-sync
+      run: mise run toolchain:check
+      glob:
+        - "mise.toml"
+        - "rust-toolchain.toml"
     - name: skill-version-bump
       run: bash ./scripts/check-skill-version-bump.sh
       glob: "skills/**/*"

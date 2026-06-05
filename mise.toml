@@ -19,7 +19,7 @@ SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
-"rust" = { version = "1.95.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
+"rust" = { version = "1.95.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu", postinstall = "bash ./scripts/check-rust-toolchain.sh --write" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -339,6 +339,14 @@ description = "Validate ontology YAML files against JSON schema"
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
+
+[tasks."toolchain:generate"]
+run = "bash ./scripts/check-rust-toolchain.sh --write"
+description = "Regenerate rust-toolchain.toml from mise.toml"
+
+[tasks."toolchain:check"]
+run = "bash ./scripts/check-rust-toolchain.sh --check"
+description = "Fail if rust-toolchain.toml is out of sync with mise.toml"
 
 [tasks."metrics:catalog"]
 run = "cargo xtask metrics-catalog"

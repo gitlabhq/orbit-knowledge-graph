@@ -11,12 +11,8 @@ goon_files_changed() {
         | grep -qE '^(crates/query-engine/formatters/src/goon/[^/]+\.rs|crates/query-engine/formatters/src/(graph|lib)\.rs)$'
 }
 
-skip_requested() {
-    [[ "${SKIP_GOON_FORMAT_VERSION_CHECK:-}" == "1" ]] && return 0
-    local mr_desc
-    mr_desc="${CI_MERGE_REQUEST_DESCRIPTION:-}"
-    [[ "$mr_desc" == *"[skip goon-format-version-check]"* ]]
-}
+source "$(dirname "$0")/ci-skip-utils.sh"
+skip_requested() { ci_skip_requested "goon-format-version-check"; }
 
 version_bumped() {
     git diff "$BASE_REF"...HEAD -- config/GOON_OUTPUT_FORMAT_VERSION | grep -q '^+[0-9]'

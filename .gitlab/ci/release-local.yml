@@ -107,7 +107,6 @@ local-cli-build-windows-amd64:
   needs: []
   variables:
     PLATFORM: darwin
-    RUST_VERSION: "1.95.0"
   before_script:
     # macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the
     # project mise.toml is bypassed here because the runner's system-wide mise
@@ -115,6 +114,7 @@ local-cli-build-windows-amd64:
     # to install and aren't needed to compile the orbit binary.
     - command -v rustup || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path)
     - export PATH="$HOME/.cargo/bin:$PATH"
+    - export RUST_VERSION="$(awk -F'\"' '/^channel = / { print $2 }' rust-toolchain.toml)"
     - rustup toolchain install "$RUST_VERSION" --profile minimal
     - rustup default "$RUST_VERSION"
     - rustup target add aarch64-apple-darwin x86_64-apple-darwin
