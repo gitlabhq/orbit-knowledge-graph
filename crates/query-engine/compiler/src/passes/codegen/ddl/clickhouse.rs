@@ -238,7 +238,12 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
     }
 
     let query = if let Some(ref source_query) = dict.source_query {
-        source_query.clone()
+        // Custom source queries use bare table names. Qualify with the
+        // database so the dictionary source can resolve them.
+        source_query.replace(
+            &dict.source_table,
+            &format!("`{}`.{}", source.database, dict.source_table),
+        )
     } else {
         let key_csv = dict.keys.join(", ");
         let attr_names: Vec<&str> = dict
