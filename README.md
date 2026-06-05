@@ -104,7 +104,7 @@ The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pip
 | GitLab authorization | Filesystem permissions only | Enforced per query |
 | Runs offline | Yes (after install) | No |
 
-Orbit Local exposes raw SQL, so traversals are expressed as joins. Orbit Remote supports hop-bounded (max 3) traversals, neighbors, and path finding.
+Orbit Local exposes raw SQL, so traversals are expressed as joins. Orbit Remote supports aggregations, traversals, neighbors, and pathfinding at multi-billion-edge scale.
 
 ## Architecture
 
