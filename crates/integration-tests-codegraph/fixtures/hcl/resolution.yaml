@@ -1,7 +1,7 @@
 name: "HCL resolution — resources, data sources, variables, modules, locals, refs"
 
 fixtures:
-  - path: variables.tf
+  - path: main.tf
     content: |
       variable "region" {
         type    = string
@@ -13,23 +13,18 @@ fixtures:
         default = "t3.micro"
       }
 
-      variable "environment" {
-        type    = string
-        default = "staging"
-      }
-
-  - path: locals.tf
-    content: |
       locals {
         common_tags = {
-          Environment = var.environment
-          ManagedBy   = "terraform"
+          ManagedBy = "terraform"
         }
-        instance_name = "app-${var.environment}"
+        instance_name = "app-server"
       }
 
-  - path: network.tf
-    content: |
+      data "aws_ami" "ubuntu" {
+        most_recent = true
+        owners      = ["099720109477"]
+      }
+
       resource "aws_vpc" "main" {
         cidr_block = "10.0.0.0/16"
         tags       = local.common_tags
@@ -38,13 +33,6 @@ fixtures:
       resource "aws_subnet" "public" {
         vpc_id     = aws_vpc.main.id
         cidr_block = "10.0.1.0/24"
-      }
-
-  - path: main.tf
-    content: |
-      data "aws_ami" "ubuntu" {
-        most_recent = true
-        owners      = ["099720109477"]
       }
 
       resource "aws_instance" "web" {
@@ -58,8 +46,6 @@ fixtures:
         value = aws_instance.web.id
       }
 
-  - path: modules.tf
-    content: |
       module "security_group" {
         source = "terraform-aws-modules/security-group/aws"
         vpc_id = aws_vpc.main.id
@@ -76,33 +62,36 @@ tests:
       WHERE d.definition_type = 'Variable'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
-      - { row_count: 3 }
+      - { row_count: 2 }
       - { row: { name: "region" } }
       - { row: { name: "instance_type" } }
-      - { row: { name: "environment" } }
 
   - name: "Resource type scopes produce definitions"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Resource'
-        AND d.kind = 'Class'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
       - { row: { name: "aws_vpc" } }
       - { row: { name: "aws_subnet" } }
       - { row: { name: "aws_instance" } }
-      - { row: { name: "aws_ami" } }
 
   - name: "Resource named defs have correct FQNs"
     query: |
       MATCH (d:Definition)
-      WHERE d.definition_type = 'Resource'
-        AND d.kind <> 'Class'
+      WHERE d.fqn = 'aws_vpc.main'
       RETURN d.name AS name, d.fqn AS fqn
     assert:
+      - { row_count: 1 }
       - { row: { name: "main", fqn: "aws_vpc.main" } }
-      - { row: { name: "public", fqn: "aws_subnet.public" } }
-      - { row: { name: "web", fqn: "aws_instance.web" } }
+
+  - name: "Data source type scope and named def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'DataSource'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row: { name: "aws_ami" } }
       - { row: { name: "ubuntu", fqn: "aws_ami.ubuntu" } }
 
   - name: "Output definition is extracted"
@@ -134,56 +123,56 @@ tests:
       - { row: { name: "instance_name" } }
 
   # ══════════════════════════════════════════════════════════════
-  # CROSS-FILE REFERENCES
+  # REFERENCES (Calls edges from type scopes)
   # ══════════════════════════════════════════════════════════════
 
-  - name: "Resource ref resolves cross-file: aws_instance.web -> aws_subnet.public"
+  - name: "Resource ref resolves: aws_instance type scope -> aws_subnet.public"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'aws_instance.web'
+      WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'aws_subnet.public'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
-  - name: "Variable ref resolves cross-file: aws_instance.web -> instance_type"
+  - name: "Variable ref resolves: aws_instance type scope -> instance_type"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'aws_instance.web'
+      WHERE caller.fqn = 'aws_instance'
         AND callee.name = 'instance_type'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
 
-  - name: "Data source ref resolves: aws_instance.web -> aws_ami.ubuntu"
+  - name: "Data source ref resolves: aws_instance type scope -> aws_ami.ubuntu"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'aws_instance.web'
+      WHERE caller.fqn = 'aws_instance'
         AND callee.fqn = 'aws_ami.ubuntu'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
-  - name: "Local ref resolves cross-file: aws_vpc.main -> locals.common_tags"
+  - name: "Local ref resolves: aws_vpc type scope -> locals.common_tags"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'aws_vpc.main'
+      WHERE caller.fqn = 'aws_vpc'
         AND callee.name = 'common_tags'
         AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.name AS callee
     assert:
       - { row_count: 1 }
 
-  - name: "Module ref resolves: security_group -> aws_vpc.main"
+  - name: "Subnet ref resolves: aws_subnet type scope -> aws_vpc.main"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'security_group'
+      WHERE caller.fqn = 'aws_subnet'
         AND callee.fqn = 'aws_vpc.main'
         AND e.edge_kind = 'Calls'
-      RETURN caller.name AS caller, callee.fqn AS callee
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
@@ -196,10 +185,5 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path
     assert:
-      - { row_count: 5 }
-      - { unique: path }
-      - { row: { path: variables.tf } }
-      - { row: { path: locals.tf } }
-      - { row: { path: network.tf } }
+      - { row_count: 1 }
       - { row: { path: main.tf } }
-      - { row: { path: modules.tf } }

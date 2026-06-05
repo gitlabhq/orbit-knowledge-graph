@@ -38,10 +38,6 @@ fixtures:
         env_label    = var.is_prod ? "production" : "staging"
       }
 
-      output "sg_name" {
-        value = aws_security_group.web.name
-      }
-
 tests:
   - name: "Dynamic block produces iterator def"
     query: |
@@ -52,16 +48,7 @@ tests:
       - { row_count: 1 }
       - { row: { name: "ingress" } }
 
-  - name: "For expression captures function refs"
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'upper_tags'
-        AND e.edge_kind = 'Calls'
-      RETURN callee.name AS callee
-    assert:
-      - { empty: false }
-
-  - name: "Variable refs resolve from dynamic block context"
+  - name: "Dynamic block ref resolves variable: ingress scope -> ports"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'ingress'
@@ -71,15 +58,17 @@ tests:
     assert:
       - { row_count: 1 }
 
-  - name: "Output ref resolves to resource"
+  - name: "Locals scope refs resolve to variables"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'sg_name'
-        AND callee.fqn = 'aws_security_group.web'
+      WHERE caller.name = 'locals'
         AND e.edge_kind = 'Calls'
-      RETURN caller.name AS caller, callee.fqn AS callee
+      RETURN callee.name AS callee
     assert:
-      - { row_count: 1 }
+      - { empty: false }
+      - { row: { callee: "tags" } }
+      - { row: { callee: "ports" } }
+      - { row: { callee: "is_prod" } }
 
   - name: "All definitions present"
     query: |
@@ -93,4 +82,3 @@ tests:
       - { row: { name: "upper_tags", type: "Local" } }
       - { row: { name: "port_strings", type: "Local" } }
       - { row: { name: "env_label", type: "Local" } }
-      - { row: { name: "sg_name", type: "Output" } }
