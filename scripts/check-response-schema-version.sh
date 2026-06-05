@@ -10,12 +10,8 @@ response_files_changed() {
         | grep -qE '^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$'
 }
 
-skip_requested() {
-    [[ "${SKIP_RESPONSE_SCHEMA_VERSION_CHECK:-}" == "1" ]] && return 0
-    local mr_desc
-    mr_desc="${CI_MERGE_REQUEST_DESCRIPTION:-}"
-    [[ "$mr_desc" == *"[skip response-schema-version-check]"* ]]
-}
+source "$(dirname "$0")/ci-skip-utils.sh"
+skip_requested() { ci_skip_requested "response-schema-version-check"; }
 
 version_bumped() {
     git diff "$BASE_REF"...HEAD -- config/RAW_OUTPUT_FORMAT_VERSION | grep -q '^+[0-9]'

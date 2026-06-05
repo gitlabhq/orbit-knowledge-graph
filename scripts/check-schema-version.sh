@@ -4,6 +4,7 @@
 set -euo pipefail
 
 BASE_REF="${1:-origin/main}"
+source "$(dirname "$0")/ci-skip-utils.sh"
 
 read_version() {
     local v
@@ -17,15 +18,7 @@ schema_files_changed() {
     git diff --name-only "$BASE_REF"...HEAD | grep -qE '^(config/graph\.sql|config/ontology/)'
 }
 
-skip_requested() {
-    [[ "${SKIP_SCHEMA_VERSION_CHECK:-}" == "1" ]] && return 0
-    [[ "${CI_MERGE_REQUEST_DESCRIPTION:-}" == *"[skip schema-version-check]"* ]] && return 0
-    [[ "${CI_MERGE_REQUEST_TITLE:-}" == *"[skip schema-version-check]"* ]] && return 0
-    # Check commit messages in the MR range as a last resort. The MR
-    # description variable is set at pipeline creation and may be stale
-    # if the description was edited after the push.
-    git log "$BASE_REF"...HEAD --format=%B 2>/dev/null | grep -q '\[skip schema-version-check\]'
-}
+skip_requested() { ci_skip_requested "schema-version-check"; }
 
 version_bumped() {
     git diff "$BASE_REF"...HEAD -- config/SCHEMA_VERSION | grep -q '^+[0-9]'

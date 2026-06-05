@@ -10,12 +10,8 @@ query_dsl_files_changed() {
         | grep -qE '^(config/schemas/graph_query\.schema\.json|crates/query-engine/compiler/src/(input\.rs|passes/validate\.rs))$'
 }
 
-skip_requested() {
-    [[ "${SKIP_QUERY_DSL_VERSION_CHECK:-}" == "1" ]] && return 0
-    local mr_desc
-    mr_desc="${CI_MERGE_REQUEST_DESCRIPTION:-}"
-    [[ "$mr_desc" == *"[skip query-dsl-version-check]"* ]]
-}
+source "$(dirname "$0")/ci-skip-utils.sh"
+skip_requested() { ci_skip_requested "query-dsl-version-check"; }
 
 version_bumped() {
     git diff "$BASE_REF"...HEAD -- config/QUERY_DSL_VERSION | grep -q '^+[0-9]'
