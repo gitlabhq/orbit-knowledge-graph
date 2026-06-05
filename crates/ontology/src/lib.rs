@@ -820,11 +820,15 @@ impl Ontology {
             .unwrap_or(&self.default_edge_table)
     }
 
-    /// Whether a relationship kind has at least one scope-preserving variant
-    /// (i.e. a variant with `scope: namespace_anchor` or `scope: same_namespace`).
+    /// Returns `true` when **at least one** variant of `relationship_kind` is
+    /// scope-preserving. This is a coarse pre-filter — callers that need
+    /// per-variant accuracy must inspect [`EdgeEntity::scope`] directly,
+    /// because a relationship kind may have both scope-preserving and
+    /// non-scope-preserving variants (e.g. `CONTAINS` has `Group→Project`
+    /// but also `User→Project` and `WorkItem→WorkItem` which are not).
     /// Fail-closed: unknown or unannotated edges return false.
     #[must_use]
-    pub fn is_same_namespace_relationship(&self, relationship_kind: &str) -> bool {
+    pub fn has_scope_preserving_variant(&self, relationship_kind: &str) -> bool {
         self.edges.get(relationship_kind).is_some_and(|variants| {
             variants
                 .iter()
@@ -844,7 +848,10 @@ impl Ontology {
 
     /// True when a `startsWith(traversal_path, P)` predicate prunes granules
     /// on this node's table: the table has a `traversal_path` column, its
-    /// dedup key leads with it, and the node is not global-scoped.
+    /// dedup key (ORDER BY / `sort_key`) leads with it, and the node is not
+    /// global-scoped. Uses `sort_key` rather than `storage.primary_key`
+    /// because PRIMARY KEY is an index prefix that may omit leading columns
+    /// while `sort_key` is the actual ReplacingMergeTree dedup key.
     #[must_use]
     pub fn is_path_scopable(&self, entity: &str) -> bool {
         let Some(node) = self.nodes.get(entity) else {
@@ -860,12 +867,7 @@ impl Ontology {
         {
             return false;
         }
-        let key = node
-            .storage
-            .primary_key
-            .as_deref()
-            .unwrap_or(&node.sort_key);
-        key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+        node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from
@@ -874,17 +876,29 @@ impl Ontology {
     /// `traversal_path` and scope the query.
     ///
     /// Example: `MergeRequest.project_id` → `("project_id", "Project")`.
+    ///
+    /// Deduplicated by FK column name. The load-time validator
+    /// (`validate_edge_scope_annotations`) guarantees that the same FK
+    /// column never maps to two different anchor entities.
     #[must_use]
     pub fn anchor_fk_mappings(&self) -> Vec<(&str, &str)> {
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashMap::new();
         let mut result = Vec::new();
         for variants in self.edges.values() {
             for v in variants {
                 if v.scope == Some(EdgeVariantScope::NamespaceAnchor)
                     && let Some(fk) = v.fk_column.as_deref()
-                    && seen.insert(fk)
                 {
-                    result.push((fk, v.target_kind.as_str()));
+                    if let Some(&existing_anchor) = seen.get(fk) {
+                        debug_assert_eq!(
+                            existing_anchor,
+                            v.target_kind.as_str(),
+                            "FK column '{fk}' maps to two different anchors"
+                        );
+                    } else {
+                        seen.insert(fk, v.target_kind.as_str());
+                        result.push((fk, v.target_kind.as_str()));
+                    }
                 }
             }
         }
@@ -2675,7 +2689,7 @@ properties:
     }
 
     #[test]
-    fn same_namespace_edges_loaded_from_yaml() {
+    fn scope_preserving_edges_loaded_from_yaml() {
         let o = Ontology::load_embedded().unwrap();
         for kind in [
             "HAS_DIFF",
@@ -2685,14 +2699,14 @@ properties:
             "DEFINES",
         ] {
             assert!(
-                o.is_same_namespace_relationship(kind),
+                o.has_scope_preserving_variant(kind),
                 "{kind} should be same-namespace"
             );
         }
     }
 
     #[test]
-    fn cross_namespace_edges_not_marked() {
+    fn cross_namespace_edges_have_no_scope_preserving_variant() {
         let o = Ontology::load_embedded().unwrap();
         for kind in [
             "CLOSES",
@@ -2703,7 +2717,7 @@ properties:
             "IMPORTS",
         ] {
             assert!(
-                !o.is_same_namespace_relationship(kind),
+                !o.has_scope_preserving_variant(kind),
                 "{kind} should NOT be same-namespace"
             );
         }
@@ -2775,11 +2789,11 @@ properties:
     }
 
     #[test]
-    fn ci_domain_edges_are_same_namespace() {
+    fn ci_domain_edges_have_scope_preserving_variants() {
         let o = Ontology::load_embedded().unwrap();
         for kind in ["HAS_STAGE", "HAS_JOB", "HAS_HEAD_PIPELINE", "IN_PIPELINE"] {
             assert!(
-                o.is_same_namespace_relationship(kind),
+                o.has_scope_preserving_variant(kind),
                 "{kind} should be same-namespace (CI entities share project scope)"
             );
         }
