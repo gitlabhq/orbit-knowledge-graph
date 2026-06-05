@@ -30,7 +30,11 @@ ci_skip_requested() {
 
     # Commit messages in the MR range. This is the reliable fallback
     # when the description was edited after the pipeline started.
+    # Deepen the shallow CI clone so the three-dot range actually has commits.
     if [[ -n "${BASE_REF:-}" ]]; then
+        if git rev-parse --is-shallow-repository 2>/dev/null | grep -q true; then
+            git fetch --deepen=100 2>/dev/null || true
+        fi
         git log "${BASE_REF}"...HEAD --format=%B 2>/dev/null | grep -qF "${tag}" && return 0
     fi
 
