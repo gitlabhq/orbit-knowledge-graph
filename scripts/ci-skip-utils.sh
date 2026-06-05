@@ -8,7 +8,7 @@
 #       echo "skipping"; exit 0
 #   fi
 #
-# Checks three places (in order):
+# Checks four places (in order):
 #   1. SKIP_<UPPER_NAME> env var (set to "1")
 #   2. CI_MERGE_REQUEST_DESCRIPTION (set at pipeline creation)
 #   3. Commit messages in the MR range (fallback when description is stale)
