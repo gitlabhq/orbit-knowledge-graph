@@ -546,6 +546,10 @@ impl MigrationCompletionChecker {
     /// Materialized views are dropped first because they reference the source
     /// tables; dropping a table while a view still selects from it would leave
     /// an orphaned view definition.
+    ///
+    /// TO-table targets are not dropped here separately -- the ontology loader
+    /// validates that every `to_table` references an ontology-tracked table
+    /// (auxiliary, node, or edge), so the table-cleanup loop below handles them.
     async fn drop_version_tables(&self, version: u32) -> Result<(), String> {
         let prefix = table_prefix(version);
 

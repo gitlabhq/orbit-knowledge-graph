@@ -556,7 +556,7 @@
         },
         "materialized_views": {
           "type": "array",
-          "description": "ClickHouse materialized views created after all graph tables. Views act as insert triggers that transform incoming data and write to a destination table or implicit storage.",
+          "description": "ClickHouse materialized views created after all graph tables. Views act as insert triggers that transform incoming data and write to a destination table or implicit storage. Each view must use exactly one storage mode: either to_table (TO-table mode) or engine (implicit-storage mode).",
           "items": {
             "type": "object",
             "properties": {
@@ -566,7 +566,7 @@
               },
               "to_table": {
                 "type": "string",
-                "description": "Target table for the TO clause. When set, the view inserts into this pre-existing table instead of creating implicit storage. Receives the schema-version prefix during migration."
+                "description": "Target table for the TO clause. The table must be an ontology-tracked table (auxiliary, node, or edge) so it is created and dropped alongside other graph tables during schema migration. Receives the schema-version prefix during migration."
               },
               "select_query": {
                 "type": "string",
@@ -574,7 +574,7 @@
               },
               "engine": {
                 "type": "string",
-                "description": "Engine name for implicit storage (e.g. AggregatingMergeTree, SummingMergeTree). Ignored when to_table is set."
+                "description": "Engine name for implicit storage (e.g. AggregatingMergeTree, SummingMergeTree). Required when to_table is not set."
               },
               "engine_args": {
                 "type": "array",
@@ -592,6 +592,18 @@
               }
             },
             "required": ["name", "select_query"],
+            "oneOf": [
+              {
+                "required": ["to_table"],
+                "properties": { "engine": false, "engine_args": false, "order_by": false },
+                "description": "TO-table mode: the view writes into a pre-existing ontology-tracked table."
+              },
+              {
+                "required": ["engine"],
+                "properties": { "to_table": false },
+                "description": "Implicit-storage mode: ClickHouse creates backing storage with the given engine."
+              }
+            ],
             "additionalProperties": false
           }
         },

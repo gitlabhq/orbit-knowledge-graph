@@ -179,14 +179,19 @@ pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
     if let Some(ref to_table) = mv.to_table {
         header.push_str(&format!("\nTO {to_table}"));
     } else {
-        if let Some(ref engine) = mv.engine {
-            let engine_args = if engine.args.is_empty() {
-                String::new()
-            } else {
-                format!("({})", engine.args.join(", "))
-            };
-            header.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
-        }
+        let engine = mv.engine.as_ref().unwrap_or_else(|| {
+            panic!(
+                "materialized view '{}' uses implicit storage but has no engine; \
+                 either set `to_table` or `engine`",
+                mv.name
+            )
+        });
+        let engine_args = if engine.args.is_empty() {
+            String::new()
+        } else {
+            format!("({})", engine.args.join(", "))
+        };
+        header.push_str(&format!("\nENGINE = {}{engine_args}", engine.name));
         if !mv.order_by.is_empty() {
             header.push_str(&format!("\nORDER BY ({})", mv.order_by.join(", ")));
         }
@@ -575,6 +580,20 @@ mod tests {
         assert!(sql.contains("POPULATE"));
         assert!(sql.contains("AS SELECT source_kind"));
         assert!(!sql.contains("TO "));
+    }
+
+    #[test]
+    #[should_panic(expected = "implicit storage but has no engine")]
+    fn emit_materialized_view_panics_without_engine_or_to_table() {
+        let mv = CreateMaterializedView {
+            name: "mv_bad".into(),
+            to_table: None,
+            select_query: "SELECT 1".into(),
+            engine: None,
+            order_by: vec![],
+            populate: false,
+        };
+        emit_create_materialized_view(&mv);
     }
 
     #[test]
