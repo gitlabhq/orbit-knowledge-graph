@@ -77,6 +77,18 @@ impl DslLanguage for HclDsl {
                 .when(has_child_text("provider"))
                 .no_scope()
                 .name_from(nth_label(0)),
+            // dynamic "name" { for_each = ...; content { ... } }
+            // The label becomes an iterator variable (e.g. ingress.value).
+            scope("block", "Dynamic")
+                .def_kind(DefKind::Property)
+                .when(has_child_text("dynamic"))
+                .name_from(nth_label(0)),
+            // terraform { required_version, required_providers, backend }
+            scope("block", "Terraform")
+                .def_kind(DefKind::Other)
+                .when(has_child_text("terraform"))
+                .no_scope()
+                .name_from(child_of_kind("identifier")),
             // Attributes inside a locals block become property definitions.
             scope("attribute", "Local")
                 .def_kind(DefKind::Property)
@@ -109,7 +121,12 @@ impl DslLanguage for HclDsl {
     }
 
     fn loops() -> Vec<LoopRule> {
-        vec![]
+        vec![
+            // { for k, v in expr : key => value }
+            loop_rule("for_object_expr"),
+            // [ for v in expr : value ]
+            loop_rule("for_tuple_expr"),
+        ]
     }
 
     fn hooks() -> LanguageHooks {
@@ -211,8 +228,24 @@ fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
         "local" => Some(format!("locals.{attr_name}")),
         // module.x → "x" (modules are flat defs named by their label)
         "module" => Some(attr_name),
-        // data.type.name → need type + name, skip for now (bare "data" isn't useful)
-        "data" => None,
+        // data.type.name → "type.name" to match data source FQNs
+        "data" => {
+            let attrs: Vec<_> = parent
+                .children()
+                .filter(|c| c.kind().as_ref() == "get_attr")
+                .take(2)
+                .filter_map(|ga| {
+                    ga.children()
+                        .find(|c| c.kind().as_ref() == "identifier")
+                        .map(|c| c.text().to_string())
+                })
+                .collect();
+            if attrs.len() == 2 {
+                Some(format!("{}.{}", attrs[0], attrs[1]))
+            } else {
+                None
+            }
+        }
         // resource refs: aws_vpc.main → "aws_vpc.main"
         _ => Some(format!("{name}.{attr_name}")),
     }
@@ -418,6 +451,94 @@ resource "aws_instance" "web" {
         assert!(
             refs.contains(&"locals.common_tags".to_string()),
             "expected local ref rewritten to locals scope: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn data_ref_rewrites_to_type_dot_name() {
+        let refs = parse_refs(
+            r#"
+resource "aws_instance" "web" {
+  ami = data.aws_ami.ubuntu.id
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"aws_ami.ubuntu".to_string()),
+            "expected data ref rewritten to type.name: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn for_object_expr_is_tracked() {
+        let refs = parse_refs(
+            r#"
+locals {
+  upper_tags = { for k, v in var.tags : k => upper(v) }
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"upper".to_string()),
+            "expected function ref inside for expr: {refs:?}"
+        );
+        assert!(
+            refs.contains(&"tags".to_string()),
+            "expected var.tags rewritten ref: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn dynamic_block_produces_iterator_def() {
+        let defs = parse_defs(
+            r#"
+resource "aws_security_group" "sg" {
+  dynamic "ingress" {
+    for_each = var.ports
+    content {
+      from_port = ingress.value
+    }
+  }
+}
+"#,
+        );
+        let names: Vec<&str> = defs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            names.contains(&"ingress"),
+            "expected dynamic iterator def: {names:?}"
+        );
+    }
+
+    #[test]
+    fn terraform_block_produces_definition() {
+        let defs = parse_defs(
+            r#"
+terraform {
+  required_version = ">= 1.5"
+}
+"#,
+        );
+        let names: Vec<&str> = defs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            names.contains(&"terraform"),
+            "expected terraform def: {names:?}"
+        );
+    }
+
+    #[test]
+    fn string_interpolation_refs_are_captured() {
+        let refs = parse_refs(
+            r#"
+resource "aws_instance" "web" {
+  tags = {
+    Name = "app-${var.environment}-${count.index}"
+  }
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"environment".to_string()),
+            "expected var.environment interpolation ref: {refs:?}"
         );
     }
 
