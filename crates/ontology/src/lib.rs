@@ -898,6 +898,69 @@ impl Ontology {
         self.statistics.as_ref()
     }
 
+    /// Returns the partition key column for a given entity's statistics MV,
+    /// or `None` if the entity lacks the configured partition column (global
+    /// entities like User, Runner get an empty partition key).
+    #[must_use]
+    pub fn stats_partition_key_for(&self, entity: &str) -> Option<&str> {
+        let config = self.statistics.as_ref()?;
+        let node = self.nodes.get(entity)?;
+        if node.fields.iter().any(|f| f.name == config.partition_key) {
+            Some(&config.partition_key)
+        } else {
+            None
+        }
+    }
+
+    /// Categorize a node entity's filterable fields into stat types.
+    /// Returns (categorical, token, histogram) column name lists.
+    /// Skips: uuid, virtual, filterable:false, and excluded columns.
+    #[must_use]
+    pub fn stats_columns_for(&self, entity: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+        let excluded: std::collections::HashSet<&str> = self
+            .statistics
+            .as_ref()
+            .map(|s| {
+                s.exclude
+                    .iter()
+                    .filter(|e| e.node == entity)
+                    .flat_map(|e| e.columns.iter().map(String::as_str))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let node = match self.nodes.get(entity) {
+            Some(n) => n,
+            None => return (vec![], vec![], vec![]),
+        };
+
+        let mut categorical = vec![];
+        let mut token = vec![];
+        let mut histogram = vec![];
+
+        for field in &node.fields {
+            if field.is_virtual() || !field.filterable || excluded.contains(field.name.as_str()) {
+                continue;
+            }
+            match field.data_type {
+                DataType::Bool | DataType::Enum => categorical.push(field.name.as_str()),
+                DataType::String => {
+                    if field.selectivity == FieldSelectivity::Low {
+                        categorical.push(field.name.as_str());
+                    } else {
+                        token.push(field.name.as_str());
+                    }
+                }
+                DataType::Int | DataType::Float | DataType::Date | DataType::DateTime => {
+                    histogram.push(field.name.as_str());
+                }
+                DataType::Uuid => {} // skip: selectivity is always 1/row_count
+            }
+        }
+
+        (categorical, token, histogram)
+    }
+
     #[must_use]
     pub fn auxiliary_dictionaries(&self) -> &[AuxiliaryDictionary] {
         &self.auxiliary_dictionaries
