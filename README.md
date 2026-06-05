@@ -209,7 +209,6 @@ Billing emission is on the SOX audit boundary. Before touching billing code, rea
 | Engineering lead | [@michaelangeloio](https://gitlab.com/michaelangeloio) |
 | Product Manager | [@mcorren](https://gitlab.com/mcorren) |
 | TPM | [@lyle](https://gitlab.com/lyle) |
-| Production engineering DRI | Alex Hanselka |
 | Siphon and DIP architecture | [@ahegyi](https://gitlab.com/ahegyi) |
 
 ### Cross-functional partners
@@ -223,7 +222,7 @@ Billing emission is on the SOX audit boundary. Before touching billing code, rea
 | Jason Plum ([@WarheadsSE](https://gitlab.com/WarheadsSE)) | Delivery, Self-Managed, Dedicated |
 | Brian Greene ([@bgreene1](https://gitlab.com/bgreene1)) | Ontology standards |
 | Dennis Tang ([@dennis](https://gitlab.com/dennis)) | Analytics stage, ClickHouse operations |
-| Mark Unthank | Design |
+| Nick Leonard ([@nickleonard](https://gitlab.com/nickleonard)) | Design |
 | Jerome Ng ([@jeromezng](https://gitlab.com/jeromezng)) | Usage billing system architect |
 
 GitLab stage: Analytics. Group: Knowledge Graph.
