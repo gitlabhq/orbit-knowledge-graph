@@ -19,7 +19,7 @@
 
 Index your GitLab SDLC and source code as one property graph, then query it from the GitLab UI, a CLI, MCP, or REST. Orbit ships in two shapes: **Orbit Local**, a single-binary CLI that builds a code-only graph from any repository on your machine, and **Orbit Remote**, the hosted graph that spans a top-level GitLab.com group.
 
-> Pre-GA. The Query DSL and ontology may change. Orbit Remote is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
+> Beta. The Query DSL and ontology may change. Orbit Remote is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
 
 ## Two ways to run Orbit
 
