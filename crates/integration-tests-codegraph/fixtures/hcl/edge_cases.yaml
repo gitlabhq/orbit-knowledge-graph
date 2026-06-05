@@ -1,0 +1,148 @@
+name: "HCL edge cases — providers, terraform block, nested resources, interpolation"
+
+fixtures:
+  - path: providers.tf
+    content: |
+      terraform {
+        required_version = ">= 1.5"
+        required_providers {
+          aws = {
+            source  = "hashicorp/aws"
+            version = "~> 5.0"
+          }
+        }
+      }
+
+      provider "aws" {
+        region = var.region
+      }
+
+  - path: variables.tf
+    content: |
+      variable "region" {
+        type    = string
+        default = "us-east-1"
+      }
+
+      variable "db_password" {
+        type      = string
+        sensitive = true
+      }
+
+  - path: network.tf
+    content: |
+      resource "aws_vpc" "main" {
+        cidr_block = "10.0.0.0/16"
+      }
+
+      resource "aws_subnet" "private_a" {
+        vpc_id            = aws_vpc.main.id
+        cidr_block        = "10.0.10.0/24"
+        availability_zone = "${var.region}a"
+      }
+
+      resource "aws_subnet" "private_b" {
+        vpc_id            = aws_vpc.main.id
+        cidr_block        = "10.0.11.0/24"
+        availability_zone = "${var.region}b"
+      }
+
+  - path: database.tf
+    content: |
+      resource "aws_db_subnet_group" "db" {
+        name       = "db-subnet-group"
+        subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+      }
+
+      resource "aws_db_instance" "postgres" {
+        engine               = "postgres"
+        instance_class       = "db.t3.micro"
+        db_subnet_group_name = aws_db_subnet_group.db.name
+        password             = var.db_password
+      }
+
+      output "db_endpoint" {
+        value = aws_db_instance.postgres.endpoint
+      }
+
+tests:
+  - name: "Terraform block is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Terraform'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "terraform" } }
+
+  - name: "Provider definition is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Provider'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "aws" } }
+
+  - name: "Multiple resources of same type produce distinct FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn STARTS WITH 'aws_subnet.'
+        AND d.definition_type = 'Resource'
+        AND d.kind <> 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: "aws_subnet.private_a" } }
+      - { row: { fqn: "aws_subnet.private_b" } }
+
+  - name: "String interpolation refs resolve: subnet -> var.region"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_subnet.private_a'
+        AND callee.name = 'region'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Chained resource refs: db_subnet_group -> both subnets"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_db_subnet_group.db'
+        AND callee.fqn STARTS WITH 'aws_subnet.'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "aws_subnet.private_a" } }
+      - { row: { callee: "aws_subnet.private_b" } }
+
+  - name: "Sensitive variable ref resolves: postgres -> db_password"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_db_instance.postgres'
+        AND callee.name = 'db_password'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Provider ref resolves to variable"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.definition_type = 'Provider'
+        AND callee.name = 'region'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "All files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 4 }
+      - { unique: path }

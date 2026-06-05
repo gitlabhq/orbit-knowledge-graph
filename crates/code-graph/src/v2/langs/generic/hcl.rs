@@ -543,6 +543,118 @@ resource "aws_instance" "web" {
     }
 
     #[test]
+    fn provider_block_produces_definition() {
+        let defs = parse_defs(
+            r#"
+provider "aws" {
+  region = "us-east-1"
+}
+"#,
+        );
+        let names: Vec<&str> = defs.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"aws"), "expected provider def: {names:?}");
+    }
+
+    #[test]
+    fn multiple_resources_same_type_produce_distinct_fqns() {
+        let defs = parse_defs(
+            r#"
+resource "aws_subnet" "public" {
+  cidr_block = "10.0.1.0/24"
+}
+resource "aws_subnet" "private" {
+  cidr_block = "10.0.2.0/24"
+}
+"#,
+        );
+        let fqns: Vec<&str> = defs.iter().map(|(_, f)| f.as_str()).collect();
+        assert!(
+            fqns.contains(&"aws_subnet.public"),
+            "expected public subnet FQN: {fqns:?}"
+        );
+        assert!(
+            fqns.contains(&"aws_subnet.private"),
+            "expected private subnet FQN: {fqns:?}"
+        );
+    }
+
+    #[test]
+    fn builtin_namespaces_are_not_rewritten() {
+        let refs = parse_refs(
+            r#"
+resource "aws_instance" "web" {
+  ami = self.trigger
+  tags = {
+    path_val = path.module
+    each_val = each.key
+  }
+}
+"#,
+        );
+        // Builtins pass through with their original name (no dot-join rewrite),
+        // so they won't accidentally match a resource FQN like "self.trigger".
+        assert!(
+            !refs.iter().any(|r| r == "self.trigger"),
+            "self.trigger should not be rewritten to a dot-joined ref: {refs:?}"
+        );
+        assert!(
+            !refs.iter().any(|r| r == "path.module"),
+            "path.module should not be rewritten: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn module_ref_rewrites_to_bare_name() {
+        let refs = parse_refs(
+            r#"
+resource "aws_instance" "web" {
+  security_group_id = module.sg.id
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"sg".to_string()),
+            "expected module.sg rewritten to sg: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn for_tuple_expr_is_tracked() {
+        let refs = parse_refs(
+            r#"
+locals {
+  ports = [for p in var.port_list : tostring(p)]
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"tostring".to_string()),
+            "expected function ref inside for tuple expr: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn nested_interpolation_captures_multiple_refs() {
+        let refs = parse_refs(
+            r#"
+resource "aws_instance" "web" {
+  tags = {
+    Name = "${var.project}-${var.environment}"
+  }
+}
+"#,
+        );
+        assert!(
+            refs.contains(&"project".to_string()),
+            "expected var.project ref: {refs:?}"
+        );
+        assert!(
+            refs.contains(&"environment".to_string()),
+            "expected var.environment ref: {refs:?}"
+        );
+    }
+
+    #[test]
     fn data_source_produces_type_scope_and_named_def() {
         let defs = parse_defs(
             r#"

@@ -291,6 +291,11 @@ yaml_test!(
     "php/cross_file_class_const_singleton.yaml"
 );
 
+// HCL (Terraform)
+yaml_test!(hcl_resolution, "hcl/resolution.yaml");
+yaml_test!(hcl_dynamic_and_loops, "hcl/dynamic_and_loops.yaml");
+yaml_test!(hcl_edge_cases, "hcl/edge_cases.yaml");
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(
