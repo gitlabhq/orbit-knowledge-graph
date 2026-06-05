@@ -120,38 +120,42 @@ pub struct MaterializedViewDefinition {
 }
 
 /// Configuration for automated column statistics collection.
+///
+/// Column categorization is auto-derived from ontology property types:
+///   boolean / enum / selectivity:low  →  stats_table  (value frequencies)
+///   string                            →  token_table  (token frequencies)
+///   int64 / timestamp / date / float  →  histogram_table (equi-depth buckets)
+///   uuid                              →  skipped
+///   filterable: false / virtual        →  skipped
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatisticsConfig {
-    /// AggregatingMergeTree table for per-value frequency stats.
+    /// AggregatingMergeTree table for per-value frequency stats (categorical).
     pub stats_table: String,
-    /// AggregatingMergeTree table for histogram bucket states (continuous columns).
+    /// AggregatingMergeTree table for histogram bucket states (continuous).
     pub histogram_table: String,
-    /// AggregatingMergeTree table for token frequency states (text columns).
+    /// AggregatingMergeTree table for token frequency states (text).
     pub token_table: String,
     /// ClickHouse dictionary for fast stats lookups.
     pub dictionary: String,
     /// Dictionary refresh interval.
     pub lifetime_min: u32,
     pub lifetime_max: u32,
-    /// Number of histogram buckets for continuous/high-NDV columns.
+    /// Number of histogram buckets for continuous/numerical columns.
     pub histogram_buckets: u16,
     /// Number of top-K tokens to track per token column.
     pub top_k_tokens: u16,
-    /// Per-node column tracking configuration.
-    pub tracked: Vec<TrackedNodeStats>,
+    /// Column used to partition stats by namespace. Entities without this
+    /// column get global stats (empty partition key).
+    pub partition_key: String,
+    /// Columns to exclude from statistics collection.
+    pub exclude: Vec<StatisticsExclude>,
 }
 
-/// Per-node statistics tracking declaration.
+/// Exclude specific columns from statistics collection.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrackedNodeStats {
-    /// Entity name (e.g. "MergeRequest", "File").
+pub struct StatisticsExclude {
     pub node: String,
-    /// Low-NDV categorical columns → stats_table (per-value frequencies).
     pub columns: Vec<String>,
-    /// Medium/high-NDV text columns → token_table (token frequencies).
-    pub token_columns: Vec<String>,
-    /// Continuous/numerical columns → histogram_table (equi-depth buckets).
-    pub histogram_columns: Vec<String>,
 }
 
 /// A non-ontology auxiliary table definition (checkpoint, etc.).

@@ -485,11 +485,11 @@
         },
         "statistics": {
           "type": "object",
-          "description": "Automated column statistics collection via AggregatingMergeTree MVs. Three stat types: value frequencies (categorical low-NDV), token frequencies (text medium/high-NDV), and histograms (continuous/numerical).",
+          "description": "Automated column statistics collection via AggregatingMergeTree MVs. All filterable properties on all entities are auto-tracked. Categorization is derived from property types: boolean/enum/selectivity:low → stats_table (value frequencies), string → token_table (token frequencies), int64/timestamp/date/float → histogram_table (equi-depth buckets), uuid → skipped.",
           "properties": {
             "stats_table": {
               "type": "string",
-              "description": "AggregatingMergeTree table for per-value frequency stats (categorical low-NDV columns)."
+              "description": "AggregatingMergeTree table for per-value frequency stats (categorical columns)."
             },
             "histogram_table": {
               "type": "string",
@@ -525,30 +525,24 @@
               "maximum": 1000,
               "description": "Number of top-K tokens to track per token column."
             },
-            "tracked_columns": {
+            "partition_key": {
+              "type": "string",
+              "description": "Column used to partition stats by namespace. Entities without this column get global stats (empty partition key)."
+            },
+            "exclude": {
               "type": "array",
-              "description": "Per-node statistics configuration. Each entry declares which columns get which stat type.",
+              "description": "Columns to exclude from statistics collection.",
               "items": {
                 "type": "object",
                 "properties": {
                   "node": {
                     "type": "string",
-                    "description": "Entity name (e.g. MergeRequest, File)."
+                    "description": "Entity name."
                   },
                   "columns": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Low-NDV categorical columns for per-value frequency tracking."
-                  },
-                  "token_columns": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Medium/high-NDV text columns for token frequency tracking."
-                  },
-                  "histogram_columns": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Continuous/numerical columns for equi-depth histogram tracking."
+                    "description": "Column names to exclude."
                   }
                 },
                 "required": ["node", "columns"],
@@ -556,7 +550,7 @@
               }
             }
           },
-          "required": ["stats_table", "histogram_table", "token_table", "dictionary", "lifetime", "histogram_buckets", "top_k_tokens", "tracked_columns"],
+          "required": ["stats_table", "histogram_table", "token_table", "dictionary", "lifetime", "histogram_buckets", "top_k_tokens", "partition_key"],
           "additionalProperties": false
         },
         "internal_column_prefix": {

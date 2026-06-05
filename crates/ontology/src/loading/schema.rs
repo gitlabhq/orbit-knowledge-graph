@@ -94,17 +94,15 @@ pub(super) struct StatisticsYaml {
     pub lifetime: DictionaryLifetimeYaml,
     pub histogram_buckets: u16,
     pub top_k_tokens: u16,
-    pub tracked_columns: Vec<TrackedNodeStatsYaml>,
+    pub partition_key: String,
+    #[serde(default)]
+    pub exclude: Vec<StatisticsExcludeYaml>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(super) struct TrackedNodeStatsYaml {
+pub(super) struct StatisticsExcludeYaml {
     pub node: String,
     pub columns: Vec<String>,
-    #[serde(default)]
-    pub token_columns: Vec<String>,
-    #[serde(default)]
-    pub histogram_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

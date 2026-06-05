@@ -226,124 +226,19 @@ settings:
     lifetime: {min: 120, max: 300}
     histogram_buckets: 16
     top_k_tokens: 100
-    tracked_columns:
-      # --- Core ---
-      - node: Group
-        columns: [visibility_level]
-        token_columns: [full_path, name, description]
-        histogram_columns: [id, created_at, updated_at]
-      - node: Project
-        columns: [visibility_level, archived]
-        token_columns: [full_path, name, description]
-        histogram_columns: [id, created_at, updated_at, star_count, last_activity_at]
-      - node: User
-        columns: [state, preferred_language, private_profile, is_admin, is_auditor, is_external, user_type]
-        token_columns: [username, email, name, first_name, last_name, avatar_url, public_email]
-        histogram_columns: [id, created_at, updated_at, last_activity_on]
-      - node: Note
-        columns: [noteable_type, internal, confidential]
-        token_columns: [note, line_code, discussion_id, commit_id, st_diff]
-        histogram_columns: [id, noteable_id, created_at, updated_at, resolved_at, project_id, author_id]
-      # --- Code review ---
-      - node: MergeRequest
-        columns: [state, merge_status, draft, squash, discussion_locked, first_contribution]
-        token_columns: [title, description, source_branch, target_branch, merge_commit_sha, merged_commit_sha, squash_commit_sha]
-        histogram_columns: [id, iid, created_at, updated_at, prepared_at, project_id, latest_build_started_at, latest_build_finished_at, first_deployed_to_production_at, merged_at, latest_closed_at, first_comment_at, first_commit_at, last_commit_at, diff_size, modified_paths_size, commits_count, first_approved_at, first_reassigned_at, added_lines, removed_lines, reviewer_first_assigned_at, author_id, merge_user_id, updated_by_id, last_edited_by_id, closed_by_id, milestone_id, source_project_id, head_pipeline_id, latest_merge_request_diff_id]
-      - node: MergeRequestDiff
-        columns: [state, diff_type, stored_externally]
-        token_columns: [base_commit_sha, head_commit_sha, start_commit_sha, real_size]
-        histogram_columns: [id, merge_request_id, commits_count, files_count, project_id, created_at, updated_at]
-      - node: MergeRequestDiffFile
-        columns: [too_large, new_file, renamed_file, deleted_file, binary, generated, a_mode, b_mode]
-        token_columns: [new_path, old_path]
-        histogram_columns: [id, merge_request_id, merge_request_diff_id, project_id]
-      # --- CI ---
-      - node: Pipeline
-        columns: [status, source, tag, failure_reason, protected]
-        token_columns: [sha, ref, before_sha, yaml_errors]
-        histogram_columns: [id, iid, duration, created_at, started_at, finished_at, committed_at, updated_at, project_id, user_id, merge_request_id, auto_canceled_by_id]
-      - node: Stage
-        columns: [status]
-        token_columns: [name]
-        histogram_columns: [id, position, created_at, updated_at, project_id, pipeline_id]
-      - node: Job
-        columns: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
-        token_columns: [name, ref, coverage, environment]
-        histogram_columns: [id, created_at, started_at, finished_at, queued_at, runner_id, timeout, exit_code, project_id, user_id, upstream_pipeline_id, stage_id, pipeline_id, auto_canceled_by_id]
-      - node: JobMetadata
-        columns: [interruptible, timeout_source, has_exposed_artifacts, debug_trace_enabled]
-        token_columns: [expanded_environment_name, environment_auto_stop_in]
-        histogram_columns: [id, build_id, timeout, exit_code, project_id]
-      - node: Deployment
-        columns: [tag, status, deployable_type, archived]
-        token_columns: [ref, sha, on_stop]
-        histogram_columns: [id, iid, project_id, deployable_id, created_at, finished_at, updated_at, environment_id, user_id]
-      - node: Environment
-        columns: [environment_type, state, tier, auto_stop_setting]
-        token_columns: [name, slug, external_url, kubernetes_namespace, flux_resource_path, description]
-        histogram_columns: [id, project_id, auto_stop_at, auto_delete_at, cluster_agent_id, created_at, updated_at, merge_request_id]
-      - node: Runner
-        columns: [runner_type, active, locked, run_untagged, access_level]
-        token_columns: [name, description]
-        histogram_columns: [id, maximum_timeout, organization_id, created_at, contacted_at]
-      # --- Security ---
-      - node: Vulnerability
-        columns: [state, severity, report_type, resolved_on_default_branch, present_on_default_branch]
-        token_columns: [title, description]
-        histogram_columns: [id, created_at, updated_at, detected_at, resolved_at, confirmed_at, dismissed_at, project_id, finding_id, author_id, confirmed_by_id, resolved_by_id, dismissed_by_id]
-      - node: VulnerabilityOccurrence
-        columns: [severity, report_type, detection_method]
-        token_columns: [uuid, name, description, solution, cve, location, location_fingerprint]
-        histogram_columns: [id, created_at, updated_at, detected_at, project_id, scanner_id, vulnerability_id, primary_identifier_id]
-      - node: Finding
-        columns: [severity, deduplicated]
-        token_columns: [uuid, name, description, solution, overridden_uuid]
-        histogram_columns: [id, project_id, scan_id, scanner_id]
-      - node: VulnerabilityScanner
-        columns: [vendor]
-        token_columns: [external_id, name]
-        histogram_columns: [id, created_at, updated_at, project_id]
-      - node: VulnerabilityIdentifier
-        columns: [external_type]
-        token_columns: [external_id, name, url]
-        histogram_columns: [id, created_at, updated_at, project_id]
-      - node: SecurityScan
-        columns: [scan_type, status, latest]
-        histogram_columns: [id, created_at, updated_at, project_id, pipeline_id, build_id]
-      # --- Plan ---
-      - node: WorkItem
-        columns: [state, work_item_type, confidential]
-        token_columns: [title, description]
-        histogram_columns: [id, iid, due_date, start_date, weight, created_at, updated_at, closed_at, project_id, author_id, milestone_id, namespace_id, closed_by_id]
-      - node: Milestone
-        columns: [state]
-        token_columns: [title, description]
-        histogram_columns: [id, iid, due_date, start_date, created_at, updated_at, project_id, group_id]
-      - node: Label
-        columns: []
-        token_columns: [title, description, color]
-        histogram_columns: [id, created_at, updated_at, project_id, group_id]
-      # --- Source code ---
-      - node: File
-        columns: [extension, language]
-        token_columns: [branch, commit_sha, path, name]
-        histogram_columns: [id, project_id]
-      - node: Directory
-        columns: []
-        token_columns: [branch, commit_sha, path, name]
-        histogram_columns: [id, project_id]
-      - node: Branch
-        columns: [is_default]
-        token_columns: [name]
-        histogram_columns: [id, project_id]
-      - node: Definition
-        columns: [definition_type]
-        token_columns: [branch, commit_sha, file_path, fqn, name]
-        histogram_columns: [id, project_id, start_line, end_line, start_byte, end_byte, start_char, end_char]
-      - node: ImportedSymbol
-        columns: [import_type]
-        token_columns: [branch, commit_sha, file_path, import_path, identifier_name, identifier_alias]
-        histogram_columns: [id, project_id, start_line, end_line, start_byte, end_byte, start_char, end_char]
+    # Stats are partitioned by this column for namespace-level granularity.
+    # Entities without this column (User, Runner) get global stats (empty key).
+    partition_key: traversal_path
+    # All filterable properties on all entities are auto-tracked.
+    # Categorization is derived from property types:
+    #   boolean / enum / selectivity:low  →  stats_table  (value frequencies)
+    #   string                            →  token_table  (token frequencies)
+    #   int64 / timestamp / date / float  →  histogram_table (equi-depth buckets)
+    #   uuid                              →  skipped (selectivity = 1/row_count)
+    #   filterable: false / virtual        →  skipped
+    # Use exclude to skip noisy or irrelevant columns.
+    exclude:
+      - {node: Note, columns: [st_diff]}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User, Runner]
   local_db:

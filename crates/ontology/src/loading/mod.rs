@@ -597,14 +597,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             lifetime_max: s.lifetime.max,
             histogram_buckets: s.histogram_buckets,
             top_k_tokens: s.top_k_tokens,
-            tracked: s
-                .tracked_columns
+            partition_key: s.partition_key,
+            exclude: s
+                .exclude
                 .into_iter()
-                .map(|t| crate::entities::TrackedNodeStats {
-                    node: t.node,
-                    columns: t.columns,
-                    token_columns: t.token_columns,
-                    histogram_columns: t.histogram_columns,
+                .map(|e| crate::entities::StatisticsExclude {
+                    node: e.node,
+                    columns: e.columns,
                 })
                 .collect(),
         }
