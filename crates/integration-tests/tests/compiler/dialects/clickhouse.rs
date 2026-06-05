@@ -740,7 +740,7 @@ fn scoped_aggregation_injects_tight_prefix() {
 }
 
 #[test]
-fn cross_namespace_related_to_keeps_prefix_only_on_scoped_node() {
+fn cross_namespace_related_to_edge_stays_unscoped() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
@@ -757,7 +757,13 @@ fn cross_namespace_related_to_keeps_prefix_only_on_scoped_node() {
     let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    assert_eq!(sql.matches(SCOPED_PREFIX).count(), 1);
+    // The anchor and the same-namespace IN_PROJECT edge inherit the tight
+    // prefix; the cross-namespace RELATED_TO edge and its rel node must not.
+    assert_eq!(
+        sql.matches(SCOPED_PREFIX).count(),
+        2,
+        "prefix on the anchor node and the IN_PROJECT edge only"
+    );
 
     let scoped_filter = sql.split("WHERE").nth(1).unwrap();
     let scoped_clause = scoped_filter.split("SELECT").next().unwrap();
