@@ -213,3 +213,35 @@ async fn stats_partitioned_by_traversal_path() {
     assert_eq!(val, "opened");
     assert_eq!(cnt, 1);
 }
+
+#[tokio::test]
+async fn stats_dictionary_source_query_is_valid() {
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, \
+         draft, squash, discussion_locked, first_contribution, \
+         merge_status, project_id, traversal_path, _version, _deleted) VALUES
+         (5001, 40, 'MR Dict', 'opened', 'a', 'main', false, false, false, false, '', 6000, '1/600/', 1, false)",
+        t("gl_merge_request")
+    )).await;
+
+    ctx.optimize_all().await;
+
+    // The dictionary's source query uses uniqMerge over gkg_column_stats.
+    // Verify it executes without error and returns rows.
+    let stats_table = t("gkg_column_stats");
+    let batches = ctx.query(&format!(
+        "SELECT table_name, column_name, partition_key, value, \
+         uniqMerge(row_count) AS row_count \
+         FROM {stats_table} \
+         GROUP BY table_name, column_name, partition_key, value \
+         ORDER BY table_name, column_name, value \
+         LIMIT 10"
+    )).await;
+
+    assert!(
+        !batches.is_empty() && batches[0].num_rows() > 0,
+        "dictionary source query must return rows"
+    );
+}
