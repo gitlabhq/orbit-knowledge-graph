@@ -32,10 +32,9 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition, NodeEntity,
-    NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig, StatisticsExclude,
-    StorageColumn,
-    StorageIndex,
+    EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
+    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
+    StatisticsExclude, StorageColumn, StorageIndex,
     StorageProjection, TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec,
     VirtualSource,
 };
@@ -46,6 +45,22 @@ use std::fmt;
 use std::path::Path;
 
 use loading::EtlSettings;
+
+/// A query-graph edge for [`Ontology::propagate_scope_prefixes`]. Abstracts
+/// over compiler-specific types so the taint walk lives in the ontology crate.
+#[derive(Debug)]
+pub struct ScopeEdge<'a> {
+    /// DSL alias of the source node (e.g. `"mr"`).
+    pub from: &'a str,
+    /// DSL alias of the target node (e.g. `"diff"`).
+    pub to: &'a str,
+    /// Relationship kind(s) on this edge (e.g. `["HAS_DIFF"]`).
+    pub types: &'a [String],
+    /// Entity type of the source (e.g. `"MergeRequest"`).
+    pub source_kind: &'a str,
+    /// Entity type of the target (e.g. `"MergeRequestDiff"`).
+    pub target_kind: &'a str,
+}
 
 /// Errors that can occur when loading or validating an ontology.
 #[derive(Debug)]
@@ -829,6 +844,181 @@ impl Ontology {
             .and_then(|variants| variants.first())
             .map(|e| e.destination_table.as_str())
             .unwrap_or(&self.default_edge_table)
+    }
+
+    /// Returns `true` when **at least one** variant of `relationship_kind` is
+    /// scope-preserving. This is a coarse pre-filter — callers that need
+    /// per-variant accuracy must inspect [`EdgeEntity::scope`] directly,
+    /// because a relationship kind may have both scope-preserving and
+    /// non-scope-preserving variants (e.g. `CONTAINS` has `Group→Project`
+    /// but also `User→Project` and `WorkItem→WorkItem` which are not).
+    /// Fail-closed: unknown or unannotated edges return false.
+    #[must_use]
+    pub fn has_scope_preserving_variant(&self, relationship_kind: &str) -> bool {
+        self.edges.get(relationship_kind).is_some_and(|variants| {
+            variants
+                .iter()
+                .any(|v| v.scope.is_some_and(|s| s.is_scope_preserving()))
+        })
+    }
+
+    /// True when `entity` declares a `traversal_path_lookup`, i.e. it is a
+    /// namespace anchor whose `traversal_path` can be resolved from an
+    /// `id`/`full_path` filter. Exactly `Project` and `Group` today.
+    #[must_use]
+    pub fn is_anchor(&self, entity: &str) -> bool {
+        self.traversal_path_lookups
+            .iter()
+            .any(|l| l.entity == entity)
+    }
+
+    /// True when a `startsWith(traversal_path, P)` predicate prunes granules
+    /// on this node's table: the table has a `traversal_path` column, its
+    /// dedup key (ORDER BY / `sort_key`) leads with it, and the node is not
+    /// global-scoped. Uses `sort_key` rather than `storage.primary_key`
+    /// because PRIMARY KEY is an index prefix that may omit leading columns
+    /// while `sort_key` is the actual ReplacingMergeTree dedup key.
+    #[must_use]
+    pub fn is_path_scopable(&self, entity: &str) -> bool {
+        let Some(node) = self.nodes.get(entity) else {
+            return false;
+        };
+        if !node.has_traversal_path {
+            return false;
+        }
+        if node
+            .etl
+            .as_ref()
+            .is_some_and(|e| e.scope() == EtlScope::Global)
+        {
+            return false;
+        }
+        node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+    }
+
+    /// Returns `(fk_column, anchor_entity)` pairs derived from
+    /// `namespace_anchor` edge variants. When a query filters an entity by
+    /// one of these FK columns, the compiler can resolve the anchor's
+    /// `traversal_path` and scope the query.
+    ///
+    /// Example: `MergeRequest.project_id` → `("project_id", "Project")`.
+    ///
+    /// Deduplicated by FK column name. The load-time validator
+    /// (`validate_edge_scope_annotations`) guarantees that the same FK
+    /// column never maps to two different anchor entities.
+    #[must_use]
+    pub fn anchor_fk_mappings(&self) -> Vec<(&str, &str)> {
+        let mut seen = std::collections::HashMap::new();
+        let mut result = Vec::new();
+        for variants in self.edges.values() {
+            for v in variants {
+                if v.scope == Some(EdgeVariantScope::NamespaceAnchor)
+                    && let Some(fk) = v.fk_column.as_deref()
+                {
+                    if let Some(&existing_anchor) = seen.get(fk) {
+                        debug_assert_eq!(
+                            existing_anchor,
+                            v.target_kind.as_str(),
+                            "FK column '{fk}' maps to two different anchors"
+                        );
+                    } else {
+                        seen.insert(fk, v.target_kind.as_str());
+                        result.push((fk, v.target_kind.as_str()));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Whether the specific `(relationship_kind, source_kind, target_kind)`
+    /// triple is scope-preserving. Unlike [`has_scope_preserving_variant`],
+    /// this resolves to the exact variant and is safe for mixed-variant edges
+    /// like `CONTAINS`.
+    #[must_use]
+    pub fn is_scope_preserving_triple(&self, kind: &str, source: &str, target: &str) -> bool {
+        self.edges.get(kind).is_some_and(|variants| {
+            variants.iter().any(|v| {
+                v.source_kind == source
+                    && v.target_kind == target
+                    && v.scope.is_some_and(|s| s.is_scope_preserving())
+            })
+        })
+    }
+
+    /// Flood resolved `traversal_path` prefixes across scope-preserving edges
+    /// using a two-pass taint walk.
+    ///
+    /// **Pass A (taint):** marks every alias reachable from a seed node only
+    /// through a non-scope-preserving edge — these must never receive a prefix.
+    ///
+    /// **Pass B (BFS):** from the seed aliases, walks scope-preserving edges
+    /// and copies the prefix to untainted neighbours.
+    ///
+    /// Pure: no DB calls, no widening past the seed.
+    #[must_use]
+    pub fn propagate_scope_prefixes(
+        &self,
+        edges: &[ScopeEdge<'_>],
+        seed: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        use std::collections::{HashMap, HashSet};
+
+        if seed.is_empty() {
+            return HashMap::new();
+        }
+
+        let scope_preserving: Vec<bool> = edges
+            .iter()
+            .map(|e| {
+                e.types
+                    .iter()
+                    .all(|t| self.is_scope_preserving_triple(t, e.source_kind, e.target_kind))
+            })
+            .collect();
+
+        // Pass A: taint aliases reachable only through non-scope-preserving edges.
+        let mut tainted: HashSet<&str> = HashSet::new();
+        loop {
+            let mut changed = false;
+            for (i, e) in edges.iter().enumerate() {
+                if scope_preserving[i] {
+                    continue;
+                }
+                for (from, to) in [(e.from, e.to), (e.to, e.from)] {
+                    if (seed.contains_key(from) || tainted.contains(from)) && tainted.insert(to) {
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+
+        // Pass B: flood prefixes across scope-preserving edges, skipping tainted.
+        let mut result = seed.clone();
+        loop {
+            let mut changed = false;
+            for (i, e) in edges.iter().enumerate() {
+                if !scope_preserving[i] {
+                    continue;
+                }
+                let propagation = match (result.get(e.from).cloned(), result.get(e.to).cloned()) {
+                    (Some(p), None) if !tainted.contains(e.to) => Some((e.to.to_string(), p)),
+                    (None, Some(p)) if !tainted.contains(e.from) => Some((e.from.to_string(), p)),
+                    _ => None,
+                };
+                if let Some((alias, prefix)) = propagation {
+                    result.insert(alias, prefix);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        result
     }
 
     /// Prefix for internal columns injected by the compiler.
@@ -2636,5 +2826,265 @@ properties:
             "SystemNote extract is a JOIN (query ETL)"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
+    }
+
+    // --- Scope annotation tests ---
+
+    #[test]
+    fn is_anchor_tracks_traversal_path_lookups() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in ["Project", "Group"] {
+            assert!(o.is_anchor(entity), "{entity} declares a lookup");
+        }
+        for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {
+            assert!(!o.is_anchor(entity), "{entity} declares no lookup");
+        }
+        assert!(
+            o.traversal_path_lookups()
+                .iter()
+                .all(|l| o.is_anchor(&l.entity)),
+            "is_anchor must accept every lookup entity"
+        );
+    }
+
+    #[test]
+    fn is_path_scopable_accepts_namespaced_traversal_path_entities() {
+        let o = Ontology::load_embedded().unwrap();
+        for entity in [
+            "WorkItem",
+            "MergeRequest",
+            "Note",
+            "Vulnerability",
+            "Pipeline",
+            "Job",
+            "Definition",
+            "File",
+            "Project",
+            "Group",
+        ] {
+            assert!(
+                o.is_path_scopable(entity),
+                "{entity} leads its key with traversal_path"
+            );
+        }
+        for entity in ["User", "Runner", "Nonexistent"] {
+            assert!(
+                !o.is_path_scopable(entity),
+                "{entity} is global / has no traversal_path"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_preserving_edges_loaded_from_yaml() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in [
+            "HAS_DIFF",
+            "HAS_FILE",
+            "HAS_LATEST_DIFF",
+            "CONTAINS",
+            "DEFINES",
+        ] {
+            assert!(
+                o.has_scope_preserving_variant(kind),
+                "{kind} should be same-namespace"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_namespace_edges_have_no_scope_preserving_variant() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in [
+            "CLOSES",
+            "RELATED_TO",
+            "FIXES",
+            "MENTIONS",
+            "SOURCE_PROJECT",
+            "IMPORTS",
+        ] {
+            assert!(
+                !o.has_scope_preserving_variant(kind),
+                "{kind} should NOT be same-namespace"
+            );
+        }
+    }
+
+    #[test]
+    fn namespace_anchor_edges_are_in_project_and_in_group() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in ["IN_PROJECT", "IN_GROUP"] {
+            let variants = o.edges.get(kind).expect(kind);
+            assert!(
+                variants
+                    .iter()
+                    .all(|v| v.scope == Some(EdgeVariantScope::NamespaceAnchor)),
+                "all {kind} variants must be namespace_anchor"
+            );
+        }
+    }
+
+    #[test]
+    fn contains_user_project_and_workitem_workitem_not_scope_preserving() {
+        let o = Ontology::load_embedded().unwrap();
+        let contains = o.edges.get("CONTAINS").expect("CONTAINS");
+        let user_project = contains
+            .iter()
+            .find(|v| v.source_kind == "User" && v.target_kind == "Project");
+        assert_eq!(
+            user_project.and_then(|v| v.scope),
+            None,
+            "User→Project crosses global/namespaced boundary"
+        );
+        let wi_wi = contains
+            .iter()
+            .find(|v| v.source_kind == "WorkItem" && v.target_kind == "WorkItem");
+        assert_eq!(
+            wi_wi.and_then(|v| v.scope),
+            None,
+            "WorkItem→WorkItem (epic→issue) may cross namespaces"
+        );
+    }
+
+    #[test]
+    fn calls_imported_symbol_variant_not_scope_preserving() {
+        let o = Ontology::load_embedded().unwrap();
+        let calls = o.edges.get("CALLS").expect("CALLS");
+        let def_import = calls
+            .iter()
+            .find(|v| v.target_kind == "ImportedSymbol")
+            .expect("Definition→ImportedSymbol variant");
+        assert_eq!(
+            def_import.scope, None,
+            "ImportedSymbol is the cross-repo resolution boundary"
+        );
+    }
+
+    #[test]
+    fn anchor_fk_mappings_includes_project_id_and_group_id() {
+        let o = Ontology::load_embedded().unwrap();
+        let mappings = o.anchor_fk_mappings();
+        assert!(
+            mappings.contains(&("project_id", "Project")),
+            "project_id → Project must be in anchor_fk_mappings: {mappings:?}"
+        );
+        // IN_GROUP uses group_id on Milestone/Label and namespace_id on WorkItem.
+        assert!(
+            mappings.iter().any(|(_, anchor)| *anchor == "Group"),
+            "at least one Group anchor FK must be present: {mappings:?}"
+        );
+    }
+
+    #[test]
+    fn ci_domain_edges_have_scope_preserving_variants() {
+        let o = Ontology::load_embedded().unwrap();
+        for kind in ["HAS_STAGE", "HAS_JOB", "HAS_HEAD_PIPELINE", "IN_PIPELINE"] {
+            assert!(
+                o.has_scope_preserving_variant(kind),
+                "{kind} should be same-namespace (CI entities share project scope)"
+            );
+        }
+    }
+
+    #[test]
+    fn is_scope_preserving_triple_resolves_mixed_variants() {
+        let o = Ontology::load_embedded().unwrap();
+        assert!(o.is_scope_preserving_triple("CONTAINS", "Group", "Project"));
+        assert!(!o.is_scope_preserving_triple("CONTAINS", "User", "Project"));
+        assert!(!o.is_scope_preserving_triple("CONTAINS", "WorkItem", "WorkItem"));
+        assert!(o.is_scope_preserving_triple("CALLS", "Definition", "Definition"));
+        assert!(!o.is_scope_preserving_triple("CALLS", "Definition", "ImportedSymbol"));
+    }
+
+    #[test]
+    fn propagate_floods_across_same_namespace_edges() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_diff = vec!["HAS_DIFF".to_string()];
+        let types_file = vec!["HAS_FILE".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "diff",
+                types: &types_diff,
+                source_kind: "MergeRequest",
+                target_kind: "MergeRequestDiff",
+            },
+            ScopeEdge {
+                from: "diff",
+                to: "df",
+                types: &types_file,
+                source_kind: "MergeRequestDiff",
+                target_kind: "MergeRequestDiffFile",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/15846663/")
+        );
+        assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
+    }
+
+    #[test]
+    fn propagate_stops_at_cross_namespace_edge() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_closes = vec!["CLOSES".to_string()];
+        let types_label = vec!["HAS_LABEL".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "wi",
+                types: &types_closes,
+                source_kind: "MergeRequest",
+                target_kind: "WorkItem",
+            },
+            ScopeEdge {
+                from: "wi",
+                to: "lab",
+                types: &types_label,
+                source_kind: "WorkItem",
+                target_kind: "Label",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert!(!got.contains_key("wi"));
+        assert!(!got.contains_key("lab"));
+    }
+
+    // Diamond: node X reachable via both a scope-preserving and a
+    // cross-namespace path. Taint from pass A must block propagation.
+    #[test]
+    fn propagate_taints_diamond_reachable_node() {
+        let o = Ontology::load_embedded().unwrap();
+        let types_diff = vec!["HAS_DIFF".to_string()];
+        let types_closes = vec!["CLOSES".to_string()];
+        let edges = vec![
+            ScopeEdge {
+                from: "mr",
+                to: "diff",
+                types: &types_diff,
+                source_kind: "MergeRequest",
+                target_kind: "MergeRequestDiff",
+            },
+            ScopeEdge {
+                from: "mr",
+                to: "wi",
+                types: &types_closes,
+                source_kind: "MergeRequest",
+                target_kind: "WorkItem",
+            },
+        ];
+        let seed =
+            std::collections::HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let got = o.propagate_scope_prefixes(&edges, &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/15846663/")
+        );
+        assert!(!got.contains_key("wi"), "tainted via CLOSES");
     }
 }

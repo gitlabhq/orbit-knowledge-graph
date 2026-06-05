@@ -5,10 +5,12 @@ description: Container relationship for core entities (hierarchy/ownership)
 variants:
   - from_node: { type: Group, id: id }
     to_node: { type: Group, id: id }
+    scope: same_namespace
     description: "Group contains subgroup."
 
   - from_node: { type: Group, id: id }
     to_node: { type: Project, id: id }
+    scope: same_namespace
     description: "Group contains project."
 
   - from_node: { type: User, id: id }
@@ -17,6 +19,7 @@ variants:
 
   - from_node: { type: Project, id: id }
     to_node: { type: Branch, id: id }
+    scope: same_namespace
     description: "Project contains branch."
 
   - from_node: { type: WorkItem, id: id }
@@ -25,14 +28,17 @@ variants:
 
   - from_node: { type: Branch, id: id }
     to_node: { type: Directory, id: id }
+    scope: same_namespace
     description: "Branch contains root directory."
 
   - from_node: { type: Directory, id: id }
     to_node: { type: Directory, id: id }
+    scope: same_namespace
     description: "Directory contains subdirectory."
 
   - from_node: { type: Directory, id: id }
     to_node: { type: File, id: id }
+    scope: same_namespace
     description: "Directory contains file."
 
 etl:

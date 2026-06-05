@@ -653,6 +653,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
+    validate_edge_scope_annotations(&ontology)?;
 
     Ok(ontology)
 }
@@ -763,6 +764,48 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
                     "{}: property '{}' has no matching storage column",
                     node.name, prop
                 )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// `namespace_anchor` variants must have an FK column and must target a
+/// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
+/// that the same FK column name always maps to the same anchor entity.
+fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    use crate::entities::EdgeVariantScope;
+    use std::collections::HashMap;
+
+    let mut fk_to_anchor: HashMap<&str, &str> = HashMap::new();
+
+    for edge in ontology.edges() {
+        if edge.scope == Some(EdgeVariantScope::NamespaceAnchor) {
+            if edge.fk_column.is_none() {
+                return Err(OntologyError::Validation(format!(
+                    "{} ({}→{}): scope 'namespace_anchor' requires fk_column",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind
+                )));
+            }
+            if !ontology.is_anchor(&edge.target_kind) {
+                return Err(OntologyError::Validation(format!(
+                    "{} ({}→{}): scope 'namespace_anchor' requires target '{}' \
+                     to be a namespace anchor (have a traversal_path_lookup)",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind, edge.target_kind
+                )));
+            }
+            if let Some(fk) = edge.fk_column.as_deref() {
+                if let Some(&existing) = fk_to_anchor.get(fk) {
+                    if existing != edge.target_kind.as_str() {
+                        return Err(OntologyError::Validation(format!(
+                            "FK column '{}' maps to both '{}' and '{}' as namespace_anchor targets",
+                            fk, existing, edge.target_kind
+                        )));
+                    }
+                } else {
+                    fk_to_anchor.insert(fk, &edge.target_kind);
+                }
             }
         }
     }

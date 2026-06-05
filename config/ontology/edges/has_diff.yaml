@@ -6,4 +6,5 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: MergeRequestDiff, id: id }
     fk_column: merge_request_id
+    scope: same_namespace
     description: "Merge request has a diff snapshot."

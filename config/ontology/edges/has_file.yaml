@@ -6,4 +6,5 @@ variants:
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: MergeRequestDiffFile, id: id }
     fk_column: merge_request_diff_id
+    scope: same_namespace
     description: "Merge request diff contains changed file."
