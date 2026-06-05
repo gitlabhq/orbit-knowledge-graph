@@ -115,6 +115,9 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\Model\save', callee: 'App\Models\Model\persist' } }
 
   - name: "Parent call: User.save -> Model.save via parent::"
     query: |
@@ -125,6 +128,9 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\User\save', callee: 'App\Models\Model\save' } }
 
   - name: "Typed-property call: User.save -> Logger.log via \\$this->logger"
     query: |
@@ -135,6 +141,9 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\User\save', callee: 'App\Support\Logger\log' } }
 
   - name: "Same-class call: User.rename -> User.save"
     query: |

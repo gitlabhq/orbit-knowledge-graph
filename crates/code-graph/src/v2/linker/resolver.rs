@@ -650,12 +650,19 @@ impl<'a> ResolveCtx<'a> {
         // `scope_fqn_walk` always prepends an enclosing scope. Try a
         // direct by_fqn lookup first so absolute qualified references
         // resolve to non-type-container definitions like Constants.
-        if !r.name.is_empty() && r.name.contains(self.rules.fqn_separator) {
+        // An absolute leading-separator name (PHP `\Vendor\Foo`, C++ `::Foo`)
+        // is stored in the index without the leading separator; strip it so
+        // the by_fqn lookup matches. No-op for names without the prefix.
+        let bare_name = r
+            .name
+            .strip_prefix(self.rules.fqn_separator)
+            .unwrap_or(r.name);
+        if !bare_name.is_empty() && bare_name.contains(self.rules.fqn_separator) {
             let matches = self
                 .graph
                 .indexes
                 .by_fqn
-                .lookup(r.name, |idx| self.graph.def_fqn(idx) == r.name);
+                .lookup(bare_name, |idx| self.graph.def_fqn(idx) == bare_name);
             if !matches.is_empty() {
                 return Ok(matches.to_vec());
             }

@@ -199,9 +199,12 @@ tests:
       WHERE caller.fqn = 'App\Models\Product\rename'
         AND callee.fqn = 'App\Concerns\Loggable\log'
         AND e.edge_kind = 'Calls'
-      RETURN caller.fqn AS c
+      RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
+      - { no_nulls: caller }
+      - { no_nulls: callee }
+      - { row: { caller: 'App\Models\Product\rename', callee: 'App\Concerns\Loggable\log' } }
 
   - name: "Inherited method via subclass: Product.rename -> Entity.touch"
     query: |

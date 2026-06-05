@@ -397,8 +397,6 @@ impl LanguageSpec {
             // and has no tree-sitter field. Pick the first NAMED child to
             // skip the literal `(` / `)` tokens.
             if cc.transparent_kinds.contains(&kind_ref) {
-                // Bind on its own line so the `children()` borrow of `current`
-                // drops before the reassignment below.
                 let inner = current.children().find(|c| c.is_named());
                 if let Some(inner) = inner {
                     current = inner;
@@ -1085,10 +1083,13 @@ impl LanguageSpec {
 
             // Import handling → also write to SSA
             let import_count_before = state.imports.len();
-            let handled = self
-                .hooks
-                .on_import
-                .is_some_and(|f| f(node, &mut state.imports));
+            let on_import_applies =
+                self.hooks.on_import_kinds.is_empty() || self.hooks.on_import_kinds.contains(&nk);
+            let handled = on_import_applies
+                && self
+                    .hooks
+                    .on_import
+                    .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
                 let ms = state.scope_stack.first().map(|s| s.as_ref());
                 self.evaluate_imports(node, nk, &mut state.imports, ms, sep);

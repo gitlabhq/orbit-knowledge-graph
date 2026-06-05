@@ -185,6 +185,11 @@ tests:
       RETURN c.fqn AS child, p.fqn AS parent
     assert:
       - { row_count: 3 }
+      - { no_nulls: child }
+      - { no_nulls: parent }
+      - { row: { child: 'App\Zoo\Mammal', parent: 'App\Zoo\Animal' } }
+      - { row: { child: 'App\Zoo\Canine', parent: 'App\Zoo\Mammal' } }
+      - { row: { child: 'App\Zoo\Dog', parent: 'App\Zoo\Canine' } }
 
   - name: "Grandparent call: Dog.describe -> Animal.kingdom via inherited \\$this"
     query: |

@@ -824,6 +824,10 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    /// Node kinds `on_import` cares about. Empty (default) calls `on_import`
+    /// on every node (back-compatible); a non-empty list restricts the call
+    /// to those kinds, avoiding a per-node indirect call on large repos.
+    pub on_import_kinds: &'static [&'static str],
     /// Override the identifier an import writes into SSA.
     pub import_scope_name: Option<ImportScopeNameHook>,
     /// Override the target FQN used by type-resolution import maps.

@@ -11,7 +11,7 @@ use treesitter_visit::{Node, SupportLang};
 use crate::v2::linker::rules::{
     ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules, ResolveSettings};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -37,7 +37,9 @@ fn php_super_types(node: &N<'_>) -> Vec<String> {
             "base_clause" | "class_interface_clause" => {
                 for t in child.children() {
                     if is_type_name(t.kind().as_ref()) {
-                        out.push(t.text().to_string());
+                        // Tree-sitter keeps the leading `\` of an absolute name,
+                        // but graph FQNs are stored without it.
+                        out.push(t.text().trim_start_matches('\\').to_string());
                     }
                 }
             }
@@ -70,6 +72,7 @@ impl DslLanguage for PhpDsl {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
             on_import: Some(php_extract_use),
+            on_import_kinds: &["namespace_use_declaration"],
             ..LanguageHooks::default()
         }
     }
@@ -403,16 +406,20 @@ impl HasRules for PhpRules {
             "php",
             scopes,
             spec,
-            vec![
-                ResolveStage::SSA,
-                ResolveStage::ImportStrategies,
-                ResolveStage::ImplicitMember,
-            ],
+            // No ImplicitMember: PHP always qualifies member access ($this->,
+            // self::, Foo::), so a bare unqualified name is a function/import,
+            // never an enclosing-class member. ImplicitMember + chain_fallback
+            // mis-routed bare builtins (substr, tap) and fluent-chain tails to
+            // same-named class members, which was both wrong and O(n^2).
+            vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
             vec![
                 ImportStrategy::ScopeFqnWalk,
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
+                // Last resort for global-namespace classes referenced without a
+                // `use` (e.g. `new HTMLPurifier_Length()`); capped at 5 results.
+                ImportStrategy::GlobalName,
             ],
             ReceiverMode::Keyword,
             "\\",
@@ -422,6 +429,10 @@ impl HasRules for PhpRules {
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
             resolve_ident_type: Some(php_resolve_ident_type),
+            ..Default::default()
+        })
+        .with_settings(ResolveSettings {
+            chain_fallback: false,
             ..Default::default()
         })
     }
