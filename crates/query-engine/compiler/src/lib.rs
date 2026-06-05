@@ -81,7 +81,7 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use scope::{PathResolutionKey, PathScopeId, scope_keys};
+pub use scope::{PathResolutionKey, PathScopeId, scope_edges, scope_keys};
 pub use types::{
     AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
     is_valid_traversal_path,
@@ -203,6 +203,126 @@ mod tests {
             .expect("should compile")
             .base
             .render()
+    }
+
+    fn scoped_ctx(prefixes: &[(&str, &str)]) -> SecurityContext {
+        let map = prefixes
+            .iter()
+            .map(|(a, p)| (a.to_string(), p.to_string()))
+            .collect();
+        SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes(map)
+    }
+
+    const DIFF_CHAIN: &str = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "mr", "entity": "MergeRequest",
+             "filters": {"project_id": {"op": "eq", "value": 278964}}, "columns": ["iid"]},
+            {"id": "diff", "entity": "MergeRequestDiff"},
+            {"id": "df", "entity": "MergeRequestDiffFile"}
+        ],
+        "relationships": [
+            {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
+            {"type": "HAS_FILE", "from": "diff", "to": "df"}
+        ],
+        "limit": 50
+    }"#;
+
+    // #601941: a project-pinned multi-edge traversal must confine every edge scan
+    // to the project's traversal_path prefix, not the broad org-wide '1/'. e0
+    // (source = the pinned MR) and e1 (reached via the same-namespace HAS_DIFF
+    // edge) both inherit the prefix so ClickHouse seeks the edge PK to the project
+    // range instead of scanning ~100M org-wide rows.
+    #[test]
+    fn multi_edge_traversal_confines_edges_to_resolved_project_prefix() {
+        let sql = compile(
+            DIFF_CHAIN,
+            &ONTOLOGY,
+            &scoped_ctx(&[("mr", "1/9970/15846663/")]),
+        )
+        .unwrap()
+        .base
+        .render();
+        assert!(
+            sql.contains("startsWith(e0.traversal_path, '1/9970/15846663/')"),
+            "driving edge e0 must inherit the project prefix:\n{sql}"
+        );
+        assert!(
+            sql.contains("startsWith(e1.traversal_path, '1/9970/15846663/')"),
+            "second hop e1 must inherit the prefix via same-namespace propagation:\n{sql}"
+        );
+    }
+
+    // The largest cost on the customer's worst case is the FINAL scan of the
+    // intermediate/target node tables (MergeRequestDiff, MergeRequestDiffFile).
+    // Once the webserver floods the resolved prefix to those same-namespace
+    // payload nodes, their scans must inherit the project prefix too. (Prod A/B:
+    // adding node scoping on top of edge scoping took 7.9s/30.9GB to 1.8s/3.4GB.)
+    #[test]
+    fn reachable_node_tables_inherit_resolved_project_prefix() {
+        let ctx = scoped_ctx(&[
+            ("mr", "1/9970/15846663/"),
+            ("diff", "1/9970/15846663/"),
+            ("df", "1/9970/15846663/"),
+        ]);
+        let sql = compile(DIFF_CHAIN, &ONTOLOGY, &ctx).unwrap().base.render();
+        assert!(
+            sql.contains("startsWith(diff.traversal_path, '1/9970/15846663/')"),
+            "diff node table must inherit the project prefix:\n{sql}"
+        );
+        assert!(
+            sql.contains("startsWith(df.traversal_path, '1/9970/15846663/')"),
+            "df node table must inherit the project prefix:\n{sql}"
+        );
+    }
+
+    // Without a resolved project/group scope the edges keep only the broad
+    // authorization prefix, so org-wide queries are unchanged.
+    #[test]
+    fn multi_edge_traversal_without_scope_keeps_broad_prefix_only() {
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let sql = compile(DIFF_CHAIN, &ONTOLOGY, &ctx).unwrap().base.render();
+        assert!(
+            !sql.contains("1/9970/15846663/"),
+            "no tight prefix may appear without a resolved scope:\n{sql}"
+        );
+        assert!(
+            sql.contains("startsWith(e0.traversal_path, '1/')"),
+            "broad authz stays:\n{sql}"
+        );
+    }
+
+    // CLOSES crosses project boundaries (an MR may close an issue in another
+    // project), so the prefix must NOT propagate past it. The pinned MR node is
+    // still tightened, but the CLOSES and HAS_LABEL edges keep the broad prefix —
+    // tightening them would drop legitimate cross-project rows.
+    #[test]
+    fn cross_namespace_edge_does_not_inherit_project_prefix() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest",
+                 "filters": {"project_id": {"op": "eq", "value": 278964}}, "columns": ["iid"]},
+                {"id": "wi", "entity": "WorkItem"},
+                {"id": "lab", "entity": "Label"}
+            ],
+            "relationships": [
+                {"type": "CLOSES", "from": "mr", "to": "wi"},
+                {"type": "HAS_LABEL", "from": "wi", "to": "lab"}
+            ],
+            "limit": 50
+        }"#;
+        let sql = compile(query, &ONTOLOGY, &scoped_ctx(&[("mr", "1/9970/15846663/")]))
+            .unwrap()
+            .base
+            .render();
+        assert!(
+            !sql.contains("startsWith(e0.traversal_path, '1/9970/15846663/')")
+                && !sql.contains("startsWith(e1.traversal_path, '1/9970/15846663/')"),
+            "cross-namespace edges must not be tightened (would drop cross-project rows):\n{sql}"
+        );
     }
 
     /// Regression: pipeline-execution errors must reach `count_err`. Before

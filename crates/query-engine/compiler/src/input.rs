@@ -569,6 +569,12 @@ pub struct InputRelationship {
     /// The compiler resolves which node has the column from the edge variant's entity types.
     #[serde(skip)]
     pub fk_column: Option<String>,
+    /// Tight `traversal_path` prefix this edge's scan may be confined to. Set by
+    /// `restrict` when both endpoints resolve to the same project/group scope, so
+    /// the edge scan inherits the PK prefix instead of the broad org-wide one.
+    /// Lossless because an edge row's `traversal_path` is its source entity's.
+    #[serde(skip)]
+    pub scope_prefix: Option<String>,
 }
 
 fn default_hops() -> u32 {

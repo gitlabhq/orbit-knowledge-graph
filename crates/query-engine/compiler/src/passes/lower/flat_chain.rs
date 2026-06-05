@@ -16,6 +16,22 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
+/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
+/// project/group scope, or `None` when the hop carries no resolved prefix.
+/// Emitted alongside the broad authorization filter so ClickHouse can seek the
+/// edge PK to the project's contiguous range instead of the whole org.
+fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
+    hop.scope_prefix.as_deref().map(|prefix| {
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                Expr::string(prefix),
+            ],
+        )
+    })
+}
+
 /// Collect all edge predicates for a hop into a target vec.
 #[allow(clippy::too_many_arguments)]
 fn collect_edge_predicates(
@@ -95,6 +111,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut narrowed_nodes,
             );
 
+            inner_preds.extend(edge_scope_predicate(hop, &alias));
+
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
 
             from = Some(limit_by_scan(
@@ -152,6 +170,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 union
             } else if dedup_edges {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
+                inner.extend(edge_scope_predicate(hop, &alias));
                 if push_narrow_inner {
                     inner.extend(narrow_in);
                 } else {
@@ -160,6 +179,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
             } else {
                 where_parts.extend(narrow_in);
+                where_parts.extend(edge_scope_predicate(hop, &alias));
                 TableRef::scan(&hop.edge_table, &alias)
             };
 
