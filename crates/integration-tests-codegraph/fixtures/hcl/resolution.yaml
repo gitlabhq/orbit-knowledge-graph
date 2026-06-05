@@ -196,7 +196,7 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path
     assert:
-      - { row_count: 4 }
+      - { row_count: 5 }
       - { unique: path }
       - { row: { path: variables.tf } }
       - { row: { path: locals.tf } }

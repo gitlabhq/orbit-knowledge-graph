@@ -90,11 +90,8 @@ impl DslLanguage for HclDsl {
                 .no_scope()
                 .name_from(child_of_kind("identifier")),
             // Attributes inside a locals block become property definitions.
-            scope("attribute", "Local")
-                .def_kind(DefKind::Property)
-                .when(ancestor_is(&["block"]))
-                .no_scope()
-                .name_from(child_of_kind("identifier")),
+            // Handled via on_scope hook for the Locals block to avoid
+            // matching attributes in other block types.
         ]
     }
 
@@ -175,8 +172,13 @@ fn hcl_on_scope(
 
                 if let Some(name) = name {
                     let fqn = Fqn::from_scope(scope_stack, &name, sep);
+                    let def_type = if block_type.as_deref() == Some("data") {
+                        "DataSource"
+                    } else {
+                        "Resource"
+                    };
                     defs.push(crate::v2::types::CanonicalDefinition {
-                        definition_type: "Resource",
+                        definition_type: def_type,
                         kind: DefKind::Class,
                         name,
                         fqn,
@@ -184,6 +186,31 @@ fn hcl_on_scope(
                         is_top_level: false,
                         metadata: None,
                     });
+                }
+            }
+        }
+        Some("locals") => {
+            // Extract each attribute inside the locals block body as a Local def.
+            if let Some(body) = node.children().find(|c| c.kind().as_ref() == "body") {
+                for attr in body
+                    .children()
+                    .filter(|c| c.kind().as_ref() == "attribute")
+                {
+                    if let Some(id) =
+                        attr.children().find(|c| c.kind().as_ref() == "identifier")
+                    {
+                        let name = id.text().to_string();
+                        let fqn = Fqn::from_scope(scope_stack, &name, sep);
+                        defs.push(crate::v2::types::CanonicalDefinition {
+                            definition_type: "Local",
+                            kind: DefKind::Property,
+                            name,
+                            fqn,
+                            range: crate::v2::types::Range::empty(),
+                            is_top_level: false,
+                            metadata: None,
+                        });
+                    }
                 }
             }
         }
