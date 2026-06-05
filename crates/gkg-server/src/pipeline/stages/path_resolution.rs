@@ -163,8 +163,6 @@ mod tests {
         assert_eq!(got.get("df").map(String::as_str), Some("1/9970/15846663/"));
     }
 
-    // Two project anchors in one query each flood only their own subtree — the
-    // prefixes must not cross-contaminate.
     #[test]
     fn flood_keeps_distinct_anchor_prefixes_separate() {
         use std::collections::HashMap;

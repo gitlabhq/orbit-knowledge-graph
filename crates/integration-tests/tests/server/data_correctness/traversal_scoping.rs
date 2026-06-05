@@ -55,10 +55,6 @@ fn assert_diff_file_chain(resp: &ResponseView) {
     resp.assert_referential_integrity();
 }
 
-/// The customer-zero chain (`MergeRequest --HAS_DIFF--> Diff --HAS_FILE-->
-/// File`) scoped to its project must return exactly the same rows as the
-/// unscoped query. Diff 5000 (MR 2000, project 1000) gets two changed files;
-/// HAS_FILE lives in the project's traversal_path like HAS_DIFF.
 pub(super) async fn project_scoped_multi_edge_traversal_is_lossless(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, merge_request_id, merge_request_diff_id, project_id, new_path, traversal_path) VALUES
@@ -85,8 +81,6 @@ pub(super) async fn project_scoped_multi_edge_traversal_is_lossless(ctx: &TestCo
     .await;
     assert_diff_file_chain(&broad);
 
-    // Same query with the project prefix flooded onto the anchor MR and the
-    // same-namespace diff/file payload nodes — identical result set.
     let scoped_resp = run_query_with_security(
         ctx,
         MR_DIFF_FILE_CHAIN,
@@ -104,10 +98,6 @@ pub(super) async fn project_scoped_multi_edge_traversal_is_lossless(ctx: &TestCo
     assert_diff_file_chain(&scoped_resp);
 }
 
-/// Cross-namespace MergeRequest -> WorkItem: MR 2000 (project 1000,
-/// `1/100/1000/`) closes WorkItem 4002, which lives in a different namespace
-/// (`1/101/`). CLOSES is not scope-preserving, so the MR's project prefix must
-/// not prune the cross-project work item.
 pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
@@ -145,10 +135,6 @@ pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: 
     resp.assert_referential_integrity();
 }
 
-/// Multiple anchors in one query apply distinct traversal_paths. User 1
-/// authors MRs in two different projects; the two MergeRequest nodes are pinned
-/// to different projects, so each must be scoped to its own project's prefix.
-/// Cross-contamination would drop one project's MRs.
 pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestContext) {
     // User 1 already authors MRs 2000/2001 in project 1000 (1/100/1000/);
     // give them an authored MR in project 1001 (1/101/1001/) too.
@@ -182,8 +168,6 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
     )
     .await;
 
-    // mr_a is scoped to project 1000 (returns 2000, 2001); mr_b to project 1001
-    // (returns 2002). Both prefixes apply independently — neither over-prunes.
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
     resp.assert_filter("MergeRequest", "project_id", |n| {
@@ -193,10 +177,6 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
     resp.assert_referential_integrity();
 }
 
-/// Cross-namespace WorkItem -> Label: WorkItems 4000/4001 live in group 100
-/// (`1/100/`); WorkItem 4001 carries Label 7002, which lives in a different
-/// group (`1/101/`). HAS_LABEL is not scope-preserving, so scoping the work
-/// items to their group must still return the cross-group label.
 pub(super) async fn cross_namespace_has_label_returns_cross_group_label(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
