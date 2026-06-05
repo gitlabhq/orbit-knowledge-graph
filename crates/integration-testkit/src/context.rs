@@ -185,7 +185,8 @@ impl TestContext {
         let src = &self.config.database;
         let batches = self
             .query(&format!(
-                "SELECT name FROM system.tables WHERE database = '{name}' AND engine != 'View'"
+                "SELECT name FROM system.tables WHERE database = '{name}' \
+                 AND engine NOT IN ('View', 'MaterializedView', 'AggregatingMergeTree')"
             ))
             .await;
         for batch in &batches {
