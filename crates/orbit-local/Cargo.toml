@@ -18,6 +18,7 @@ async-trait = { workspace = true }
 code-graph = { path = "../code-graph" }
 duckdb-client = { path = "../duckdb-client" }
 gkg-utils = { path = "../utils" }
+migration-framework = { path = "../migration-framework" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 gitalisk-core = { workspace = true }

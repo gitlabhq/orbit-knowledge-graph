@@ -376,6 +376,13 @@ cargo run --bin orbit -- debug ddl-local 2>/dev/null > config/graph_local.sql.tm
 """
 description = "Regenerate config/graph.sql (ClickHouse) and config/graph_local.sql (DuckDB) from ontology"
 
+[tasks."schema:generate:migration"]
+run = """
+mkdir -p config/migrations
+cargo run --bin orbit -- debug migration 2>/dev/null > config/migrations/0001_baseline.sql.tmp && mv config/migrations/0001_baseline.sql.tmp config/migrations/0001_baseline.sql
+"""
+description = "Generate the baseline (first) migration config/migrations/0001_baseline.sql from the ontology"
+
 [tasks."lint:markdown"]
 run = "markdownlint-cli2 README.md 'docs/**/*.md'"
 description = "Run markdownlint on all markdown files"

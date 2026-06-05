@@ -8336,6 +8336,7 @@ dependencies = [
  "dunce",
  "gitalisk-core",
  "gkg-utils",
+ "migration-framework",
  "mimalloc",
  "ontology",
  "query-engine",
