@@ -36,6 +36,7 @@ pub mod constants;
 pub mod error;
 pub mod input;
 pub mod metrics;
+pub mod scope;
 pub mod types;
 
 pub mod config;
@@ -59,8 +60,10 @@ pub use ontology::{Ontology, OntologyError};
 
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_materialized_view,
-    ddl::clickhouse::emit_create_table, ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_dictionary,
+    ddl::clickhouse::emit_create_materialized_view, ddl::clickhouse::emit_create_table,
+    ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    ddl::generate_graph_dictionaries, ddl::generate_graph_dictionaries_with_prefix,
     ddl::generate_graph_materialized_views, ddl::generate_graph_materialized_views_with_prefix,
     ddl::generate_graph_tables, ddl::generate_graph_tables_with_prefix, ddl::generate_local_tables,
 };
@@ -70,7 +73,11 @@ pub use passes::hydrate::{
     generate_hydration_plan,
 };
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath};
+pub use scope::{PathResolutionKey, PathScopeId, scope_keys};
+pub use types::{
+    AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, Realm, SecurityContext, TraversalPath,
+    is_valid_traversal_path,
+};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -104,6 +111,23 @@ pub fn compile(
         .and_then(|()| {
             ctx.take_output().ok_or_else(|| {
                 error::QueryError::PipelineInvariant("pipeline did not produce output".into())
+            })
+        })
+        .count_err()
+}
+
+/// Run only `validate` + `normalize`, returning the normalized [`Input`].
+///
+/// Lets the querying pipeline's path-resolution stage read normalized scope
+/// keys before the full pipeline runs, then resolve and attach the tight
+/// traversal_path prefix as [`SecurityContext`] scope metadata.
+pub fn validate_normalize(json_input: &str, ontology: &Ontology) -> Result<Input> {
+    let mut ctx = config::ValidateNormalizeCtx::new(Arc::new(ontology.clone()));
+    ctx.set_json(json_input.to_string());
+    config::run_validate_normalize(&mut ctx)
+        .and_then(|()| {
+            ctx.take_input().ok_or_else(|| {
+                error::QueryError::PipelineInvariant("validate_normalize produced no input".into())
             })
         })
         .count_err()

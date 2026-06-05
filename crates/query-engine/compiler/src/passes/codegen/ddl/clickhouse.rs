@@ -3,8 +3,10 @@
 //! Emits `CREATE TABLE IF NOT EXISTS` statements from the DDL AST.
 
 use crate::ast::ddl::{
-    Codec, ColumnType, CreateMaterializedView, CreateTable, IndexType, ProjectionDef,
+    Codec, ColumnType, CreateDictionary, CreateMaterializedView, CreateTable, IndexType,
+    ProjectionDef,
 };
+use ontology::constants::{DELETED_COLUMN, VERSION_COLUMN};
 
 /// ClickHouse reserved words that must be backtick-quoted when used as column identifiers.
 /// This is a conservative list of words that cause parse ambiguity in CREATE TABLE DDL.
@@ -205,6 +207,69 @@ pub fn emit_create_materialized_view(mv: &CreateMaterializedView) -> String {
     parts.push(format!("AS {}", mv.select_query));
 
     parts.join("\n")
+}
+
+pub fn emit_create_dictionary(dict: &CreateDictionary, source_db: &str) -> String {
+    let key_type = dict
+        .attributes
+        .iter()
+        .find(|a| a.name == dict.key)
+        .map(|a| emit_column_type(&a.data_type))
+        .unwrap_or_else(|| "Int64".into());
+
+    let mut body: Vec<String> = vec![format!("    {} {}", quote_ident(&dict.key), key_type)];
+    for attr in &dict.attributes {
+        if attr.name == dict.key {
+            continue;
+        }
+        body.push(format!(
+            "    {} {}",
+            quote_ident(&attr.name),
+            emit_column_type(&attr.data_type)
+        ));
+    }
+
+    let attr_names: Vec<&str> = dict
+        .attributes
+        .iter()
+        .map(|a| a.name.as_str())
+        .filter(|n| *n != dict.key)
+        .collect();
+    let dedup_selects: Vec<String> = attr_names
+        .iter()
+        .map(|n| format!("argMax({n}, {VERSION_COLUMN}) AS {n}"))
+        .collect();
+    let outer_selects: Vec<String> = std::iter::once(dict.key.clone())
+        .chain(attr_names.iter().map(|n| (*n).to_string()))
+        .collect();
+    let inner_selects: Vec<String> = std::iter::once(dict.key.clone())
+        .chain(dedup_selects)
+        .collect();
+
+    let query = format!(
+        "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
+        outer = outer_selects.join(", "),
+        inner = inner_selects.join(", "),
+        db = source_db,
+        table = dict.source_table,
+        key = dict.key,
+    );
+
+    let layout = match dict.layout.size_in_cells {
+        Some(n) => format!("{}(SIZE_IN_CELLS {n})", dict.layout.kind.to_uppercase()),
+        None => format!("{}()", dict.layout.kind.to_uppercase()),
+    };
+
+    // $q$...$q$ is a ClickHouse heredoc (dollar-quoted string literal), so the backtick-quoted
+    // identifiers in `query` need no escaping; the body is schema-derived and never contains $q$.
+    format!(
+        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE(QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
+        name = dict.name,
+        body = body.join(",\n"),
+        key = dict.key,
+        min = dict.lifetime_min,
+        max = dict.lifetime_max,
+    )
 }
 
 fn emit_projection(proj: &ProjectionDef) -> String {

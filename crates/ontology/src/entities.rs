@@ -143,6 +143,29 @@ pub struct AuxiliaryColumn {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryDictionary {
+    pub name: String,
+    pub source_table: String,
+    pub key: String,
+    pub key_type: Option<DataType>,
+    pub attributes: Vec<AuxiliaryColumn>,
+    pub layout: DictionaryLayout,
+    pub lifetime: DictionaryLifetime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DictionaryLayout {
+    pub kind: String,
+    pub size_in_cells: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DictionaryLifetime {
+    pub min: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainInfo {
     pub name: String,
     pub description: String,
@@ -450,6 +473,30 @@ impl VirtualSource {
     ];
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraversalPathKind {
+    Id,
+    FullPath,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraversalPathLookupSpec {
+    pub kind: TraversalPathKind,
+    pub dictionary: Option<String>,
+    pub source_table: String,
+    pub key_column: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraversalPathLookup {
+    pub entity: String,
+    pub kind: TraversalPathKind,
+    pub dictionary: Option<String>,
+    pub source_table: String,
+    pub key_column: String,
+}
+
 /// A field definition within an entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
@@ -483,6 +530,7 @@ pub struct Field {
     pub selectivity: FieldSelectivity,
     /// Human-readable description of this field from the ontology YAML.
     pub description: Option<String>,
+    pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
 }
 
 impl Default for Field {
@@ -499,6 +547,7 @@ impl Default for Field {
             admin_only: false,
             selectivity: FieldSelectivity::High,
             description: None,
+            traversal_path_lookup: None,
         }
     }
 }

@@ -6,7 +6,8 @@ use crate::OntologyError;
 use crate::constants::DEFAULT_PRIMARY_KEY;
 use crate::entities::{
     DataType, EnumType, Field, FieldSelectivity, FieldSource, NodeEntity, NodeStorage, NodeStyle,
-    RedactionConfig, StorageIndex, StorageProjection, VirtualSource,
+    RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
+    VirtualSource,
 };
 use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -161,6 +162,17 @@ struct PropertyYaml {
     selectivity: Option<FieldSelectivity>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    traversal_path_lookup: Option<TraversalPathLookupYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TraversalPathLookupYaml {
+    kind: TraversalPathKind,
+    #[serde(default)]
+    dictionary: Option<String>,
+    source_table: String,
+    key_column: String,
 }
 
 impl PropertyYaml {
@@ -323,6 +335,14 @@ impl NodeYaml {
                     admin_only: prop_def.admin_only,
                     selectivity,
                     description: prop_def.description,
+                    traversal_path_lookup: prop_def.traversal_path_lookup.map(|l| {
+                        TraversalPathLookupSpec {
+                            kind: l.kind,
+                            dictionary: l.dictionary,
+                            source_table: l.source_table,
+                            key_column: l.key_column,
+                        }
+                    }),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

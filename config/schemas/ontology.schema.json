@@ -133,6 +133,10 @@
               "type": "string",
               "enum": ["low", "high"],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
+            },
+            "traversal_path_lookup": {
+              "$ref": "#/definitions/traversalPathLookup",
+              "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
           "required": ["type", "source"],
@@ -160,6 +164,32 @@
           "additionalProperties": false
         }
       ]
+    },
+
+    "traversalPathLookup": {
+      "type": "object",
+      "description": "Path-resolution annotation for a scoping column: how to map an id/full_path filter to a traversal_path leaf.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["id", "full_path"],
+          "description": "Whether this column resolves by entity id or by full_path."
+        },
+        "dictionary": {
+          "type": "string",
+          "description": "Auxiliary dictionary to probe (id kind). Absent for argMax-only resolution (full_path)."
+        },
+        "source_table": {
+          "type": "string",
+          "description": "Unprefixed destination_table of the owning node."
+        },
+        "key_column": {
+          "type": "string",
+          "description": "Column the dictionary or scan keys on."
+        }
+      },
+      "required": ["kind", "source_table", "key_column"],
+      "additionalProperties": false
     },
 
     "edgeMappingDefinition": {
@@ -604,6 +634,51 @@
                 "description": "Implicit-storage mode: ClickHouse creates backing storage with the given engine."
               }
             ],
+            "additionalProperties": false
+          }
+        },
+        "auxiliary_dictionaries": {
+          "type": "array",
+          "description": "ClickHouse dictionaries over node tables (e.g. traversal_path resolution). ClickHouse-only; skipped for DuckDB local.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "source_table": { "type": "string" },
+              "key": { "type": "string" },
+              "key_type": { "$ref": "#/definitions/propertyType" },
+              "attributes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "$ref": "#/definitions/propertyType" }
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                }
+              },
+              "layout": {
+                "type": "object",
+                "properties": {
+                  "kind": { "type": "string" },
+                  "size_in_cells": { "type": "integer" }
+                },
+                "required": ["kind"],
+                "additionalProperties": false
+              },
+              "lifetime": {
+                "type": "object",
+                "properties": {
+                  "min": { "type": "integer" },
+                  "max": { "type": "integer" }
+                },
+                "required": ["min", "max"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["name", "source_table", "key", "attributes", "layout", "lifetime"],
             "additionalProperties": false
           }
         },

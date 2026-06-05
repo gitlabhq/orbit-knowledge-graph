@@ -63,6 +63,8 @@ pub(super) struct SettingsYaml {
     pub auxiliary_tables: Vec<AuxiliaryTableYaml>,
     #[serde(default)]
     pub materialized_views: Vec<MaterializedViewYaml>,
+    #[serde(default)]
+    pub auxiliary_dictionaries: Vec<AuxiliaryDictionaryYaml>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -136,6 +138,31 @@ pub(super) struct AuxiliaryColumnYaml {
     pub codec: Option<Vec<String>>,
     #[serde(default)]
     pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct AuxiliaryDictionaryYaml {
+    pub name: String,
+    pub source_table: String,
+    pub key: String,
+    #[serde(default)]
+    pub key_type: Option<DataType>,
+    pub attributes: Vec<AuxiliaryColumnYaml>,
+    pub layout: DictionaryLayoutYaml,
+    pub lifetime: DictionaryLifetimeYaml,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct DictionaryLayoutYaml {
+    pub kind: String,
+    #[serde(default)]
+    pub size_in_cells: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct DictionaryLifetimeYaml {
+    pub min: u32,
+    pub max: u32,
 }
 
 #[derive(Debug, Deserialize)]

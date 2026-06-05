@@ -19,6 +19,23 @@ pub struct CreateTable {
     pub settings: Vec<TableSetting>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateDictionary {
+    pub name: String,
+    pub source_table: String,
+    pub key: String,
+    pub attributes: Vec<ColumnDef>,
+    pub layout: DictLayout,
+    pub lifetime_min: u32,
+    pub lifetime_max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DictLayout {
+    pub kind: String,
+    pub size_in_cells: Option<u64>,
+}
+
 /// A column definition: `name type [DEFAULT expr] [codec]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColumnDef {
@@ -224,15 +241,26 @@ impl CreateTable {
 
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.name = format!("{prefix}{}", self.name);
-        assert!(
-            self.name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_'),
-            "table name must be a valid identifier: {}",
-            self.name
-        );
+        assert_valid_ident(&self.name, "table name");
         self
     }
+}
+
+impl CreateDictionary {
+    pub fn with_prefix(mut self, prefix: &str) -> Self {
+        self.name = format!("{prefix}{}", self.name);
+        self.source_table = format!("{prefix}{}", self.source_table);
+        assert_valid_ident(&self.name, "dictionary name");
+        assert_valid_ident(&self.source_table, "dictionary source_table");
+        self
+    }
+}
+
+fn assert_valid_ident(s: &str, what: &str) {
+    assert!(
+        s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        "{what} must be a valid identifier: {s}"
+    );
 }
 
 impl Engine {
@@ -324,5 +352,33 @@ mod tests {
 
         let col2 = ColumnDef::new("_deleted", ColumnType::Bool).with_default("false");
         assert_eq!(col2.default, Some("false".into()));
+    }
+
+    fn dict(source_table: &str) -> CreateDictionary {
+        CreateDictionary {
+            name: "gl_project_dict".into(),
+            source_table: source_table.into(),
+            key: "id".into(),
+            attributes: vec![],
+            layout: DictLayout {
+                kind: "HASHED".into(),
+                size_in_cells: None,
+            },
+            lifetime_min: 0,
+            lifetime_max: 0,
+        }
+    }
+
+    #[test]
+    fn create_dictionary_with_prefix_prefixes_name_and_source_table() {
+        let d = dict("gl_project").with_prefix("v1_");
+        assert_eq!(d.name, "v1_gl_project_dict");
+        assert_eq!(d.source_table, "v1_gl_project");
+    }
+
+    #[test]
+    #[should_panic(expected = "source_table must be a valid identifier")]
+    fn create_dictionary_with_prefix_rejects_malformed_source_table() {
+        dict("gl_project; DROP").with_prefix("v1_");
     }
 }

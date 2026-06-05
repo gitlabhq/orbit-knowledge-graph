@@ -99,6 +99,47 @@ fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     names
 }
 
+pub fn generate_graph_dictionaries(ontology: &Ontology) -> Vec<CreateDictionary> {
+    generate_graph_dictionaries_with_prefix(ontology, "")
+}
+
+pub fn generate_graph_dictionaries_with_prefix(
+    ontology: &Ontology,
+    prefix: &str,
+) -> Vec<CreateDictionary> {
+    ontology
+        .auxiliary_dictionaries()
+        .iter()
+        .map(|d| {
+            let key = ColumnDef::new(
+                &d.key,
+                parse_column_type(&aux_col_ch_type(
+                    d.key_type.as_ref().unwrap_or(&ontology::DataType::Int),
+                    false,
+                )),
+            );
+            let attributes: Vec<ColumnDef> = std::iter::once(key)
+                .chain(d.attributes.iter().map(|c| {
+                    let col_type = parse_column_type(&aux_col_ch_type(&c.data_type, c.nullable));
+                    ColumnDef::new(&c.name, col_type)
+                }))
+                .collect();
+            CreateDictionary {
+                name: d.name.clone(),
+                source_table: d.source_table.clone(),
+                key: d.key.clone(),
+                attributes,
+                layout: DictLayout {
+                    kind: d.layout.kind.clone(),
+                    size_in_cells: d.layout.size_in_cells,
+                },
+                lifetime_min: d.lifetime.min,
+                lifetime_max: d.lifetime.max,
+            }
+            .with_prefix(prefix)
+        })
+        .collect()
+}
 /// Generates local (DuckDB) graph table DDL from the ontology's `local_db` config.
 ///
 /// Returns `CreateTable` ASTs for each local entity and the local edge table.
@@ -657,7 +698,7 @@ mod tests {
 
     #[test]
     fn generated_ddl_snapshot() {
-        use super::clickhouse::emit_create_table;
+        use super::clickhouse::{emit_create_dictionary, emit_create_table};
 
         let tables = generate_graph_tables(&ontology());
         let full_ddl: String = tables
@@ -673,6 +714,36 @@ mod tests {
         for table in &tables {
             assert!(!table.columns.is_empty(), "{}: no columns", table.name);
             assert!(!table.order_by.is_empty(), "{}: no ORDER BY", table.name);
+        }
+
+        let dicts = generate_graph_dictionaries(&ontology());
+        let dict_names: Vec<&str> = dicts.iter().map(|d| d.name.as_str()).collect();
+        for expected in [
+            "gl_project_traversal_paths_dict",
+            "gl_group_traversal_paths_dict",
+        ] {
+            assert!(
+                dict_names.contains(&expected),
+                "missing dictionary {expected}: {dict_names:?}"
+            );
+        }
+
+        for dict in &dicts {
+            let sql = emit_create_dictionary(dict, "default");
+            eprintln!("\n--- GENERATED DICTIONARY DDL ---\n{sql};\n--- END ---\n");
+            assert!(sql.contains("CREATE DICTIONARY IF NOT EXISTS"), "{sql}");
+            assert!(sql.contains("id Int64"), "Int64 key: {sql}");
+            assert!(sql.contains("PRIMARY KEY id"), "{sql}");
+            assert!(
+                sql.contains("argMax(traversal_path, _version) AS traversal_path"),
+                "argMax dedup: {sql}"
+            );
+            assert!(
+                sql.contains("HAVING argMax(_deleted, _version) = false"),
+                "tombstone dedup: {sql}"
+            );
+            assert!(sql.contains("LAYOUT(HASHED())"), "HASHED layout: {sql}");
+            assert!(sql.contains("LIFETIME(MIN 60 MAX 300)"), "{sql}");
         }
     }
 

@@ -341,6 +341,19 @@ fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>
         })
         .collect();
 
+    let dicts = query_engine::compiler::generate_graph_dictionaries(&ont);
+    generated.extend(dicts.iter().map(|d| {
+        let d = if prefix.is_empty() {
+            d.clone()
+        } else {
+            d.clone().with_prefix(&prefix)
+        };
+        format!(
+            "{};\n",
+            query_engine::compiler::emit_create_dictionary(&d, "default")
+        )
+    }));
+
     let views = if prefix.is_empty() {
         query_engine::compiler::generate_graph_materialized_views(&ont)
     } else {
@@ -388,7 +401,9 @@ fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, Stri
             ')' if !in_string => depth -= 1,
             ';' if !in_string && depth == 0 => {
                 let stmt = sql[start..=i].trim();
-                if let Some(name) = extract_ddl_object_name(stmt) {
+                if let Some(name) =
+                    extract_ddl_object_name(stmt).or_else(|| extract_create_dictionary_name(stmt))
+                {
                     tables.insert(name, strip_leading_comments(stmt).to_string());
                 }
                 start = i + 1;
@@ -438,6 +453,21 @@ fn extract_ddl_object_name(stmt: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_create_dictionary_name(stmt: &str) -> Option<String> {
+    let upper = stmt.to_uppercase();
+    let marker = "CREATE DICTIONARY IF NOT EXISTS ";
+    let pos = upper.find(marker)?;
+    let after = &stmt[pos + marker.len()..];
+    let name = after
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()> {

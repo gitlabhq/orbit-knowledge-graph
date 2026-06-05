@@ -17,7 +17,9 @@ use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
-use query_engine::compiler::{generate_graph_materialized_views, generate_graph_tables};
+use query_engine::compiler::{
+    generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
+};
 use tracing::{info, warn};
 
 use super::metrics::CompletionMetrics;
@@ -573,6 +575,22 @@ impl MigrationCompletionChecker {
                 .execute(&ddl)
                 .await
                 .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
+        }
+
+        let dicts: Vec<String> = generate_graph_dictionaries(&self.ontology)
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        for dict_name in &dicts {
+            let prefixed = format!("{prefix}{dict_name}");
+            let ddl = format!("DROP DICTIONARY IF EXISTS {prefixed}");
+
+            info!(version, dictionary = %prefixed, "dropping dictionary");
+
+            self.graph
+                .execute(&ddl)
+                .await
+                .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
         }
 
         let tables: Vec<String> = generate_graph_tables(&self.ontology)
