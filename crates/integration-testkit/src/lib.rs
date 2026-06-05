@@ -60,18 +60,26 @@ const fn const_parse_version(bytes: &[u8]) -> u32 {
 
 /// Graph DDL with the correct table prefix for the current SCHEMA_VERSION.
 /// Generated from the ontology so integration tests create the same prefixed
-/// tables the indexer writes to at runtime.
+/// tables and materialized views the indexer writes to at runtime.
 pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(|| {
-    use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
+    use query_engine::compiler::{
+        emit_create_materialized_view, emit_create_table,
+        generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
+    };
 
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let tables = generate_graph_tables_with_prefix(&ontology, &TABLE_PREFIX);
-    let sql = tables
+    let mut stmts: Vec<String> = tables
         .iter()
         .map(|t| format!("{};", emit_create_table(t)))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect();
 
+    let views = generate_graph_materialized_views_with_prefix(&ontology, &TABLE_PREFIX);
+    for mv in &views {
+        stmts.push(format!("{};", emit_create_materialized_view(mv)));
+    }
+
+    let sql = stmts.join("\n");
     Box::leak(sql.into_boxed_str())
 });
 
