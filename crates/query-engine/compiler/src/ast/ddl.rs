@@ -78,6 +78,8 @@ pub enum ColumnType {
     LowCardinality(Box<ColumnType>),
     /// ClickHouse `Array(T)`.
     Array(Box<ColumnType>),
+    /// Opaque type string emitted verbatim (e.g. `AggregateFunction(uniq, Int64)`).
+    Raw(std::string::String),
 }
 
 /// Compression codec applied to a column's on-disk representation.

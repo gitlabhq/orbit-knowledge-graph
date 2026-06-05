@@ -244,7 +244,7 @@ fn parse_column_type(s: &str) -> ColumnType {
         "Bool" => ColumnType::Bool,
         "String" => ColumnType::String,
         "Date32" => ColumnType::Date32,
-        _ => ColumnType::String, // fallback
+        _ => ColumnType::Raw(s.to_string()),
     }
 }
 
@@ -576,7 +576,10 @@ pub fn generate_statistics_ddl_with_prefix(
     let build_stats_table =
         |name: &str, value_col: &str, extra_cols: Vec<ColumnDef>| -> CreateTable {
             let mut columns = base_columns.clone();
-            columns.push(ColumnDef::new(value_col, parse_column_type("String")));
+            columns.push(ColumnDef::new(
+                value_col,
+                parse_column_type("Nullable(String)"),
+            ));
             columns.push(uniq_row_count.clone());
             columns.extend(extra_cols);
 
@@ -603,11 +606,11 @@ pub fn generate_statistics_ddl_with_prefix(
             vec![
                 ColumnDef::new(
                     "min_value",
-                    parse_column_type("SimpleAggregateFunction(min, String)"),
+                    parse_column_type("SimpleAggregateFunction(min, Nullable(String))"),
                 ),
                 ColumnDef::new(
                     "max_value",
-                    parse_column_type("SimpleAggregateFunction(max, String)"),
+                    parse_column_type("SimpleAggregateFunction(max, Nullable(String))"),
                 ),
             ],
         )

@@ -30,6 +30,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
         ColumnType::Nullable(inner) => emit_column_type(inner),
         ColumnType::LowCardinality(inner) => emit_column_type(inner),
         ColumnType::Array(inner) => format!("{}[]", emit_column_type(inner)),
+        ColumnType::Raw(s) => s.clone(),
     }
 }
 

@@ -60,6 +60,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
             format!("LowCardinality({})", emit_column_type(inner))
         }
         ColumnType::Array(inner) => format!("Array({})", emit_column_type(inner)),
+        ColumnType::Raw(s) => s.clone(),
     }
 }
 

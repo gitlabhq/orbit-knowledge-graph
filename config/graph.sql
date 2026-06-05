@@ -1215,8 +1215,8 @@ CREATE TABLE IF NOT EXISTS gkg_column_stats (
     table_name LowCardinality(String),
     column_name LowCardinality(String),
     partition_key String,
-    value String,
-    row_count String
+    value Nullable(String),
+    row_count AggregateFunction(uniq, Int64)
 ) ENGINE = AggregatingMergeTree
 ORDER BY (table_name, column_name, partition_key, value);
 
@@ -1224,10 +1224,10 @@ CREATE TABLE IF NOT EXISTS gkg_histogram_stats (
     table_name LowCardinality(String),
     column_name LowCardinality(String),
     partition_key String,
-    value String,
-    row_count String,
-    min_value String,
-    max_value String
+    value Nullable(String),
+    row_count AggregateFunction(uniq, Int64),
+    min_value SimpleAggregateFunction(min, Nullable(String)),
+    max_value SimpleAggregateFunction(max, Nullable(String))
 ) ENGINE = AggregatingMergeTree
 ORDER BY (table_name, column_name, partition_key, value);
 
@@ -1235,8 +1235,8 @@ CREATE TABLE IF NOT EXISTS gkg_token_stats (
     table_name LowCardinality(String),
     column_name LowCardinality(String),
     partition_key String,
-    token String,
-    row_count String
+    token Nullable(String),
+    row_count AggregateFunction(uniq, Int64)
 ) ENGINE = AggregatingMergeTree
 ORDER BY (table_name, column_name, partition_key, token);
 
