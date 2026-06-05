@@ -11,6 +11,7 @@
 [![latest release](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/badges/release.svg)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/releases)
 [![Helm chart](https://img.shields.io/badge/helm-gkg--helm--charts-blue)](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts)
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
+[![Community fork](https://img.shields.io/badge/Contribute-community%20fork-blue)](https://gitlab.com/gitlab-community/gitlab-org/orbit/knowledge-graph)
 
 [Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Local](docs/source/local/getting-started.md) · [Orbit Remote](docs/source/remote/getting-started.md) · [AI coding agents](docs/source/ai_coding_agents.md)
 
