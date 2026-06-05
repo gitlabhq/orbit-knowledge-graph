@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD041 -->
 <div align="center">
 
-<img src="docs/assets/orbit-logo.svg" width="120" height="120" alt="GitLab Orbit logo">
+<img src="docs/assets/orbit-logo.png" width="120" height="120" alt="GitLab Orbit logo">
 
 # GitLab Orbit
 
@@ -234,31 +234,10 @@ GitLab stage: Analytics. Group: Knowledge Graph.
 
 Orbit was founded by:
 
-- [@michaelangeloio](https://gitlab.com/michaelangeloio) (Angelo Rivera), Orbit Engineering Lead. Repo init, security, CI, query engine.
-- [@jgdoyon1](https://gitlab.com/jgdoyon1) (Jean-Gabriel Doyon). ETL engine, SDLC and code indexing, schema management.
-- [@michaelusa](https://gitlab.com/michaelusa) (Michael Usachenko). Query engine and compiler, code indexer migration.
-- [@bohdanpk](https://gitlab.com/bohdanpk) (Bohdan Parkhomchuk). CI/CD, build images, deployment, Helm charts.
-
-<details>
-<summary>Core contributors</summary>
-
-| Contributor | Area |
-|---|---|
-| [@michaelusa](https://gitlab.com/michaelusa) | Query engine, compiler |
-| [@michaelangeloio](https://gitlab.com/michaelangeloio) | Engineering lead, performance, query optimization |
-| [@jgdoyon1](https://gitlab.com/jgdoyon1) | Indexing pipeline, schema management |
-| [@nduff](https://gitlab.com/nduff) | Code graph, language support |
-| [@pguinoiseau](https://gitlab.com/pguinoiseau) | Infrastructure, ClickHouse |
-| [@bohdanpk](https://gitlab.com/bohdanpk) | CI/CD, deployment, Helm |
-| [@gsgl](https://gitlab.com/gsgl) | Server, observability, billing |
-| [@jomartin](https://gitlab.com/jomartin) | Query engine, integration tests |
-| [@dgruzd](https://gitlab.com/dgruzd) | Indexer transforms |
-| [@cgardner](https://gitlab.com/cgardner) | Code graph, language support |
-| [@swainaina](https://gitlab.com/swainaina) | Indexer, ontology |
-| [@arun.sori](https://gitlab.com/arun.sori) | Siphon connectivity |
-| [@snachnolkar](https://gitlab.com/snachnolkar) | Billing, observability |
-
-</details>
+- [@michaelangeloio](https://gitlab.com/michaelangeloio) (Angelo Rivera). Overall engineering lead.
+- [@michaelusa](https://gitlab.com/michaelusa) (Michael Usachenko). Code graph and query engine.
+- [@jgdoyon1](https://gitlab.com/jgdoyon1) (Jean-Gabriel Doyon). ETL engine and the overall indexing engine.
+- [@bohdanpk](https://gitlab.com/bohdanpk) (Bohdan Parkhomchuk). Infrastructure, web server, and security.
 
 Orbit has received contributions from 75+ GitLab team members. See the [contributors graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/graphs/main) for the live list.
 
