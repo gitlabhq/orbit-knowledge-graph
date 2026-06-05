@@ -1,4 +1,17 @@
 //! Diffing a baseline schema against the ontology's desired schema.
+//!
+//! What counts as in-place vs breaking is validated against the ClickHouse
+//! `ALTER` reference (`sql-reference/statements/alter/{column,skipping-index,
+//! projection,order-by,setting}`):
+//!
+//! - In place, non-rewriting: `ADD COLUMN`; `MODIFY COLUMN` for default/codec
+//!   only (metadata, leaves existing data); `ADD`/`DROP INDEX`;
+//!   `ADD`/`DROP PROJECTION`.
+//! - Breaking (refused): a column **type** change (rewriting mutation, with
+//!   `Nullable`→non-`Nullable` hazards); a dropped column or table (data loss);
+//!   `ORDER BY`/primary-key/engine changes (no safe in-place path); a settings
+//!   change (excluded — some settings such as `index_granularity` are immutable,
+//!   so auto-generating `MODIFY SETTING` could fail at apply time).
 
 use std::collections::BTreeMap;
 
@@ -6,7 +19,7 @@ use compiler::ddl::{ColumnDef, CreateTable, IndexDef, ProjectionDef};
 use ontology::Ontology;
 use thiserror::Error;
 
-/// An additive change a generated migration applies in place.
+/// An in-place change a generated migration applies without rewriting row data.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SchemaChange {
     CreateTable(Box<CreateTable>),
@@ -14,7 +27,18 @@ pub enum SchemaChange {
         table: String,
         column: ColumnDef,
     },
+    /// A default- or codec-only column change (`MODIFY COLUMN`). `from` is kept
+    /// so the migration can be reverted.
+    ModifyColumn {
+        table: String,
+        from: Box<ColumnDef>,
+        to: Box<ColumnDef>,
+    },
     AddIndex {
+        table: String,
+        index: IndexDef,
+    },
+    DropIndex {
         table: String,
         index: IndexDef,
     },
@@ -22,27 +46,23 @@ pub enum SchemaChange {
         table: String,
         projection: ProjectionDef,
     },
+    DropProjection {
+        table: String,
+        projection: ProjectionDef,
+    },
 }
 
-/// A non-additive difference the generator refuses to emit. ClickHouse cannot
-/// apply these in place without rewriting data, so they need a deliberate,
-/// out-of-band schema change rather than a generated migration.
+/// A difference the generator refuses to emit: ClickHouse cannot apply it
+/// without rewriting data or losing it, so it needs a deliberate, out-of-band
+/// change (a column/table drop follows the finalization path; see ADR 016).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum BreakingChange {
     #[error("table `{0}` was removed from the ontology")]
     DroppedTable(String),
     #[error("column `{table}`.`{column}` was removed")]
     DroppedColumn { table: String, column: String },
-    #[error("column `{table}`.`{column}` changed type, default, or codec")]
-    ColumnChanged { table: String, column: String },
-    #[error("index `{index}` on `{table}` was removed")]
-    DroppedIndex { table: String, index: String },
-    #[error("index `{index}` on `{table}` changed definition")]
-    IndexChanged { table: String, index: String },
-    #[error("projection `{projection}` on `{table}` was removed")]
-    DroppedProjection { table: String, projection: String },
-    #[error("projection `{projection}` on `{table}` changed definition")]
-    ProjectionChanged { table: String, projection: String },
+    #[error("column `{table}`.`{column}` changed type")]
+    ColumnTypeChanged { table: String, column: String },
     #[error("sort key (ORDER BY) of `{table}` changed")]
     SortKeyChanged { table: String },
     #[error("primary key of `{table}` changed")]
@@ -53,8 +73,8 @@ pub enum BreakingChange {
     SettingsChanged { table: String },
 }
 
-/// The additive changes a generated migration will apply, in a deterministic
-/// order (new tables first, then per-table column/index/projection additions).
+/// The in-place changes a generated migration will apply, in a deterministic
+/// order (new tables first, then per-table column/index/projection changes).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SchemaDiff {
     pub changes: Vec<SchemaChange>,
@@ -66,7 +86,7 @@ impl SchemaDiff {
     }
 }
 
-/// Diffs `baseline` against `desired`, returning the additive migration or the
+/// Diffs `baseline` against `desired`, returning the in-place migration or the
 /// full list of breaking changes that block generation.
 pub fn diff_schemas(
     baseline: &[CreateTable],
@@ -142,8 +162,8 @@ fn diff_table(
     }
 
     diff_columns(old, new, table, changes, breaking);
-    diff_indexes(old, new, table, changes, breaking);
-    diff_projections(old, new, table, changes, breaking);
+    diff_indexes(old, new, table, changes);
+    diff_projections(old, new, table, changes);
 }
 
 fn diff_columns(
@@ -163,10 +183,19 @@ fn diff_columns(
                 table: table.to_string(),
                 column: column.clone(),
             }),
-            Some(old_column) if *old_column != column => {
-                breaking.push(BreakingChange::ColumnChanged {
+            // A type change is a rewriting mutation; default/codec drift is a
+            // metadata-only `MODIFY COLUMN` that leaves existing data alone.
+            Some(old_column) if old_column.data_type != column.data_type => {
+                breaking.push(BreakingChange::ColumnTypeChanged {
                     table: table.to_string(),
                     column: column.name.clone(),
+                });
+            }
+            Some(old_column) if *old_column != column => {
+                changes.push(SchemaChange::ModifyColumn {
+                    table: table.to_string(),
+                    from: Box::new((*old_column).clone()),
+                    to: Box::new(column.clone()),
                 });
             }
             Some(_) => {}
@@ -188,7 +217,6 @@ fn diff_indexes(
     new: &CreateTable,
     table: &str,
     changes: &mut Vec<SchemaChange>,
-    breaking: &mut Vec<BreakingChange>,
 ) {
     let old_by_name: BTreeMap<&str, &IndexDef> =
         old.indexes.iter().map(|i| (i.name.as_str(), i)).collect();
@@ -200,10 +228,15 @@ fn diff_indexes(
                 table: table.to_string(),
                 index: index.clone(),
             }),
+            // A changed index is re-created in place: DROP then ADD.
             Some(old_index) if *old_index != index => {
-                breaking.push(BreakingChange::IndexChanged {
+                changes.push(SchemaChange::DropIndex {
                     table: table.to_string(),
-                    index: index.name.clone(),
+                    index: (*old_index).clone(),
+                });
+                changes.push(SchemaChange::AddIndex {
+                    table: table.to_string(),
+                    index: index.clone(),
                 });
             }
             Some(_) => {}
@@ -212,9 +245,9 @@ fn diff_indexes(
 
     for index in &old.indexes {
         if !new_names.contains_key(index.name.as_str()) {
-            breaking.push(BreakingChange::DroppedIndex {
+            changes.push(SchemaChange::DropIndex {
                 table: table.to_string(),
-                index: index.name.clone(),
+                index: index.clone(),
             });
         }
     }
@@ -225,7 +258,6 @@ fn diff_projections(
     new: &CreateTable,
     table: &str,
     changes: &mut Vec<SchemaChange>,
-    breaking: &mut Vec<BreakingChange>,
 ) {
     let old_by_name: BTreeMap<&str, &ProjectionDef> = old
         .projections
@@ -245,9 +277,13 @@ fn diff_projections(
                 projection: projection.clone(),
             }),
             Some(old_projection) if *old_projection != projection => {
-                breaking.push(BreakingChange::ProjectionChanged {
+                changes.push(SchemaChange::DropProjection {
                     table: table.to_string(),
-                    projection: projection_name(projection).to_string(),
+                    projection: (*old_projection).clone(),
+                });
+                changes.push(SchemaChange::AddProjection {
+                    table: table.to_string(),
+                    projection: projection.clone(),
                 });
             }
             Some(_) => {}
@@ -256,9 +292,9 @@ fn diff_projections(
 
     for projection in &old.projections {
         if !new_names.contains_key(projection_name(projection)) {
-            breaking.push(BreakingChange::DroppedProjection {
+            changes.push(SchemaChange::DropProjection {
                 table: table.to_string(),
-                projection: projection_name(projection).to_string(),
+                projection: projection.clone(),
             });
         }
     }
@@ -275,7 +311,7 @@ pub(crate) fn projection_name(projection: &ProjectionDef) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compiler::ddl::{ColumnType, Engine, IndexType};
+    use compiler::ddl::{Codec, ColumnType, Engine, IndexType};
 
     fn table(name: &str, columns: Vec<ColumnDef>) -> CreateTable {
         CreateTable {
@@ -319,19 +355,70 @@ mod tests {
     }
 
     #[test]
-    fn added_index_emits_add_index() {
-        let mut desired = table("gl_user", vec![col("id")]);
+    fn codec_only_change_is_in_place_modify_column() {
+        let baseline = vec![table(
+            "gl_user",
+            vec![ColumnDef::new("id", ColumnType::String)],
+        )];
+        let to = ColumnDef::new("id", ColumnType::String).with_codec(vec![Codec::ZSTD(1)]);
+        let desired = vec![table("gl_user", vec![to.clone()])];
+        let diff = diff_schemas(&baseline, &desired).unwrap();
+        assert_eq!(
+            diff.changes,
+            vec![SchemaChange::ModifyColumn {
+                table: "gl_user".into(),
+                from: Box::new(ColumnDef::new("id", ColumnType::String)),
+                to: Box::new(to),
+            }]
+        );
+    }
+
+    #[test]
+    fn default_only_change_is_in_place_modify_column() {
+        let baseline = vec![table("gl_user", vec![col("state")])];
+        let to = ColumnDef::new("state", ColumnType::String).with_default("'active'");
+        let desired = vec![table("gl_user", vec![to.clone()])];
+        let diff = diff_schemas(&baseline, &desired).unwrap();
+        assert!(matches!(
+            diff.changes.as_slice(),
+            [SchemaChange::ModifyColumn { to: t, .. }] if **t == to
+        ));
+    }
+
+    #[test]
+    fn retyped_column_is_breaking() {
+        let baseline = vec![table(
+            "gl_user",
+            vec![ColumnDef::new("id", ColumnType::String)],
+        )];
+        let desired = vec![table(
+            "gl_user",
+            vec![ColumnDef::new("id", ColumnType::Int64)],
+        )];
+        let breaking = diff_schemas(&baseline, &desired).unwrap_err();
+        assert_eq!(
+            breaking,
+            vec![BreakingChange::ColumnTypeChanged {
+                table: "gl_user".into(),
+                column: "id".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn dropped_index_is_in_place() {
         let index = IndexDef {
             name: "idx_id".into(),
             expression: "id".into(),
             index_type: IndexType::MinMax,
             granularity: 1,
         };
-        desired.indexes.push(index.clone());
-        let diff = diff_schemas(&[table("gl_user", vec![col("id")])], &[desired]).unwrap();
+        let mut baseline = table("gl_user", vec![col("id")]);
+        baseline.indexes.push(index.clone());
+        let diff = diff_schemas(&[baseline], &[table("gl_user", vec![col("id")])]).unwrap();
         assert_eq!(
             diff.changes,
-            vec![SchemaChange::AddIndex {
+            vec![SchemaChange::DropIndex {
                 table: "gl_user".into(),
                 index,
             }]
@@ -339,9 +426,35 @@ mod tests {
     }
 
     #[test]
-    fn identical_schemas_produce_no_changes() {
-        let schema = vec![table("gl_user", vec![col("id")])];
-        assert!(diff_schemas(&schema, &schema).unwrap().is_empty());
+    fn changed_index_is_drop_then_add() {
+        let old = IndexDef {
+            name: "idx".into(),
+            expression: "id".into(),
+            index_type: IndexType::MinMax,
+            granularity: 1,
+        };
+        let new = IndexDef {
+            granularity: 4,
+            ..old.clone()
+        };
+        let mut baseline = table("gl_user", vec![col("id")]);
+        baseline.indexes.push(old.clone());
+        let mut desired = table("gl_user", vec![col("id")]);
+        desired.indexes.push(new.clone());
+        let diff = diff_schemas(&[baseline], &[desired]).unwrap();
+        assert_eq!(
+            diff.changes,
+            vec![
+                SchemaChange::DropIndex {
+                    table: "gl_user".into(),
+                    index: old,
+                },
+                SchemaChange::AddIndex {
+                    table: "gl_user".into(),
+                    index: new,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -364,26 +477,6 @@ mod tests {
             vec![BreakingChange::DroppedColumn {
                 table: "gl_user".into(),
                 column: "bio".into(),
-            }]
-        );
-    }
-
-    #[test]
-    fn retyped_column_is_breaking() {
-        let baseline = vec![table(
-            "gl_user",
-            vec![ColumnDef::new("id", ColumnType::String)],
-        )];
-        let desired = vec![table(
-            "gl_user",
-            vec![ColumnDef::new("id", ColumnType::Int64)],
-        )];
-        let breaking = diff_schemas(&baseline, &desired).unwrap_err();
-        assert_eq!(
-            breaking,
-            vec![BreakingChange::ColumnChanged {
-                table: "gl_user".into(),
-                column: "id".into(),
             }]
         );
     }

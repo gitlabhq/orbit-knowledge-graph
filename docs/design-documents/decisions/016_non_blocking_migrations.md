@@ -76,6 +76,27 @@ column is applied only if it is `Nullable` or has a `DEFAULT` (`reconcile.rs:219
 sort-key / incompatible type / column-removal changes remain out of scope and
 require a deliberate, out-of-band baseline change.
 
+The generator's in-place/breaking split was validated against the ClickHouse
+`ALTER` reference (`sql-reference/statements/alter/{column,skipping-index,
+projection,order-by,setting}`):
+
+- **Applied in place** (metadata, no row rewrite): `CREATE TABLE`; `ADD COLUMN`;
+  `MODIFY COLUMN` for **default/codec-only** drift (leaves existing data alone);
+  `ADD`/`DROP INDEX`; `ADD`/`DROP PROJECTION`. A changed index or projection is
+  re-created as drop-then-add.
+- **Refused as breaking**: a column **type** change (a rewriting mutation, with
+  `Nullable`→non-`Nullable` hazards); a dropped column or table (data loss — see
+  the finalization path below); `ORDER BY`, primary-key, and engine changes (no
+  safe in-place path — `MODIFY ORDER BY` only *appends* a brand-new column); and
+  settings changes (`MODIFY SETTING` covers most, but immutable settings such as
+  `index_granularity` would fail at apply, so auto-generation is excluded).
+
+This matches the in-flight reconciler (!1004), which applies codec/default, index,
+and projection changes in place and treats type/sort-key/column-removal as needing
+a version bump. Generated `down` is best-effort: `MODIFY COLUMN` overrides a codec
+or default but does not `REMOVE` one, so reverting an *added* property is not
+symmetric.
+
 ### 2. The non-blocking re-index ("convergence") layer — the new work
 
 This is what no track implements yet, and it aligns with the framework design's V2:
@@ -146,6 +167,39 @@ ontology ─► reconciler (!1004) ─► live tables, additive ALTER, in place
                                drained rate-limited by code backfill dispatcher
                                (force reparse, bypass last_commit)
 ```
+
+## Safe drops: the finalization path
+
+The generator never emits a `DROP TABLE` or `DROP COLUMN` — those are destructive
+and are handled as a separate, gated **finalization** step (the framework's
+`MigrationType::Finalization`, which the reconciler currently refuses to execute;
+that refusal is the interlock). A drop runs only after the additive rollout is
+fully adopted, following expand → deprecate → soak → contract:
+
+1. **Expand** — the new shape is added and re-indexed (the in-place path above);
+   the old column/table still exists.
+2. **Deprecate** — the column/entity leaves the ontology's active read and ETL
+   surface, but the physical object is *retained*, not dropped. Nothing reads or
+   writes it; it is orphaned but intact. This needs a "retained" state distinct
+   from "removed" so the generator neither exposes it nor tries to drop it.
+3. **Soak** — confirm via telemetry that nothing references or writes it, across
+   enough deploys that the rollback horizon passes (no serving binary still expects
+   the old shape). Deprecate and drop must therefore be **different releases**.
+4. **Contract** — a deliberate, approved `Finalization` migration runs the physical
+   `DROP`, recorded in the ledger off the automated path.
+
+Recovery nets that make the drop safe:
+
+- `DROP TABLE` has a window: on an Atomic database (CH 23.3+), `UNDROP TABLE` within
+  `database_atomic_delay_before_drop_table_sec` (default 8 minutes) restores it, and
+  dropped tables are listed in `system.dropped_tables`
+  (`sql-reference/statements/undrop`). Back up for longer safety.
+- `DROP COLUMN` has no undo (`sql-reference/statements/alter/column`). The real net
+  is **re-derivation**: the graph is read-only-derived from the datalake and repos,
+  so a wrongly-dropped column or table can be rebuilt by re-indexing — provided the
+  datalake data *and* the ETL mapping are kept until the drop is confirmed good.
+  Order the steps so the physical drop is last and the mapping is retired only after
+  verification; a drop is then recoverable cost (a re-index), not permanent loss.
 
 ## Why not the alternatives
 

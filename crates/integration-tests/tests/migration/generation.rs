@@ -2,10 +2,10 @@
 //! baseline schema to the ontology's desired schema.
 
 use clickhouse_client::FromArrowColumn;
-use compiler::ddl::{ColumnDef, ColumnType, CreateTable, Engine, IndexDef, IndexType};
+use compiler::ddl::{Codec, ColumnDef, ColumnType, CreateTable, Engine, IndexDef, IndexType};
 use compiler::emit_create_table;
 use integration_testkit::TestContext;
-use migration_framework::generation::{diff_schemas, render_up};
+use migration_framework::generation::{diff_schemas, render_down, render_up};
 
 fn merge_tree() -> Engine {
     Engine {
@@ -63,6 +63,20 @@ async fn table_exists(ctx: &TestContext, table: &str) -> bool {
     !String::extract_column(&batches, 0).unwrap().is_empty()
 }
 
+async fn column_codec(ctx: &TestContext, table: &str, column: &str) -> String {
+    let batches = ctx
+        .query(&format!(
+            "SELECT compression_codec FROM system.columns \
+             WHERE table = '{table}' AND name = '{column}'"
+        ))
+        .await;
+    String::extract_column(&batches, 0)
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
 #[tokio::test]
 async fn generated_additive_migration_converges_baseline_to_desired() {
     let desired = vec![
@@ -110,4 +124,56 @@ async fn generated_additive_migration_converges_baseline_to_desired() {
             .contains(&"idx_id".to_string())
     );
     assert!(table_exists(&ctx, "mig_issue").await);
+}
+
+#[tokio::test]
+async fn generated_in_place_alters_apply_and_revert() {
+    let drop_index = IndexDef {
+        name: "idx_old".into(),
+        ..id_index()
+    };
+
+    // Baseline: `id` carries one codec and an index the ontology no longer
+    // declares. The diff must be a metadata-only MODIFY COLUMN (codec swap) plus
+    // a DROP INDEX, neither of which rewrites row data. A codec→codec swap is
+    // chosen because it is cleanly invertible — `MODIFY COLUMN` overrides a codec
+    // but does not REMOVE one, so reverting an *added* codec is not symmetric.
+    let baseline = vec![table(
+        "mig_acct",
+        vec![ColumnDef::new("id", ColumnType::Int64).with_codec(vec![Codec::LZ4])],
+        vec![drop_index],
+    )];
+    let desired = vec![table(
+        "mig_acct",
+        vec![ColumnDef::new("id", ColumnType::Int64).with_codec(vec![Codec::ZSTD(1)])],
+        vec![],
+    )];
+
+    let ctx = TestContext::new(&[]).await;
+    for table in &baseline {
+        ctx.execute(&emit_create_table(table)).await;
+    }
+
+    let diff = diff_schemas(&baseline, &desired).expect("codec swap + index drop are in place");
+    for statement in render_up(&diff) {
+        ctx.execute(&statement).await;
+    }
+
+    assert!(column_codec(&ctx, "mig_acct", "id").await.contains("ZSTD"));
+    assert!(
+        !index_names(&ctx, "mig_acct")
+            .await
+            .contains(&"idx_old".to_string())
+    );
+
+    for statement in render_down(&diff) {
+        ctx.execute(&statement).await;
+    }
+
+    assert!(column_codec(&ctx, "mig_acct", "id").await.contains("LZ4"));
+    assert!(
+        index_names(&ctx, "mig_acct")
+            .await
+            .contains(&"idx_old".to_string())
+    );
 }
