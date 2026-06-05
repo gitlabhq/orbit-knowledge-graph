@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD041 -->
 <div align="center">
 
-<img src="docs/assets/orbit-logo.png" width="120" height="127" alt="GitLab Orbit logo">
+<img src="docs/assets/orbit-logo.png" width="200" height="216" alt="GitLab Orbit logo">
 
 # GitLab Orbit
 
