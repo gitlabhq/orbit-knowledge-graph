@@ -135,6 +135,7 @@ pub fn generate_graph_dictionaries_with_prefix(
                 },
                 lifetime_min: d.lifetime.min,
                 lifetime_max: d.lifetime.max,
+                source_query: None,
             }
             .with_prefix(prefix)
         })
@@ -525,6 +526,291 @@ fn aux_col_ch_type(dt: &ontology::DataType, nullable: bool) -> String {
     } else {
         base.to_string()
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Statistics DDL generation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Statistics DDL output: three AggregatingMergeTree tables, one MV per
+/// (entity, stat_type) combination, and a dictionary for query-time lookups.
+pub struct StatisticsDdl {
+    pub tables: Vec<CreateTable>,
+    pub views: Vec<CreateMaterializedView>,
+    pub dictionaries: Vec<CreateDictionary>,
+}
+
+/// Generates statistics collection DDL from the ontology's `statistics` config.
+///
+/// Returns `None` if statistics are not configured.
+pub fn generate_statistics_ddl(ontology: &Ontology) -> Option<StatisticsDdl> {
+    generate_statistics_ddl_with_prefix(ontology, "")
+}
+
+pub fn generate_statistics_ddl_with_prefix(
+    ontology: &Ontology,
+    prefix: &str,
+) -> Option<StatisticsDdl> {
+    let config = ontology.statistics()?;
+    let known_tables = collect_table_names(ontology);
+
+    let mut tables = Vec::new();
+    let mut views = Vec::new();
+
+    // --- Stats table (categorical value frequencies) ---
+    tables.push(
+        CreateTable {
+            name: config.stats_table.clone(),
+            columns: vec![
+                ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("value", parse_column_type("String")),
+                ColumnDef::new(
+                    "row_count",
+                    parse_column_type("AggregateFunction(uniq, Int64)"),
+                ),
+            ],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "AggregatingMergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec![
+                "table_name".into(),
+                "column_name".into(),
+                "partition_key".into(),
+                "value".into(),
+            ],
+            primary_key: None,
+            settings: vec![],
+        }
+        .with_prefix(prefix),
+    );
+
+    // --- Histogram table (equi-depth buckets for continuous columns) ---
+    tables.push(
+        CreateTable {
+            name: config.histogram_table.clone(),
+            columns: vec![
+                ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("value", parse_column_type("String")),
+                ColumnDef::new(
+                    "row_count",
+                    parse_column_type("AggregateFunction(uniq, Int64)"),
+                ),
+                ColumnDef::new(
+                    "min_value",
+                    parse_column_type("SimpleAggregateFunction(min, String)"),
+                ),
+                ColumnDef::new(
+                    "max_value",
+                    parse_column_type("SimpleAggregateFunction(max, String)"),
+                ),
+            ],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "AggregatingMergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec![
+                "table_name".into(),
+                "column_name".into(),
+                "partition_key".into(),
+                "value".into(),
+            ],
+            primary_key: None,
+            settings: vec![],
+        }
+        .with_prefix(prefix),
+    );
+
+    // --- Token table (token frequencies for text columns) ---
+    tables.push(
+        CreateTable {
+            name: config.token_table.clone(),
+            columns: vec![
+                ColumnDef::new("table_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("column_name", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("partition_key", parse_column_type("LowCardinality(String)")),
+                ColumnDef::new("token", parse_column_type("String")),
+                ColumnDef::new(
+                    "row_count",
+                    parse_column_type("AggregateFunction(uniq, Int64)"),
+                ),
+            ],
+            indexes: vec![],
+            projections: vec![],
+            engine: Engine {
+                name: "AggregatingMergeTree".into(),
+                args: vec![],
+            },
+            order_by: vec![
+                "table_name".into(),
+                "column_name".into(),
+                "partition_key".into(),
+                "token".into(),
+            ],
+            primary_key: None,
+            settings: vec![],
+        }
+        .with_prefix(prefix),
+    );
+
+    // --- MVs per node entity ---
+    for node in ontology.nodes() {
+        let entity = &node.name;
+        let table = &node.destination_table;
+        let (categorical, token, histogram) = ontology.stats_columns_for(entity);
+        let partition_key = ontology.stats_partition_key_for(entity);
+
+        // Categorical MV: per-value frequencies
+        if !categorical.is_empty() {
+            let array_join_entries: Vec<String> = categorical
+                .iter()
+                .map(|col| format!("('{col}', toString({col}))"))
+                .collect();
+            let pk_expr = match partition_key {
+                Some(pk) => pk.to_string(),
+                None => "''".to_string(),
+            };
+            let select = format!(
+                "SELECT \
+                 '{table}' AS table_name, \
+                 col.1 AS column_name, \
+                 {pk_expr} AS partition_key, \
+                 col.2 AS value, \
+                 uniqState(id) AS row_count \
+                 FROM {{{table}}} \
+                 ARRAY JOIN [{entries}] AS col \
+                 GROUP BY table_name, column_name, partition_key, value",
+                entries = array_join_entries.join(", "),
+            );
+            views.push(
+                CreateMaterializedView {
+                    name: format!("gkg_stats_mv_{table}"),
+                    to_table: Some(config.stats_table.clone()),
+                    select_query: select,
+                    engine: None,
+                    order_by: vec![],
+                    populate: false,
+                }
+                .with_prefix(prefix, &known_tables),
+            );
+        }
+
+        // Histogram MV: per-value with min/max for continuous columns
+        if !histogram.is_empty() {
+            let array_join_entries: Vec<String> = histogram
+                .iter()
+                .map(|col| format!("('{col}', toString({col}))"))
+                .collect();
+            let pk_expr = match partition_key {
+                Some(pk) => pk.to_string(),
+                None => "''".to_string(),
+            };
+            let select = format!(
+                "SELECT \
+                 '{table}' AS table_name, \
+                 col.1 AS column_name, \
+                 {pk_expr} AS partition_key, \
+                 col.2 AS value, \
+                 uniqState(id) AS row_count, \
+                 col.2 AS min_value, \
+                 col.2 AS max_value \
+                 FROM {{{table}}} \
+                 ARRAY JOIN [{entries}] AS col \
+                 GROUP BY table_name, column_name, partition_key, value",
+                entries = array_join_entries.join(", "),
+            );
+            views.push(
+                CreateMaterializedView {
+                    name: format!("gkg_hist_mv_{table}"),
+                    to_table: Some(config.histogram_table.clone()),
+                    select_query: select,
+                    engine: None,
+                    order_by: vec![],
+                    populate: false,
+                }
+                .with_prefix(prefix, &known_tables),
+            );
+        }
+
+        // Token MV: token frequencies for text columns
+        if !token.is_empty() {
+            let array_join_entries: Vec<String> = token
+                .iter()
+                .map(|col| format!("('{col}', toString({col}))"))
+                .collect();
+            let pk_expr = match partition_key {
+                Some(pk) => pk.to_string(),
+                None => "''".to_string(),
+            };
+            let select = format!(
+                "SELECT \
+                 '{table}' AS table_name, \
+                 col.1 AS column_name, \
+                 {pk_expr} AS partition_key, \
+                 col.2 AS token, \
+                 uniqState(id) AS row_count \
+                 FROM {{{table}}} \
+                 ARRAY JOIN [{entries}] AS col \
+                 GROUP BY table_name, column_name, partition_key, token",
+                entries = array_join_entries.join(", "),
+            );
+            views.push(
+                CreateMaterializedView {
+                    name: format!("gkg_token_mv_{table}"),
+                    to_table: Some(config.token_table.clone()),
+                    select_query: select,
+                    engine: None,
+                    order_by: vec![],
+                    populate: false,
+                }
+                .with_prefix(prefix, &known_tables),
+            );
+        }
+    }
+
+    // --- Dictionary for query-time lookups ---
+    // Source query merges uniqState across all three stats tables via UNION ALL.
+    let source_query = format!(
+        "SELECT table_name, column_name, partition_key, value, \
+         uniqMerge(row_count) AS row_count \
+         FROM {{{stats_table}}} \
+         GROUP BY table_name, column_name, partition_key, value",
+        stats_table = config.stats_table,
+    );
+    let dict = CreateDictionary {
+        name: config.dictionary.clone(),
+        source_table: config.stats_table.clone(),
+        key: "table_name".into(),
+        attributes: vec![
+            ColumnDef::new("table_name", parse_column_type("String")),
+            ColumnDef::new("column_name", parse_column_type("String")),
+            ColumnDef::new("partition_key", parse_column_type("String")),
+            ColumnDef::new("value", parse_column_type("String")),
+            ColumnDef::new("row_count", parse_column_type("UInt64")),
+        ],
+        layout: DictLayout {
+            kind: "complex_key_hashed".into(),
+            size_in_cells: None,
+        },
+        lifetime_min: config.lifetime_min,
+        lifetime_max: config.lifetime_max,
+        source_query: Some(source_query),
+    }
+    .with_prefix(prefix);
+
+    Some(StatisticsDdl {
+        tables,
+        views,
+        dictionaries: vec![dict],
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

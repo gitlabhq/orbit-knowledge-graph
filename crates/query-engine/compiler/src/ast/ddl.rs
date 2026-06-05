@@ -28,6 +28,10 @@ pub struct CreateDictionary {
     pub layout: DictLayout,
     pub lifetime_min: u32,
     pub lifetime_max: u32,
+    /// When set, used as the SOURCE(CLICKHOUSE(QUERY ...)) instead of the
+    /// auto-generated argMax dedup query over `source_table`. Table references
+    /// use `{table_name}` placeholders for schema-version prefixing.
+    pub source_query: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -250,6 +254,14 @@ impl CreateDictionary {
     pub fn with_prefix(mut self, prefix: &str) -> Self {
         self.name = format!("{prefix}{}", self.name);
         self.source_table = format!("{prefix}{}", self.source_table);
+        if let Some(ref mut query) = self.source_query {
+            // Resolve {table_name} placeholders in the source query.
+            // We only know the source_table here; the caller should ensure
+            // all referenced tables are prefixed.
+            let old_table = self.source_table.trim_start_matches(prefix);
+            let placeholder = format!("{{{old_table}}}");
+            *query = query.replace(&placeholder, &self.source_table);
+        }
         assert_valid_ident(&self.name, "dictionary name");
         assert_valid_ident(&self.source_table, "dictionary source_table");
         self
@@ -366,6 +378,7 @@ mod tests {
             },
             lifetime_min: 0,
             lifetime_max: 0,
+            source_query: None,
         }
     }
 

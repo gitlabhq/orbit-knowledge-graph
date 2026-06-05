@@ -244,31 +244,35 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
         ));
     }
 
-    let attr_names: Vec<&str> = dict
-        .attributes
-        .iter()
-        .map(|a| a.name.as_str())
-        .filter(|n| *n != dict.key)
-        .collect();
-    let dedup_selects: Vec<String> = attr_names
-        .iter()
-        .map(|n| format!("argMax({n}, {VERSION_COLUMN}) AS {n}"))
-        .collect();
-    let outer_selects: Vec<String> = std::iter::once(dict.key.clone())
-        .chain(attr_names.iter().map(|n| (*n).to_string()))
-        .collect();
-    let inner_selects: Vec<String> = std::iter::once(dict.key.clone())
-        .chain(dedup_selects)
-        .collect();
+    let query = if let Some(ref source_query) = dict.source_query {
+        source_query.clone()
+    } else {
+        let attr_names: Vec<&str> = dict
+            .attributes
+            .iter()
+            .map(|a| a.name.as_str())
+            .filter(|n| *n != dict.key)
+            .collect();
+        let dedup_selects: Vec<String> = attr_names
+            .iter()
+            .map(|n| format!("argMax({n}, {VERSION_COLUMN}) AS {n}"))
+            .collect();
+        let outer_selects: Vec<String> = std::iter::once(dict.key.clone())
+            .chain(attr_names.iter().map(|n| (*n).to_string()))
+            .collect();
+        let inner_selects: Vec<String> = std::iter::once(dict.key.clone())
+            .chain(dedup_selects)
+            .collect();
 
-    let query = format!(
-        "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
-        outer = outer_selects.join(", "),
-        inner = inner_selects.join(", "),
-        db = source.database,
-        table = dict.source_table,
-        key = dict.key,
-    );
+        format!(
+            "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
+            outer = outer_selects.join(", "),
+            inner = inner_selects.join(", "),
+            db = source.database,
+            table = dict.source_table,
+            key = dict.key,
+        )
+    };
 
     let credentials = match source.password {
         Some(password) => format!(
@@ -729,6 +733,7 @@ mod tests {
             },
             lifetime_min: 60,
             lifetime_max: 300,
+            source_query: None,
         }
     }
 
