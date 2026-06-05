@@ -4,6 +4,9 @@
 //! and populate the stats tables with correct value frequencies.
 
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
+use query_engine::compiler::{
+    DictionarySource, emit_create_dictionary, generate_statistics_ddl_with_prefix,
+};
 
 #[tokio::test]
 async fn categorical_stats_mv_tracks_value_frequencies() {
@@ -215,33 +218,52 @@ async fn stats_partitioned_by_traversal_path() {
 }
 
 #[tokio::test]
-async fn stats_dictionary_source_query_is_valid() {
+async fn stats_dictionary_is_queryable() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+
+    // Create the statistics dictionary (testkit skips dictionaries by default).
+    let ontology = ontology::Ontology::load_embedded().unwrap();
+    let prefix = integration_testkit::TABLE_PREFIX.as_str();
+    if let Some(stats) = generate_statistics_ddl_with_prefix(&ontology, prefix) {
+        let source = DictionarySource {
+            database: &ctx.config.database,
+            user: &ctx.config.username,
+            password: ctx.config.password.as_deref(),
+        };
+        for d in &stats.dictionaries {
+            ctx.execute(&emit_create_dictionary(d, &source)).await;
+        }
+    }
 
     ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, \
          draft, squash, discussion_locked, first_contribution, \
          merge_status, project_id, traversal_path, _version, _deleted) VALUES
-         (5001, 40, 'MR Dict', 'opened', 'a', 'main', false, false, false, false, '', 6000, '1/600/', 1, false)",
+         (5001, 40, 'MR One',   'opened', 'a', 'main', false, false, false, false, '', 6000, '1/600/', 1, false),
+         (5002, 41, 'MR Two',   'merged', 'b', 'main', false, false, false, false, '', 6000, '1/600/', 1, false),
+         (5003, 42, 'MR Three', 'opened', 'c', 'main', false, false, false, false, '', 6000, '1/600/', 1, false)",
         t("gl_merge_request")
     )).await;
 
     ctx.optimize_all().await;
 
-    // The dictionary's source query uses uniqMerge over gkg_column_stats.
-    // Verify it executes without error and returns rows.
-    let stats_table = t("gkg_column_stats");
+    // Force dictionary reload so it picks up the fresh stats.
+    let dict_name = t("gkg_column_stats_dict");
+    ctx.execute(&format!("SYSTEM RELOAD DICTIONARY {dict_name}")).await;
+
+    // Query the dictionary via dictGet.
+    let mr_table = t("gl_merge_request");
     let batches = ctx.query(&format!(
-        "SELECT table_name, column_name, partition_key, value, \
-         uniqMerge(row_count) AS row_count \
-         FROM {stats_table} \
-         GROUP BY table_name, column_name, partition_key, value \
-         ORDER BY table_name, column_name, value \
-         LIMIT 10"
+        "SELECT dictGet('{dict_name}', 'row_count', \
+         ('{mr_table}', 'state', '1/600/', 'opened')) AS cnt"
     )).await;
 
-    assert!(
-        !batches.is_empty() && batches[0].num_rows() > 0,
-        "dictionary source query must return rows"
-    );
+    assert!(!batches.is_empty(), "dictGet must return a result");
+    let cnt = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<arrow::array::UInt64Array>()
+        .unwrap()
+        .value(0);
+    assert_eq!(cnt, 2, "dictGet should return 2 opened MRs");
 }

@@ -13,6 +13,7 @@ use indexer::testkit::MockLockService;
 use integration_testkit::{TestContext, t};
 use query_engine::compiler::{
     DictionarySource, generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
+    generate_statistics_ddl_with_prefix,
 };
 
 fn dictionary_source(config: &gkg_server_config::ClickHouseConfiguration) -> DictionarySource<'_> {
@@ -66,6 +67,10 @@ async fn fresh_install_creates_tables_and_records_version() {
     // Fresh install creates all ontology-driven tables.
     let prefix = table_prefix(*SCHEMA_VERSION);
     let expected_tables = generate_graph_tables_with_prefix(&ontology, &prefix);
+    let stats_ddl = generate_statistics_ddl_with_prefix(&ontology, &prefix);
+    let stats_table_count = stats_ddl.as_ref().map_or(0, |s| s.tables.len());
+    let stats_view_count = stats_ddl.as_ref().map_or(0, |s| s.views.len());
+    let stats_dict_count = stats_ddl.as_ref().map_or(0, |s| s.dictionaries.len());
 
     let result = ctx
         .query(
@@ -75,10 +80,11 @@ async fn fresh_install_creates_tables_and_records_version() {
         )
         .await;
     let count = i64::extract_column(&result, 0).unwrap();
+    let expected_count = expected_tables.len() + stats_table_count + stats_view_count;
     assert_eq!(
         count,
-        vec![expected_tables.len() as i64],
-        "fresh install should create all ontology tables"
+        vec![expected_count as i64],
+        "fresh install should create all ontology tables + stats tables/views"
     );
 
     let expected_dicts = generate_graph_dictionaries_with_prefix(&ontology, &prefix);
@@ -88,8 +94,8 @@ async fn fresh_install_creates_tables_and_records_version() {
     let dict_count = i64::extract_column(&result, 0).unwrap();
     assert_eq!(
         dict_count,
-        vec![expected_dicts.len() as i64],
-        "fresh install should create all ontology dictionaries"
+        vec![(expected_dicts.len() + stats_dict_count) as i64],
+        "fresh install should create all ontology + statistics dictionaries"
     );
 }
 
