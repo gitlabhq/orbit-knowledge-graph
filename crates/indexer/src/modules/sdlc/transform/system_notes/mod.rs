@@ -61,13 +61,19 @@ type DefaultProjectLookup = HashMap<i64, String>;
 pub(in crate::modules::sdlc) struct SystemNotesTransform {
     datalake: Arc<dyn DatalakeQuery>,
     outputs: Vec<String>,
+    resolve_lookup_batch_size: usize,
 }
 
 impl SystemNotesTransform {
-    fn new(datalake: Arc<dyn DatalakeQuery>, edge_table: String) -> Self {
+    fn new(
+        datalake: Arc<dyn DatalakeQuery>,
+        edge_table: String,
+        resolve_lookup_batch_size: usize,
+    ) -> Self {
         Self {
             datalake,
             outputs: vec![edge_table],
+            resolve_lookup_batch_size,
         }
     }
 }
@@ -96,7 +102,13 @@ impl BlockTransform for SystemNotesTransform {
             return Ok(Vec::new());
         };
 
-        let edges = resolve_and_emit(&*self.datalake, &notes, &root_prefix).await?;
+        let edges = resolve_and_emit(
+            &*self.datalake,
+            &notes,
+            &root_prefix,
+            self.resolve_lookup_batch_size,
+        )
+        .await?;
         if edges.is_empty() {
             return Ok(Vec::new());
         }
@@ -116,6 +128,7 @@ pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
     edge_table: &str,
+    resolve_lookup_batch_size: usize,
 ) {
     // Every write path targets the current schema version's table-set, so the
     // hand-written transform must prefix its destination exactly like the
@@ -126,6 +139,7 @@ pub(in crate::modules::sdlc) fn register(
         Arc::new(SystemNotesTransform::new(
             Arc::clone(&datalake),
             edge_table.clone(),
+            resolve_lookup_batch_size,
         ))
     });
     registry.register("system_notes", factory);
@@ -185,10 +199,12 @@ async fn resolve_and_emit(
     datalake: &dyn DatalakeQuery,
     notes: &[ExtractedNote],
     root_prefix: &str,
+    resolve_lookup_batch_size: usize,
 ) -> Result<Vec<EmittedEdge>, HandlerError> {
-    let default_projects = resolve_default_projects(datalake, notes, root_prefix).await?;
+    let default_projects =
+        resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
     let plan = plan_for_batch(notes, &default_projects);
-    let index = resolve_plan(datalake, &plan, root_prefix).await?;
+    let index = resolve_plan(datalake, &plan, root_prefix, resolve_lookup_batch_size).await?;
 
     let edges = process_batch(notes, &default_projects, |r, default_project| {
         index.resolve(r, default_project)
@@ -268,6 +284,7 @@ async fn resolve_default_projects(
     datalake: &dyn DatalakeQuery,
     notes: &[ExtractedNote],
     root_prefix: &str,
+    resolve_lookup_batch_size: usize,
 ) -> Result<DefaultProjectLookup, HandlerError> {
     let project_ids: Vec<i64> = {
         let mut ids: Vec<i64> = notes.iter().filter_map(|n| n.project_id).collect();
@@ -281,7 +298,7 @@ async fn resolve_default_projects(
     }
 
     let mut lookup = DefaultProjectLookup::new();
-    for source_ids in lookup_chunks(&project_ids) {
+    for source_ids in lookup_chunks(&project_ids, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix, "source_ids": source_ids });
         let batches = datalake
             .query_batches(PROJECT_PATHS_SQL, params, None)
@@ -303,20 +320,33 @@ async fn resolve_plan(
     datalake: &dyn DatalakeQuery,
     plan: &ResolutionPlan,
     root_prefix: &str,
+    resolve_lookup_batch_size: usize,
 ) -> Result<ResolvedIndex, HandlerError> {
     if plan.paths.is_empty() {
         return Ok(ResolvedIndex::default());
     }
 
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-    let routes = query_routes(datalake, &paths, root_prefix).await?;
+    let routes = query_routes(datalake, &paths, root_prefix, resolve_lookup_batch_size).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
 
     let (mr_entities, wi_entities) = tokio::try_join!(
-        query_entities(datalake, MERGE_REQUESTS_SQL, &mr_pairs, root_prefix),
-        query_entities(datalake, WORK_ITEMS_SQL, &wi_pairs, root_prefix),
+        query_entities(
+            datalake,
+            MERGE_REQUESTS_SQL,
+            &mr_pairs,
+            root_prefix,
+            resolve_lookup_batch_size
+        ),
+        query_entities(
+            datalake,
+            WORK_ITEMS_SQL,
+            &wi_pairs,
+            root_prefix,
+            resolve_lookup_batch_size
+        ),
     )?;
 
     Ok(ResolvedIndex::build(&routes, &mr_entities, &wi_entities))
@@ -340,9 +370,10 @@ async fn query_routes(
     datalake: &dyn DatalakeQuery,
     paths: &[&str],
     root_prefix: &str,
+    resolve_lookup_batch_size: usize,
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
-    for paths in lookup_chunks(paths) {
+    for paths in lookup_chunks(paths, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix, "paths": paths });
         let batches = datalake
             .query_batches(ROUTES_SQL, params, None)
@@ -370,12 +401,13 @@ async fn query_entities(
     sql: &str,
     pairs: &[(i64, i64)],
     root_prefix: &str,
+    resolve_lookup_batch_size: usize,
 ) -> Result<Vec<EntityRow>, HandlerError> {
     if pairs.is_empty() {
         return Ok(Vec::new());
     }
     let mut rows = Vec::new();
-    for pairs in lookup_chunks(pairs) {
+    for pairs in lookup_chunks(pairs, resolve_lookup_batch_size) {
         let project_ids: Vec<i64> = pairs.iter().map(|(p, _)| *p).collect();
         let iids: Vec<i64> = pairs.iter().map(|(_, i)| *i).collect();
         let params = json!({
@@ -473,7 +505,9 @@ mod tests {
 
     use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream};
     use crate::modules::sdlc::transform::system_notes::parse::RefKind;
-    use crate::modules::sdlc::transform::system_notes::resolve::RESOLVE_LOOKUP_BATCH_SIZE;
+
+    const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
+    const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
 
     fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {
         ExtractedNote {
@@ -606,7 +640,7 @@ mod tests {
         let ids: Vec<i64> = project_ids
             .iter()
             .zip(iids.iter())
-            .map(|(project_id, iid)| project_id * 1_000_000 + iid)
+            .map(|(project_id, iid)| project_id * TEST_ENTITY_ID_PROJECT_FACTOR + iid)
             .collect();
         RecordBatch::try_new(
             Arc::new(Schema::new(vec![
@@ -718,40 +752,43 @@ mod tests {
     #[tokio::test]
     async fn resolve_default_projects_chunks_source_id_lookups() {
         let datalake = RecordingDatalake::new();
-        let notes: Vec<_> = (0..RESOLVE_LOOKUP_BATCH_SIZE + 2)
+        let notes: Vec<_> = (0..TEST_RESOLVE_LOOKUP_BATCH_SIZE + 2)
             .map(|i| ExtractedNote {
                 project_id: Some(i as i64),
                 ..make_note("cross_reference", "mentioned in #1", "Issue", i as i64)
             })
             .collect();
 
-        let lookup = resolve_default_projects(&datalake, &notes, "1/")
-            .await
-            .unwrap();
+        let lookup =
+            resolve_default_projects(&datalake, &notes, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+                .await
+                .unwrap();
 
         let queries = datalake.queries();
         let chunk_sizes: Vec<_> = queries
             .iter()
             .map(|params| params["source_ids"].as_array().unwrap().len())
             .collect();
-        assert_eq!(chunk_sizes, vec![RESOLVE_LOOKUP_BATCH_SIZE, 2]);
-        assert_eq!(lookup.len(), RESOLVE_LOOKUP_BATCH_SIZE + 2);
+        assert_eq!(chunk_sizes, vec![TEST_RESOLVE_LOOKUP_BATCH_SIZE, 2]);
+        assert_eq!(lookup.len(), TEST_RESOLVE_LOOKUP_BATCH_SIZE + 2);
         assert_eq!(lookup[&0], "group/project-0");
         assert_eq!(
-            lookup[&((RESOLVE_LOOKUP_BATCH_SIZE + 1) as i64)],
-            format!("group/project-{}", RESOLVE_LOOKUP_BATCH_SIZE + 1)
+            lookup[&((TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1) as i64)],
+            format!("group/project-{}", TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1)
         );
     }
 
     #[tokio::test]
     async fn query_routes_chunks_path_lookups_and_unions_rows() {
         let datalake = RecordingDatalake::new();
-        let paths: Vec<_> = (0..(RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7))
+        let paths: Vec<_> = (0..(TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7))
             .map(|i| format!("group/project-{i}"))
             .collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &path_refs, "1/").await.unwrap();
+        let routes = query_routes(&datalake, &path_refs, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+            .await
+            .unwrap();
 
         let queries = datalake.queries();
         let chunk_sizes: Vec<_> = queries
@@ -761,27 +798,36 @@ mod tests {
         assert_eq!(
             chunk_sizes,
             vec![
-                RESOLVE_LOOKUP_BATCH_SIZE,
-                RESOLVE_LOOKUP_BATCH_SIZE,
-                RESOLVE_LOOKUP_BATCH_SIZE,
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
                 7
             ]
         );
-        assert_eq!(routes.len(), RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7);
+        assert_eq!(routes.len(), TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7);
         assert_eq!(routes[0].source_id, 0);
-        assert_eq!(routes[RESOLVE_LOOKUP_BATCH_SIZE * 3 + 6].source_id, 3006);
+        assert_eq!(
+            routes[TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 6].source_id,
+            3006
+        );
     }
 
     #[tokio::test]
     async fn query_entities_chunks_project_iid_pair_lookups_and_unions_rows() {
         let datalake = RecordingDatalake::new();
-        let pairs: Vec<_> = (0..RESOLVE_LOOKUP_BATCH_SIZE + 2)
+        let pairs: Vec<_> = (0..TEST_RESOLVE_LOOKUP_BATCH_SIZE + 2)
             .map(|i| (10_000 + i as i64, i as i64))
             .collect();
 
-        let entities = query_entities(&datalake, WORK_ITEMS_SQL, &pairs, "1/")
-            .await
-            .unwrap();
+        let entities = query_entities(
+            &datalake,
+            WORK_ITEMS_SQL,
+            &pairs,
+            "1/",
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+        )
+        .await
+        .unwrap();
 
         let queries = datalake.queries();
         let chunk_sizes: Vec<_> = queries
@@ -792,13 +838,13 @@ mod tests {
                 project_ids.len()
             })
             .collect();
-        assert_eq!(chunk_sizes, vec![RESOLVE_LOOKUP_BATCH_SIZE, 2]);
-        assert_eq!(entities.len(), RESOLVE_LOOKUP_BATCH_SIZE + 2);
+        assert_eq!(chunk_sizes, vec![TEST_RESOLVE_LOOKUP_BATCH_SIZE, 2]);
+        assert_eq!(entities.len(), TEST_RESOLVE_LOOKUP_BATCH_SIZE + 2);
         assert_eq!(entities[0].project_id, 10_000);
         assert_eq!(entities[0].iid, 0);
         assert_eq!(
-            entities[RESOLVE_LOOKUP_BATCH_SIZE + 1].project_id,
-            10_000 + (RESOLVE_LOOKUP_BATCH_SIZE + 1) as i64
+            entities[TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1].project_id,
+            10_000 + (TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1) as i64
         );
     }
 
@@ -806,18 +852,20 @@ mod tests {
     async fn resolve_plan_unions_results_from_more_than_three_chunks() {
         let datalake = RecordingDatalake::new();
         let mut plan = ResolutionPlan::default();
-        for i in 0..(RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7) {
+        for i in 0..(TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7) {
             let path = format!("group/project-{i}");
             plan.paths.insert(path.clone());
             plan.issue_pairs.insert((path, i as i64));
         }
 
-        let index = resolve_plan(&datalake, &plan, "1/").await.unwrap();
+        let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+            .await
+            .unwrap();
 
         for i in [
             0,
-            RESOLVE_LOOKUP_BATCH_SIZE,
-            RESOLVE_LOOKUP_BATCH_SIZE * 3 + 6,
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 6,
         ] {
             let reference = Reference {
                 kind: RefKind::Issue,
@@ -826,7 +874,10 @@ mod tests {
                 commit_sha: None,
             };
             let resolved = index.resolve(&reference, "").unwrap();
-            assert_eq!(resolved.id, i as i64 * 1_000_000 + i as i64);
+            assert_eq!(
+                resolved.id,
+                i as i64 * TEST_ENTITY_ID_PROJECT_FACTOR + i as i64
+            );
             assert_eq!(resolved.traversal_path, format!("1/{i}/"));
         }
     }
@@ -834,9 +885,14 @@ mod tests {
     #[tokio::test]
     async fn resolve_plan_empty_input_skips_lookups() {
         let datalake = RecordingDatalake::new();
-        let index = resolve_plan(&datalake, &ResolutionPlan::default(), "1/")
-            .await
-            .unwrap();
+        let index = resolve_plan(
+            &datalake,
+            &ResolutionPlan::default(),
+            "1/",
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+        )
+        .await
+        .unwrap();
         let reference = Reference {
             kind: RefKind::Issue,
             project_path: Some("group/project-1".to_string()),
@@ -851,12 +907,20 @@ mod tests {
     async fn resolve_plan_handles_exact_boundary_and_one_over() {
         for (count, expected_chunk_sizes) in [
             (
-                RESOLVE_LOOKUP_BATCH_SIZE,
-                vec![RESOLVE_LOOKUP_BATCH_SIZE, RESOLVE_LOOKUP_BATCH_SIZE],
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                vec![
+                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                ],
             ),
             (
-                RESOLVE_LOOKUP_BATCH_SIZE + 1,
-                vec![RESOLVE_LOOKUP_BATCH_SIZE, 1, RESOLVE_LOOKUP_BATCH_SIZE, 1],
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1,
+                vec![
+                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                    1,
+                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                    1,
+                ],
             ),
         ] {
             let datalake = RecordingDatalake::new();
@@ -867,7 +931,9 @@ mod tests {
                 plan.issue_pairs.insert((path, i as i64));
             }
 
-            let index = resolve_plan(&datalake, &plan, "1/").await.unwrap();
+            let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
+                .await
+                .unwrap();
             let reference = Reference {
                 kind: RefKind::Issue,
                 project_path: Some(format!("group/project-{}", count - 1)),
