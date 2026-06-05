@@ -1247,7 +1247,7 @@ CREATE DICTIONARY IF NOT EXISTS gkg_column_stats_dict (
     value String,
     row_count UInt64
 )
-PRIMARY KEY table_name
+PRIMARY KEY table_name, column_name, partition_key, value
 SOURCE(CLICKHOUSE(USER 'default' QUERY $q$SELECT table_name, column_name, partition_key, value, uniqMerge(row_count) AS row_count FROM gkg_column_stats GROUP BY table_name, column_name, partition_key, value$q$))
 LIFETIME(MIN 120 MAX 300)
 LAYOUT(COMPLEX_KEY_HASHED());

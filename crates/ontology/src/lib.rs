@@ -1114,20 +1114,16 @@ impl Ontology {
     /// Skips: uuid, virtual, filterable:false, and excluded columns.
     #[must_use]
     pub fn stats_columns_for(&self, entity: &str) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
-        if self.statistics.is_none() {
-            return (vec![], vec![], vec![]);
-        }
-        let excluded: std::collections::HashSet<&str> = self
-            .statistics
-            .as_ref()
-            .map(|s| {
-                s.exclude
-                    .iter()
-                    .filter(|e| e.node == entity)
-                    .flat_map(|e| e.columns.iter().map(String::as_str))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let stats = match self.statistics.as_ref() {
+            Some(s) => s,
+            None => return (vec![], vec![], vec![]),
+        };
+        let excluded: std::collections::HashSet<&str> = stats
+            .exclude
+            .iter()
+            .filter(|e| e.node == entity)
+            .flat_map(|e| e.columns.iter().map(String::as_str))
+            .collect();
 
         let node = match self.nodes.get(entity) {
             Some(n) => n,

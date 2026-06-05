@@ -127,7 +127,7 @@ pub fn generate_graph_dictionaries_with_prefix(
             CreateDictionary {
                 name: d.name.clone(),
                 source_table: d.source_table.clone(),
-                key: d.key.clone(),
+                keys: vec![d.key.clone()],
                 attributes,
                 layout: DictLayout {
                     kind: d.layout.kind.clone(),
@@ -678,9 +678,11 @@ pub fn generate_statistics_ddl_with_prefix(
                 Some(pk) => pk.to_string(),
                 None => "''".to_string(),
             };
+            // Use '{table}' placeholder inside the SQL literal so
+            // with_prefix resolves it to the prefixed name.
             let select = format!(
                 "SELECT \
-                 '{table}' AS table_name, \
+                 '{{{table}}}' AS table_name, \
                  col.1 AS column_name, \
                  {pk_expr} AS partition_key, \
                  col.2 AS value, \
@@ -715,7 +717,7 @@ pub fn generate_statistics_ddl_with_prefix(
             };
             let select = format!(
                 "SELECT \
-                 '{table}' AS table_name, \
+                 '{{{table}}}' AS table_name, \
                  col.1 AS column_name, \
                  {pk_expr} AS partition_key, \
                  col.2 AS value, \
@@ -752,7 +754,7 @@ pub fn generate_statistics_ddl_with_prefix(
             };
             let select = format!(
                 "SELECT \
-                 '{table}' AS table_name, \
+                 '{{{table}}}' AS table_name, \
                  col.1 AS column_name, \
                  {pk_expr} AS partition_key, \
                  col.2 AS token, \
@@ -788,7 +790,12 @@ pub fn generate_statistics_ddl_with_prefix(
     let dict = CreateDictionary {
         name: config.dictionary.clone(),
         source_table: config.stats_table.clone(),
-        key: "table_name".into(),
+        keys: vec![
+            "table_name".into(),
+            "column_name".into(),
+            "partition_key".into(),
+            "value".into(),
+        ],
         attributes: vec![
             ColumnDef::new("table_name", parse_column_type("String")),
             ColumnDef::new("column_name", parse_column_type("String")),

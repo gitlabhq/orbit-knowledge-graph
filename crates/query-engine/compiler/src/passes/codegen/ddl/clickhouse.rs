@@ -225,18 +225,10 @@ fn quote_literal(value: &str) -> String {
 }
 
 pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource) -> String {
-    let key_type = dict
-        .attributes
-        .iter()
-        .find(|a| a.name == dict.key)
-        .map(|a| emit_column_type(&a.data_type))
-        .unwrap_or_else(|| "Int64".into());
+    let key_set: std::collections::HashSet<&str> = dict.keys.iter().map(String::as_str).collect();
 
-    let mut body: Vec<String> = vec![format!("    {} {}", quote_ident(&dict.key), key_type)];
+    let mut body: Vec<String> = Vec::new();
     for attr in &dict.attributes {
-        if attr.name == dict.key {
-            continue;
-        }
         body.push(format!(
             "    {} {}",
             quote_ident(&attr.name),
@@ -247,22 +239,24 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
     let query = if let Some(ref source_query) = dict.source_query {
         source_query.clone()
     } else {
+        let key_csv = dict.keys.join(", ");
         let attr_names: Vec<&str> = dict
             .attributes
             .iter()
             .map(|a| a.name.as_str())
-            .filter(|n| *n != dict.key)
+            .filter(|n| !key_set.contains(n))
             .collect();
         let dedup_selects: Vec<String> = attr_names
             .iter()
             .map(|n| format!("argMax({n}, {VERSION_COLUMN}) AS {n}"))
             .collect();
-        let outer_selects: Vec<String> = std::iter::once(dict.key.clone())
+        let outer_selects: Vec<String> = dict
+            .keys
+            .iter()
+            .cloned()
             .chain(attr_names.iter().map(|n| (*n).to_string()))
             .collect();
-        let inner_selects: Vec<String> = std::iter::once(dict.key.clone())
-            .chain(dedup_selects)
-            .collect();
+        let inner_selects: Vec<String> = dict.keys.iter().cloned().chain(dedup_selects).collect();
 
         format!(
             "SELECT {outer} FROM (SELECT {inner} FROM `{db}`.{table} GROUP BY {key} HAVING argMax({DELETED_COLUMN}, {VERSION_COLUMN}) = false)",
@@ -270,7 +264,7 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
             inner = inner_selects.join(", "),
             db = source.database,
             table = dict.source_table,
-            key = dict.key,
+            key = key_csv,
         )
     };
 
@@ -288,13 +282,12 @@ pub fn emit_create_dictionary(dict: &CreateDictionary, source: &DictionarySource
         None => format!("{}()", dict.layout.kind.to_uppercase()),
     };
 
-    // $q$...$q$ is a ClickHouse heredoc (dollar-quoted string literal), so the backtick-quoted
-    // identifiers in `query` need no escaping; the body is schema-derived and never contains $q$.
+    let primary_key = dict.keys.join(", ");
+
     format!(
-        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {key}\nSOURCE(CLICKHOUSE({credentials}QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
+        "CREATE DICTIONARY IF NOT EXISTS {name} (\n{body}\n)\nPRIMARY KEY {primary_key}\nSOURCE(CLICKHOUSE({credentials}QUERY $q${query}$q$))\nLIFETIME(MIN {min} MAX {max})\nLAYOUT({layout})",
         name = dict.name,
         body = body.join(",\n"),
-        key = dict.key,
         min = dict.lifetime_min,
         max = dict.lifetime_max,
     )
@@ -722,7 +715,7 @@ mod tests {
         CreateDictionary {
             name: "gl_project_traversal_paths_dict".into(),
             source_table: "gl_project".into(),
-            key: "id".into(),
+            keys: vec!["id".into()],
             attributes: vec![
                 ColumnDef::new("id", ColumnType::Int64),
                 ColumnDef::new("traversal_path", ColumnType::String),

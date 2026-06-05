@@ -23,7 +23,8 @@ pub struct CreateTable {
 pub struct CreateDictionary {
     pub name: String,
     pub source_table: String,
-    pub key: String,
+    /// PRIMARY KEY columns. Single-element for simple key, multiple for composite.
+    pub keys: Vec<String>,
     pub attributes: Vec<ColumnDef>,
     pub layout: DictLayout,
     pub lifetime_min: u32,
@@ -370,7 +371,7 @@ mod tests {
         CreateDictionary {
             name: "gl_project_dict".into(),
             source_table: source_table.into(),
-            key: "id".into(),
+            keys: vec!["id".into()],
             attributes: vec![],
             layout: DictLayout {
                 kind: "HASHED".into(),
