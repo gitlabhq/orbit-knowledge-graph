@@ -705,6 +705,32 @@ mod tests {
     }
 
     #[test]
+    fn path_finding_cross_level_endpoints_union_traversal_scope() {
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "from", "entity": "Group",   "node_ids": [9970]},
+                {"id": "to",   "entity": "Project", "node_ids": [278964]}
+            ],
+            "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3,
+                     "rel_types": ["CONTAINS"]}
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            sql.contains("_path_scope_traversal_paths"),
+            "cross-level path finding should still compute a scope, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("UNION ALL SELECT _path_scope_end.traversal_path"),
+            "scope must UNION both endpoints' traversal paths, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("_path_scope_start.traversal_path = _path_scope_end.traversal_path"),
+            "scope must not intersect endpoints on traversal_path equality, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn path_finding_without_cursor_orders_only_by_depth() {
         let query = r#"{
             "query_type": "path_finding",
@@ -1245,6 +1271,69 @@ mod tests {
         assert!(
             sql.contains("source_branch") && sql.contains("main"),
             "JOIN must retain non-denormalized source_branch filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_boolean_filter_renders_value_token() {
+        let sql = denorm_traversal_sql(r#""draft": {"op": "eq", "value": true}"#);
+        assert!(
+            sql.contains("has(e0.target_tags, 'draft:true')"),
+            "boolean denorm filter must render its value token, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("'draft:'"),
+            "boolean denorm filter must not emit an empty-value token, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_filter_pushed_onto_carrying_edge_not_first_hop() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "cl"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            sql.contains("has(e1.source_tags, 'state:opened')"),
+            "state must be pushed onto IN_PROJECT (e1), which carries it, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("has(e0.source_tags, 'state:opened')"),
+            "state must NOT be pushed onto HAS_LABEL (e0), whose tags are empty, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_filter_uncovered_by_query_relationships_filters_node_table() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
+                {"id": "cl", "entity": "Label", "filters": {"title": {"op": "eq", "value": "Community contribution"}}}
+            ],
+            "relationships": [
+                {"type": "HAS_LABEL", "from": "mr", "to": "cl"}
+            ],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}]
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            !sql.contains("source_tags, 'state:opened'"),
+            "uncovered state filter must not be pushed onto edge tags, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("gl_merge_request") && sql.contains("state = 'opened'"),
+            "uncovered state filter must be enforced on the MR node table, got:\n{sql}"
         );
     }
 

@@ -355,24 +355,19 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     if !start.has_tp || !end.has_tp {
         return None;
     }
+    // UNION, not intersect: endpoints at different namespace depths are linked
+    // by edges carrying only the deeper tp, so equality yields an empty scope.
+    let arm = |cte: &str, alias: &str| Query {
+        select: vec![SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN)],
+        from: TableRef::scan(cte, alias),
+        group_by: vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN)],
+        ..Default::default()
+    };
     Some(Cte::new(
         PATH_SCOPE_CTE,
         Query {
-            select: vec![SelectExpr::col(
-                PATH_SCOPE_START_ALIAS,
-                TRAVERSAL_PATH_COLUMN,
-            )],
-            from: TableRef::join(
-                JoinType::Inner,
-                TableRef::scan(start_cte, PATH_SCOPE_START_ALIAS),
-                TableRef::scan(end_cte, PATH_SCOPE_END_ALIAS),
-                Expr::eq(
-                    Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
-                    Expr::col(PATH_SCOPE_END_ALIAS, TRAVERSAL_PATH_COLUMN),
-                ),
-            ),
-            group_by: vec![Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN)],
-            ..Default::default()
+            union_all: vec![arm(end_cte, PATH_SCOPE_END_ALIAS)],
+            ..arm(start_cte, PATH_SCOPE_START_ALIAS)
         },
     ))
 }

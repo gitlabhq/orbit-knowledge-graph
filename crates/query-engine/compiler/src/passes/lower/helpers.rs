@@ -415,9 +415,6 @@ pub(super) fn limit_by_scan(
     TableRef::subquery(query, alias)
 }
 
-/// Emit denorm tag filters computed from `plan.denorm_columns`.
-///
-/// Each node is tagged at most once (tracked by `tagged_nodes`).
 pub(super) fn emit_denorm_tags(
     where_parts: &mut Vec<Expr>,
     plan: &Plan,
@@ -425,12 +422,9 @@ pub(super) fn emit_denorm_tags(
     edge_alias: &str,
     start_col: &str,
     end_col: &str,
-    tagged_nodes: &mut HashSet<String>,
+    tagged: &mut HashSet<(String, String)>,
 ) {
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-        if !tagged_nodes.insert(node_alias.clone()) {
-            continue;
-        }
         let Some(np) = plan.nodes.get(node_alias) else {
             continue;
         };
@@ -443,14 +437,34 @@ pub(super) fn emit_denorm_tags(
             "target"
         };
         for (prop, filter) in &np.filters {
+            let tag_id = (node_alias.clone(), prop.clone());
+            if tagged.contains(&tag_id) {
+                continue;
+            }
             let key = (entity.clone(), prop.clone(), dir.to_string());
+            // Skip hops that don't write this tag; pushing it there matches an
+            // empty edge and silently drops the row.
+            if !hop_carries_denorm(plan, hop, &key) {
+                continue;
+            }
             if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
                 && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
             {
                 where_parts.push(expr);
+                tagged.insert(tag_id);
             }
         }
     }
+}
+
+fn hop_carries_denorm(plan: &Plan, hop: &Hop, key: &(String, String, String)) -> bool {
+    // A wildcard hop's relationship is unknown at runtime, so no tag is safe.
+    if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+        return false;
+    }
+    plan.denorm_rel_kinds
+        .get(key)
+        .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
 }
 
 pub(super) fn node_id_pin_predicates(

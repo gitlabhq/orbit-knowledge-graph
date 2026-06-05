@@ -1259,6 +1259,36 @@ impl Ontology {
         self.edge_etl_configs.contains_key(relationship_kind)
     }
 
+    /// Whether this relationship's edge materializes `column` on its
+    /// `direction` side — i.e. whether a node property in that column can be
+    /// denormalized onto the edge row. The single source of truth for which
+    /// edges carry which denorm tags; both the read path (compiler) and the
+    /// write path (indexer) derive from it.
+    ///
+    /// - FK edges (no standalone ETL config) project every column of their
+    ///   node, so they always carry it.
+    /// - A standalone edge projects `column` only when the matching endpoint
+    ///   is a fixed `Literal` node type whose `enrich` list includes it;
+    ///   polymorphic (`Column`-typed) endpoints materialize no node columns.
+    pub fn edge_projects_column(
+        &self,
+        relationship_kind: &str,
+        direction: DenormDirection,
+        column: &str,
+    ) -> bool {
+        let Some(etls) = self.get_edge_etl(relationship_kind) else {
+            return true;
+        };
+        etls.iter().any(|etl| {
+            let endpoint = match direction {
+                DenormDirection::Source => &etl.from,
+                DenormDirection::Target => &etl.to,
+            };
+            matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
+                && endpoint.enrich.iter().any(|c| c == column)
+        })
+    }
+
     /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
         self.edge_etl_configs

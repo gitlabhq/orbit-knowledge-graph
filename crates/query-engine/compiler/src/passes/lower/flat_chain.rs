@@ -26,7 +26,7 @@ fn collect_edge_predicates(
     start_col: &str,
     end_col: &str,
     ctes: &mut Vec<Cte>,
-    tagged_nodes: &mut HashSet<String>,
+    tagged_nodes: &mut HashSet<(String, String)>,
     narrowed_nodes: &mut HashSet<String>,
 ) {
     push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
@@ -55,7 +55,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
-    let mut tagged_nodes: HashSet<String> = HashSet::new();
+    let mut tagged_nodes: HashSet<(String, String)> = HashSet::new();
     let mut narrowed_nodes: HashSet<String> = HashSet::new();
     let mut filter_only_done: HashSet<String> = HashSet::new();
     let mut edge_if_predicates: Option<Expr> = None;

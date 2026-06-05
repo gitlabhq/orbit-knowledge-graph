@@ -319,6 +319,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 ))
             })?;
         let enum_values = field.enum_values.clone();
+        let field_column = field
+            .column_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| entry.property.clone());
 
         let tag_key = entry
             .column_alias
@@ -336,6 +340,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
+                    // Declare the denorm only on edges whose ETL materializes
+                    // the column, so the compiler never pushes a tag onto an
+                    // edge with empty tags.
+                    if !ontology.edge_projects_column(edge_name, direction.clone(), &field_column) {
+                        continue;
+                    }
                     let edge_column = match direction {
                         crate::entities::DenormDirection::Source => "source_tags",
                         crate::entities::DenormDirection::Target => "target_tags",
