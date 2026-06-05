@@ -58,9 +58,7 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
 /// [`generate_graph_materialized_views_with_prefix`] to apply a schema
 /// version prefix to view names, `TO` targets, and table references inside
 /// the `SELECT` query.
-pub fn generate_graph_materialized_views(
-    ontology: &Ontology,
-) -> Vec<CreateMaterializedView> {
+pub fn generate_graph_materialized_views(ontology: &Ontology) -> Vec<CreateMaterializedView> {
     generate_graph_materialized_views_with_prefix(ontology, "")
 }
 
@@ -84,9 +82,9 @@ pub fn generate_graph_materialized_views_with_prefix(
         .collect()
 }
 
-/// Collects all known graph table names from the ontology (auxiliary + node
-/// + edge) so that `{table_name}` placeholders in materialized view queries
-/// can be resolved.
+/// Collects all known graph table names from the ontology (auxiliary + node +
+/// edge) so that `{table_name}` placeholders in materialized view queries can
+/// be resolved.
 fn collect_table_names(ontology: &Ontology) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     for aux in ontology.auxiliary_tables() {

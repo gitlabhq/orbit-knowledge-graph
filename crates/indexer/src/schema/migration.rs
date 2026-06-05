@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use query_engine::compiler::{
-    emit_create_materialized_view, emit_create_table, generate_graph_materialized_views_with_prefix,
-    generate_graph_tables_with_prefix,
+    emit_create_materialized_view, emit_create_table,
+    generate_graph_materialized_views_with_prefix, generate_graph_tables_with_prefix,
 };
 use thiserror::Error;
 use tracing::{info, warn};
