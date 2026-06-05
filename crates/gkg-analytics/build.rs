@@ -135,15 +135,14 @@ fn render_module(iglu_dir: &Path, schema_name: &str, type_name: &str) -> String 
 /// `promote_defaults_on_required` so the injected defaults get the same
 /// treatment as any naturally present ones.
 fn inject_defaults(schema: &mut Value, schema_name: &str) {
-    if schema_name == "orbit_query" {
-        if let Some(source_type) = schema
+    if schema_name == "orbit_query"
+        && let Some(source_type) = schema
             .pointer_mut("/properties/source_type")
             .and_then(Value::as_object_mut)
-        {
-            source_type
-                .entry("default")
-                .or_insert(Value::String("rest".to_string()));
-        }
+    {
+        source_type
+            .entry("default")
+            .or_insert(Value::String("rest".to_string()));
     }
 }
 
