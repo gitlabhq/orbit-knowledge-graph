@@ -383,6 +383,78 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 }
 
 #[tokio::test]
+async fn under_emitting_reindex_does_not_wipe_prior_definitions() {
+    let project_id: i64 = 77;
+    let traversal_path = "1/77/";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    // Enough definitions to clear the cleaner's prior-live floor so the
+    // completeness guard engages on the next run.
+    let mut big = String::from("public class Big {\n");
+    for i in 0..80 {
+        big.push_str(&format!("    public void m{i}() {{}}\n"));
+    }
+    big.push_str("}\n");
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(project_id, "main", &[("src/Big.java", big.as_str())]);
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    let before = query_active_definition_names(&clickhouse, project_id, "src/Big.java").await;
+    assert!(
+        before.len() > 50,
+        "fixture must exceed the prior-live floor to engage the guard, got {}",
+        before.len()
+    );
+
+    // A degraded re-index that re-emits almost nothing. Before the guard this
+    // tombstoned every prior definition (the production wipe). It must now be
+    // refused, leaving the prior definitions live.
+    mock.replace_archive(
+        project_id,
+        &[(
+            "src/Tiny.java",
+            "public class Tiny { public void only() {} }",
+        )],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        traversal_path,
+    )
+    .await;
+
+    let after = query_active_definition_names(&clickhouse, project_id, "src/Big.java").await;
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "under-emitting re-index must not tombstone prior definitions"
+    );
+    assert_file_is_active(&clickhouse, project_id, "src/Big.java").await;
+    assert_file_is_active(&clickhouse, project_id, "src/Tiny.java").await;
+}
+
+#[tokio::test]
 async fn skips_stale_data_cleanup_on_first_index() {
     let project_id: i64 = 13;
     let traversal_path = "1/13/";

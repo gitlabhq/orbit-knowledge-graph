@@ -697,6 +697,17 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.stale_cleanup.decision",
+      "prom_name": "gkg_indexer_code_stale_cleanup_decision_total",
+      "description": "Stale-data cleanup decisions per re-index (ran, skipped_under_emit, error). skipped_under_emit means the completeness guard blocked a destructive delete.",
+      "kind": "counter",
+      "labels": [
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.namespace_deletion.table.duration",
       "prom_name": "gkg_indexer_namespace_deletion_table_duration_seconds",
       "description": "Duration of a single table's soft-delete INSERT-SELECT.",

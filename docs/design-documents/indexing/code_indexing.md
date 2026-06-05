@@ -284,6 +284,17 @@ The graph is converted to Apache Arrow record batches and written to six ClickHo
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
+##### Stale data cleanup
+
+The graph tables are `ReplacingMergeTree` keyed on the entity sort key with a `_version` timestamp and a `_deleted` flag. A re-index writes the current commit's rows stamped with the run's start time (`indexed_at`), then `ClickHouseStaleDataCleaner` tombstones prior-version rows the run did not re-emit (`_version < indexed_at`), so a definition deleted from the code disappears from query results.
+
+This delete is only correct if the run actually re-emitted the full repository. A degraded run (the build/converter/sink silently dropped most rows) emits a small subset, and tombstoning its complement is a mass wipe of live data. Two safeguards prevent that:
+
+- **Completeness guard.** Before tombstoning, the cleaner compares the rows this run actually wrote to ClickHouse (from `BufferedClickHouseSink::flush`, not the in-memory stats counter, which over-reports dropped rows) against the prior live count per node table. If any populated table was re-emitted below a floor fraction, cleanup is skipped entirely and `gkg_indexer_code_stale_cleanup_decision_total{outcome="skipped_under_emit"}` increments. The prior rows stay live (bounded ghost data) until a later complete run cleans them up — never a wipe.
+- **Explicit tombstone `_version`.** Tombstone rows are stamped at `indexed_at + 1µs` rather than the `now64()` column default. The default stamped every tombstone at cleanup wall-clock time, which always outranked the current run's live rows under `FINAL` and made retries accumulate zombie versions; the explicit value wins only over genuinely older rows and is idempotent across retries.
+
+Cleanup is skipped entirely on a first-time index (no prior checkpoint).
+
 #### Checkpoint tracking
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.

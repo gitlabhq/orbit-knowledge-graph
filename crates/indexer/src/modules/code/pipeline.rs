@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,7 +14,7 @@ use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::{RepositoryResolver, ResolveError};
-use super::stale_data_cleaner::StaleDataCleaner;
+use super::stale_data_cleaner::{CleanupOutcome, StaleDataCleaner};
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
 use opentelemetry::KeyValue;
@@ -473,6 +474,15 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         if had_prior_checkpoint {
+            // Rows actually written to ClickHouse this run, per table. This is
+            // the ground truth for the cleanup completeness guard; the in-memory
+            // `result.stats` counter over-reports when the converter/sink drops
+            // rows, so it must not gate a destructive delete.
+            let written_rows: HashMap<String, u64> = per_table_writes
+                .iter()
+                .map(|w| (w.table.clone(), w.rows))
+                .collect();
+
             // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
             info!(
                 project_id,
@@ -488,17 +498,44 @@ impl CodeIndexingPipeline {
                 "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
             );
             let cleanup_start = Instant::now();
-            if let Err(error) = self
+            match self
                 .stale_data_cleaner
-                .delete_stale_data(traversal_path, project_id, branch, indexed_at)
+                .delete_stale_data(
+                    traversal_path,
+                    project_id,
+                    branch,
+                    indexed_at,
+                    &written_rows,
+                )
                 .await
             {
-                warn!(
-                    project_id,
-                    branch = %branch,
-                    %error,
-                    "failed to delete stale data, will retry on next indexing"
-                );
+                Ok(CleanupOutcome::Ran) => self.metrics.record_stale_cleanup("ran"),
+                Ok(CleanupOutcome::SkippedUnderEmit {
+                    table,
+                    prior_live,
+                    written,
+                }) => {
+                    self.metrics.record_stale_cleanup("skipped_under_emit");
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        table,
+                        prior_live,
+                        written,
+                        watermark = %indexed_at,
+                        "refusing stale-data cleanup: run under-emitted prior checkpoint; \
+                         keeping prior rows live to avoid a wipe"
+                    );
+                }
+                Err(error) => {
+                    self.metrics.record_stale_cleanup("error");
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        %error,
+                        "failed to delete stale data, will retry on next indexing"
+                    );
+                }
             }
             let stale_data_cleanup_duration = cleanup_start.elapsed();
             info!(
