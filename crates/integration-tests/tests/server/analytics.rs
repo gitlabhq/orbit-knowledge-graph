@@ -123,14 +123,10 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     let query = OrbitQueryContext::new(orbit_query::OrbitQuery {
         source_type: orbit_query::OrbitQuerySourceType::Mcp,
         tool_name: Some("query_graph".parse().expect("tool_name")),
-        coding_agent: None,
-        queried_namespace_ids: None,
         root_namespace_id: Some(99),
         global_user_id: Some("guser-it".parse().expect("global_user_id")),
         session_id: Some("sess-it".parse().expect("session_id")),
-        user_type: None,
-        plan: None,
-        is_gitlab_team_member: None,
+        ..Default::default()
     });
 
     let event = labkit_events::StructuredEvent::builder("gkg", "gkg_query_executed")
