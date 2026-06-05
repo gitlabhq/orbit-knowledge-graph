@@ -12,15 +12,29 @@
 [![Helm chart](https://img.shields.io/badge/helm-gkg--helm--charts-blue)](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts)
 [![license](https://img.shields.io/badge/license-GitLab%20EE-blue)](LICENSE.md)
 
-[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Remote](docs/source/remote/getting-started.md) · [Orbit Local](docs/source/local/getting-started.md) · [AI coding agents](docs/source/ai_coding_agents.md)
+[Docs](https://docs.gitlab.com/orbit/) · [Quickstart](#quickstart) · [Orbit Local](docs/source/local/getting-started.md) · [Orbit Remote](docs/source/remote/getting-started.md) · [AI coding agents](docs/source/ai_coding_agents.md)
 
 </div>
 
-Index your GitLab SDLC and source code as one property graph, then query it from the GitLab UI, a CLI, MCP, or REST. Orbit ships in two shapes: **Orbit Remote**, the hosted graph that spans a top-level GitLab.com group, and **Orbit Local**, a single-binary CLI that builds a code-only graph from any repository on your machine.
+Index your GitLab SDLC and source code as one property graph, then query it from the GitLab UI, a CLI, MCP, or REST. Orbit ships in two shapes: **Orbit Local**, a single-binary CLI that builds a code-only graph from any repository on your machine, and **Orbit Remote**, the hosted graph that spans a top-level GitLab.com group.
 
 > Pre-GA. The Query DSL and ontology may change. Orbit Remote is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
 
 ## Two ways to run Orbit
+
+### Orbit Local
+
+Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only property graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
+
+What it indexes: directories, files, function and class definitions, and cross-file import references. Same 11 languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
+
+| Access method | Use for | Billing |
+|---|---|---|
+| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today | None |
+| [`glab orbit local`](docs/source/local/access/glab.md) (planned) | Drive Orbit Local through `glab` | None |
+| [MCP](docs/source/local/access/mcp.md) (planned) | Expose the local graph to AI coding agents | None |
+
+Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
 ### Orbit Remote
 
@@ -54,20 +68,6 @@ flowchart LR
     Orbit --> DAP[GitLab Duo Agent Platform]
 ```
 
-### Orbit Local
-
-Orbit Local runs on your machine. The `orbit` CLI parses a local repository, extracts definitions and cross-file references, and writes a code-only property graph to a single DuckDB file. No GitLab account is required at query time. The install step downloads a release artifact over HTTPS.
-
-What it indexes: directories, files, function and class definitions, and cross-file import references. Same 11 languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
-
-| Access method | Use for | Billing |
-|---|---|---|
-| [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today | None |
-| [`glab orbit local`](docs/source/local/access/glab.md) (planned) | Drive Orbit Local through `glab` | None |
-| [MCP](docs/source/local/access/mcp.md) (planned) | Expose the local graph to AI coding agents | None |
-
-Start with [Orbit Local getting started](docs/source/local/getting-started.md).
-
 ## Quickstart
 
 ### Quickstart: Orbit Local
@@ -96,14 +96,14 @@ The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pip
 
 ## Features
 
-| Capability | Orbit Remote | Orbit Local |
+| Capability | Orbit Local | Orbit Remote |
 |---|---|---|
-| Scope | SDLC and code | Code only |
-| Query interface | Query DSL compiled to ClickHouse SQL | Raw DuckDB SQL |
-| GitLab authorization | Enforced per query | Filesystem permissions only |
-| Runs offline | No | Yes (after install) |
+| Scope | Code only | SDLC and code |
+| Query interface | Raw DuckDB SQL | Query DSL compiled to ClickHouse SQL |
+| GitLab authorization | Filesystem permissions only | Enforced per query |
+| Runs offline | Yes (after install) | No |
 
-Orbit Remote supports hop-bounded (max 3) traversals, neighbors, and path finding. Orbit Local exposes raw SQL, so traversals are expressed as joins.
+Orbit Local exposes raw SQL, so traversals are expressed as joins. Orbit Remote supports hop-bounded (max 3) traversals, neighbors, and path finding.
 
 ## Architecture
 
