@@ -272,9 +272,14 @@ pub async fn run_dispatcher(
 
     let migration_metrics = schema::metrics::MigrationMetrics::new();
     info!("running schema migration check");
+    let dictionary_source = query_engine::compiler::DictionarySource {
+        database: &config.graph.database,
+        user: &config.graph.username,
+        password: config.graph.password.as_deref(),
+    };
     schema::migration::run_if_needed(
         &graph,
-        &config.graph.database,
+        &dictionary_source,
         &lock_service,
         ontology,
         &migration_metrics,

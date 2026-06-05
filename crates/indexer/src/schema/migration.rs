@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use query_engine::compiler::{
-    emit_create_dictionary, emit_create_table, generate_graph_dictionaries_with_prefix,
-    generate_graph_tables_with_prefix,
+    DictionarySource, emit_create_dictionary, emit_create_table,
+    generate_graph_dictionaries_with_prefix, generate_graph_tables_with_prefix,
 };
 use thiserror::Error;
 use tracing::{info, warn};
@@ -76,7 +76,7 @@ pub enum MigrationError {
 ///   migrating, releases lock.
 pub async fn run_if_needed(
     graph: &ArrowClickHouseClient,
-    graph_database: &str,
+    source: &DictionarySource<'_>,
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
@@ -90,7 +90,7 @@ pub async fn run_if_needed(
                 version = *SCHEMA_VERSION,
                 "fresh install — creating tables from ontology and recording initial schema version"
             );
-            create_prefixed_tables(graph, graph_database, ontology, metrics).await?;
+            create_prefixed_tables(graph, source, ontology, metrics).await?;
             write_schema_version(graph, *SCHEMA_VERSION).await?;
             metrics.record("complete", "fresh_install");
             Ok(())
@@ -111,7 +111,7 @@ pub async fn run_if_needed(
             );
             run_migration(
                 graph,
-                graph_database,
+                source,
                 lock_service,
                 ontology,
                 metrics,
@@ -125,7 +125,7 @@ pub async fn run_if_needed(
 
 async fn run_migration(
     graph: &ArrowClickHouseClient,
-    graph_database: &str,
+    source: &DictionarySource<'_>,
     lock_service: &Arc<dyn LockService>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
@@ -155,7 +155,7 @@ async fn run_migration(
     metrics.record("drain", "success");
 
     // Phase 3: create new-prefix tables.
-    let create_result = create_prefixed_tables(graph, graph_database, ontology, metrics).await;
+    let create_result = create_prefixed_tables(graph, source, ontology, metrics).await;
     if let Err(ref e) = create_result {
         warn!(error = %e, "failed to create new-prefix tables — releasing lock");
         let _ = lock_service.release(MIGRATION_LOCK_KEY).await;
@@ -224,7 +224,7 @@ async fn acquire_migration_lock(
 
 async fn create_prefixed_tables(
     graph: &ArrowClickHouseClient,
-    graph_database: &str,
+    source: &DictionarySource<'_>,
     ontology: &ontology::Ontology,
     metrics: &MigrationMetrics,
 ) -> Result<(), MigrationError> {
@@ -246,7 +246,7 @@ async fn create_prefixed_tables(
     for dict in &dicts {
         info!(dictionary = %dict.name, source = %dict.source_table, "creating dictionary");
         graph
-            .execute(&emit_create_dictionary(dict, graph_database))
+            .execute(&emit_create_dictionary(dict, source))
             .await
             .map_err(|e| MigrationError::Ddl {
                 table: dict.name.clone(),
