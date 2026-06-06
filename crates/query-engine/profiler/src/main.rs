@@ -63,14 +63,6 @@ struct Cli {
     #[arg(long)]
     explain: bool,
 
-    /// Deep profile: query system.query_log for ProfileEvents, CPU, memory
-    #[arg(long)]
-    profile: bool,
-
-    /// Include system.processors_profile_log pipeline breakdown
-    #[arg(long)]
-    processors: bool,
-
     /// Show ClickHouse instance health snapshot
     #[arg(long)]
     health: bool,
@@ -385,9 +377,8 @@ async fn main() -> Result<()> {
     let profiling_config = ProfilingConfig {
         enabled: true,
         explain: cli.explain,
-        query_log: cli.profile,
-        processors: cli.processors,
         instance_health: cli.health,
+        ..Default::default()
     };
 
     if cli.raw_sql {
