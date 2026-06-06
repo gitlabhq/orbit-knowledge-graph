@@ -57,7 +57,9 @@ enum SourceType {
 
 Entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it.
 
-Replace `count()` with `uniq(id)`. Graph tables use `ReplacingMergeTree`, which keeps multiple row versions between background merges. `count()` overcounts proportionally to update volume (observed 49% overall, up to 300% for frequently updated types on staging). `uniq(id)` uses HyperLogLog to count distinct entity IDs with ~1-2% error at high cardinalities — acceptable for a status indicator and far better than the current overcount.
+Every type is counted with `uniq(id)`, which routes to the per-table `tp_count` aggregate projection (`SELECT traversal_path, uniq(id) GROUP BY traversal_path`). It reads kilobytes of HyperLogLog state rather than scanning the namespace and deduplicates the un-merged `ReplacingMergeTree` versions that a plain `count()` overcounts (observed up to +300% for frequently updated types). It carries ~1-2% HyperLogLog error, acceptable for a status indicator, and every type except Group measured within ~1% of exact on prod.
+
+Group is the one exception, counted with exact `count() FINAL`. Namespace deletion permanently removes groups and leaves tombstoned rows with distinct ids, and the projection has no `_deleted` column to exclude them, so `uniq(id)` overcounts Group ~6x (measured +549% on a large namespace). The group table is tiny, so FINAL is cheap. The check lives in `build_node_query` in `crates/gkg-server/src/graph_status/lower.rs`.
 
 #### Per-entity access control
 
@@ -133,7 +135,7 @@ The indexer invalidates the cached entry for the relevant traversal path after e
 2. Scope is `GROUP` (provided by Rails).
 3. If not a top-level group, resolve the top-level group from the traversal path. SDLC indexing runs at the top-level namespace, so indexing metadata comes from the top-level group's progress entry.
 4. Read indexing progress from NATS KV (`sdlc.{namespace_id}`).
-5. Count all entities under the traversal path using `uniq(id)` per entity type, grouped by domain.
+5. Count all entities under the traversal path per entity type with `uniq(id)` (Group is counted exactly via `count() FINAL`, see above), grouped by domain.
 6. Count projects known (`uniq(id)` on `gl_project`) vs projects indexed (`uniq(project_id)` on `code_indexing_checkpoint`) under the traversal path.
 
 **Response:**

@@ -253,7 +253,8 @@ async fn graph_status() {
         indexing_status_survives_single_entity_read_failure,
         reporter_excludes_security_entity_counts,
         security_manager_includes_security_entity_counts,
-        definition_count_includes_distinct_sort_keys_excludes_tombstone,
+        definition_count_counts_distinct_ids,
+        group_count_excludes_deleted,
         projects_total_known_counts_distinct_ids,
         get_status_degrades_when_entity_count_table_missing,
     );
@@ -703,15 +704,15 @@ async fn indexing_status_survives_single_entity_read_failure(ctx: &TestContext) 
     assert_eq!(indexing.state, IndexingState::Indexed as i32);
 }
 
-async fn definition_count_includes_distinct_sort_keys_excludes_tombstone(ctx: &TestContext) {
-    let db = ctx.fork("graph_status_definition_sort_keys").await;
+async fn definition_count_counts_distinct_ids(ctx: &TestContext) {
+    let db = ctx.fork("graph_status_definition_distinct_ids").await;
 
+    // 9002 is inserted twice; uniq(id) dedups the duplicate version.
     db.execute(&format!(
         "INSERT INTO {} (id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char, _version, _deleted) VALUES
-         (9001, '1/100/1000/', 1000, 'main',    'sha-a', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
-         (9001, '1/100/1000/', 1000, 'feature', 'sha-b', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
-         (9002, '1/100/1000/', 1000, 'main',    'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
-         (9002, '1/100/1000/', 1000, 'main',    'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-06-01 00:00:00', true)",
+         (9001, '1/100/1000/', 1000, 'main', 'sha-a', 'a.rb', 'A#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
+         (9002, '1/100/1000/', 1000, 'main', 'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-01-01 00:00:00', false),
+         (9002, '1/100/1000/', 1000, 'main', 'sha-c', 'b.rb', 'B#m', 'm', 'Method', 1, 2, 0, 10, 0, 10, '2024-06-01 00:00:00', false)",
         t("gl_definition")
     ))
     .await;
@@ -727,8 +728,31 @@ async fn definition_count_includes_distinct_sort_keys_excludes_tombstone(ctx: &T
     assert_eq!(
         find_item(source_code, "Definition"),
         2,
-        "9001's two distinct-branch rows both count; 9002's tombstoned main row is excluded"
+        "two distinct ids count as two; 9002's duplicate version is deduped by uniq(id)"
     );
+}
+
+async fn group_count_excludes_deleted(ctx: &TestContext) {
+    let db = ctx.fork("graph_status_group_excludes_deleted").await;
+
+    // 9101 is a tombstone; uniq(id) would still count it as a distinct id.
+    db.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path, _version, _deleted) VALUES
+         (9100, 'Live Group', 'public', '1/900/9100/', '2024-01-01 00:00:00', false),
+         (9101, 'Deleted Group', 'public', '1/900/9101/', '2024-06-01 00:00:00', true)",
+        t("gl_group")
+    ))
+    .await;
+    db.optimize_all().await;
+
+    let service = build_service(&db);
+    let response = service
+        .get_status("1/900/", ResponseFormat::Raw as i32, &admin_context())
+        .await
+        .expect("should succeed");
+    let status = extract_structured(response);
+    let core = find_domain(&status.domains, "core");
+    assert_eq!(find_item(core, "Group"), 1, "tombstoned group is excluded");
 }
 
 async fn projects_total_known_counts_distinct_ids(ctx: &TestContext) {
