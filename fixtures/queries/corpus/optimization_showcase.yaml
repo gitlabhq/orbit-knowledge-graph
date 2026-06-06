@@ -1,0 +1,1213 @@
+# Optimizer showcase corpus.
+#
+# Queries that exercise SIP / cascade / namespace-scoped optimizer passes.
+# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
+# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+
+01_cascading_sip_3node_chain:
+  desc: "Cascading sip 3node chain"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "u",
+          "entity": "User",
+          "node_ids": "$sample:3"
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "u",
+          "to": "mr"
+        },
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "limit": 50
+    }
+
+02_cascading_sip_4node_fan_out:
+  desc: "Cascading sip 4node fan out"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Project",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User"
+        },
+        {
+          "id": "note",
+          "entity": "Note"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        },
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "mr"
+        },
+        {
+          "type": "HAS_NOTE",
+          "from": "mr",
+          "to": "note"
+        }
+      ],
+      "limit": 30
+    }
+
+03_neighbors_both_directions:
+  desc: "Neighbors both directions"
+  category: neighbors
+  suite: showcase
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "node_ids": "$sample:3"
+      },
+      "neighbors": {
+        "node": "mr",
+        "direction": "both"
+      },
+      "limit": 100
+    }
+
+04_neighbors_outgoing_with_rel_filter:
+  desc: "Neighbors incoming with rel filter"
+  category: neighbors
+  suite: showcase
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": "$sample"
+      },
+      "neighbors": {
+        "node": "p",
+        "direction": "incoming",
+        "rel_types": [
+          "IN_PROJECT"
+        ]
+      },
+      "limit": 50
+    }
+
+05_path_finding_depth3:
+  desc: "Path finding depth3"
+  category: path_finding
+  suite: showcase
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {
+          "id": "start",
+          "entity": "Project",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "end",
+          "entity": "Project",
+          "node_ids": "$sample"
+        }
+      ],
+      "path": {
+        "type": "shortest",
+        "from": "start",
+        "to": "end",
+        "max_depth": 2,
+        "rel_types": [
+          "IN_PROJECT",
+          "AUTHORED"
+        ]
+      }
+    }
+  expect: empty  # two random Projects don't share a 2-hop directed path; every entity->Project edge goes IN_PROJECT inbound, so Project->Project via [AUTHORED, IN_PROJECT] loops back to self
+
+06_path_finding_depth2_user_to_project:
+  desc: "Path finding depth2 user to project"
+  category: path_finding
+  suite: showcase
+  expect: empty  # random User->Project pair rarely has a bounded path in scope
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {
+          "id": "start",
+          "entity": "User",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "end",
+          "entity": "Project",
+          "node_ids": "$sample"
+        }
+      ],
+      "path": {
+        "type": "shortest",
+        "from": "start",
+        "to": "end",
+        "max_depth": 2,
+        "rel_types": [
+          "AUTHORED",
+          "IN_PROJECT"
+        ]
+      }
+    }
+
+07_aggregation_count_merged_mrs:
+  desc: "Aggregation count merged mrs"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "merged_mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "merged_mr_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+08_aggregation_sum_pipeline_duration:
+  desc: "Aggregation sum pipeline duration"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "success"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "sum",
+          "target": "pipe",
+          "property": "duration",
+          "alias": "total_pipeline_seconds"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "total_pipeline_seconds",
+        "direction": "DESC"
+      },
+      "limit": 15
+    }
+
+09_cascading_sip_aggregation_mr_count_pinned:
+  desc: "Cascading sip aggregation mr count pinned"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Project",
+          "node_ids": "$sample:3",
+          "columns": [
+            "name"
+          ]
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "merged_mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "merged_mr_count",
+        "direction": "DESC"
+      },
+      "limit": 10
+    }
+
+10_traversal_user_to_group:
+  desc: "Traversal user to group"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "u",
+          "entity": "User",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "g",
+          "entity": "Group"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "MEMBER_OF",
+          "from": "u",
+          "to": "g"
+        }
+      ],
+      "limit": 50
+    }
+
+11_traversal_project_pipelines_jobs:
+  desc: "Traversal project pipelines jobs"
+  category: traversal
+  suite: showcase
+  expect: empty  # 3-hop Project->Pipeline->Job OOMs on large sampled projects at gitlab-org scope
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Project",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "failed"
+          }
+        },
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": "failed"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        },
+        {
+          "type": "IN_PIPELINE",
+          "from": "j",
+          "to": "pipe"
+        }
+      ],
+      "limit": 20
+    }
+
+12_ns_traversal_all_mrs_in_group:
+  desc: "Ns traversal all mrs in group"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "u",
+          "entity": "User"
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "u",
+          "to": "mr"
+        }
+      ],
+      "limit": 50
+    }
+
+13_ns_traversal_merged_mrs_with_notes:
+  desc: "Ns traversal merged mrs with notes"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "n",
+          "entity": "Note"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "HAS_NOTE",
+          "from": "mr",
+          "to": "n"
+        }
+      ],
+      "limit": 50
+    }
+  expect: empty  # #582 silent-empty: state filter is pushed onto the HAS_NOTE edge denorm, which encodes no MR state, yielding zero rows
+
+14_ns_aggregation_mr_count_by_project_no_ids:
+  desc: "Ns aggregation mr count by project no ids"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "mr_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+15_ns_aggregation_jobs_by_status:
+  desc: "Ns aggregation jobs by status"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed",
+                "running",
+                "pending"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "j",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "job_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+16_ns_search_pipelines_failed:
+  desc: "Ns search pipelines failed"
+  category: search
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "failed"
+        },
+        "columns": [
+          "id",
+          "status",
+          "ref"
+        ]
+      },
+      "limit": 50
+    }
+
+17_ns_traversal_narrow_group_authored:
+  desc: "Ns traversal narrow group authored"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "u",
+          "entity": "User"
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "u",
+          "to": "mr"
+        }
+      ],
+      "limit": 50
+    }
+
+18_ns_aggregation_narrow_group_pipeline_duration:
+  desc: "Ns aggregation narrow group pipeline duration"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed",
+                "running",
+                "pending"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pipe",
+          "alias": "pipeline_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "pipeline_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+19_complex_mr_full_context:
+  desc: "Complex mr full context"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User"
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "mr"
+        },
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "limit": 100
+    }
+
+20_complex_pipeline_chain_no_ids:
+  desc: "Complex pipeline chain no ids"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "failed"
+          }
+        },
+        {
+          "id": "j",
+          "entity": "Job"
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        },
+        {
+          "type": "HAS_JOB",
+          "from": "pipe",
+          "to": "j"
+        }
+      ],
+      "limit": 50
+    }
+
+21_complex_aggregation_multi_filter:
+  desc: "Complex aggregation multi filter"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged",
+            "draft": false
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "merged_non_draft_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "merged_non_draft_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+22_complex_narrow_3node_no_ids:
+  desc: "Complex narrow 3node no ids"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "u",
+          "entity": "User"
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "u",
+          "to": "mr"
+        },
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "limit": 50
+    }
+
+23_complex_narrow_aggregation_jobs_per_project:
+  desc: "Complex narrow aggregation jobs per project"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": "failed"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "j",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "failed_job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "failed_job_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+24_large_result_traversal_all_jobs:
+  desc: "Large result traversal all jobs"
+  category: traversal
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed",
+                "running",
+                "pending"
+              ]
+            }
+          }
+        },
+        {
+          "id": "pipe",
+          "entity": "Pipeline"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PIPELINE",
+          "from": "j",
+          "to": "pipe"
+        }
+      ],
+      "limit": 500
+    }
+
+25_ns_search_all_mrs:
+  desc: "Ns search all mrs"
+  category: search
+  suite: showcase
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "columns": [
+          "id",
+          "title",
+          "state"
+        ],
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": [
+              "opened",
+              "closed",
+              "merged"
+            ]
+          }
+        }
+      },
+      "limit": 100
+    }
+
+26_property_group_vulnerabilities_by_severity:
+  desc: "Property group vulnerabilities by severity"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "detected",
+                "confirmed",
+                "resolved",
+                "dismissed"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "v",
+          "property": "severity"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "v",
+          "alias": "vulnerability_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "vulnerability_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+27_property_group_security_scans_by_type:
+  desc: "Property group security scans by type"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "s",
+          "entity": "SecurityScan",
+          "filters": {
+            "latest": true
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "s",
+          "property": "scan_type"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "s",
+          "alias": "scan_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "scan_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+28_property_group_pipeline_status_source:
+  desc: "Property group pipeline status source"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed",
+                "running",
+                "pending"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "pipe",
+          "property": "status",
+          "alias": "status"
+        },
+        {
+          "kind": "property",
+          "node": "pipe",
+          "property": "source",
+          "alias": "source"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pipe",
+          "alias": "pipeline_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "pipeline_count",
+        "direction": "DESC"
+      },
+      "limit": 30
+    }
+
+29_node_and_property_group_project_pipeline_status:
+  desc: "Node and property group project pipeline status"
+  category: aggregation
+  suite: showcase
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name",
+            "full_path"
+          ]
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p",
+          "alias": "project"
+        },
+        {
+          "kind": "property",
+          "node": "pipe",
+          "property": "status",
+          "alias": "pipeline_status"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pipe",
+          "alias": "pipeline_count"
+        },
+        {
+          "function": "avg",
+          "target": "pipe",
+          "property": "duration",
+          "alias": "avg_duration"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "pipeline_count",
+        "direction": "DESC"
+      },
+      "limit": 30
+    }
+
