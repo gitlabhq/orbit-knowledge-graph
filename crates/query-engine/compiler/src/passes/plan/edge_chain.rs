@@ -43,6 +43,10 @@ pub struct Hop {
     /// Tight `traversal_path` prefix to confine this hop's edge scan to,
     /// carried over from the originating `InputRelationship`.
     pub scope_prefix: Option<String>,
+    /// Whether this hop keeps both endpoints in the same namespace (intrinsic
+    /// child). Gates the FK-chain lowering, which is only result-equivalent to
+    /// the edge scan for such relationships.
+    pub scope_preserving: bool,
 }
 
 /// Pre-resolved join columns for connecting a hop to the previous hop.
@@ -154,6 +158,10 @@ pub enum Strategy {
     /// The center node drives a single scan; other nodes JOIN via FK columns.
     /// Zero edge table scans.
     FkStar { center: String },
+    /// Linear FK chain: every hop is FK-derived and consecutive hops share a
+    /// node. The node tables are joined on their FK columns; the edges are a
+    /// materialization of those FKs, so the chain skips all edge table scans.
+    FkChain,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +188,8 @@ pub fn plan(input: &mut Input) -> Plan {
         Strategy::SingleNode
     } else if let Some(center) = detect_fk_star(&hops) {
         Strategy::FkStar { center }
+    } else if input.query_type == QueryType::Traversal && detect_fk_chain(&hops) {
+        Strategy::FkChain
     } else {
         Strategy::Flat
     };
@@ -283,6 +293,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.min_hops,
                 max_hops: rel.max_hops,
                 fk,
+                scope_preserving: rel.scope_preserving,
                 filters: rel
                     .filters
                     .iter()
@@ -424,6 +435,27 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
         }
     }
     Some(first_center.clone())
+}
+
+/// Multi-hop traversal where every hop is a single-depth, single-directional,
+/// scope-preserving scalar FK with no edge-level filters, and the hops connect
+/// end-to-end. Such a chain is answerable by joining node tables on their FK
+/// columns, with zero edge scans. Single-hop FK traversals are handled by
+/// `detect_fk_star`; this fires only when `detect_fk_star` does not (hops span
+/// more than one FK center). The FK join carries no edge row and requires the
+/// joined node to exist, so it stays on the edge-scan path for hops with
+/// edge-property filters, `Both` direction, or a non-scope-preserving target
+/// (an independent entity like a runner can outlive the edge to it).
+fn detect_fk_chain(hops: &[Hop]) -> bool {
+    hops.len() >= 2
+        && hops.iter().all(|h| {
+            h.fk.is_some()
+                && h.scope_preserving
+                && h.max_hops == 1
+                && h.filters.is_empty()
+                && !matches!(h.direction, Direction::Both)
+        })
+        && hops.windows(2).all(|w| w[0].to_node == w[1].from_node)
 }
 
 fn reorder_by_selectivity(
@@ -582,6 +614,16 @@ fn compute_node_edge_mappings(
                         fk.fk_node.clone()
                     };
                     mappings.insert(fk.target_node.clone(), (fk_alias, fk.fk_column.clone()));
+                }
+            }
+        }
+        Strategy::FkChain => {
+            // Every node is joined as its own table, so each maps to its own PK.
+            for hop in hops {
+                for node in [&hop.from_node, &hop.to_node] {
+                    mappings
+                        .entry(node.clone())
+                        .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
                 }
             }
         }

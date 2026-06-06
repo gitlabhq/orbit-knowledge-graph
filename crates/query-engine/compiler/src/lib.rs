@@ -1595,6 +1595,66 @@ mod tests {
     }
 
     #[test]
+    fn fk_chain_multi_hop_joins_nodes_via_fk_without_edge_scans() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id", "title"]},
+                {"id": "diff", "entity": "MergeRequestDiff", "columns": ["id"]},
+                {"id": "df", "entity": "MergeRequestDiffFile", "columns": ["id", "new_path"]}
+            ],
+            "relationships": [
+                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
+                {"type": "HAS_FILE", "from": "diff", "to": "df"}
+            ],
+            "limit": 50
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("gl_edge"),
+            "an all-FK chain must answer from node FK joins, not edge scans, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("diff.merge_request_id = mr.id"),
+            "HAS_DIFF should join via the diff's FK to the merge request, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("df.merge_request_diff_id = diff.id"),
+            "HAS_FILE should join via the file's FK to the diff, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_chain_with_non_scope_preserving_hop_stays_on_edge_scan() {
+        // AUTHORED links a user to a merge request across namespaces: the user
+        // is an independent entity that can be deleted while the edge survives,
+        // so the chain must not collapse to node joins (which would drop merge
+        // requests whose author is gone).
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "columns": ["id"]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}, "columns": ["id"]},
+                {"id": "diff", "entity": "MergeRequestDiff", "columns": ["id"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_DIFF", "from": "mr", "to": "diff"}
+            ],
+            "limit": 50
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("gl_edge"),
+            "a chain through a non-scope-preserving edge must keep the edge scan, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
         let query = r#"{
             "query_type": "aggregation",

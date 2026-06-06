@@ -233,6 +233,27 @@ fn stamp_edge_scope_prefixes(
     }
 }
 
+/// Mark each relationship whose every resolved variant keeps both endpoints in
+/// the same namespace. The orientation is checked both ways because the query
+/// may traverse a variant in reverse of its ontology definition.
+fn stamp_scope_preserving(input: &mut Input, ontology: &Ontology) {
+    let entity_of: std::collections::HashMap<String, String> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.clone(), n.entity.clone()?)))
+        .collect();
+    for rel in &mut input.relationships {
+        let (Some(from_e), Some(to_e)) = (entity_of.get(&rel.from), entity_of.get(&rel.to)) else {
+            continue;
+        };
+        rel.scope_preserving = !rel.types.is_empty()
+            && rel.types.iter().all(|kind| {
+                ontology.is_scope_preserving_triple(kind, from_e, to_e)
+                    || ontology.is_scope_preserving_triple(kind, to_e, from_e)
+            });
+    }
+}
+
 pub fn restrict(
     input: &mut Input,
     ontology: &Ontology,
@@ -240,6 +261,7 @@ pub fn restrict(
 ) -> Result<()> {
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
     stamp_edge_scope_prefixes(input, ontology, security_ctx);
+    stamp_scope_preserving(input, ontology);
 
     if security_ctx.admin {
         return Ok(());
@@ -363,6 +385,7 @@ mod tests {
             filters: std::collections::HashMap::new(),
             fk_column: None,
             scope_prefix: None,
+            scope_preserving: false,
         }
     }
 

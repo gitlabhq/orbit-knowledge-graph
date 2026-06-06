@@ -580,6 +580,13 @@ pub struct InputRelationship {
     /// Lossless because an edge row's `traversal_path` is its source entity's.
     #[serde(skip)]
     pub scope_prefix: Option<String>,
+    /// Whether every resolved variant of this relationship keeps both endpoints
+    /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
+    /// link a node to an intrinsic child whose lifecycle is coupled to the
+    /// parent; the FK-chain lowering relies on this to be result-equivalent to
+    /// the edge scan (an independent entity like a runner can outlive its edge).
+    #[serde(skip)]
+    pub scope_preserving: bool,
 }
 
 fn default_hops() -> u32 {
