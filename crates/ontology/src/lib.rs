@@ -1276,17 +1276,40 @@ impl Ontology {
         direction: DenormDirection,
         column: &str,
     ) -> bool {
-        let Some(etls) = self.get_edge_etl(relationship_kind) else {
-            return true;
-        };
-        etls.iter().any(|etl| {
-            let endpoint = match direction {
-                DenormDirection::Source => &etl.from,
-                DenormDirection::Target => &etl.to,
-            };
-            matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
-                && endpoint.enrich.iter().any(|c| c == column)
-        })
+        if let Some(etls) = self.get_edge_etl(relationship_kind) {
+            return etls.iter().any(|etl| {
+                let endpoint = match direction {
+                    DenormDirection::Source => &etl.from,
+                    DenormDirection::Target => &etl.to,
+                };
+                matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
+                    && endpoint.enrich.iter().any(|c| c == column)
+            });
+        }
+
+        // An FK edge is indexed from the node holding the key, so only that side
+        // is enriched; the other side's tags stay empty.
+        if let Some(variants) = self.edges.get(relationship_kind)
+            && variants.iter().any(|v| v.fk_column.is_some())
+        {
+            return variants.iter().any(|v| {
+                let Some(fk) = v.fk_column.as_deref() else {
+                    return false;
+                };
+                let holder = match direction {
+                    DenormDirection::Source => &v.source_kind,
+                    DenormDirection::Target => &v.target_kind,
+                };
+                self.node_has_column(holder, fk)
+            });
+        }
+
+        true
+    }
+
+    fn node_has_column(&self, node_kind: &str, column: &str) -> bool {
+        self.get_node(node_kind)
+            .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
     }
 
     /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
@@ -1533,6 +1556,41 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn denorm_declared_only_on_fk_holding_side() {
+        use crate::entities::DenormDirection;
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let denorms_mr_state = |rel: &str, dir: DenormDirection| {
+            ontology.denormalized_properties().iter().any(|dp| {
+                dp.relationship_kind == rel
+                    && dp.node_kind == "MergeRequest"
+                    && dp.property_name == "state"
+                    && dp.direction == dir
+            })
+        };
+
+        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so the
+        // indexer builds the edge from the diff and never enriches the MR/source
+        // side. Declaring MergeRequest.state there would push has(source_tags,
+        // 'state:merged') onto an always-empty array and silently drop every row
+        // of a merged-MR diff traversal (gitlab-org/gitlab#601941).
+        assert!(
+            !denorms_mr_state("HAS_DIFF", DenormDirection::Source),
+            "HAS_DIFF must not denormalize MergeRequest.state onto source_tags"
+        );
+
+        // ETL edges (CLOSES enriches state_id on its `from` endpoint) and
+        // FK edges whose key sits on the MR (IN_PROJECT's project_id) do carry it.
+        assert!(
+            denorms_mr_state("CLOSES", DenormDirection::Source),
+            "CLOSES enriches MergeRequest.state onto source_tags"
+        );
+        assert!(
+            denorms_mr_state("IN_PROJECT", DenormDirection::Source),
+            "IN_PROJECT (project_id on the MR) enriches MergeRequest.state onto source_tags"
+        );
     }
 
     #[test]
