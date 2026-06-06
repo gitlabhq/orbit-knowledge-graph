@@ -188,7 +188,7 @@ pub fn plan(input: &mut Input) -> Plan {
         Strategy::SingleNode
     } else if let Some(center) = detect_fk_star(&hops) {
         Strategy::FkStar { center }
-    } else if input.query_type == QueryType::Traversal && detect_fk_chain(&hops) {
+    } else if input.query_type == QueryType::Traversal && detect_fk_chain(&hops, &nodes) {
         Strategy::FkChain
     } else {
         Strategy::Flat
@@ -446,7 +446,18 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 /// joined node to exist, so it stays on the edge-scan path for hops with
 /// edge-property filters, `Both` direction, or a non-scope-preserving target
 /// (an independent entity like a runner can outlive the edge to it).
-fn detect_fk_chain(hops: &[Hop]) -> bool {
+///
+/// A point-selective endpoint (pinned ids or an id range) also stays on the
+/// edge-scan path: there the SIP narrowing prunes the edge scan to the pinned
+/// set, which beats the FK chain's full scan of the (scoped) leaf node table.
+/// The FK chain wins for broad and property-filtered traversals, where the leaf
+/// must be scanned regardless and it avoids the per-hop edge scans.
+fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
+    let point_selective = |alias: &str| {
+        nodes
+            .get(alias)
+            .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
+    };
     hops.len() >= 2
         && hops.iter().all(|h| {
             h.fk.is_some()
@@ -454,6 +465,8 @@ fn detect_fk_chain(hops: &[Hop]) -> bool {
                 && h.max_hops == 1
                 && h.filters.is_empty()
                 && !matches!(h.direction, Direction::Both)
+                && !point_selective(&h.from_node)
+                && !point_selective(&h.to_node)
         })
         && hops.windows(2).all(|w| w[0].to_node == w[1].from_node)
 }
