@@ -224,11 +224,7 @@ impl CodeIndexingPipeline {
             )
             .await;
 
-        if let Err(error) = self
-            .resolver
-            .cleanup(request.project_id, &request.branch)
-            .await
-        {
+        if let Err(error) = self.resolver.cleanup(&repository.path).await {
             self.metrics.record_cleanup("failure");
             warn!(
                 project_id = request.project_id,

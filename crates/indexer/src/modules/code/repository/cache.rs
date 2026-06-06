@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use code_graph::v2::{FileInventoryEntry, config::is_excluded_from_indexing};
@@ -49,11 +50,13 @@ pub trait RepositoryCache: Send + Sync {
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError>;
 
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
+    async fn remove_repository(&self, path: &Path) -> Result<(), RepositoryCacheError>;
 }
 
 const CACHE_DIR_NAME: &str = "gkg-repository-cache";
 const REPOSITORY_DIR: &str = "repository";
+
+static EXTRACT_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
@@ -79,10 +82,6 @@ impl LocalRepositoryCache {
             .join(project_id.to_string())
             .join(hashed_branch_name(branch))
     }
-
-    fn repository_dir(&self, project_id: i64, branch: &str) -> PathBuf {
-        self.branch_dir(project_id, branch).join(REPOSITORY_DIR)
-    }
 }
 
 fn hashed_branch_name(branch: &str) -> String {
@@ -98,13 +97,10 @@ impl RepositoryCache for LocalRepositoryCache {
         branch: &str,
         archive_stream: ByteStream,
     ) -> Result<CachedRepository, RepositoryCacheError> {
-        let repo_dir = self.repository_dir(project_id, branch);
-
-        match tokio::fs::remove_dir_all(&repo_dir).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
+        let seq = EXTRACT_SEQ.fetch_add(1, Ordering::Relaxed);
+        let repo_dir = self
+            .branch_dir(project_id, branch)
+            .join(format!("{REPOSITORY_DIR}-{}-{seq}", std::process::id()));
         tokio::fs::create_dir_all(&repo_dir).await?;
 
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
@@ -139,16 +135,19 @@ impl RepositoryCache for LocalRepositoryCache {
         })
     }
 
-    async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
-        let branch_dir = self.branch_dir(project_id, branch);
-        match tokio::fs::remove_dir_all(&branch_dir).await {
+    async fn remove_repository(&self, path: &Path) -> Result<(), RepositoryCacheError> {
+        match tokio::fs::remove_dir_all(path).await {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
 
-        let project_dir = self.base_dir.join(project_id.to_string());
-        let _ = tokio::fs::remove_dir(&project_dir).await;
+        if let Some(branch_dir) = path.parent() {
+            let _ = tokio::fs::remove_dir(branch_dir).await;
+            if let Some(project_dir) = branch_dir.parent() {
+                let _ = tokio::fs::remove_dir(project_dir).await;
+            }
+        }
 
         Ok(())
     }
@@ -223,47 +222,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extract_archive_replaces_existing_files() {
+    async fn extract_archive_uses_a_unique_dir_per_call() {
         let (_dir, cache) = create_cache();
-        let first_archive = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
-        cache
-            .extract_archive(42, "main", archive_stream(first_archive))
+        let first = build_tar_gz(&[("project-commit1/old_file.rs", b"old content")]);
+        let path_a = cache
+            .extract_archive(42, "main", archive_stream(first))
             .await
             .unwrap();
 
-        let second_archive = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
-        let path = cache
-            .extract_archive(42, "main", archive_stream(second_archive))
+        let second = build_tar_gz(&[("project-commit2/new_file.rs", b"new content")]);
+        let path_b = cache
+            .extract_archive(42, "main", archive_stream(second))
             .await
             .unwrap();
 
-        assert!(!path.join("old_file.rs").exists());
-        let content = tokio::fs::read_to_string(path.join("new_file.rs"))
-            .await
-            .unwrap();
-        assert_eq!(content, "new content");
+        assert_ne!(path_a.path, path_b.path);
+        assert!(path_a.join("old_file.rs").exists());
+        assert!(path_b.join("new_file.rs").exists());
+        assert!(!path_b.join("old_file.rs").exists());
     }
 
     #[tokio::test]
-    async fn invalidate_removes_directory() {
+    async fn remove_repository_removes_only_its_own_tree() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[("file.rs", b"content")]);
-        let path = cache
+        let keep = cache
+            .extract_archive(42, "main", archive_stream(archive.clone()))
+            .await
+            .unwrap();
+        let drop = cache
             .extract_archive(42, "main", archive_stream(archive))
             .await
             .unwrap();
-        assert!(path.exists());
+        assert!(keep.exists() && drop.exists());
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache.remove_repository(&drop.path).await.unwrap();
 
-        assert!(!path.exists());
+        assert!(!drop.exists());
+        assert!(keep.exists());
     }
 
     #[tokio::test]
-    async fn invalidate_succeeds_when_no_directory_exists() {
-        let (_dir, cache) = create_cache();
+    async fn remove_repository_succeeds_when_no_directory_exists() {
+        let (dir, cache) = create_cache();
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache
+            .remove_repository(&dir.path().join("missing"))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -283,22 +289,17 @@ mod tests {
         assert!(path_main.exists());
         assert!(path_dev.exists());
 
-        cache.invalidate(42, "main").await.unwrap();
+        cache.remove_repository(&path_main.path).await.unwrap();
         assert!(!path_main.exists());
         assert!(path_dev.exists());
 
-        // Project directory still exists because "develop" branch is present
         let project_dir = dir.path().join("42");
         assert!(project_dir.exists());
 
-        cache.invalidate(42, "develop").await.unwrap();
+        cache.remove_repository(&path_dev.path).await.unwrap();
         assert!(!path_dev.exists());
 
-        // Project directory removed after all branches invalidated
-        assert!(
-            !project_dir.exists(),
-            "project directory should be removed when all branches are invalidated"
-        );
+        assert!(!project_dir.exists());
     }
 
     #[tokio::test]

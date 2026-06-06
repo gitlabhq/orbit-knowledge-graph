@@ -278,6 +278,8 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 5. Deletes the downloaded repository from disk
 6. Updates the checkpoint and releases the lock
 
+Each task extracts into a working directory unique to that execution and removes only that directory, so a NATS-redelivered or otherwise concurrent task for the same project and branch can never delete another in-flight task's extracted tree. The handler also emits a periodic in-progress ack for the whole run (every `ack_wait / 3`), so a slow archive download or extract does not exceed `ack_wait` and trigger that redelivery in the first place.
+
 ##### Storage in ClickHouse
 
 The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
