@@ -86,8 +86,11 @@ impl PipelineStage for ProfilerExecutor {
         let result_context = compiled.base.result_context.clone();
         let rendered_sql = compiled.base.render();
 
-        let profiling_id = uuid::Uuid::new_v4().to_string();
-        let log_comment = format!("gkg;profiler;profiling_id={profiling_id}");
+        let correlation_id = labkit::correlation::current();
+        let log_comment = match &correlation_id {
+            Some(id) => format!("gkg;profiler;correlation_id={id}"),
+            None => "gkg;profiler".to_string(),
+        };
 
         let mut query = client
             .query(&compiled.base.sql)
@@ -128,8 +131,9 @@ impl PipelineStage for ProfilerExecutor {
             processors: None,
         };
 
-        // Backfill stats from system.query_log using the profiling_id
-        if let Ok(Some(entry)) = client.fetch_query_log(&profiling_id).await {
+        if let Some(id) = &correlation_id
+            && let Ok(Some(entry)) = client.fetch_query_log(id).await
+        {
             execution.query_id = entry.query_id.clone();
             execution.stats.read_rows = entry.read_rows;
             execution.stats.read_bytes = entry.read_bytes;
@@ -179,5 +183,31 @@ impl PipelineStage for MockAuthorizationStage {
             query_result: input.query_result.clone(),
             authorizations,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::{EnvFilter, Layer};
+
+    // The env filter must stay per-layer; as a global registry filter it would
+    // disable the span below its level and current() would return None.
+    #[test]
+    fn correlation_id_resolves_within_profile_span() {
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::sink)
+                    .with_filter(EnvFilter::new("error")),
+            )
+            .with(labkit::correlation::CorrelationCaptureLayer::new());
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let id = labkit::correlation::generate_id();
+        let span = labkit::context::span_with_id("profile", &id);
+        let resolved = span.in_scope(labkit::correlation::current);
+
+        assert_eq!(resolved.as_deref(), Some(id.as_str()));
     }
 }
