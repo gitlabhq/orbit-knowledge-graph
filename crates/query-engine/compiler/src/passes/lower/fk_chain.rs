@@ -13,6 +13,7 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
+use crate::input::Direction;
 
 use super::EmitOutput;
 use super::helpers::{latest_node_predicates, node_select_columns};
@@ -107,33 +108,40 @@ pub(super) fn emit_fk_chain(plan: &Plan) -> Result<EmitOutput> {
         );
         selects.extend(node_select_columns(&hop.to_node, to_np));
 
-        // Synthesize the edge row for the graph formatter.
+        // Synthesize the edge row in physical (ontology) orientation so source
+        // and target match the edge-scan path even after reorder_by_selectivity
+        // reverses the hop: the edge's source_id side is from_node for an
+        // outgoing hop and to_node for an incoming one.
         let ea = format!("e{i}");
-        let from_entity = plan
-            .nodes
-            .get(&hop.from_node)
-            .and_then(|n| n.entity.as_deref())
-            .unwrap_or("");
-        let to_entity = to_np.entity.as_deref().unwrap_or("");
+        let (src_node, dst_node) = match hop.direction {
+            Direction::Incoming => (&hop.to_node, &hop.from_node),
+            Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
+        };
+        let entity = |alias: &str| {
+            plan.nodes
+                .get(alias)
+                .and_then(|n| n.entity.as_deref())
+                .unwrap_or("")
+        };
         let rel_type = hop.rel_types.first().map(String::as_str).unwrap_or("");
         selects.push(SelectExpr::new(
             Expr::string(rel_type),
             format!("{ea}_{EDGE_TYPE_SUFFIX}"),
         ));
         selects.push(SelectExpr::new(
-            Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
+            Expr::col(src_node, DEFAULT_PRIMARY_KEY),
             format!("{ea}_{EDGE_SRC_SUFFIX}"),
         ));
         selects.push(SelectExpr::new(
-            Expr::string(from_entity),
+            Expr::string(entity(src_node)),
             format!("{ea}_{EDGE_SRC_TYPE_SUFFIX}"),
         ));
         selects.push(SelectExpr::new(
-            Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+            Expr::col(dst_node, DEFAULT_PRIMARY_KEY),
             format!("{ea}_{EDGE_DST_SUFFIX}"),
         ));
         selects.push(SelectExpr::new(
-            Expr::string(to_entity),
+            Expr::string(entity(dst_node)),
             format!("{ea}_{EDGE_DST_TYPE_SUFFIX}"),
         ));
         edge_aliases.push(ea);
