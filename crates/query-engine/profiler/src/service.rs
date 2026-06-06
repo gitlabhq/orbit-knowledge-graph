@@ -112,7 +112,7 @@ impl PipelineStage for ProfilerExecutor {
             PipelineError::Execution("missing X-ClickHouse-Summary header".into())
         })?;
 
-        let mut execution = QueryExecution {
+        let execution = QueryExecution {
             label: "base".into(),
             rendered_sql,
             query_id: String::new(),
@@ -130,17 +130,6 @@ impl PipelineStage for ProfilerExecutor {
             query_log: None,
             processors: None,
         };
-
-        if let Some(id) = &correlation_id
-            && let Ok(Some(entry)) = client.fetch_query_log(id).await
-        {
-            execution.query_id = entry.query_id.clone();
-            execution.stats.read_rows = entry.read_rows;
-            execution.stats.read_bytes = entry.read_bytes;
-            execution.stats.result_rows = entry.result_rows;
-            execution.stats.result_bytes = entry.result_bytes;
-            execution.stats.memory_usage = entry.memory_usage as i64;
-        }
 
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
