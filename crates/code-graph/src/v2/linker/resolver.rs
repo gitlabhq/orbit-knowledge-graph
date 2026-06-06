@@ -657,7 +657,23 @@ impl<'a> ResolveCtx<'a> {
                 .by_fqn
                 .lookup(r.name, |idx| self.graph.def_fqn(idx) == r.name);
             if !matches.is_empty() {
-                return Ok(matches.to_vec());
+                if self.settings.same_directory_scope {
+                    // Directory-scoped languages (HCL): a qualified ref such as
+                    // `local.x` / `aws_vpc.this` only addresses its own module
+                    // (directory). Keep same-directory matches; if none, fall
+                    // through rather than bind to an unrelated module's def.
+                    let dir = super::imports::dir_of(self.graph.graph[self.file_node].path());
+                    let same: Vec<_> = matches
+                        .iter()
+                        .copied()
+                        .filter(|&idx| super::imports::dir_of(self.graph.graph[idx].path()) == dir)
+                        .collect();
+                    if !same.is_empty() {
+                        return Ok(same);
+                    }
+                } else {
+                    return Ok(matches.to_vec());
+                }
             }
         }
 

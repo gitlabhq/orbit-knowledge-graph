@@ -5,9 +5,9 @@ use treesitter_visit::extract::{child_of_kind, text};
 use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{
-    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
+    ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
 };
-use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::linker::{HasRules, ResolutionRules, ResolveSettings};
 use treesitter_visit::Axis;
 use treesitter_visit::Match;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -210,14 +210,11 @@ fn hcl_on_scope(
             }
         }
         // Variable/Module blocks are `.no_scope()`, so the scope rule pushed a
-        // single flat def whose fqn equals its name (e.g. "region"). The engine's
-        // bare-name cross-file strategy (GlobalName) only admits a non-type-container
-        // def when fqn != name, so flat Variable defs were unreachable across files
-        // (var.x is defined in variables.tf but referenced from main.tf). Re-anchor
-        // the fqn under the reference namespace ("var"/"module") so a bare `var.x` /
-        // `module.x` reference resolves through the CAPPED GlobalName strategy.
-        // References stay bare in hcl_rewrite_ref; this is the def-side half.
-        // `last.name` (not `last.fqn`) keeps this idempotent.
+        // single flat def whose fqn equals its name (e.g. "region"). Re-anchor the
+        // fqn under the reference namespace ("var"/"module") so definition FQNs
+        // mirror Terraform's reference syntax (var.region / module.sg). Resolution
+        // itself is directory-scoped (see HclRules: SameDirectory); references stay
+        // bare in hcl_rewrite_ref. `last.name` (not `last.fqn`) keeps this idempotent.
         Some(ns @ ("variable" | "module")) => {
             let expected = if ns == "variable" {
                 "Variable"
@@ -265,21 +262,19 @@ fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
         .find(|c| c.kind().as_ref() == "identifier")
         .map(|c| c.text().to_string())?;
 
-    // Rewrite strategy is split by how the engine resolves the result:
-    //  - Bare names (var.x → "x", module.x → "x") route through the CAPPED
-    //    GlobalName strategy, matching the namespaced def fqn (var.x / module.x)
-    //    that hcl_on_scope produces — bounded cross-directory fan-out.
-    //  - Dotted names (local.x → "locals.x", data/resource → "type.name") match
-    //    a dotted def fqn via the engine's UNBOUNDED by_fqn fast path: full recall
-    //    but cross-directory over-resolution (a known engine gap — there is no
-    //    directory/module-scoped resolution strategy for HCL's flat namespace).
+    // Every reference is rewritten to the dotted FQN of its target definition,
+    // so it resolves through the engine's qualified-name fast path — which
+    // `same_directory_scope` (see HclRules) restricts to the referencing file's
+    // own directory (the Terraform module). var/module FQNs are namespaced in
+    // hcl_on_scope (var.x / module.x); locals live under a "locals" scope;
+    // resources/data sources are already type.name.
     match name {
-        // var.x → "x": resolves to the namespaced `var.x` def via GlobalName.
-        "var" => Some(attr_name),
-        // local.x → "locals.x" (locals scope is named "locals")
+        // var.x.attr → "var.x": matches the namespaced Variable fqn.
+        "var" => Some(format!("var.{attr_name}")),
+        // local.x → "locals.x" (the locals scope is named "locals").
         "local" => Some(format!("locals.{attr_name}")),
-        // module.x → "x": resolves to the namespaced `module.x` def via GlobalName.
-        "module" => Some(attr_name),
+        // module.x.attr → "module.x": matches the namespaced Module fqn.
+        "module" => Some(format!("module.{attr_name}")),
         // data.type.name → "type.name" to match data source FQNs
         "data" => {
             let attrs: Vec<_> = parent
@@ -317,15 +312,13 @@ impl HasRules for HclRules {
             scopes,
             spec,
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
-            // No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution.
-            // Worse, since hcl_on_scope namespaces variable/module fqns (var.x /
-            // module.x), ScopeFqnWalk would walk a bare ref up to the "var"/"module"
-            // segment and do an UNBOUNDED global by_fqn match, fanning a single
-            // `var.region` ref out to every same-named variable across every module
-            // directory in the repo. SameFile then the CAPPED GlobalName keep
-            // bare-ref resolution bounded; dotted refs (resource/data/local) never
-            // reach these strategies — they resolve via the engine's by_fqn fast path.
-            vec![ImportStrategy::SameFile, ImportStrategy::GlobalName],
+            // No import strategies: every HCL reference is rewritten
+            // (hcl_rewrite_ref) to the dotted FQN of its target, so all resolution
+            // runs through the engine's qualified-name fast path. `same_directory_scope`
+            // (below) restricts that fast path to the referencing file's own
+            // directory — a Terraform module is exactly one directory of .tf files
+            // sharing a flat namespace, so a cross-directory match is never correct.
+            vec![],
             ReceiverMode::None,
             ".",
             &[],
@@ -333,6 +326,10 @@ impl HasRules for HclRules {
         )
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::default(),
+            ..Default::default()
+        })
+        .with_settings(ResolveSettings {
+            same_directory_scope: true,
             ..Default::default()
         })
     }
@@ -490,8 +487,8 @@ resource "aws_instance" "web" {
 "#,
         );
         assert!(
-            refs.contains(&"instance_type".to_string()),
-            "expected var ref rewritten to bare name: {refs:?}"
+            refs.contains(&"var.instance_type".to_string()),
+            "expected var ref rewritten to namespaced fqn: {refs:?}"
         );
     }
 
@@ -539,7 +536,7 @@ locals {
             "expected function ref inside for expr: {refs:?}"
         );
         assert!(
-            refs.contains(&"tags".to_string()),
+            refs.contains(&"var.tags".to_string()),
             "expected var.tags rewritten ref: {refs:?}"
         );
     }
@@ -593,7 +590,7 @@ resource "aws_instance" "web" {
 "#,
         );
         assert!(
-            refs.contains(&"environment".to_string()),
+            refs.contains(&"var.environment".to_string()),
             "expected var.environment interpolation ref: {refs:?}"
         );
     }
@@ -660,7 +657,7 @@ resource "aws_instance" "web" {
     }
 
     #[test]
-    fn module_ref_rewrites_to_bare_name() {
+    fn module_ref_rewrites_to_namespaced_fqn() {
         let refs = parse_refs(
             r#"
 resource "aws_instance" "web" {
@@ -669,8 +666,8 @@ resource "aws_instance" "web" {
 "#,
         );
         assert!(
-            refs.contains(&"sg".to_string()),
-            "expected module.sg rewritten to sg: {refs:?}"
+            refs.contains(&"module.sg".to_string()),
+            "expected module ref rewritten to namespaced fqn: {refs:?}"
         );
     }
 
@@ -701,11 +698,11 @@ resource "aws_instance" "web" {
 "#,
         );
         assert!(
-            refs.contains(&"project".to_string()),
+            refs.contains(&"var.project".to_string()),
             "expected var.project ref: {refs:?}"
         );
         assert!(
-            refs.contains(&"environment".to_string()),
+            refs.contains(&"var.environment".to_string()),
             "expected var.environment ref: {refs:?}"
         );
     }
