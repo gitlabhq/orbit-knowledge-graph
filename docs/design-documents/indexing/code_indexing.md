@@ -278,6 +278,12 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 5. Deletes the downloaded repository from disk
 6. Updates the checkpoint and releases the lock
 
+##### Working-tree isolation and ack heartbeat
+
+Each task extracts into a working directory unique to that execution (under `<project_id>/<hashed_branch>/repository-<pid>-<seq>`), not a directory shared per `(project_id, branch)`. This is a correctness requirement, not an optimization: a NATS-redelivered or otherwise concurrent task for the same project/branch must never delete or overwrite another in-flight task's extracted tree. Cleanup removes only the specific tree it created.
+
+To keep redeliveries from happening in the first place, the handler emits a periodic in-progress ack (every `ack_wait / 3`) for the whole run. The pipeline only heartbeats once analysis starts, so without this a slow archive download/extract could exceed `ack_wait`, NATS would redeliver, and the redelivered task would race the original.
+
 ##### Storage in ClickHouse
 
 The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.

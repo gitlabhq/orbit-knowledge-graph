@@ -278,6 +278,23 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
+        // Keep the JetStream ack alive across the whole run. The pipeline only
+        // heartbeats once analysis starts, so a slow fetch/extract can exceed
+        // ack_wait, NATS redelivers, and the redelivered task races the
+        // original's working tree. A periodic in-progress ack closes that window.
+        let heartbeat = {
+            let progress = context.progress.clone();
+            let interval = (self.lock_ttl / 3).max(std::time::Duration::from_secs(1));
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(interval);
+                tick.tick().await; // the first tick resolves immediately
+                loop {
+                    tick.tick().await;
+                    progress.notify_in_progress().await;
+                }
+            })
+        };
+
         let result = self
             .pipeline
             .index_project(
@@ -293,6 +310,8 @@ impl CodeIndexingTaskHandler {
                 observer,
             )
             .await;
+
+        heartbeat.abort();
 
         context
             .indexing_status

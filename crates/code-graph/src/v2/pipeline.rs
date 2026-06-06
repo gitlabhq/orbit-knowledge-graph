@@ -570,6 +570,10 @@ pub struct PipelineResult {
 
 pub struct PipelineStats {
     pub files_discovered: usize,
+    /// Files routed to a language family for analysis (the rest are non-code
+    /// inventory). `definitions_count == 0` is expected and benign when this is
+    /// 0 (a no-code repo), and suspicious when this is large.
+    pub parseable_files: usize,
     pub bytes_discovered: u64,
     pub directories_indexed: usize,
     pub files_indexed: usize,
@@ -1001,6 +1005,7 @@ impl Pipeline {
         PipelineResult {
             stats: PipelineStats {
                 files_discovered: total_files,
+                parseable_files: parsable_files,
                 bytes_discovered: total_bytes,
                 directories_indexed: directories_count.into_inner(),
                 files_indexed: files_count.into_inner(),

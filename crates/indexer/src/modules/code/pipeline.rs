@@ -224,11 +224,7 @@ impl CodeIndexingPipeline {
             )
             .await;
 
-        if let Err(error) = self
-            .resolver
-            .cleanup(request.project_id, &request.branch)
-            .await
-        {
+        if let Err(error) = self.resolver.cleanup(&repository.path).await {
             self.metrics.record_cleanup("failure");
             warn!(
                 project_id = request.project_id,
@@ -483,6 +479,7 @@ impl CodeIndexingPipeline {
                 files = result.stats.files_indexed,
                 directories = result.stats.directories_indexed,
                 files_discovered = result.stats.files_discovered,
+                parseable_files = result.stats.parseable_files,
                 faulted = result.faults.len(),
                 skipped = result.skipped.len(),
                 "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
