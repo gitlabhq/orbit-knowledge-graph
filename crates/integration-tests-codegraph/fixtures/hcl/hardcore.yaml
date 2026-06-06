@@ -528,7 +528,7 @@ tests:
     assert:
       - { row: { callee: "aws_db_subnet_group.main" } }
       - { row: { callee: "aws_security_group.rds" } }
-      - { row: { callee: "db_password" } }
+      - { row: { callee: "var.db_password" } }
 
   - name: "RDS security group refs EKS security group"
     query: |

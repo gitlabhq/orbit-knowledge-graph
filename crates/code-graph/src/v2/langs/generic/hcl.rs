@@ -209,6 +209,29 @@ fn hcl_on_scope(
                 }
             }
         }
+        // Variable/Module blocks are `.no_scope()`, so the scope rule pushed a
+        // single flat def whose fqn equals its name (e.g. "region"). The engine's
+        // bare-name cross-file strategy (GlobalName) only admits a non-type-container
+        // def when fqn != name, so flat Variable defs were unreachable across files
+        // (var.x is defined in variables.tf but referenced from main.tf). Re-anchor
+        // the fqn under the reference namespace ("var"/"module") so a bare `var.x` /
+        // `module.x` reference resolves through the CAPPED GlobalName strategy.
+        // References stay bare in hcl_rewrite_ref; this is the def-side half.
+        // `last.name` (not `last.fqn`) keeps this idempotent.
+        Some(ns @ ("variable" | "module")) => {
+            let expected = if ns == "variable" {
+                "Variable"
+            } else {
+                "Module"
+            };
+            if let Some(last) = defs.last_mut()
+                && last.definition_type == expected
+            {
+                let prefix = if ns == "variable" { "var" } else { "module" };
+                let name = last.name.clone();
+                last.fqn = Fqn::from_parts(&[prefix, name.as_str()], sep);
+            }
+        }
         _ => {}
     }
     false
@@ -242,12 +265,20 @@ fn hcl_rewrite_ref(node: &N<'_>, name: &str) -> Option<String> {
         .find(|c| c.kind().as_ref() == "identifier")
         .map(|c| c.text().to_string())?;
 
+    // Rewrite strategy is split by how the engine resolves the result:
+    //  - Bare names (var.x → "x", module.x → "x") route through the CAPPED
+    //    GlobalName strategy, matching the namespaced def fqn (var.x / module.x)
+    //    that hcl_on_scope produces — bounded cross-directory fan-out.
+    //  - Dotted names (local.x → "locals.x", data/resource → "type.name") match
+    //    a dotted def fqn via the engine's UNBOUNDED by_fqn fast path: full recall
+    //    but cross-directory over-resolution (a known engine gap — there is no
+    //    directory/module-scoped resolution strategy for HCL's flat namespace).
     match name {
-        // var.x → "x" (variables are flat defs named by their label)
+        // var.x → "x": resolves to the namespaced `var.x` def via GlobalName.
         "var" => Some(attr_name),
         // local.x → "locals.x" (locals scope is named "locals")
         "local" => Some(format!("locals.{attr_name}")),
-        // module.x → "x" (modules are flat defs named by their label)
+        // module.x → "x": resolves to the namespaced `module.x` def via GlobalName.
         "module" => Some(attr_name),
         // data.type.name → "type.name" to match data source FQNs
         "data" => {
@@ -286,11 +317,15 @@ impl HasRules for HclRules {
             scopes,
             spec,
             vec![ResolveStage::SSA, ResolveStage::ImportStrategies],
-            vec![
-                ImportStrategy::ScopeFqnWalk,
-                ImportStrategy::SameFile,
-                ImportStrategy::GlobalName,
-            ],
+            // No ScopeFqnWalk: HCL has no lexical-scope-relative name resolution.
+            // Worse, since hcl_on_scope namespaces variable/module fqns (var.x /
+            // module.x), ScopeFqnWalk would walk a bare ref up to the "var"/"module"
+            // segment and do an UNBOUNDED global by_fqn match, fanning a single
+            // `var.region` ref out to every same-named variable across every module
+            // directory in the repo. SameFile then the CAPPED GlobalName keep
+            // bare-ref resolution bounded; dotted refs (resource/data/local) never
+            // reach these strategies — they resolve via the engine's by_fqn fast path.
+            vec![ImportStrategy::SameFile, ImportStrategy::GlobalName],
             ReceiverMode::None,
             ".",
             &[],
@@ -696,5 +731,31 @@ data "aws_ami" "ubuntu" {
             .find(|(n, _)| n == "ubuntu")
             .map(|(_, f)| f.as_str());
         assert_eq!(ubuntu_fqn, Some("aws_ami.ubuntu"));
+    }
+
+    #[test]
+    fn variable_and_module_fqns_are_namespaced_but_output_provider_stay_flat() {
+        // var.x / module.x refs stay bare in hcl_rewrite_ref; namespacing the def
+        // fqn (so fqn != name) is what lets the capped GlobalName strategy resolve
+        // them across files. Output/Provider stay flat on purpose: nothing
+        // references them by a bare name, so admitting them to GlobalName would
+        // only add cross-file false positives.
+        let defs = parse_defs(
+            r#"
+variable "region" { default = "us-east-1" }
+module "sg" { source = "./modules/sg" }
+output "vpc_id" { value = "x" }
+provider "aws" { region = "us-east-1" }
+"#,
+        );
+        let fqn = |n: &str| {
+            defs.iter()
+                .find(|(name, _)| name == n)
+                .map(|(_, f)| f.as_str())
+        };
+        assert_eq!(fqn("region"), Some("var.region"));
+        assert_eq!(fqn("sg"), Some("module.sg"));
+        assert_eq!(fqn("vpc_id"), Some("vpc_id"));
+        assert_eq!(fqn("aws"), Some("aws"));
     }
 }
