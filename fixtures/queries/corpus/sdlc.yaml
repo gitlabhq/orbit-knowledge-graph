@@ -1,0 +1,1274 @@
+# SDLC query corpus.
+#
+# Core SDLC traversals + aggregations (also drives the xtask simulator).
+# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
+# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+
+q1:
+  desc: "List active users"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "state": "active"
+        }
+      },
+      "limit": 30,
+      "order_by": {
+        "node": "u",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+
+q2:
+  desc: "Open merge requests in a project"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "opened"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "limit": 25,
+      "order_by": {
+        "node": "mr",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+
+q3:
+  desc: "Draft MRs awaiting review"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "opened",
+            "draft": true
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "mr"
+        }
+      ],
+      "limit": 20
+    }
+
+q4:
+  desc: "MRs merged by a specific user"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "merger",
+          "entity": "User",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "MERGED",
+          "from": "merger",
+          "to": "mr"
+        }
+      ],
+      "limit": 30,
+      "order_by": {
+        "node": "mr",
+        "property": "updated_at",
+        "direction": "DESC"
+      }
+    }
+
+q5:
+  desc: "Count MRs per project"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "mr_count",
+        "direction": "DESC"
+      },
+      "limit": 10
+    }
+
+q6:
+  desc: "Failed pipelines recently"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": "failed"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        }
+      ],
+      "limit": 30,
+      "order_by": {
+        "node": "pipe",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+
+q7:
+  desc: "Pipeline success rate by project"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "pipe",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pipe",
+          "alias": "total_pipelines"
+        }
+      ],
+      "limit": 20
+    }
+
+q8:
+  desc: "Long-running pipelines"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "success",
+          "duration": {
+            "op": "gt",
+            "value": 60
+          }
+        }
+      },
+      "limit": 20,
+      "order_by": {
+        "node": "pipe",
+        "property": "duration",
+        "direction": "DESC"
+      }
+    }
+
+q9:
+  desc: "Critical vulnerabilities detected"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "severity": "critical",
+            "state": "detected"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "v",
+          "to": "p"
+        }
+      ],
+      "limit": 30,
+      "order_by": {
+        "node": "v",
+        "property": "detected_at",
+        "direction": "DESC"
+      }
+    }
+
+q10:
+  desc: "Unresolved high-severity vulns by report type"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "severity": {
+              "op": "in",
+              "value": [
+                "high",
+                "critical"
+              ]
+            },
+            "state": {
+              "op": "in",
+              "value": [
+                "detected",
+                "confirmed"
+              ]
+            }
+          }
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "v",
+          "alias": "vuln_count"
+        }
+      ],
+      "limit": 10
+    }
+
+q11:
+  desc: "Vulnerabilities fixed by MRs"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "state": "resolved"
+          }
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "FIXES",
+          "from": "mr",
+          "to": "v"
+        }
+      ],
+      "limit": 25
+    }
+
+q12:
+  desc: "Open work items (issues) by type"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened"
+          }
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "wi",
+          "alias": "count"
+        }
+      ],
+      "limit": 10
+    }
+
+q13:
+  desc: "Overdue work items"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "wi",
+        "entity": "WorkItem",
+        "filters": {
+          "state": "opened"
+        }
+      },
+      "limit": 30,
+      "order_by": {
+        "node": "wi",
+        "property": "due_date",
+        "direction": "ASC"
+      }
+    }
+
+q14:
+  desc: "High weight work items assigned to user"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened",
+            "weight": {
+              "op": "gte",
+              "value": 1
+            }
+          }
+        },
+        {
+          "id": "assignee",
+          "entity": "User",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "ASSIGNED",
+          "from": "assignee",
+          "to": "wi"
+        }
+      ],
+      "limit": 20
+    }
+  expect: empty  # only ~6% of opened gitlab-org work items have weight>=1; a random sample user rarely has one assigned
+
+q15:
+  desc: "Work items closing MRs"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged"
+          }
+        },
+        {
+          "id": "wi",
+          "entity": "WorkItem"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "CLOSES",
+          "from": "mr",
+          "to": "wi"
+        }
+      ],
+      "limit": 30
+    }
+
+q16:
+  desc: "Notes (comments) on MRs by user"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "note",
+          "entity": "Note",
+          "filters": {
+            "noteable_type": "MergeRequest"
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "note"
+        }
+      ],
+      "limit": 30,
+      "order_by": {
+        "node": "note",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+  expect: empty  # most sampled users have no MR-noteable_type notes in gitlab-org; verified rows for hand-picked MR commenters only
+
+q17:
+  desc: "Comment activity per user"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "note",
+          "entity": "Note",
+          "filters": {
+            "noteable_type": "MergeRequest"
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "note"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "author"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "note",
+          "alias": "note_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "note_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+q18:
+  desc: "Projects in a group"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Project",
+          "filters": {
+            "archived": false
+          }
+        },
+        {
+          "id": "g",
+          "entity": "Group",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "CONTAINS",
+          "from": "g",
+          "to": "p"
+        }
+      ],
+      "limit": 30,
+      "order_by": {
+        "node": "p",
+        "property": "last_activity_at",
+        "direction": "DESC"
+      }
+    }
+
+q19:
+  desc: "Public projects"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "p",
+        "entity": "Project",
+        "filters": {
+          "visibility_level": "public",
+          "archived": false
+        }
+      },
+      "limit": 20,
+      "order_by": {
+        "node": "p",
+        "property": "star_count",
+        "direction": "DESC"
+      }
+    }
+
+q20:
+  desc: "User contributions: authored MRs"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        {
+          "id": "author",
+          "entity": "User"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "AUTHORED",
+          "from": "author",
+          "to": "mr"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "author"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "mr_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+q21:
+  desc: "MR reviewers per project"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        {
+          "id": "reviewer",
+          "entity": "User"
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "REVIEWER",
+          "from": "reviewer",
+          "to": "mr"
+        },
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "reviewer",
+          "alias": "reviewer_count"
+        }
+      ],
+      "limit": 15
+    }
+
+q22:
+  desc: "Work items in milestone"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened"
+          }
+        },
+        {
+          "id": "m",
+          "entity": "Milestone",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_MILESTONE",
+          "from": "wi",
+          "to": "m"
+        }
+      ],
+      "limit": 30
+    }
+
+q23:
+  desc: "Work items with specific label"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened"
+          }
+        },
+        {
+          "id": "lbl",
+          "entity": "Label",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "HAS_LABEL",
+          "from": "wi",
+          "to": "lbl"
+        }
+      ],
+      "limit": 30
+    }
+
+q24:
+  desc: "Pipeline triggered by MR"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "source": "merge_request_event"
+          }
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "TRIGGERED",
+          "from": "mr",
+          "to": "pipe"
+        }
+      ],
+      "limit": 10,
+      "order_by": {
+        "node": "pipe",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+  expect: empty  # random sampled MRs in gitlab-org rarely have a TRIGGERED Pipeline edge; structurally verified against a known MR
+
+q25:
+  desc: "Shortest path between two projects"
+  category: path_finding
+  suite: sdlc
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {
+          "id": "start",
+          "entity": "Project",
+          "node_ids": "$sample"
+        },
+        {
+          "id": "end",
+          "entity": "Project",
+          "node_ids": "$sample"
+        }
+      ],
+      "path": {
+        "type": "shortest",
+        "from": "start",
+        "to": "end",
+        "max_depth": 2,
+        "rel_types": ["CONTAINS"]
+      }
+    }
+  expect: empty  # CONTAINS is parent->child only; two random gitlab-org projects share a Group parent and have no directed CONTAINS path between them
+
+q26:
+  desc: "Users by state"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "state": "active"
+        }
+      },
+      "limit": 20
+    }
+
+q27:
+  desc: "Bot accounts"
+  category: search
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "user_type": {
+            "op": "in",
+            "value": [
+              "project_bot",
+              "service_account",
+              "automation_bot"
+            ]
+          }
+        }
+      },
+      "limit": 30,
+      "order_by": {
+        "node": "u",
+        "property": "created_at",
+        "direction": "DESC"
+      }
+    }
+
+q28:
+  desc: "Confidential work items"
+  category: traversal
+  suite: sdlc
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "confidential": true,
+            "state": "opened"
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "wi",
+          "to": "p"
+        }
+      ],
+      "limit": 20
+    }
+
+q29:
+  desc: "SAST vulnerabilities by severity"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "report_type": "sast"
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "v",
+          "property": "severity"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "v",
+          "alias": "total"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "total",
+        "direction": "DESC"
+      },
+      "limit": 10
+    }
+
+q30:
+  desc: "Merge requests by state"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "mr",
+          "property": "state"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "mr_count",
+        "direction": "DESC"
+      },
+      "limit": 10
+    }
+
+q31:
+  desc: "Pipeline duration by status"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "pipe",
+          "entity": "Pipeline",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "pipe",
+          "property": "status"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pipe",
+          "alias": "pipeline_count"
+        },
+        {
+          "function": "avg",
+          "target": "pipe",
+          "property": "duration",
+          "alias": "avg_duration"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "pipeline_count",
+        "direction": "DESC"
+      },
+      "limit": 10
+    }
+
+q32:
+  desc: "Jobs by status and when"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "job",
+          "entity": "Job",
+          "filters": {
+            "status": {
+              "op": "in",
+              "value": [
+                "success",
+                "failed",
+                "running",
+                "pending"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "job",
+          "property": "status",
+          "alias": "job_status"
+        },
+        {
+          "kind": "property",
+          "node": "job",
+          "property": "when",
+          "alias": "job_when"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "job",
+          "alias": "job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "job_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+
+q33:
+  desc: "Vulnerabilities by severity and state"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "v",
+          "entity": "Vulnerability",
+          "filters": {
+            "report_type": {
+              "op": "in",
+              "value": [
+                "sast",
+                "dependency_scanning",
+                "container_scanning",
+                "secret_detection"
+              ]
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "v",
+          "property": "severity",
+          "alias": "severity"
+        },
+        {
+          "kind": "property",
+          "node": "v",
+          "property": "state",
+          "alias": "state"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "v",
+          "alias": "vuln_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "vuln_count",
+        "direction": "DESC"
+      },
+      "limit": 30
+    }
+
+q34:
+  desc: "Merge request state by project"
+  category: aggregation
+  suite: sdlc
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": {
+              "op": "in",
+              "value": [
+                "opened",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        {
+          "id": "p",
+          "entity": "Project",
+          "node_ids": "$sample"
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p",
+          "alias": "project"
+        },
+        {
+          "kind": "property",
+          "node": "mr",
+          "property": "state",
+          "alias": "mr_state"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "mr_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "mr_count",
+        "direction": "DESC"
+      },
+      "limit": 20
+    }
+

@@ -31,7 +31,7 @@ Adopt GOON, a line-oriented text format for `format=llm` responses. Section-mark
 The format spec was validated by:
 
 - A **5-variant Pareto benchmark** on Haiku 4.5 against the production GitLab.com graph (`gitlab-org/orbit/gkg-evals-harness`). 430 task-runs over two cohorts measured cost, duration, and tool-call correctness for `kv`, `col`, `hier`, `min`, `incident`, and the raw JSON baseline.
-- A **corpus audit pass** running the full `fixtures/queries/corpus-input.json` against production via four parallel sub-agents, surfacing six production-confirmed encoder gaps (each fixed and regression-tested).
+- A **corpus audit pass** running the full query corpus (then `fixtures/queries/corpus-input.json`, since reorganized under `fixtures/queries/corpus/`) against production via four parallel sub-agents, surfacing six production-confirmed encoder gaps (each fixed and regression-tested).
 - A **post-merge data-loss audit** using two parallel sub-agents to walk every field of `GraphResponse` and verify the encoder reads it. Four silent drops found and fixed.
 
 The `kv` variant was Pareto-dominant over raw JSON: −11% cost, −15% duration, +4.8pp correctness, p=0.043 on `tool_sequence_length`. The `min` variant matched `kv` on accuracy at lower token cost, which led to the `@hints` block being descoped from the format — its presence in `kv` did not improve agent behavior over `min`'s absence of it.
