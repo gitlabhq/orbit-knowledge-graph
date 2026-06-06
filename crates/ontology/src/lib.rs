@@ -1288,7 +1288,12 @@ impl Ontology {
         }
 
         // An FK edge is indexed from the node holding the key, so only that side
-        // is enriched; the other side's tags stay empty.
+        // is enriched; the other side's tags stay empty. The `any` guard treats
+        // the whole kind as FK-projecting if a single variant declares an
+        // `fk_column`; this is sound only because every FK-bearing edge declares
+        // it on all variants, except the one mixed edge (`has_identifier`), which
+        // carries an ETL block and already returned above. A future mixed edge
+        // without an ETL block would need per-variant projection instead.
         if let Some(variants) = self.edges.get(relationship_kind)
             && variants.iter().any(|v| v.fk_column.is_some())
         {
