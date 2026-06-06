@@ -388,6 +388,13 @@ impl EdgeVariantScope {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeTpSource {
+    From,
+    To,
+}
+
 /// An edge entity representing a relationship between nodes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
@@ -410,6 +417,7 @@ pub struct EdgeEntity {
     /// Namespace scope relationship. When set, the compiler may propagate a
     /// resolved `traversal_path` prefix across this edge variant.
     pub scope: Option<EdgeVariantScope>,
+    pub edge_tp_source: Option<EdgeTpSource>,
 }
 
 /// ETL configuration for edges sourced from join tables.

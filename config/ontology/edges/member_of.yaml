@@ -37,10 +37,12 @@ properties:
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Group, id: id }
+    edge_tp_source: to
     description: "User is a member of group."
 
   - from_node: { type: User, id: id }
     to_node: { type: Project, id: id }
+    edge_tp_source: to
     description: "User has access to project (via direct membership or group inheritance)."
 
 etl:

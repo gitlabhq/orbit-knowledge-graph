@@ -924,6 +924,12 @@
       "description": "Namespace scope relationship between the two endpoints. Controls whether a resolved traversal_path prefix can propagate across this edge during query compilation. 'namespace_anchor': the source entity's namespace-of-record FK points to the target, which is a namespace anchor (Project/Group) — also enables anchor FK resolution for scope keys. 'same_namespace': both endpoints are guaranteed to live in the same namespace subtree (structural containment, project-local association, or intra-repo reference) — prefix propagates but no anchor FK resolution. Omitted (default): no namespace guarantee, fail-closed — prefix must not propagate."
     },
 
+    "edgeTpSource": {
+      "type": "string",
+      "enum": ["from", "to"],
+      "description": "Which endpoint's resolved traversal_path prefix scopes this edge's scan. Independent of 'scope': lets the compiler tighten the edge from the named side without making the edge scope-preserving, so the prefix does NOT propagate across this edge. Use when the far endpoint is a shared hub (e.g. User, Runner) and same_namespace would silently drop cross-project rows. The named side (from=source_kind, to=target_kind) must itself be path-scopable."
+    },
+
     "edgeVariant": {
       "type": "object",
       "description": "A specific source-target pair for an edge relationship.",
@@ -937,6 +943,10 @@
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",
           "description": "Namespace scope relationship between endpoints. See edgeVariantScope for values."
+        },
+        "edge_tp_source": {
+          "$ref": "#/definitions/edgeTpSource",
+          "description": "Which endpoint's traversal_path prefix scopes this edge. See edgeTpSource. Independent of 'scope'."
         },
         "description": {
           "type": "string",

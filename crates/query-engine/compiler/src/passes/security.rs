@@ -80,8 +80,10 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
                 .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
             let broad = build_path_filter(alias, &ctx.paths_at_least(min_role));
             match ctx.scope_prefixes.get(alias) {
-                Some(prefix) => Expr::and(broad, starts_with_expr(alias, prefix)),
-                None => broad,
+                Some(prefix) if ontology.is_table_path_scopable(table) => {
+                    Expr::and(broad, starts_with_expr(alias, prefix))
+                }
+                _ => broad,
             }
         });
         q.where_clause = Expr::and_all(
@@ -935,7 +937,8 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
+        let ontology = Ontology::new().with_path_scopable_nodes(["Project", "WorkItem"]);
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -950,6 +953,39 @@ mod tests {
             starts_with_paths_for_alias(where_clause, "wi"),
             vec!["1/".to_string()],
             "neighbor alias gets broad authz only, never the tight prefix"
+        );
+    }
+
+    #[test]
+    fn scope_prefix_dropped_on_non_path_scopable_alias() {
+        let mut prefixes = std::collections::HashMap::new();
+        prefixes.insert("g".to_string(), "1/24/23/".to_string());
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes(prefixes);
+
+        let ontology = Ontology::new().with_nodes(["Global"]);
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("g", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_global", "g"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let where_clause = q.where_clause.as_ref().unwrap();
+        assert_eq!(
+            starts_with_paths_for_alias(where_clause, "g"),
+            vec!["1/".to_string()],
+            "non-path-scopable alias must drop scope_prefix and keep broad authz only"
         );
     }
 

@@ -32,10 +32,10 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
-    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
-    StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
-    TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    EdgeTpSource, EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource,
+    MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole,
+    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
+    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -227,6 +227,29 @@ impl Ontology {
         self
     }
 
+    #[must_use]
+    pub fn with_path_scopable_nodes(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let leads_with_tp =
+            self.default_entity_sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN);
+        for name in names {
+            let name = name.into();
+            self.nodes.insert(
+                name.clone(),
+                NodeEntity {
+                    name: name.clone(),
+                    destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
+                    sort_key: self.default_entity_sort_key.clone(),
+                    has_traversal_path: leads_with_tp,
+                    ..Default::default()
+                },
+            );
+        }
+        self
+    }
+
     /// Add edge types by name.
     #[must_use]
     pub fn with_edges(mut self, names: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -271,6 +294,14 @@ impl Ontology {
                 storage: EdgeTableStorage::default(),
             },
         );
+        self
+    }
+
+    #[must_use]
+    pub fn with_edge_variant(mut self, variant: EdgeEntity) -> Self {
+        let kind = variant.relationship_kind.clone();
+        let entry = self.edges.entry(kind).or_default();
+        entry.push(variant);
         self
     }
 
@@ -895,6 +926,15 @@ impl Ontology {
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
     }
 
+    #[must_use]
+    pub fn is_table_path_scopable(&self, table: &str) -> bool {
+        let normalized = strip_schema_version_prefix(table);
+        self.nodes
+            .iter()
+            .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
+            .is_some_and(|(name, _)| self.is_path_scopable(name))
+    }
+
     /// Returns `(fk_column, anchor_entity)` pairs derived from
     /// `namespace_anchor` edge variants. When a query filters an entity by
     /// one of these FK columns, the compiler can resolve the anchor's
@@ -942,6 +982,21 @@ impl Ontology {
                     && v.target_kind == target
                     && v.scope.is_some_and(|s| s.is_scope_preserving())
             })
+        })
+    }
+
+    #[must_use]
+    pub fn edge_tp_source_for(
+        &self,
+        kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Option<EdgeTpSource> {
+        self.edges.get(kind).and_then(|variants| {
+            variants
+                .iter()
+                .find(|v| v.source_kind == source_kind && v.target_kind == target_kind)
+                .and_then(|v| v.edge_tp_source)
         })
     }
 

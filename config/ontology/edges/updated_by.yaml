@@ -6,4 +6,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     fk_column: updated_by_id
+    edge_tp_source: to
     description: "User last updated merge request."

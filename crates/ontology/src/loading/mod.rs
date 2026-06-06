@@ -785,7 +785,7 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
 /// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
 /// that the same FK column name always maps to the same anchor entity.
 fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), OntologyError> {
-    use crate::entities::EdgeVariantScope;
+    use crate::entities::{EdgeTpSource, EdgeVariantScope};
     use std::collections::HashMap;
 
     let mut fk_to_anchor: HashMap<&str, &str> = HashMap::new();
@@ -816,6 +816,33 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
                 } else {
                     fk_to_anchor.insert(fk, &edge.target_kind);
                 }
+            }
+        }
+
+        if edge.scope == Some(EdgeVariantScope::SameNamespace) {
+            for endpoint in [edge.source_kind.as_str(), edge.target_kind.as_str()] {
+                if !ontology.is_path_scopable(endpoint) {
+                    return Err(OntologyError::Validation(format!(
+                        "{} ({}→{}): scope 'same_namespace' requires both endpoints \
+                         to be path-scopable, but '{}' is not. Use 'edge_tp_source' \
+                         instead so the prefix scopes the edge without propagating.",
+                        edge.relationship_kind, edge.source_kind, edge.target_kind, endpoint
+                    )));
+                }
+            }
+        }
+
+        if let Some(tp_source) = edge.edge_tp_source {
+            let (label, named) = match tp_source {
+                EdgeTpSource::From => ("from", edge.source_kind.as_str()),
+                EdgeTpSource::To => ("to", edge.target_kind.as_str()),
+            };
+            if !ontology.is_path_scopable(named) {
+                return Err(OntologyError::Validation(format!(
+                    "{} ({}→{}): edge_tp_source '{}' requires the {} side ('{}') \
+                     to be path-scopable",
+                    edge.relationship_kind, edge.source_kind, edge.target_kind, label, label, named
+                )));
             }
         }
     }

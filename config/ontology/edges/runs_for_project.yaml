@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Runner, id: id }
     to_node: { type: Project, id: id }
+    edge_tp_source: to
     description: "Runner serves jobs for this project."
 
 etl:
