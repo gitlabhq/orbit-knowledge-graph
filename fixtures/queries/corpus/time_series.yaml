@@ -3,6 +3,11 @@
 # Aggregations grouped by a truncated temporal column.
 # Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
 # Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+#
+# Absolute date filters (e.g. "2026-03-01T00:00:00Z") are intentional fixed
+# historical windows: the graph is append-only, so these windows keep matching
+# rows over time and stay reproducible. Roll them forward only if you want the
+# window to track "recent" activity.
 
 01_jobs_failed_per_month:
   desc: "Jobs failed per month"

@@ -582,7 +582,7 @@
 
 15_path_finding_depth2_user_to_project:
   desc: "Path finding depth2 user to project"
-  category: cursor
+  category: path_finding
   suite: cursor
   expect: empty  # shortest-path between random sampled User/Project rarely connects in scope
   query: |
@@ -611,7 +611,7 @@
 
 16_path_finding_depth3:
   desc: "Path finding depth3 work item containment chain"
-  category: cursor
+  category: path_finding
   suite: cursor
   expect: empty  # shortest-path between random sampled endpoints rarely connects in scope
   query: |
