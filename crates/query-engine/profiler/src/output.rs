@@ -3,6 +3,7 @@ use shared::{PipelineOutput, QueryExecution};
 
 #[derive(Serialize)]
 pub struct ProfilerOutput {
+    pub correlation_id: String,
     pub query: serde_json::Value,
     pub security_context: SecurityContextInfo,
     pub compilation: CompilationInfo,
@@ -42,6 +43,7 @@ pub fn build_output(
     traversal_paths: &[String],
     output: &PipelineOutput,
     instance_health: Option<serde_json::Value>,
+    correlation_id: &str,
 ) -> ProfilerOutput {
     let query: serde_json::Value =
         serde_json::from_str(query_json).unwrap_or(serde_json::Value::String(query_json.into()));
@@ -59,6 +61,7 @@ pub fn build_output(
     };
 
     ProfilerOutput {
+        correlation_id: correlation_id.to_string(),
         query,
         security_context: SecurityContextInfo {
             org_id,

@@ -9777,6 +9777,7 @@ dependencies = [
  "gkg-server",
  "gkg-server-config",
  "gkg-utils",
+ "labkit",
  "ontology",
  "pipeline",
  "regex",
@@ -9788,7 +9789,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "types",
- "uuid",
 ]
 
 [[package]]

@@ -11,7 +11,10 @@ use clap::Parser;
 use clickhouse_client::ArrowClickHouseClient;
 use compiler::SecurityContext;
 use ontology::Ontology;
-use tracing_subscriber::EnvFilter;
+use tracing::Instrument;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
 use gkg_server_config::ProfilingConfig;
@@ -125,9 +128,12 @@ async fn run_single(
     query_json: &str,
     instance_health: Option<serde_json::Value>,
 ) -> Result<ProfilerOutput> {
+    let correlation_id = labkit::correlation::generate_id();
+    let span = labkit::context::span_with_id("profile", &correlation_id);
     let mut output = ctx
         .service
         .run_query(ctx.security_ctx.clone(), query_json)
+        .instrument(span)
         .await
         .map_err(|e| anyhow::anyhow!("pipeline failed: {e}"))?;
 
@@ -139,6 +145,7 @@ async fn run_single(
         ctx.traversal_paths,
         &output,
         instance_health,
+        &correlation_id,
     ))
 }
 
@@ -318,10 +325,14 @@ async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .with_writer(std::io::stderr)
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_writer(std::io::stderr)
+                .with_filter(EnvFilter::from_default_env()),
+        )
+        .with(labkit::correlation::CorrelationCaptureLayer::new())
         .init();
 
     let query_json = if cli.query.starts_with('@') {
