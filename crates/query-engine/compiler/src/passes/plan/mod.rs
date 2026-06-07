@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy};
+pub use edge_chain::{
+    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
+};
 pub use hydration::HydrationNodePlan;
 
 /// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
