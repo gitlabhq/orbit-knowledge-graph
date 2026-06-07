@@ -46,7 +46,11 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     };
 
     let mut keys = Vec::new();
-    if let Some(id) = single_id(node) {
+    if node.node_ids.len() > 1 {
+        for &id in &node.node_ids {
+            keys.push(PathResolutionKey::id(entity, id));
+        }
+    } else if let Some(id) = single_id(node) {
         keys.push(PathResolutionKey::id(entity, id));
     }
     if let Some(value) = single_full_path(node) {
@@ -115,9 +119,10 @@ pub fn scope_edges(input: &Input) -> Vec<ScopeEdge<'_>> {
 
 fn eq_value(filters: &[InputFilter]) -> Option<&serde_json::Value> {
     let [filter] = filters else { return None };
-    matches!(filter.op, Some(FilterOp::Eq))
-        .then_some(filter.value.as_ref())
-        .flatten()
+    match filter.op {
+        None | Some(FilterOp::Eq) => filter.value.as_ref(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -146,10 +151,39 @@ mod tests {
     }
 
     #[test]
-    fn multi_id_yields_no_key() {
+    fn multi_id_yields_one_key_per_id_for_lcp_fold() {
         let mut node = project_node("p");
         node.node_ids = vec![1, 2, 3];
-        assert!(scope_keys(&node, ANCHOR_FKS).is_empty());
+        assert_eq!(
+            scope_keys(&node, ANCHOR_FKS),
+            vec![
+                PathResolutionKey::id("Project", 1),
+                PathResolutionKey::id("Project", 2),
+                PathResolutionKey::id("Project", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn bare_full_path_shorthand_yields_full_path_key() {
+        let mut node = InputNode {
+            id: "p".to_string(),
+            entity: Some("Project".to_string()),
+            has_traversal_path: true,
+            ..Default::default()
+        };
+        node.filters.insert(
+            "full_path".to_string(),
+            vec![InputFilter {
+                op: None,
+                value: Some(json!("group/project")),
+                ..Default::default()
+            }],
+        );
+        assert_eq!(
+            scope_keys(&node, ANCHOR_FKS),
+            vec![PathResolutionKey::full_path("Project", "group/project")]
+        );
     }
 
     #[test]

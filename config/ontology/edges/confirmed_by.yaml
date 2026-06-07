@@ -6,4 +6,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
     fk_column: confirmed_by_id
+    scope: prune_to_target
     description: "User confirmed vulnerability."

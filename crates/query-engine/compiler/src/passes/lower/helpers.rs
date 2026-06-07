@@ -595,6 +595,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
+                hop.scope_prefix.as_deref(),
             )
         })
         .collect();
@@ -622,6 +623,7 @@ pub(super) fn build_multi_hop_union(
     (union, where_parts)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_depth_arm(
     depth: u32,
     edge_table: &str,
@@ -630,7 +632,17 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
+    scope_prefix: Option<&str>,
 ) -> Query {
+    let scope_pred = |alias: &str| -> Option<Expr> {
+        scope_prefix.map(|p| {
+            Expr::func(
+                "startsWith",
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(p)],
+            )
+        })
+    };
+
     let mut from = TableRef::scan(edge_table, "e1");
     // First edge: relationship kind + _deleted filter.
     let mut where_parts = Vec::new();
@@ -648,6 +660,7 @@ pub(super) fn build_depth_arm(
         where_parts.push(f);
     }
     where_parts.push(deleted_false("e1"));
+    where_parts.extend(scope_pred("e1"));
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
@@ -669,6 +682,9 @@ pub(super) fn build_depth_arm(
             )
         {
             join_on = Expr::and(join_on, tc);
+        }
+        if let Some(sp) = scope_pred(&curr) {
+            join_on = Expr::and(join_on, sp);
         }
         from = TableRef::join(JoinType::Inner, from, right, join_on);
     }
