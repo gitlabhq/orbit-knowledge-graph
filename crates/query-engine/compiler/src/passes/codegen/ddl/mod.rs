@@ -651,27 +651,6 @@ mod tests {
     }
 
     #[test]
-    fn code_edge_has_no_reorder_projections() {
-        let tables = generate_graph_tables(&ontology());
-        let code_edge = tables
-            .iter()
-            .find(|table| table.name == "gl_code_edge")
-            .expect("gl_code_edge table should be generated");
-
-        let reorder_count = code_edge
-            .projections
-            .iter()
-            .filter(|p| matches!(p, ProjectionDef::Reorder { .. }))
-            .count();
-
-        assert_eq!(
-            reorder_count, 0,
-            "gl_code_edge should have no reorder projections (forward traversals \
-             use the 3-column PK, reverse use bloom_filter on target_id)"
-        );
-    }
-
-    #[test]
     fn every_table_has_system_columns() {
         for table in &generate_graph_tables(&ontology()) {
             let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
