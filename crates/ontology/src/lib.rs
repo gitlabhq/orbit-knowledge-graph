@@ -892,9 +892,10 @@ impl Ontology {
         })
     }
 
-    /// True when `entity` declares a `traversal_path_lookup`, i.e. it is a
-    /// namespace anchor whose `traversal_path` can be resolved from an
-    /// `id`/`full_path` filter. Exactly `Project` and `Group` today.
+    /// True when `entity` declares a `traversal_path_lookup`, i.e. its
+    /// `traversal_path` can be resolved from an `id`/`full_path` filter so a
+    /// query anchored on it can be scope-pruned. `Project`, `Group`, and
+    /// `MergeRequest` today.
     #[must_use]
     pub fn is_anchor(&self, entity: &str) -> bool {
         self.traversal_path_lookups
@@ -2970,7 +2971,7 @@ properties:
     #[test]
     fn is_anchor_tracks_traversal_path_lookups() {
         let o = Ontology::load_embedded().unwrap();
-        for entity in ["Project", "Group"] {
+        for entity in ["Project", "Group", "MergeRequest"] {
             assert!(o.is_anchor(entity), "{entity} declares a lookup");
         }
         for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {

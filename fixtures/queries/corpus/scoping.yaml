@@ -1039,3 +1039,25 @@ unauth_group_in_authorized_list_no_leak:
       "options": {"include_debug_sql": true}
     }
 
+mr_ids_changed_paths_agg:
+  desc: "Most-changed file paths across pinned MergeRequests: MergeRequest (pinned ids) HAS_LATEST_DIFF -> MergeRequestDiff HAS_FILE -> MergeRequestDiffFile, grouped by old_path. The pinned MR ids resolve to their project traversal_path, which floods across the same_namespace diff edges so both edge dedup scans and the diff-file aggregation seek the project's PK range instead of the whole authorized diff-file subtree."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": "$sample"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
+      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "limit": 40
+    }
+

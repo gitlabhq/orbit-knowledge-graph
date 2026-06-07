@@ -188,6 +188,50 @@ mod tests {
     }
 
     #[test]
+    fn flood_reaches_diff_and_file_via_has_latest_diff() {
+        use std::collections::HashMap;
+        let json = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [492857469]},
+                {"id": "diff", "entity": "MergeRequestDiff"},
+                {"id": "df", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "diff"},
+                {"type": "HAS_FILE", "from": "diff", "to": "df"}
+            ],
+            "limit": 80
+        }"#;
+        let input = parse_input(json).unwrap();
+        let seed = HashMap::from([("mr".to_string(), "1/9970/120946322/122873006/".to_string())]);
+        let got = ontology().propagate_scope_prefixes(&scope_edges(&input), &seed);
+        assert_eq!(
+            got.get("diff").map(String::as_str),
+            Some("1/9970/120946322/122873006/")
+        );
+        assert_eq!(
+            got.get("df").map(String::as_str),
+            Some("1/9970/120946322/122873006/")
+        );
+    }
+
+    #[test]
+    fn merge_request_node_ids_yield_mr_scope() {
+        let n = node(
+            "MergeRequest",
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [492857469, 492764321]}, "limit": 1}"#,
+        );
+        assert_eq!(
+            ontology_keys(&n, &ontology()),
+            vec![
+                PathResolutionKey::id("MergeRequest", 492857469),
+                PathResolutionKey::id("MergeRequest", 492764321),
+            ]
+        );
+    }
+
+    #[test]
     fn flood_keeps_distinct_anchor_prefixes_separate() {
         use std::collections::HashMap;
         let json = r#"{
