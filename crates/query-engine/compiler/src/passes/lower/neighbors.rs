@@ -14,7 +14,7 @@ use crate::input::*;
 
 use crate::passes::plan::{EdgeTableConfig, Plan};
 use crate::passes::shared::{
-    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
+    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan_filtered, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
@@ -26,6 +26,7 @@ pub fn emit_neighbors(
     direction: Direction,
     edge: &EdgeTableConfig,
     has_non_denorm: bool,
+    center_tp_lookup: Option<&(String, String)>,
 ) -> Result<Node> {
     let cnp = &plan.nodes[center_alias];
     let center_id = center_alias.to_string();
@@ -37,7 +38,13 @@ pub fn emit_neighbors(
     let center_node_ids = cnp.node_ids.clone();
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
-    let edge_table = edge.tables.clone();
+    let edge_table: Vec<String> = {
+        let mut t = edge.outgoing_tables.clone();
+        t.extend(edge.incoming_tables.iter().cloned());
+        t.sort();
+        t.dedup();
+        t
+    };
     let edge_alias = "e";
 
     fn build_center_dedup(
@@ -126,28 +133,49 @@ pub fn emit_neighbors(
             Direction::Both => unreachable!(),
         };
 
-        let mut where_parts: Vec<Expr> = Vec::new();
-
-        // Center entity kind.
-        where_parts.push(Expr::eq(
-            Expr::col(edge_alias, center_kind_col),
-            Expr::string(&center_entity),
-        ));
-
-        // Push node_ids directly on edge column.
-        if !center_node_ids.is_empty() {
-            where_parts.push(id_list_predicate(
-                edge_alias,
-                center_edge_col,
-                &center_node_ids,
-            ));
-        }
-
         let denorm_dir = if dir == Direction::Outgoing {
             "source"
         } else {
             "target"
         };
+
+        let arm_where = |a: &str| -> Vec<Expr> {
+            let mut wp = vec![Expr::eq(
+                Expr::col(a, center_kind_col),
+                Expr::string(&center_entity),
+            )];
+            if !center_node_ids.is_empty() {
+                wp.push(id_list_predicate(a, center_edge_col, &center_node_ids));
+            }
+            if let Some(ref types) = edge.rel_type_filter
+                && let Some(f) = rel_kind_filter(a, types)
+            {
+                wp.push(f);
+            }
+            // Incoming edges to a namespace center sit at the center's own tp; pin to the resolved paths for a leading-PK point lookup.
+            if dir == Direction::Incoming
+                && !center_node_ids.is_empty()
+                && let Some((src, key_col)) = center_tp_lookup
+            {
+                wp.push(Expr::InSelect {
+                    expr: Box::new(Expr::col(a, TRAVERSAL_PATH_COLUMN)),
+                    query: Box::new(Query {
+                        select: vec![SelectExpr::col("_tpd", TRAVERSAL_PATH_COLUMN)],
+                        from: TableRef::scan(src.as_str(), "_tpd"),
+                        where_clause: Expr::conjoin(vec![
+                            id_list_predicate("_tpd", key_col, &center_node_ids),
+                            deleted_false("_tpd"),
+                        ]),
+                        ..Default::default()
+                    }),
+                });
+            }
+            wp.push(deleted_false(a));
+            wp
+        };
+
+        let mut where_parts: Vec<Expr> = Vec::new();
+        // Denorm tags aren't in the per-arm projection, so they filter the union output alias.
         for (prop, filter) in &center_filters {
             let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
             if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
@@ -156,14 +184,6 @@ pub fn emit_neighbors(
                 where_parts.push(expr);
             }
         }
-
-        if let Some(ref types) = edge.rel_type_filter
-            && let Some(f) = rel_kind_filter(edge_alias, types)
-        {
-            where_parts.push(f);
-        }
-
-        where_parts.push(deleted_false(edge_alias));
 
         let mut select = vec![
             SelectExpr::new(Expr::col(edge_alias, neighbor_id), neighbor_id_column()),
@@ -175,7 +195,13 @@ pub fn emit_neighbors(
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let mut from: TableRef = edge_table_scan(&edge_table, edge_alias);
+        let arm_tables = if dir == Direction::Outgoing {
+            &edge.outgoing_tables
+        } else {
+            &edge.incoming_tables
+        };
+        let (mut from, outer_pushed) = edge_table_scan_filtered(arm_tables, edge_alias, arm_where);
+        where_parts.extend(outer_pushed);
         let needs_center_table = !center_uses_default_pk;
 
         if has_non_denorm {

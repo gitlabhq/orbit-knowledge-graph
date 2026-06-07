@@ -301,6 +301,34 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
     }
 }
 
+/// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
+pub fn edge_table_scan_filtered(
+    tables: &[String],
+    alias: &str,
+    arm_where: impl Fn(&str) -> Vec<Expr>,
+) -> (TableRef, Vec<Expr>) {
+    if tables.len() == 1 {
+        (TableRef::scan(&tables[0], alias), arm_where(alias))
+    } else {
+        let inner_alias = format!("_{alias}");
+        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|col| SelectExpr::col(&inner_alias, *col))
+            .collect();
+        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
+        let arms: Vec<Query> = tables
+            .iter()
+            .map(|table| Query {
+                select: common_cols.clone(),
+                from: TableRef::scan(table, &inner_alias),
+                where_clause: Expr::conjoin(arm_where(&inner_alias)),
+                ..Default::default()
+            })
+            .collect();
+        (TableRef::union_all(arms, alias), Vec::new())
+    }
+}
+
 /// Build a latest-row scan over a ReplacingMergeTree node table.
 ///
 /// `FINAL` applies the table engine's merge semantics at read time, so filters

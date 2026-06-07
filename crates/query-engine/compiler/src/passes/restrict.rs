@@ -1213,6 +1213,7 @@ mod tests {
             filters: std::collections::HashMap::new(),
             fk_column: None,
             scope_prefix: None,
+            scope_preserving: false,
         }
     }
 

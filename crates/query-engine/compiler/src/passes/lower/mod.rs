@@ -77,7 +77,15 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             direction,
             edge,
             has_non_denorm,
-        } => neighbors::emit_neighbors(plan, center, *direction, edge, *has_non_denorm),
+            center_tp_lookup,
+        } => neighbors::emit_neighbors(
+            plan,
+            center,
+            *direction,
+            edge,
+            *has_non_denorm,
+            center_tp_lookup.as_ref(),
+        ),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, pf),
         PlanBody::Hydration(nodes) => {
             hydration::emit_hydration(nodes, plan.limit, input.hydration_dynamic)

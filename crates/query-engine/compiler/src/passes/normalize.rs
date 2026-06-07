@@ -10,7 +10,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use ontology::{EnumType, Ontology};
+use ontology::{EnumType, Ontology, TraversalPathKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -88,6 +88,14 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .compiler
             .edge_target_kinds
             .insert(name.to_string(), ontology.get_edge_all_target_types(name));
+    }
+    for lookup in ontology.traversal_path_lookups() {
+        if lookup.kind == TraversalPathKind::Id {
+            input.compiler.tp_id_lookup.insert(
+                lookup.entity.clone(),
+                (lookup.source_table.clone(), lookup.key_column.clone()),
+            );
+        }
     }
     input.compiler.table_columns.clear();
     for node in ontology.nodes() {

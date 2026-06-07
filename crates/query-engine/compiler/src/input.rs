@@ -175,6 +175,8 @@ pub struct CompilerMetadata {
     pub edge_source_kinds: HashMap<String, Vec<String>>,
     /// Maps relationship kind → valid target entity kinds.
     pub edge_target_kinds: HashMap<String, Vec<String>>,
+    /// Namespace entity (Group/Project) → (tp-dict table, key column) for pinning a neighbors anchor arm to its centers' exact traversal_paths.
+    pub tp_id_lookup: HashMap<String, (String, String)>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -194,6 +196,7 @@ impl Default for CompilerMetadata {
             table_sort_keys: HashMap::new(),
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
+            tp_id_lookup: HashMap::new(),
         }
     }
 }
