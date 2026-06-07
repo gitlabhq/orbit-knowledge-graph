@@ -573,9 +573,10 @@ corpus-smoke-test:
         docker tag ${DEP_PROXY}clickhouse/clickhouse-server:26.2 clickhouse/clickhouse-server:26.2
       fi
   script:
-    # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
-    # against a real ClickHouse schema (no correctness assertions).
-    - cargo nextest run --profile ci --all-features --test containers -E 'test(corpus_smoke)'
+    # Smoke test: every query in fixtures/queries/corpus/ runs through the full
+    # query pipeline against a real ClickHouse schema (no correctness assertions).
+    # --no-capture surfaces the "<n> queries executed" line as proof it ran.
+    - cargo nextest run --profile ci --all-features --test containers -E 'test(corpus_smoke)' --no-capture
     - sccache --show-stats || true
 
 # Benchmark Stage

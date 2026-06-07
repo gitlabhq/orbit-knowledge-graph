@@ -235,6 +235,14 @@ async fn corpus_smoke() {
 
     let corpus = load_corpus();
     let total = corpus.len();
+    // Guard against a vacuous pass (wrong path, empty parse): the corpus is ~360
+    // queries, so anything well below that means the test didn't load it.
+    assert!(
+        total >= 300,
+        "corpus_smoke loaded only {total} queries from {CORPUS_DIR}; expected the full corpus"
+    );
+
+    let mut ran = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
     for (key, entry) in corpus {
@@ -251,6 +259,7 @@ async fn corpus_smoke() {
         };
 
         let outcome = run_pipeline(&ctx, &json, &ontology, &claims).await;
+        ran += 1;
 
         match (expects_error, outcome) {
             (false, Err(e)) => failures.push(format!("{key}: {e:?}")),
@@ -268,5 +277,10 @@ async fn corpus_smoke() {
         total,
         failures.join("\n  ")
     );
-    eprintln!("corpus_smoke: {total} queries ran clean through the full pipeline");
+    // Every query must have actually gone through the pipeline (not skipped).
+    assert!(
+        ran >= 300,
+        "only {ran}/{total} queries reached the pipeline; the rest were skipped"
+    );
+    eprintln!("corpus_smoke: {ran}/{total} queries executed through the full webserver pipeline");
 }
