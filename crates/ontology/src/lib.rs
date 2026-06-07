@@ -1567,34 +1567,23 @@ mod tests {
     fn denorm_declared_only_on_fk_holding_side() {
         use crate::entities::DenormDirection;
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-        let denorms_mr_state = |rel: &str, dir: DenormDirection| {
-            ontology.denormalized_properties().iter().any(|dp| {
-                dp.relationship_kind == rel
-                    && dp.node_kind == "MergeRequest"
-                    && dp.property_name == "state"
-                    && dp.direction == dir
-            })
-        };
 
-        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so the
-        // indexer builds the edge from the diff and never enriches the MR/source
-        // side. Declaring MergeRequest.state there would push has(source_tags,
-        // 'state:merged') onto an always-empty array and silently drop every row
-        // of a merged-MR diff traversal (gitlab-org/gitlab#601941).
+        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so only the
+        // target side projects. Projecting onto the always-empty source side pushes
+        // has(source_tags,'state:merged') and silently drops every merged-MR diff
+        // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
+        // guard would fail if that fix were reverted.
         assert!(
-            !denorms_mr_state("HAS_DIFF", DenormDirection::Source),
-            "HAS_DIFF must not denormalize MergeRequest.state onto source_tags"
-        );
-
-        // ETL edges (CLOSES enriches state_id on its `from` endpoint) and
-        // FK edges whose key sits on the MR (IN_PROJECT's project_id) do carry it.
-        assert!(
-            denorms_mr_state("CLOSES", DenormDirection::Source),
-            "CLOSES enriches MergeRequest.state onto source_tags"
+            !ontology.edge_projects_column("HAS_DIFF", DenormDirection::Source, "state"),
+            "HAS_DIFF must not project MergeRequest.state onto source_tags"
         );
         assert!(
-            denorms_mr_state("IN_PROJECT", DenormDirection::Source),
-            "IN_PROJECT (project_id on the MR) enriches MergeRequest.state onto source_tags"
+            ontology.edge_projects_column("HAS_DIFF", DenormDirection::Target, "state"),
+            "HAS_DIFF (diff holds merge_request_id) projects on the target side"
+        );
+        assert!(
+            ontology.edge_projects_column("IN_PROJECT", DenormDirection::Source, "state"),
+            "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
         );
     }
 
