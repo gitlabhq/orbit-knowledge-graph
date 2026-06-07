@@ -5,7 +5,7 @@ description: Review assignment relationship between users and merge requests
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    edge_tp_source: to
+    scope: prune_to_target
     description: "User is a reviewer of merge request."
 
 etl:

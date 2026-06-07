@@ -920,14 +920,8 @@
 
     "edgeVariantScope": {
       "type": "string",
-      "enum": ["namespace_anchor", "same_namespace"],
-      "description": "Namespace scope relationship between the two endpoints. Controls whether a resolved traversal_path prefix can propagate across this edge during query compilation. 'namespace_anchor': the source entity's namespace-of-record FK points to the target, which is a namespace anchor (Project/Group) — also enables anchor FK resolution for scope keys. 'same_namespace': both endpoints are guaranteed to live in the same namespace subtree (structural containment, project-local association, or intra-repo reference) — prefix propagates but no anchor FK resolution. Omitted (default): no namespace guarantee, fail-closed — prefix must not propagate."
-    },
-
-    "edgeTpSource": {
-      "type": "string",
-      "enum": ["from", "to"],
-      "description": "Which endpoint's resolved traversal_path prefix scopes this edge's scan. Independent of 'scope': lets the compiler tighten the edge from the named side without making the edge scope-preserving, so the prefix does NOT propagate across this edge. Use when the far endpoint is a shared hub (e.g. User, Runner) and same_namespace would silently drop cross-project rows. The named side (from=source_kind, to=target_kind) must itself be path-scopable."
+      "enum": ["namespace_anchor", "same_namespace", "prune_to_source", "prune_to_target"],
+      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) — the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
     },
 
     "edgeVariant": {
@@ -943,10 +937,6 @@
         "scope": {
           "$ref": "#/definitions/edgeVariantScope",
           "description": "Namespace scope relationship between endpoints. See edgeVariantScope for values."
-        },
-        "edge_tp_source": {
-          "$ref": "#/definitions/edgeTpSource",
-          "description": "Which endpoint's traversal_path prefix scopes this edge. See edgeTpSource. Independent of 'scope'."
         },
         "description": {
           "type": "string",

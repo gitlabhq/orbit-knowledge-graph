@@ -3,7 +3,7 @@ description: User who approved a merge request
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    edge_tp_source: to
+    scope: prune_to_target
     description: "User approved a merge request."
 
 etl:

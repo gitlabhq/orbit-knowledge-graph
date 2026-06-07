@@ -6,5 +6,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
     fk_column: resolved_by_id
-    edge_tp_source: to
+    scope: prune_to_target
     description: "User resolved vulnerability."

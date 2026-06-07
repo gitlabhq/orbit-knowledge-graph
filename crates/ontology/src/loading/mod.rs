@@ -785,7 +785,7 @@ fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyEr
 /// namespace anchor (an entity with a `traversal_path_lookup`). Also enforces
 /// that the same FK column name always maps to the same anchor entity.
 fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), OntologyError> {
-    use crate::entities::{EdgeTpSource, EdgeVariantScope};
+    use crate::entities::EdgeVariantScope;
     use std::collections::HashMap;
 
     let mut fk_to_anchor: HashMap<&str, &str> = HashMap::new();
@@ -824,26 +824,30 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
                 if !ontology.is_path_scopable(endpoint) {
                     return Err(OntologyError::Validation(format!(
                         "{} ({}→{}): scope 'same_namespace' requires both endpoints \
-                         to be path-scopable, but '{}' is not. Use 'edge_tp_source' \
-                         instead so the prefix scopes the edge without propagating.",
+                         to be path-scopable, but '{}' is not. Use 'prune_to_source' or \
+                         'prune_to_target' so the prefix scopes the edge without propagating.",
                         edge.relationship_kind, edge.source_kind, edge.target_kind, endpoint
                     )));
                 }
             }
         }
 
-        if let Some(tp_source) = edge.edge_tp_source {
-            let (label, named) = match tp_source {
-                EdgeTpSource::From => ("from", edge.source_kind.as_str()),
-                EdgeTpSource::To => ("to", edge.target_kind.as_str()),
-            };
-            if !ontology.is_path_scopable(named) {
-                return Err(OntologyError::Validation(format!(
-                    "{} ({}→{}): edge_tp_source '{}' requires the {} side ('{}') \
-                     to be path-scopable",
-                    edge.relationship_kind, edge.source_kind, edge.target_kind, label, label, named
-                )));
+        let pruned = match edge.scope {
+            Some(EdgeVariantScope::PruneToSource) => {
+                Some(("prune_to_source", edge.source_kind.as_str()))
             }
+            Some(EdgeVariantScope::PruneToTarget) => {
+                Some(("prune_to_target", edge.target_kind.as_str()))
+            }
+            _ => None,
+        };
+        if let Some((label, named)) = pruned
+            && !ontology.is_path_scopable(named)
+        {
+            return Err(OntologyError::Validation(format!(
+                "{} ({}→{}): scope '{}' requires the named endpoint '{}' to be path-scopable",
+                edge.relationship_kind, edge.source_kind, edge.target_kind, label, named
+            )));
         }
     }
 

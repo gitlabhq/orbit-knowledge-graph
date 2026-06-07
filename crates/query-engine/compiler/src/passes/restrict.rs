@@ -12,7 +12,7 @@ use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
-use ontology::{EdgeTpSource, Ontology};
+use ontology::{EdgeVariantScope, Ontology};
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -245,12 +245,10 @@ fn stamp_edge_scope_prefixes(
             continue;
         };
         for kind in &rel.types {
-            let Some(tp_source) = ontology.edge_tp_source_for(kind, from_kind, to_kind) else {
-                continue;
-            };
-            let named = match tp_source {
-                EdgeTpSource::From => pf,
-                EdgeTpSource::To => pt,
+            let named = match ontology.edge_scope_for(kind, from_kind, to_kind) {
+                Some(EdgeVariantScope::PruneToSource) => pf,
+                Some(EdgeVariantScope::PruneToTarget) => pt,
+                _ => continue,
             };
             if let Some(prefix) = named {
                 rel.scope_prefix = Some(prefix.clone());
@@ -1164,7 +1162,7 @@ mod tests {
         }
     }
 
-    fn reviewer_edge_tp_source_to_ontology() -> Ontology {
+    fn reviewer_prune_to_target_ontology() -> Ontology {
         let base = Ontology::new()
             .with_nodes(["User"])
             .with_path_scopable_nodes(["MergeRequest"]);
@@ -1177,8 +1175,7 @@ mod tests {
             target_kind: "MergeRequest".into(),
             destination_table: edge_table,
             fk_column: None,
-            scope: None,
-            edge_tp_source: Some(ontology::EdgeTpSource::To),
+            scope: Some(ontology::EdgeVariantScope::PruneToTarget),
         })
     }
 
@@ -1197,8 +1194,8 @@ mod tests {
     }
 
     #[test]
-    fn edge_tp_source_to_stamps_when_target_resolves() {
-        let ont = reviewer_edge_tp_source_to_ontology();
+    fn prune_to_target_stamps_when_target_resolves() {
+        let ont = reviewer_prune_to_target_ontology();
         let prefixes = HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()
@@ -1224,13 +1221,13 @@ mod tests {
         assert_eq!(
             input.relationships[0].scope_prefix.as_deref(),
             Some("1/9970/15846663/"),
-            "edge_tp_source=to must stamp the edge from the pinned target's prefix"
+            "prune_to_target must stamp the edge from the pinned target prefix"
         );
     }
 
     #[test]
-    fn edge_tp_source_does_not_propagate_across_hub() {
-        let ont = reviewer_edge_tp_source_to_ontology();
+    fn prune_to_target_does_not_propagate_across_hub() {
+        let ont = reviewer_prune_to_target_ontology();
         let prefixes = HashMap::from([("mr_a".to_string(), "1/9970/15846663/".to_string())]);
         let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
             .unwrap()

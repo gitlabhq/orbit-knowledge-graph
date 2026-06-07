@@ -32,10 +32,10 @@ pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
     DenormalizedProperty, DerivedEntity, DictionaryLayout, DictionaryLifetime, DomainInfo,
     EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
-    EdgeTpSource, EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource,
-    MaterializedViewDefinition, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole,
-    StatisticsConfig, StatisticsExclude, StorageColumn, StorageIndex, StorageProjection,
-    TraversalPathKind, TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
+    EdgeVariantScope, EnumType, Field, FieldSelectivity, FieldSource, MaterializedViewDefinition,
+    NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StatisticsConfig,
+    StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
+    TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -985,18 +985,19 @@ impl Ontology {
         })
     }
 
+    /// The exact `scope` annotation for a `(kind, source, target)` variant.
     #[must_use]
-    pub fn edge_tp_source_for(
+    pub fn edge_scope_for(
         &self,
         kind: &str,
         source_kind: &str,
         target_kind: &str,
-    ) -> Option<EdgeTpSource> {
+    ) -> Option<EdgeVariantScope> {
         self.edges.get(kind).and_then(|variants| {
             variants
                 .iter()
                 .find(|v| v.source_kind == source_kind && v.target_kind == target_kind)
-                .and_then(|v| v.edge_tp_source)
+                .and_then(|v| v.scope)
         })
     }
 

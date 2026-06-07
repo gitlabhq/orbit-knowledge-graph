@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use crate::OntologyError;
 use crate::entities::{
-    EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTpSource, EdgeVariantScope,
+    EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeVariantScope,
 };
 use crate::etl::EtlScope;
 
@@ -31,8 +31,6 @@ struct EdgeVariantYaml {
     fk_column: Option<String>,
     #[serde(default)]
     scope: Option<EdgeVariantScope>,
-    #[serde(default)]
-    edge_tp_source: Option<EdgeTpSource>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,7 +85,6 @@ impl EdgeYaml {
                 destination_table: table.clone(),
                 fk_column: v.fk_column.clone(),
                 scope: v.scope,
-                edge_tp_source: v.edge_tp_source,
             })
             .collect()
     }

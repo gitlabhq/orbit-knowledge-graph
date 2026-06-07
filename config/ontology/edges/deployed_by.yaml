@@ -7,5 +7,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Deployment, id: id }
     fk_column: user_id
-    edge_tp_source: to
+    scope: prune_to_target
     description: "User triggered deployment."
