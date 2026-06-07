@@ -1,5 +1,7 @@
-//! Emit: FK star (all hops FK to same center node, zero edges).
-//! Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
+//! Emit FK-derived traversals as node joins on FK columns (no `gl_edge` scans).
+//! `Star` scans one center with `FINAL` + candidate-CTE narrowing; `Chain` joins
+//! a linear chain end-to-end with `LIMIT 1 BY` scans. Both synthesize the per-hop
+//! edge columns the formatter expects.
 
 use ontology::constants::*;
 use std::collections::{HashMap, HashSet};
@@ -7,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
+use crate::input::Direction;
 
 use super::EmitOutput;
 use super::helpers::{
@@ -17,7 +20,14 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::id_list_predicate;
 
-pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
+pub(super) fn emit_fk(plan: &Plan, shape: &FkShape) -> Result<EmitOutput> {
+    match shape {
+        FkShape::Star { center } => emit_star(plan, center),
+        FkShape::Chain => emit_chain(plan),
+    }
+}
+
+fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
         QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
     })?;
@@ -32,8 +42,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
-    // Elevated-access center node: emit a FilterOnly CTE so SecurityPass
-    // can inject the stricter role-gated startsWith filter.
+    // Elevated access: FilterOnly CTE so SecurityPass injects the role-gated filter.
     if center_np.needs_elevated_filter {
         center_where_parts.extend(emit_filter_subquery(
             center_np,
@@ -133,7 +142,6 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         center_alias,
     );
 
-    // Each hop: target node connected via FK column.
     for hop in &plan.hops {
         let fk = hop
             .fk
@@ -149,7 +157,6 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             fk.fk_node.clone()
         };
 
-        // Pinned target IDs.
         if !target_np.node_ids.is_empty() && fk_alias != center_alias {
             where_parts.push(id_list_predicate(
                 &fk_alias,
@@ -158,12 +165,9 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             ));
         }
 
-        // Target hydration — use pre-resolved fk_needs_join.
         if target_np.fk_needs_join {
-            // Narrow the target's latest-row scan to only IDs the center
-            // actually references via its FK column. Without this, the
-            // target scans the full org (e.g., all Jobs) just to join
-            // on the handful of FK values from the center.
+            // Narrow the target scan to the FK values the center references, else
+            // it scans the full org (e.g. all Jobs) just to join a handful.
             let narrow = if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
                 Some(NarrowSource::Cte(cte_name.clone()))
             } else if target_np.filters.is_empty()
@@ -189,9 +193,8 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
             } else {
                 None
             };
-            // Don't add traversal_path equality to FK JOINs: entities
-            // at different depths have different TP prefixes (e.g.
-            // WorkItem at '1/100/' vs Project at '1/100/1000/').
+            // No traversal_path equality on FK JOINs: entities at different depths
+            // have different TP prefixes (WorkItem '1/100/' vs Project '1/100/1000/').
             let target_table = target_np.table.as_deref().ok_or_else(|| {
                 QueryError::Lowering(format!("node '{}' has no table", target_np.alias))
             })?;
@@ -222,10 +225,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         }
     }
 
-    // Synthesize edge metadata columns for the graph formatter.
-    // FK paths have no edge table, but traversal queries need e0_type,
-    // e0_src, e0_src_type, e0_dst, e0_dst_type for each relationship.
-    // Aggregation queries don't need edge columns.
+    // Synthesize per-hop edge columns for the formatter; aggregations need none.
     let mut edge_aliases = Vec::new();
     if !matches!(plan.body, PlanBody::Traversal) {
         return Ok(EmitOutput {
@@ -246,7 +246,6 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
         let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
 
-        // Source ID/kind and target ID/kind from the FK relationship.
         let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == hop.from_node {
             (
                 Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
@@ -375,4 +374,136 @@ fn emit_join_target_candidate_ctes(
         candidate_ctes.insert(fk.target_node.clone(), cte_name);
     }
     Ok(())
+}
+
+/// Latest-row, `_deleted`-filtered `SELECT *` scan. `scope_prefix` is the tighter
+/// project/group prefix that lets ClickHouse seek the node PK to a contiguous range.
+fn node_scan(np: &NodePlan, plan: &Plan, scope_prefix: Option<&str>) -> Result<TableRef> {
+    let alias = &np.alias;
+    let table = np
+        .table
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
+    let sort_key = plan
+        .table_sort_keys
+        .get(table)
+        .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))?;
+
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+
+    let mut where_parts = latest_node_predicates(alias, np);
+    if np.has_traversal_path
+        && let Some(prefix) = scope_prefix
+    {
+        where_parts.push(Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                Expr::string(prefix),
+            ],
+        ));
+    }
+
+    Ok(TableRef::subquery(
+        Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan(table, alias),
+            where_clause: Expr::conjoin(where_parts),
+            order_by,
+            limit_by: Some((1, limit_by_cols)),
+            ..Default::default()
+        },
+        alias,
+    ))
+}
+
+fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
+    let root_alias = &plan.hops[0].from_node;
+    let root_np = plan
+        .nodes
+        .get(root_alias)
+        .ok_or_else(|| QueryError::Lowering(format!("FK chain root '{root_alias}' not found")))?;
+
+    let mut from = node_scan(root_np, plan, plan.hops[0].scope_prefix.as_deref())?;
+    let mut selects = node_select_columns(root_alias, root_np);
+    let mut edge_aliases = Vec::new();
+
+    for (i, hop) in plan.hops.iter().enumerate() {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
+        let to_np = plan.nodes.get(&hop.to_node).ok_or_else(|| {
+            QueryError::Lowering(format!("FK chain node '{}' not found", hop.to_node))
+        })?;
+
+        let on = if fk.fk_node == hop.to_node {
+            Expr::eq(
+                Expr::col(&hop.to_node, &fk.fk_column),
+                Expr::col(&hop.from_node, DEFAULT_PRIMARY_KEY),
+            )
+        } else {
+            Expr::eq(
+                Expr::col(&hop.from_node, &fk.fk_column),
+                Expr::col(&hop.to_node, DEFAULT_PRIMARY_KEY),
+            )
+        };
+        from = TableRef::join(
+            JoinType::Inner,
+            from,
+            node_scan(to_np, plan, hop.scope_prefix.as_deref())?,
+            on,
+        );
+        selects.extend(node_select_columns(&hop.to_node, to_np));
+
+        // Emit edges in physical (source->target) orientation so a reversed hop
+        // still reports the same orientation as the edge-scan path.
+        let ea = format!("e{i}");
+        let (src_node, dst_node) = match hop.direction {
+            Direction::Incoming => (&hop.to_node, &hop.from_node),
+            Direction::Outgoing | Direction::Both => (&hop.from_node, &hop.to_node),
+        };
+        let entity = |alias: &str| {
+            plan.nodes
+                .get(alias)
+                .and_then(|n| n.entity.as_deref())
+                .unwrap_or("")
+        };
+        let rel_type = hop.rel_types.first().map(String::as_str).unwrap_or("");
+        selects.push(SelectExpr::new(
+            Expr::string(rel_type),
+            format!("{ea}_{EDGE_TYPE_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::col(src_node, DEFAULT_PRIMARY_KEY),
+            format!("{ea}_{EDGE_SRC_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::string(entity(src_node)),
+            format!("{ea}_{EDGE_SRC_TYPE_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::col(dst_node, DEFAULT_PRIMARY_KEY),
+            format!("{ea}_{EDGE_DST_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::string(entity(dst_node)),
+            format!("{ea}_{EDGE_DST_TYPE_SUFFIX}"),
+        ));
+        edge_aliases.push(ea);
+    }
+
+    Ok(EmitOutput {
+        from,
+        edge_aliases,
+        where_parts: Vec::new(),
+        select: selects,
+        ctes: Vec::new(),
+        edge_if_predicates: None,
+    })
 }

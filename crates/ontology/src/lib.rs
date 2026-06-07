@@ -1276,17 +1276,45 @@ impl Ontology {
         direction: DenormDirection,
         column: &str,
     ) -> bool {
-        let Some(etls) = self.get_edge_etl(relationship_kind) else {
-            return true;
-        };
-        etls.iter().any(|etl| {
-            let endpoint = match direction {
-                DenormDirection::Source => &etl.from,
-                DenormDirection::Target => &etl.to,
-            };
-            matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
-                && endpoint.enrich.iter().any(|c| c == column)
-        })
+        if let Some(etls) = self.get_edge_etl(relationship_kind) {
+            return etls.iter().any(|etl| {
+                let endpoint = match direction {
+                    DenormDirection::Source => &etl.from,
+                    DenormDirection::Target => &etl.to,
+                };
+                matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
+                    && endpoint.enrich.iter().any(|c| c == column)
+            });
+        }
+
+        // An FK edge is indexed from the node holding the key, so only that side
+        // is enriched; the other side's tags stay empty. The `any` guard treats
+        // the whole kind as FK-projecting if a single variant declares an
+        // `fk_column`; this is sound only because every FK-bearing edge declares
+        // it on all variants, except the one mixed edge (`has_identifier`), which
+        // carries an ETL block and already returned above. A future mixed edge
+        // without an ETL block would need per-variant projection instead.
+        if let Some(variants) = self.edges.get(relationship_kind)
+            && variants.iter().any(|v| v.fk_column.is_some())
+        {
+            return variants.iter().any(|v| {
+                let Some(fk) = v.fk_column.as_deref() else {
+                    return false;
+                };
+                let holder = match direction {
+                    DenormDirection::Source => &v.source_kind,
+                    DenormDirection::Target => &v.target_kind,
+                };
+                self.node_has_column(holder, fk)
+            });
+        }
+
+        true
+    }
+
+    fn node_has_column(&self, node_kind: &str, column: &str) -> bool {
+        self.get_node(node_kind)
+            .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
     }
 
     /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
@@ -1533,6 +1561,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn denorm_declared_only_on_fk_holding_side() {
+        use crate::entities::DenormDirection;
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so only the
+        // target side projects. Projecting onto the always-empty source side pushes
+        // has(source_tags,'state:merged') and silently drops every merged-MR diff
+        // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
+        // guard would fail if that fix were reverted.
+        assert!(
+            !ontology.edge_projects_column("HAS_DIFF", DenormDirection::Source, "state"),
+            "HAS_DIFF must not project MergeRequest.state onto source_tags"
+        );
+        assert!(
+            ontology.edge_projects_column("HAS_DIFF", DenormDirection::Target, "state"),
+            "HAS_DIFF (diff holds merge_request_id) projects on the target side"
+        );
+        assert!(
+            ontology.edge_projects_column("IN_PROJECT", DenormDirection::Source, "state"),
+            "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
-mod fk_star;
+mod fk;
 mod flat_chain;
 mod helpers;
 pub mod hydration;
@@ -20,7 +20,7 @@ impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
         match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
-            Strategy::FkStar { ref center } => fk_star::emit_fk_star(self, center),
+            Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
             Strategy::Flat | Strategy::Bidirectional { .. } => flat_chain::emit_flat_chain(self),
         }
     }
