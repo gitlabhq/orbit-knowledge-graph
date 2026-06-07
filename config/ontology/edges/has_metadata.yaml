@@ -7,4 +7,5 @@ variants:
   - from_node: { type: Job, id: id }
     to_node: { type: JobMetadata, id: id }
     fk_column: build_id
+    scope: same_namespace
     description: "Job has metadata describing its effective timeout, interruptibility, and expanded environment."

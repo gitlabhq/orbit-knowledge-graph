@@ -5,10 +5,12 @@ description: Entity has a label applied
 variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Label, id: id }
+    scope: prune_to_source
     description: "Work item has label."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Label, id: id }
+    scope: prune_to_source
     description: "Merge request has label."
 
 etl:

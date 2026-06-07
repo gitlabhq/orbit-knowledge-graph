@@ -1396,6 +1396,41 @@ mod tests {
     }
 
     #[test]
+    fn count_with_property_on_skip_target_drops_column_arg() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "wi", "entity": "WorkItem", "filters": {"state": "closed"}},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+                {"type": "CLOSED", "from": "u", "to": "wi"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "u",
+                "property": "id",
+                "alias": "closers_count"
+            }],
+            "limit": 20
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("u.id") && !sql.contains("(u.id"),
+            "must not reference u.id when User is not hydrated and absent from FROM, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("COUNT()") || sql.contains("countIf("),
+            "Count over unhydrated target must collapse to bare COUNT()/countIf(cond), got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_preserves_role_gated_node_table_for_security() {
         let query = r#"{
             "query_type": "aggregation",

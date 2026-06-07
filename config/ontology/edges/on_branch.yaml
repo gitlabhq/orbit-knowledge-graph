@@ -6,8 +6,10 @@ table: gl_code_edge
 variants:
   - from_node: { type: Directory, id: id }
     to_node: { type: Branch, id: id }
+    scope: same_namespace
     description: "Directory exists on branch."
 
   - from_node: { type: File, id: id }
     to_node: { type: Branch, id: id }
+    scope: same_namespace
     description: "File exists on branch."

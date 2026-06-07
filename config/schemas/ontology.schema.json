@@ -920,8 +920,8 @@
 
     "edgeVariantScope": {
       "type": "string",
-      "enum": ["namespace_anchor", "same_namespace"],
-      "description": "Namespace scope relationship between the two endpoints. Controls whether a resolved traversal_path prefix can propagate across this edge during query compilation. 'namespace_anchor': the source entity's namespace-of-record FK points to the target, which is a namespace anchor (Project/Group) — also enables anchor FK resolution for scope keys. 'same_namespace': both endpoints are guaranteed to live in the same namespace subtree (structural containment, project-local association, or intra-repo reference) — prefix propagates but no anchor FK resolution. Omitted (default): no namespace guarantee, fail-closed — prefix must not propagate."
+      "enum": ["namespace_anchor", "same_namespace", "prune_to_source", "prune_to_target"],
+      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) — the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
     },
 
     "edgeVariant": {

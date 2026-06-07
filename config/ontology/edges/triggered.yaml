@@ -7,14 +7,17 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Pipeline, id: id }
     fk_column: user_id
+    scope: prune_to_target
     description: "User triggered pipeline."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
     fk_column: merge_request_id
+    scope: same_namespace
     description: "Merge request triggered pipeline."
 
   - from_node: { type: User, id: id }
     to_node: { type: Job, id: id }
     fk_column: user_id
+    scope: prune_to_target
     description: "User triggered job."

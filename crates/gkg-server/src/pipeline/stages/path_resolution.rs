@@ -50,7 +50,7 @@ impl PipelineStage for PathResolutionStage {
         let anchor_fks = ctx.ontology.anchor_fk_mappings();
         let mut wanted = Vec::new();
         let mut seen = HashSet::new();
-        let mut aliases_by_key: HashMap<PathResolutionKey, Vec<String>> = HashMap::new();
+        let mut keys_by_alias: HashMap<String, Vec<PathResolutionKey>> = HashMap::new();
         for node in &input.nodes {
             for key in scope_keys(node, &anchor_fks) {
                 if ctx
@@ -60,10 +60,10 @@ impl PipelineStage for PathResolutionStage {
                 {
                     continue;
                 }
-                aliases_by_key
-                    .entry(key.clone())
+                keys_by_alias
+                    .entry(node.id.clone())
                     .or_default()
-                    .push(node.id.clone());
+                    .push(key.clone());
                 if seen.insert(key.clone()) {
                     wanted.push(key);
                 }
@@ -73,14 +73,21 @@ impl PipelineStage for PathResolutionStage {
         // resolve_batch returns a cached prefix that can lag a namespace transfer's
         // re-stamp; gating on is_descendant keeps a stale or wrong prefix from widening
         // past authorized scope, leaving only a benign, self-healing under-prune within it.
+        let resolved = resolver.resolve_batch(&wanted).await;
         let mut scope_prefixes = HashMap::new();
-        for (key, path) in resolver.resolve_batch(&wanted).await {
-            if let Some(path) = path
-                && is_descendant(&path, &authorized)
-            {
-                for alias in aliases_by_key.get(&key).into_iter().flatten() {
-                    scope_prefixes.insert(alias.clone(), path.clone());
-                }
+        for (alias, keys) in keys_by_alias {
+            let paths: Vec<String> = keys
+                .iter()
+                .filter_map(|k| resolved.get(k).cloned().flatten())
+                .collect();
+            if paths.is_empty() || paths.len() < keys.len() {
+                continue;
+            }
+            let Some(prefix) = longest_common_path_prefix(&paths) else {
+                continue;
+            };
+            if is_descendant(&prefix, &authorized) {
+                scope_prefixes.insert(alias, prefix);
             }
         }
 
@@ -108,6 +115,23 @@ impl PipelineStage for PathResolutionStage {
 
 fn is_descendant(resolved: &str, authorized: &[&str]) -> bool {
     authorized.iter().any(|auth| resolved.starts_with(auth))
+}
+
+fn longest_common_path_prefix(paths: &[String]) -> Option<String> {
+    let (first, rest) = paths.split_first()?;
+    let mut common: &str = first;
+    for p in rest {
+        let n = common
+            .bytes()
+            .zip(p.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        common = &common[..n];
+    }
+    common
+        .rfind('/')
+        .map(|i| common[..=i].to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Only Traversal/Aggregation scope a node to a tight prefix. Neighbors and
@@ -251,12 +275,49 @@ mod tests {
     }
 
     #[test]
-    fn multi_id_is_skipped() {
+    fn multi_id_yields_one_key_per_id() {
         let n = node(
             "Project",
             r#"{"query_type": "traversal", "node": {"id": "p", "entity": "Project", "node_ids": [1, 2, 3]}, "limit": 1}"#,
         );
-        assert!(ontology_keys(&n, &ontology()).is_empty());
+        assert_eq!(
+            ontology_keys(&n, &ontology()),
+            vec![
+                PathResolutionKey::id("Project", 1),
+                PathResolutionKey::id("Project", 2),
+                PathResolutionKey::id("Project", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn lcp_collapses_sibling_projects_to_shared_group() {
+        let paths = vec!["1/9970/15846663/".to_string(), "1/9970/18/".to_string()];
+        assert_eq!(
+            longest_common_path_prefix(&paths),
+            Some("1/9970/".to_string())
+        );
+    }
+
+    #[test]
+    fn lcp_is_segment_aligned_not_byte_aligned() {
+        let paths = vec!["1/9970/15846663/".to_string(), "1/9971/".to_string()];
+        assert_eq!(longest_common_path_prefix(&paths), Some("1/".to_string()));
+    }
+
+    #[test]
+    fn lcp_returns_none_when_paths_share_no_segment() {
+        let paths = vec!["1/9970/".to_string(), "2/100/".to_string()];
+        assert_eq!(longest_common_path_prefix(&paths), None);
+    }
+
+    #[test]
+    fn lcp_identity_for_single_path() {
+        let paths = vec!["1/9970/15846663/".to_string()];
+        assert_eq!(
+            longest_common_path_prefix(&paths),
+            Some("1/9970/15846663/".to_string())
+        );
     }
 
     #[test]

@@ -15,8 +15,10 @@ properties:
 variants:
   - from_node: { type: Finding, id: id }
     to_node: { type: Pipeline, id: id }
+    scope: same_namespace
     description: "Finding was first detected in pipeline."
 
   - from_node: { type: Finding, id: id }
     to_node: { type: Pipeline, id: id }
+    scope: same_namespace
     description: "Finding was last detected in pipeline."

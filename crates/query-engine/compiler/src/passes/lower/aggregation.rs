@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::passes::plan::Plan;
+use crate::passes::plan::{HydrationStrategy, Plan};
 use crate::passes::shared::requested_columns;
 
 pub fn emit_aggregation(
@@ -83,7 +83,7 @@ fn build_aggregation(
         let owned_default = default_alias(agg.function);
         let alias = agg.alias.as_deref().unwrap_or(&owned_default);
 
-        let agg_expr = build_agg_expr(agg, if_cond);
+        let agg_expr = build_agg_expr(plan, agg, if_cond);
         select.push(SelectExpr::new(agg_expr, alias));
     }
 
@@ -108,11 +108,20 @@ fn build_aggregation(
 /// - `SUM(col)` → `sumIf(col, cond)`
 /// - `AVG/MIN/MAX(col)` → `avgIf/minIf/maxIf(col, cond)`
 /// - `groupArray(col)` → `groupArrayIf(col, cond)`
-fn build_agg_expr(agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
+fn build_agg_expr(plan: &Plan, agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr {
+    let count_drops_col = matches!(agg.function, AggFunction::Count)
+        && agg
+            .target
+            .as_deref()
+            .and_then(|t| plan.nodes.get(t))
+            .is_some_and(|np| matches!(np.hydration, HydrationStrategy::Skip));
+
     match if_cond {
         Some(cond) => match agg.function {
             AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
+                if let (Some(target), Some(prop)) = (&agg.target, &agg.property)
+                    && !count_drops_col
+                {
                     // countIf(col, cond) counts non-null values of col
                     // where cond is true.
                     Expr::func(
@@ -134,7 +143,9 @@ fn build_agg_expr(agg: &InputAggregationMetric, if_cond: Option<&Expr>) -> Expr 
         },
         None => match agg.function {
             AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (&agg.target, &agg.property) {
+                if let (Some(target), Some(prop)) = (&agg.target, &agg.property)
+                    && !count_drops_col
+                {
                     Expr::func("COUNT", vec![Expr::col(target, prop)])
                 } else {
                     Expr::func("COUNT", vec![])
