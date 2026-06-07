@@ -154,14 +154,22 @@ pub enum Strategy {
     Bidirectional { meeting_hop: usize },
     /// Single node, no edges.
     SingleNode,
-    /// Star-schema optimization: all hops have FKs on the same center node.
-    /// The center node drives a single scan; other nodes JOIN via FK columns.
-    /// Zero edge table scans.
-    FkStar { center: String },
-    /// Linear FK chain: every hop is FK-derived and consecutive hops share a
-    /// node. The node tables are joined on their FK columns; the edges are a
-    /// materialization of those FKs, so the chain skips all edge table scans.
-    FkChain,
+    /// FK-derived traversal answered by joining node tables on their FK
+    /// columns, with zero edge-table scans. The [`FkShape`] selects how the
+    /// nodes are joined; both shapes share one emit path (`lower::fk`).
+    Fk(FkShape),
+}
+
+/// Topology of an FK-derived traversal. Single-hop FK is the degenerate
+/// one-hop [`FkShape::Star`].
+pub enum FkShape {
+    /// All hops have FKs on the same center node. The center node drives a
+    /// single scan; other nodes JOIN via the center's FK columns.
+    Star { center: String },
+    /// Every hop is FK-derived and consecutive hops share a node. The node
+    /// tables are joined on their FK columns; the edges are a materialization
+    /// of those FKs, so the chain skips all edge-table scans.
+    Chain,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,10 +194,8 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(center) = detect_fk_star(&hops) {
-        Strategy::FkStar { center }
-    } else if input.query_type == QueryType::Traversal && detect_fk_chain(&hops, &nodes) {
-        Strategy::FkChain
+    } else if let Some(shape) = detect_fk(&hops, &nodes, input.query_type) {
+        Strategy::Fk(shape)
     } else {
         Strategy::Flat
     };
@@ -426,6 +432,22 @@ fn elide_fk_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
+/// Star first (covers single-hop FK), then linear chain. Chain is traversal-only
+/// because aggregations keep the edge-scan path.
+fn detect_fk(
+    hops: &[Hop],
+    nodes: &HashMap<String, NodePlan>,
+    query_type: QueryType,
+) -> Option<FkShape> {
+    if let Some(center) = detect_fk_star(hops) {
+        return Some(FkShape::Star { center });
+    }
+    if query_type == QueryType::Traversal && detect_fk_chain(hops, nodes) {
+        return Some(FkShape::Chain);
+    }
+    None
+}
+
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
     for hop in &hops[1..] {
@@ -437,21 +459,10 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     Some(first_center.clone())
 }
 
-/// Multi-hop traversal where every hop is a single-depth, single-directional,
-/// scope-preserving scalar FK with no edge-level filters, and the hops connect
-/// end-to-end. Such a chain is answerable by joining node tables on their FK
-/// columns, with zero edge scans. Single-hop FK traversals are handled by
-/// `detect_fk_star`; this fires only when `detect_fk_star` does not (hops span
-/// more than one FK center). The FK join carries no edge row and requires the
-/// joined node to exist, so it stays on the edge-scan path for hops with
-/// edge-property filters, `Both` direction, or a non-scope-preserving target
-/// (an independent entity like a runner can outlive the edge to it).
-///
-/// A point-selective endpoint (pinned ids or an id range) also stays on the
-/// edge-scan path: there the SIP narrowing prunes the edge scan to the pinned
-/// set, which beats the FK chain's full scan of the (scoped) leaf node table.
-/// The FK chain wins for broad and property-filtered traversals, where the leaf
-/// must be scanned regardless and it avoids the per-hop edge scans.
+/// Linear FK chain that the node-join path answers without edge scans. Gated out
+/// of edge-property filters, `Both`, non-scope-preserving targets (an independent
+/// entity can outlive its edge), and point-selective endpoints (SIP narrowing on
+/// the edge scan beats a full leaf-node scan there).
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
@@ -612,13 +623,11 @@ fn compute_node_edge_mappings(
     let mut mappings = HashMap::new();
 
     match strategy {
-        Strategy::FkStar { center } => {
-            // Center node maps to itself.
+        Strategy::Fk(FkShape::Star { center }) => {
             mappings.insert(
                 center.clone(),
                 (center.clone(), DEFAULT_PRIMARY_KEY.to_string()),
             );
-            // Each hop's target maps via the FK column on the center.
             for hop in hops {
                 if let Some(ref fk) = hop.fk {
                     let fk_alias = if fk.fk_node == *center {
@@ -630,8 +639,8 @@ fn compute_node_edge_mappings(
                 }
             }
         }
-        Strategy::FkChain => {
-            // Every node is joined as its own table, so each maps to its own PK.
+        Strategy::Fk(FkShape::Chain) => {
+            // Each node is joined as its own table, so it maps to its own PK.
             for hop in hops {
                 for node in [&hop.from_node, &hop.to_node] {
                     mappings
@@ -641,7 +650,6 @@ fn compute_node_edge_mappings(
             }
         }
         _ => {
-            // Flat/Bidirectional: each hop contributes from_node and to_node.
             for (i, hop) in hops.iter().enumerate() {
                 let alias = format!("e{i}");
                 let (start_col, end_col) = hop.direction.edge_columns();
