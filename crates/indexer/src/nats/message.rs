@@ -155,6 +155,19 @@ pub enum DlqResult {
     Nacked,
 }
 
+/// Wraps a [`tokio::task::JoinHandle`] and aborts the task when dropped.
+///
+/// Covers the cancellation and panic cases where an explicit `.abort()` call
+/// would be skipped: if the owning future is cancelled or the thread panics,
+/// the guard's `Drop` impl fires and the spawned task is stopped.
+pub struct AbortOnDrop(pub tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Tells NATS "I'm still working on this" so it doesn't redeliver the message.
 ///
 /// Each call resets the `ack_wait` timer back to its full duration.

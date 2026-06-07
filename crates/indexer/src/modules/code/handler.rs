@@ -14,6 +14,7 @@ use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServ
 use crate::analytics::IndexingAnalytics;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::locking::LockGuard;
+use crate::nats::AbortOnDrop;
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -278,17 +279,17 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
-        let heartbeat = {
+        let _heartbeat = {
             let progress = context.progress.clone();
             let interval = (self.lock_ttl / 3).max(Duration::from_secs(1));
-            tokio::spawn(async move {
+            AbortOnDrop(tokio::spawn(async move {
                 let mut tick = tokio::time::interval(interval);
                 tick.tick().await;
                 loop {
                     tick.tick().await;
                     progress.notify_in_progress().await;
                 }
-            })
+            }))
         };
 
         let result = self
@@ -306,8 +307,6 @@ impl CodeIndexingTaskHandler {
                 observer,
             )
             .await;
-
-        heartbeat.abort();
 
         context
             .indexing_status
