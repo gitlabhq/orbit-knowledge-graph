@@ -17,7 +17,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
 use executor::enrich_output;
-use gkg_server_config::ProfilingConfig;
+use gkg_server::pipeline::PathResolver;
+use gkg_server_config::{PathResolverConfig, ProfilingConfig};
 use output::{ProfilerOutput, build_output};
 use service::ProfilerPipelineService;
 
@@ -402,7 +403,15 @@ async fn main() -> Result<()> {
         None
     };
 
-    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client));
+    let resolver = Some(Arc::new(
+        PathResolver::new(
+            Arc::clone(&client),
+            &ontology,
+            &PathResolverConfig::default(),
+        )
+        .await,
+    ));
+    let service = ProfilerPipelineService::new(ontology, Arc::clone(&client), resolver);
     let run_ctx = RunContext {
         service: &service,
         client: &client,
