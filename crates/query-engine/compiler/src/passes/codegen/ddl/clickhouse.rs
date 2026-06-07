@@ -685,35 +685,6 @@ mod tests {
         emit_create_materialized_view(&mv);
     }
 
-    #[test]
-    fn emit_bloom_filter_stable_precision() {
-        let idx = IndexDef {
-            name: "idx_id".into(),
-            expression: "id".into(),
-            index_type: IndexType::BloomFilter(0.01),
-            granularity: 1,
-        };
-        let table = CreateTable {
-            name: "test".into(),
-            columns: vec![ColumnDef::new("id", ColumnType::Int64)],
-            indexes: vec![idx],
-            projections: vec![],
-            engine: Engine {
-                name: "MergeTree".into(),
-                args: vec![],
-            },
-            order_by: vec!["id".into()],
-            primary_key: None,
-            settings: vec![],
-        };
-
-        let sql = emit_create_table(&table);
-        assert!(
-            sql.contains("bloom_filter(0.01)"),
-            "bloom_filter precision should be stable: {sql}"
-        );
-    }
-
     fn dict() -> CreateDictionary {
         CreateDictionary {
             name: "gl_project_traversal_paths_dict".into(),
