@@ -142,6 +142,7 @@ storage:
     - {name: end_char, type: "Int64", codec: ["Delta(8)", "LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_fqn, column: fqn, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}

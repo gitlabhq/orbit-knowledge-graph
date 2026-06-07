@@ -75,7 +75,7 @@ fn emit_index_type(it: &IndexType) -> String {
     match it {
         IndexType::MinMax => "minmax".into(),
         IndexType::Set(n) => format!("set({n})"),
-        IndexType::BloomFilter(rate) => format!("bloom_filter({rate:.2})"),
+        IndexType::BloomFilter(rate) => format!("bloom_filter({rate})"),
         IndexType::Text(params) => format!("text({params})"),
         IndexType::NgramBF(params) => format!("ngrambf_v1({params})"),
         IndexType::TokenBF(params) => format!("tokenbf_v1({params})"),
