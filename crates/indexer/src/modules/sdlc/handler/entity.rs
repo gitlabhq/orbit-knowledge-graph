@@ -8,13 +8,13 @@ use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{CheckpointStore, namespace_position_key};
+use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
 use crate::modules::sdlc::plan::{Plan, PreparedQuery, TraversalPathFilter, WatermarkFilter};
 use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
@@ -124,13 +124,12 @@ impl EntityHandler {
             .load(&checkpoint_key)
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        // Only a completed checkpoint may advance the watermark; an in-progress one
-        // stores a never-reached target that would skip unprocessed rows below it.
-        let last_watermark = parent_checkpoint
-            .as_ref()
-            .filter(|checkpoint| checkpoint.cursor_values.is_none())
-            .map(|checkpoint| checkpoint.watermark)
-            .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+        let (last_watermark, target_watermark) =
+            pull_window(parent_checkpoint.as_ref(), request.watermark);
+        let window = WindowBounds {
+            target: target_watermark,
+            floor: Some(last_watermark),
+        };
 
         observer.set_indexing_mode(if parent_checkpoint.is_none() {
             IndexingMode::Full
@@ -151,7 +150,7 @@ impl EntityHandler {
             .with(WatermarkFilter {
                 column: &self.plan.watermark_column,
                 last: last_watermark,
-                current: request.watermark,
+                current: target_watermark,
             })
             .with(
                 request
@@ -178,7 +177,7 @@ impl EntityHandler {
                     &self.plan,
                     base_query,
                     &checkpoint_key,
-                    request.watermark,
+                    window,
                 )
                 .await
         } else {
@@ -192,7 +191,7 @@ impl EntityHandler {
                 .run_partitions(
                     base_query.into_partitions(ranges),
                     &checkpoint_key,
-                    request.watermark,
+                    window,
                     &context,
                     &pipeline_context,
                 )
@@ -254,7 +253,7 @@ impl EntityHandler {
             PreparedQuery,
         )>,
         checkpoint_key: &str,
-        target_watermark: DateTime<Utc>,
+        window: WindowBounds,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
@@ -284,13 +283,7 @@ impl EntityHandler {
 
             set.spawn(async move {
                 pipeline
-                    .run_plan(
-                        &partition_context,
-                        &plan,
-                        query,
-                        &position_key,
-                        target_watermark,
-                    )
+                    .run_plan(&partition_context, &plan, query, &position_key, window)
                     .await
             });
         }
@@ -313,6 +306,24 @@ impl EntityHandler {
                 errors.join("; ")
             )))
         }
+    }
+}
+
+/// The `(last, target]` window for a pull. A cursor-bearing checkpoint resumes its
+/// original window rather than rescanning from epoch.
+fn pull_window(
+    parent_checkpoint: Option<&Checkpoint>,
+    request_watermark: DateTime<Utc>,
+) -> (DateTime<Utc>, DateTime<Utc>) {
+    match parent_checkpoint {
+        Some(checkpoint) if checkpoint.cursor_values.is_some() => (
+            checkpoint
+                .resume_floor
+                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+            checkpoint.watermark,
+        ),
+        Some(checkpoint) => (checkpoint.watermark, request_watermark),
+        None => (DateTime::<Utc>::UNIX_EPOCH, request_watermark),
     }
 }
 
@@ -484,6 +495,59 @@ mod tests {
 
         let result = handler.handle(handler_context(), envelope).await;
         assert!(result.is_ok());
+    }
+
+    fn ts(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn pull_window_missing_checkpoint_is_full_load() {
+        let now = ts("2026-06-07T22:00:00Z");
+        assert_eq!(pull_window(None, now), (DateTime::<Utc>::UNIX_EPOCH, now));
+    }
+
+    #[test]
+    fn pull_window_completed_advances_to_now() {
+        let now = ts("2026-06-07T22:00:00Z");
+        let completed = Checkpoint {
+            watermark: ts("2026-06-07T21:59:30Z"),
+            cursor_values: None,
+            resume_floor: None,
+        };
+        assert_eq!(
+            pull_window(Some(&completed), now),
+            (ts("2026-06-07T21:59:30Z"), now)
+        );
+    }
+
+    // Resume must keep the original window, never expand to (epoch, now].
+    #[test]
+    fn pull_window_resume_keeps_original_window() {
+        let now = ts("2026-06-07T22:05:00Z");
+        let in_progress = Checkpoint {
+            watermark: ts("2026-06-07T22:00:00Z"),
+            cursor_values: Some(vec!["1/65957873/".to_string(), "42".to_string()]),
+            resume_floor: Some(ts("2026-06-07T21:59:30Z")),
+        };
+        assert_eq!(
+            pull_window(Some(&in_progress), now),
+            (ts("2026-06-07T21:59:30Z"), ts("2026-06-07T22:00:00Z"))
+        );
+    }
+
+    #[test]
+    fn pull_window_resume_without_floor_falls_back_to_epoch() {
+        let now = ts("2026-06-07T22:05:00Z");
+        let legacy = Checkpoint {
+            watermark: ts("2026-06-07T22:00:00Z"),
+            cursor_values: Some(vec!["42".to_string()]),
+            resume_floor: None,
+        };
+        assert_eq!(
+            pull_window(Some(&legacy), now),
+            (DateTime::<Utc>::UNIX_EPOCH, ts("2026-06-07T22:00:00Z"))
+        );
     }
 
     #[tokio::test]

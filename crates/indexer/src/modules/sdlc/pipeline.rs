@@ -120,7 +120,7 @@ impl Pipeline {
         plan: &Plan,
         base_query: PreparedQuery,
         position_key: &str,
-        target_watermark: DateTime<Utc>,
+        window: WindowBounds,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -131,18 +131,11 @@ impl Pipeline {
         }
 
         let mut stats = self
-            .run(
-                context,
-                plan,
-                base_query,
-                cursor,
-                position_key,
-                target_watermark,
-            )
+            .run(context, plan, base_query, cursor, position_key, window)
             .await?;
 
         self.checkpoint_store
-            .save_completed(position_key, &target_watermark)
+            .save_completed(position_key, &window.target)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -155,7 +148,7 @@ impl Pipeline {
         stats.duration_ms = elapsed.as_millis() as u64;
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics.record_watermark_lag(&target_watermark);
+        self.metrics.record_watermark_lag(&window.target);
 
         {
             let mut observer = context.observer.lock().unwrap();
@@ -191,7 +184,7 @@ impl Pipeline {
         base_query: PreparedQuery,
         cursor: Cursor,
         position_key: &str,
-        target_watermark: DateTime<Utc>,
+        window: WindowBounds,
     ) -> Result<PipelineStats, HandlerError> {
         let transform = self.registry.build(plan)?;
 
@@ -213,13 +206,7 @@ impl Pipeline {
         );
 
         let consumed = self
-            .consume(
-                rx,
-                context,
-                transform.as_ref(),
-                position_key,
-                target_watermark,
-            )
+            .consume(rx, context, transform.as_ref(), position_key, window)
             .await;
 
         // Producer error wins: a write failure usually means it failed first and
@@ -233,7 +220,7 @@ impl Pipeline {
     async fn save_batch_progress(
         &self,
         position_key: &str,
-        target_watermark: DateTime<Utc>,
+        window: WindowBounds,
         cursor: &Cursor,
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
@@ -241,8 +228,9 @@ impl Pipeline {
             .save_progress(
                 position_key,
                 &Checkpoint {
-                    watermark: target_watermark,
+                    watermark: window.target,
                     cursor_values: cursor.to_checkpoint_values(),
+                    resume_floor: window.floor,
                 },
             )
             .await
@@ -259,6 +247,7 @@ impl Pipeline {
             Ok(None) => Checkpoint {
                 watermark: DateTime::<Utc>::UNIX_EPOCH,
                 cursor_values: None,
+                resume_floor: None,
             },
             Err(err) => {
                 warn!(
@@ -269,6 +258,7 @@ impl Pipeline {
                 Checkpoint {
                     watermark: DateTime::<Utc>::UNIX_EPOCH,
                     cursor_values: None,
+                    resume_floor: None,
                 }
             }
         }
@@ -282,7 +272,7 @@ impl Pipeline {
         context: &PipelineContext,
         transform: &dyn BlockTransform,
         position_key: &str,
-        target_watermark: DateTime<Utc>,
+        window: WindowBounds,
     ) -> Result<PipelineStats, HandlerError> {
         let outputs = transform.outputs();
         let mut loader = Loader::new(context.destination.as_ref(), outputs);
@@ -317,13 +307,8 @@ impl Pipeline {
                     }
 
                     if extracted_rows > 0 {
-                        self.save_batch_progress(
-                            position_key,
-                            target_watermark,
-                            &cursor,
-                            &context.progress,
-                        )
-                        .await?;
+                        self.save_batch_progress(position_key, window, &cursor, &context.progress)
+                            .await?;
                     }
                 }
             }
@@ -331,6 +316,13 @@ impl Pipeline {
 
         Ok(stats)
     }
+}
+
+/// A pull's replication-time window. `floor` is persisted so a resume can rebuild it.
+#[derive(Clone, Copy)]
+pub(in crate::modules::sdlc) struct WindowBounds {
+    pub target: DateTime<Utc>,
+    pub floor: Option<DateTime<Utc>>,
 }
 
 struct Extractor {
@@ -695,6 +687,13 @@ mod tests {
         "2024-06-15T12:00:00Z".parse().unwrap()
     }
 
+    fn test_window() -> WindowBounds {
+        WindowBounds {
+            target: test_watermark(),
+            floor: None,
+        }
+    }
+
     fn base_query(plan: &Plan) -> PreparedQuery {
         plan.prepare()
             .with(crate::modules::sdlc::plan::WatermarkFilter {
@@ -842,6 +841,7 @@ mod tests {
             *self.state.lock().unwrap() = Some(Checkpoint {
                 watermark: *watermark,
                 cursor_values: None,
+                resume_floor: None,
             });
             Ok(())
         }
@@ -878,7 +878,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
         assert!(result.is_ok());
@@ -904,7 +904,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -943,7 +943,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -1024,7 +1024,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -1065,7 +1065,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -1105,7 +1105,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -1185,7 +1185,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -1207,6 +1207,7 @@ mod tests {
             state: Mutex::new(Some(Checkpoint {
                 watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
                 cursor_values: Some(vec!["5".to_string()]),
+                resume_floor: None,
             })),
             progress_history: Mutex::new(Vec::new()),
         });
@@ -1225,7 +1226,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await;
 
@@ -1307,7 +1308,7 @@ mod tests {
                 &plan,
                 base_query(&plan),
                 &position_key(&plan),
-                test_watermark(),
+                test_window(),
             )
             .await
             .expect("run should succeed");

@@ -33,6 +33,8 @@ async fn global_indexing() {
         global::uses_watermark_for_incremental_processing,
         global::resumes_from_saved_cursor_skipping_processed_users,
         global::incomplete_checkpoint_does_not_advance_watermark_on_resume,
+        global::resume_is_bounded_by_window_floor,
+        global::resume_is_bounded_by_window_floor_for_partitioned_entity,
         partitioning::partitioned_initial_load_indexes_all_rows_and_consolidates,
         partitioning::incomplete_partition_checkpoint_does_not_advance_watermark_on_resume,
         partitioning::second_run_after_consolidation_skips_partitioning,

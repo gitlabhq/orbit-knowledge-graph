@@ -3,7 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_node_count, create_user, global_envelope, global_handler, handler_context,
+    TestContext, assert_node_count, create_user, entity_handler_with_partitions, global_envelope,
+    global_handler, handler_context,
 };
 
 pub async fn processes_and_transforms_users(ctx: &TestContext) {
@@ -113,7 +114,7 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
 pub async fn resumes_from_saved_cursor_skipping_processed_users(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User', '2024-01-19 00:00:00.000000', '[\"2\"]')",
+         VALUES ('global.User', '2024-01-21 00:00:00.000000', '{{\"c\":[\"2\"]}}')",
         t("checkpoint")
     ))
     .await;
@@ -159,7 +160,7 @@ pub async fn resumes_from_saved_cursor_skipping_processed_users(ctx: &TestContex
 pub async fn incomplete_checkpoint_does_not_advance_watermark_on_resume(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User', '2024-01-20 12:00:00.000000', '[\"2\"]')",
+         VALUES ('global.User', '2024-01-20 12:00:00.000000', '{{\"c\":[\"2\"]}}')",
         t("checkpoint")
     ))
     .await;
@@ -190,5 +191,86 @@ pub async fn incomplete_checkpoint_does_not_advance_watermark_on_resume(ctx: &Te
         vec![3, 4],
         "an incomplete checkpoint must not advance last_watermark: users 3-4 \
          (replicated_at equal to the in-progress watermark, past the cursor) must still index"
+    );
+}
+
+/// Seeds two users past the cursor (id > 2): one replicated before the floor and
+/// one within `(floor, target]`. A resume must reprocess only its original window,
+/// so the below-floor user is skipped. Before the floor was persisted, resume
+/// rescanned from epoch and would have indexed both.
+fn insert_user_at(id: i64, replicated_at: &str) -> String {
+    format!(
+        "INSERT INTO siphon_users \
+         (id, email, username, name, state, organization_id, _siphon_replicated_at) \
+         VALUES ({id}, 'u{id}@t', 'u{id}', 'User {id}', 'active', 1, '{replicated_at}')"
+    )
+}
+
+pub async fn resume_is_bounded_by_window_floor(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User', '2024-01-20 00:00:00.000000', \
+                 '{{\"c\":[\"2\"],\"f\":\"2024-01-10T00:00:00Z\"}}')",
+        t("checkpoint")
+    ))
+    .await;
+
+    ctx.execute(&insert_user_at(3, "2024-01-05 00:00:00")).await;
+    ctx.execute(&insert_user_at(4, "2024-01-15 00:00:00")).await;
+
+    global_handler(ctx)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let processed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        processed,
+        vec![4],
+        "resume must stay within (floor, target]: user 3 (replicated before the \
+         floor) is skipped; rescanning from epoch would have indexed it"
+    );
+}
+
+pub async fn resume_is_bounded_by_window_floor_for_partitioned_entity(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User', '2024-01-20 00:00:00.000000', \
+                 '{{\"c\":[\"2\"],\"f\":\"2024-01-10T00:00:00Z\"}}')",
+        t("checkpoint")
+    ))
+    .await;
+
+    ctx.execute(&insert_user_at(3, "2024-01-05 00:00:00")).await;
+    ctx.execute(&insert_user_at(4, "2024-01-15 00:00:00")).await;
+
+    // A partition-configured entity with an in-progress parent checkpoint resumes
+    // the single-pull path (it does not re-partition), and must honor the floor.
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("partitioned handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let processed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        processed,
+        vec![4],
+        "partitioned resume must also honor the floor"
     );
 }

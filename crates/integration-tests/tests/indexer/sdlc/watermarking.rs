@@ -73,7 +73,7 @@ pub async fn resumes_from_saved_cursor_skipping_processed_groups(ctx: &TestConte
 
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('ns.100.Group', '2024-01-19 00:00:00.000000', '[\"1/100/102/\", \"102\"]')",
+         VALUES ('ns.100.Group', '2024-01-21 00:00:00.000000', '{{\"c\":[\"1/100/102/\", \"102\"]}}')",
         t("checkpoint")
     ))
     .await;

@@ -361,6 +361,7 @@ mod tests {
         let checkpoint = Checkpoint {
             watermark: Utc::now(),
             cursor_values: None,
+            resume_floor: None,
         };
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(cursor.is_first_page());
@@ -371,6 +372,7 @@ mod tests {
         let checkpoint = Checkpoint {
             watermark: Utc::now(),
             cursor_values: Some(vec!["42".to_string()]),
+            resume_floor: None,
         };
         let cursor = Cursor::from_checkpoint(&checkpoint);
         assert!(!cursor.is_first_page());

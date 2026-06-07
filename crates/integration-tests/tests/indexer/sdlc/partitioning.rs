@@ -92,7 +92,7 @@ pub async fn incomplete_partition_checkpoint_does_not_advance_watermark_on_resum
 
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User.p2of4', '2024-01-20 12:00:00.000000', '[\"6\"]')",
+         VALUES ('global.User.p2of4', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}')",
         t("checkpoint")
     ))
     .await;
@@ -130,35 +130,42 @@ pub async fn second_run_after_consolidation_skips_partitioning(ctx: &TestContext
         .await
         .expect("first run should succeed");
 
+    // Newest partition-checkpoint write from the initial load and its
+    // consolidation. Comparing against `_version` is merge-invariant; counting
+    // raw rows is not, because background merges collapse the tombstoned
+    // duplicates between the two reads.
     let after_first = ctx
         .query(&format!(
-            "SELECT count() AS cnt FROM {} \
+            "SELECT toString(max(_version)) AS v FROM {} \
              WHERE startsWith(key, 'global.User.p')",
             t("checkpoint")
         ))
         .await;
-    let first_count =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&after_first[0], "cnt").expect("cnt column");
-    let partition_rows_after_first = first_count.value(0);
+    let newest_partition_write =
+        ArrowUtils::get_column_by_name::<StringArray>(&after_first[0], "v")
+            .expect("v column")
+            .value(0)
+            .to_string();
 
     handler
         .handle(handler_context(ctx), global_envelope())
         .await
         .expect("second run should succeed");
 
-    let after_second = ctx
+    let new_rows = ctx
         .query(&format!(
             "SELECT count() AS cnt FROM {} \
-             WHERE startsWith(key, 'global.User.p')",
-            t("checkpoint")
+             WHERE startsWith(key, 'global.User.p') AND _version > '{}'",
+            t("checkpoint"),
+            newest_partition_write
         ))
         .await;
-    let second_count =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&after_second[0], "cnt").expect("cnt column");
+    let cnt =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&new_rows[0], "cnt").expect("cnt column");
     assert_eq!(
-        second_count.value(0),
-        partition_rows_after_first,
-        "incremental run should not write any new partition checkpoint rows"
+        cnt.value(0),
+        0,
+        "incremental run over the consolidated parent must not write new partition checkpoint rows"
     );
 }
 

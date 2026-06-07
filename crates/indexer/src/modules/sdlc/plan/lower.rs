@@ -992,6 +992,7 @@ mod tests {
         let cursor = Cursor::from_checkpoint(&crate::checkpoint::Checkpoint {
             watermark: Utc::now(),
             cursor_values: Some(vec!["42".to_string()]),
+            resume_floor: None,
         });
 
         let sql = plan
