@@ -60,6 +60,7 @@ fn collect_edge_predicates(
         end_col,
         ctes,
         narrowed_nodes,
+        &plan.table_sort_keys,
     );
 }
 
@@ -133,6 +134,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 end_col,
                 &mut ctes,
                 &mut narrowed_nodes,
+                &plan.table_sort_keys,
             );
             // For multi-hop dedup queries, FilterOnly nodes still use
             // CTEs so their IN-subqueries can be pushed inside the edge
@@ -150,7 +152,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     if (is_filter_only || elevated_skip)
                         && filter_only_done.insert(node_alias.clone())
                     {
-                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                        let node_table = np.table.as_deref().unwrap_or("");
+                        let node_sk = plan
+                            .table_sort_keys
+                            .get(node_table)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]);
+                        narrow_in.extend(emit_filter_subquery(
+                            np, &alias, edge_col, &mut ctes, node_sk,
+                        )?);
                     }
                 }
             }
