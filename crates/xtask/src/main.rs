@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod dashboards;
+mod ddl;
 mod metrics_catalog;
 mod schema;
 mod synth;
@@ -40,6 +41,24 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Generate graph DDL from the ontology.
+    Ddl {
+        /// Target database dialect.
+        #[arg(long, short, default_value = "remote")]
+        target: DdlTarget,
+
+        /// Path to ontology directory (default: embedded).
+        #[arg(long, short)]
+        ontology: Option<std::path::PathBuf>,
+
+        /// Table prefix (e.g., "v1_"; remote only).
+        #[arg(long, short, default_value = "")]
+        prefix: String,
+
+        /// Diff generated DDL against an existing .sql file (remote only).
+        #[arg(long, short)]
+        diff: Option<std::path::PathBuf>,
+    },
     /// Generate the Orbit Grafana dashboards from the metric catalog.
     Dashboards {
         /// Write dashboards under this directory instead of the default.
@@ -50,6 +69,15 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+enum DdlTarget {
+    /// ClickHouse DDL (tables, dictionaries, materialized views).
+    #[default]
+    Remote,
+    /// DuckDB DDL (local graph tables + manifest).
+    Local,
 }
 
 #[derive(Subcommand)]
@@ -138,6 +166,15 @@ async fn main() -> Result<()> {
             SynthCommand::Evaluate { config, verbose } => {
                 synth::evaluation::run::run(&config, verbose).await
             }
+        },
+        Command::Ddl {
+            target,
+            ontology,
+            prefix,
+            diff,
+        } => match target {
+            DdlTarget::Remote => ddl::run_remote(ontology, prefix, diff),
+            DdlTarget::Local => ddl::run_local(ontology),
         },
         Command::Schema { output } => schema::run(output),
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),

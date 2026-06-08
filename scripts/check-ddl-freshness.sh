@@ -3,7 +3,7 @@
 # and have the correct SCHEMA_VERSION in their headers.
 set -euo pipefail
 
-ORBIT="${1:-cargo run --bin orbit --}"
+XTASK="${1:-cargo xtask}"
 SCHEMA_VERSION=$(cat config/SCHEMA_VERSION | tr -d '[:space:]')
 FAILED=0
 
@@ -36,7 +36,7 @@ check_file() {
     fi
 }
 
-check_file "$ORBIT debug ddl" "config/graph.sql"
-check_file "$ORBIT debug ddl-local" "config/graph_local.sql"
+check_file "$XTASK ddl --target remote" "config/graph.sql"
+check_file "$XTASK ddl --target local" "config/graph_local.sql"
 
 exit $FAILED

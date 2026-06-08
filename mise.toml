@@ -371,8 +371,8 @@ description = "Fail if the committed dashboards are out of date"
 
 [tasks."schema:generate:ddl"]
 run = """
-cargo run --bin orbit -- debug ddl 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql
-cargo run --bin orbit -- debug ddl-local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql
+cargo xtask ddl --target remote 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql
+cargo xtask ddl --target local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql
 """
 description = "Regenerate config/graph.sql (ClickHouse) and config/graph_local.sql (DuckDB) from ontology"
 

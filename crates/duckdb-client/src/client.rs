@@ -82,7 +82,7 @@ impl DuckDbClient {
     ///
     /// The DDL is typically generated from the ontology via
     /// `generate_local_tables` + `emit_duckdb_create_table`, with the
-    /// manifest DDL (`MANIFEST_DDL`) appended.
+    /// manifest DDL (`compiler::MANIFEST_DDL`) appended.
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
             .execute_batch(ddl)
