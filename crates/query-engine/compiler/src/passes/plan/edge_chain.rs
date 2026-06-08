@@ -649,7 +649,11 @@ fn apply_hop_order(hops: &mut Vec<Hop>, order: &[(usize, bool)]) {
         let mut hop = taken[i].take().expect("hop index reused");
         if swap {
             std::mem::swap(&mut hop.from_node, &mut hop.to_node);
-            hop.direction = hop.direction.flipped();
+            hop.direction = match hop.direction {
+                Direction::Outgoing => Direction::Incoming,
+                Direction::Incoming => Direction::Outgoing,
+                Direction::Both => Direction::Both,
+            };
         }
         hops.push(hop);
     }
