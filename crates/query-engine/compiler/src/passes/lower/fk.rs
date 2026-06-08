@@ -461,6 +461,12 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
         );
         selects.extend(node_select_columns(&hop.to_node, to_np));
 
+        // Aggregations group by node properties only; per-hop edge columns would
+        // be unaggregated SELECT items. Emit them solely for traversal output.
+        if !matches!(plan.body, PlanBody::Traversal) {
+            continue;
+        }
+
         // Emit edges in physical (source->target) orientation so a reversed hop
         // still reports the same orientation as the edge-scan path.
         let ea = format!("e{i}");

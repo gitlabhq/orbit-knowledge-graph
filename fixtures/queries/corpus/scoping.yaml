@@ -1061,3 +1061,27 @@ mr_ids_changed_paths_agg:
       "limit": 40
     }
 
+pipeline_filter_changed_paths_agg:
+  desc: "Most-changed file paths under a project's failed merge_request_event pipelines: Pipeline (project_id/status/source filters) <-TRIGGERED- MergeRequest -HAS_LATEST_DIFF-> MergeRequestDiff -HAS_FILE-> MergeRequestDiffFile, grouped by old_path. A filter-anchored FK-backed chain lowers to node FK joins (pl.merge_request_id, mr.latest_merge_request_diff_id, f.merge_request_diff_id) rather than edge scans, which is both faster and avoids stale HAS_LATEST_DIFF edge over-counting."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pl", "entity": "Pipeline", "filters": {"project_id": {"op": "eq", "value": {{PROJECT_ID}}}, "status": {"op": "eq", "value": "failed"}, "source": {"op": "eq", "value": "merge_request_event"}}},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
+      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "limit": 60
+    }
+
