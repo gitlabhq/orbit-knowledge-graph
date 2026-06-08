@@ -352,10 +352,8 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .collect()
 }
 
-/// Drop a container hop (e.g. `Group -CONTAINS-> Project`) to a pure scope anchor:
-/// once both endpoints carry the same resolved `traversal_path` prefix the hop only
-/// re-asserts containment the prefix already guarantees, so dropping it lets the
-/// remaining FK hops resolve as a node-join chain with no edge scans (lossless).
+/// Drop a `CONTAINS`/`IN_PROJECT` hop to a pure scope anchor: the shared resolved
+/// `traversal_path` prefix already implies the containment, so removal is lossless.
 fn elide_scope_implied_container_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
@@ -373,32 +371,28 @@ fn elide_scope_implied_container_hops(
         *hop_count.entry(hop.to_node.as_str()).or_insert(0) += 1;
     }
 
-    let drop_idx = (0..hops.len()).find(|&idx| {
+    // Elide only when every survivor is an FK-chain hop, so the result lowers
+    // through the FK node-join path with no edge scans; otherwise it buys nothing.
+    let drop = (0..hops.len()).find_map(|idx| {
         let hop = &hops[idx];
         if !hop.scope_preserving || hop.scope_prefix.is_none() || !hop.filters.is_empty() {
-            return false;
+            return None;
         }
-        let anchors = [&hop.from_node, &hop.to_node]
+        if !hops
+            .iter()
+            .enumerate()
+            .all(|(i, h)| i == idx || is_fk_chain_hop(h))
+        {
+            return None;
+        }
+        let anchor = [hop.from_node.as_str(), hop.to_node.as_str()]
             .into_iter()
-            .any(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count));
-        // Elide only when every survivor is an FK-chain hop, so the result lowers
-        // through the FK node-join path with no edge scans; otherwise it buys nothing.
-        anchors
-            && hops
-                .iter()
-                .enumerate()
-                .all(|(i, h)| i == idx || is_fk_chain_hop(h))
+            .find(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count))?;
+        Some((idx, anchor.to_string()))
     });
 
-    let Some(idx) = drop_idx else {
+    let Some((idx, anchor)) = drop else {
         return hops;
-    };
-
-    let hop = &hops[idx];
-    let anchor = if is_pure_scope_anchor(&hop.from_node, nodes, input, &hop_count) {
-        hop.from_node.clone()
-    } else {
-        hop.to_node.clone()
     };
 
     let mut kept = hops;
@@ -412,10 +406,8 @@ fn elide_scope_implied_container_hops(
     kept
 }
 
-/// Whether `alias` exists only to pin the query's scope: it is path-scopable,
-/// filtered solely by an anchor predicate (`full_path` or `id`), carries no
-/// group-by/aggregation/order-by/display role, and is referenced by exactly one
-/// relationship (so eliding that relationship leaves it orphaned).
+/// Whether `alias` exists only to pin scope: path-scopable, only a `full_path`/`id`
+/// filter, no group-by/agg/order/display role, and touched by exactly one hop.
 fn is_pure_scope_anchor(
     alias: &str,
     nodes: &HashMap<String, NodePlan>,
@@ -436,10 +428,7 @@ fn is_pure_scope_anchor(
         return false;
     }
 
-    let in_group_by = crate::input::node_group_ids(&input.aggregation.group_by).any(|n| n == alias)
-        || input.aggregation.group_by.iter().any(
-            |g| matches!(g, crate::input::InputGroupByKey::Property { node, .. } if node == alias),
-        );
+    let in_group_by = input.aggregation.group_by.iter().any(|g| g.node() == alias);
     let is_agg_target = input
         .aggregation
         .metrics
@@ -564,9 +553,8 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 /// of edge-property filters, `Both`, non-scope-preserving targets (an independent
 /// entity can outlive its edge), and point-selective endpoints (SIP narrowing on
 /// the edge scan beats a full leaf-node scan there).
-/// A hop the FK node-join path can answer without an edge scan: carries an FK,
-/// stays in one scope, is fixed single-length, has no edge-property filter, and is
-/// not bidirectional. Shared by chain detection, reordering, and container elision.
+/// A hop the FK node-join path answers without an edge scan (FK, scope-preserving,
+/// single fixed-length, no edge filter, not Both). Shared by detection and elision.
 fn is_fk_chain_hop(hop: &Hop) -> bool {
     hop.fk.is_some()
         && hop.scope_preserving
@@ -606,14 +594,8 @@ fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
     })
 }
 
-/// Topological order (with per-hop orientation) that makes an FK-chain-eligible
-/// hop set emittable by `emit_chain`. Eliding a container hop can leave the
-/// survivors out of join order (e.g. `[pipe→p, j→pipe]`, where `j` is introduced
-/// on a hop's `from` side); this re-roots and re-orients them into a connected
-/// tree (`from` reached, `to` new) without changing the inner-join result.
-///
-/// Returns `None` when the hops aren't FK-chain-eligible (so the normal strategy
-/// applies) or are already emittable (no reordering needed).
+/// Topological (index, swap) order making an FK-chain-eligible hop set emittable by
+/// `emit_chain` after a container hop is elided; `None` if ineligible or already so.
 fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
     let fk_eligible = hops.len() >= 2 && hops.iter().all(is_fk_chain_hop);
     if !fk_eligible || is_emittable_fk_chain(hops) {
@@ -640,9 +622,8 @@ fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
     Some(order)
 }
 
-/// Apply an [`emittable_fk_chain_order`] permutation to `hops`, flipping endpoints
-/// and direction on swapped hops. `input.relationships` is not reordered: no pass
-/// after lowering reads it, and the lowerer consumes `hops`, not relationships.
+/// Apply an [`emittable_fk_chain_order`] permutation to `hops`, swapping endpoints +
+/// direction on flipped hops. `input.relationships` is not reordered; no later pass reads it.
 fn apply_hop_order(hops: &mut Vec<Hop>, order: &[(usize, bool)]) {
     let mut taken: Vec<Option<Hop>> = hops.drain(..).map(Some).collect();
     for &(i, swap) in order {
