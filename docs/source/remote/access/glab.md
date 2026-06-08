@@ -86,8 +86,21 @@ glab orbit remote tools
 ### Run a query
 
 ```shell
-echo '{"query":{"query_type":"traversal","node":{"id":"p","entity":"Project","filters":{"full_path":{"op":"starts_with","value":"your-group/"}}},"limit":5}}' \
-  | glab orbit remote query -
+glab orbit remote query - <<'EOF'
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": { "op": "starts_with", "value": "your-group/" }
+      }
+    },
+    "limit": 5
+  }
+}
+EOF
 ```
 
 The `--format` flag maps to the body's `response_format`:
