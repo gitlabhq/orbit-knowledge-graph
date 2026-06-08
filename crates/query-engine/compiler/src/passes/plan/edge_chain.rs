@@ -190,10 +190,6 @@ pub fn plan(input: &mut Input) -> Plan {
         input.relationships.reverse();
     }
 
-    if let Some(order) = emittable_fk_chain_order(&hops) {
-        apply_hop_order(&mut hops, &order);
-    }
-
     for node_plan in nodes.values_mut() {
         node_plan.hydration = determine_hydration(node_plan, input, &hops);
     }
@@ -371,8 +367,8 @@ fn elide_scope_implied_container_hops(
         *hop_count.entry(hop.to_node.as_str()).or_insert(0) += 1;
     }
 
-    // Elide only when every survivor is an FK-chain hop, so the result lowers
-    // through the FK node-join path with no edge scans; otherwise it buys nothing.
+    // Elide only when every survivor carries an FK, so detect_fk lowers them as a
+    // node-join star/chain with no edge scans; otherwise the elision buys nothing.
     let drop = (0..hops.len()).find_map(|idx| {
         let hop = &hops[idx];
         if !hop.scope_preserving || hop.scope_prefix.is_none() || !hop.filters.is_empty() {
@@ -381,7 +377,7 @@ fn elide_scope_implied_container_hops(
         if !hops
             .iter()
             .enumerate()
-            .all(|(i, h)| i == idx || is_fk_chain_hop(h))
+            .all(|(i, h)| i == idx || h.fk.is_some())
         {
             return None;
         }
@@ -420,11 +416,10 @@ fn is_pure_scope_anchor(
     if !np.has_traversal_path || hop_count.get(alias).copied().unwrap_or(0) != 1 {
         return false;
     }
-    let only_anchor_filters = np
-        .filters
-        .iter()
-        .all(|(prop, _)| prop == "full_path" || prop == DEFAULT_PRIMARY_KEY);
-    if !only_anchor_filters || np.filters.is_empty() {
+    let Some(input_node) = input.nodes.iter().find(|n| n.id == alias) else {
+        return false;
+    };
+    if !crate::scope::is_scope_only(input_node) {
         return false;
     }
 
@@ -576,11 +571,9 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
         && is_emittable_fk_chain(hops)
 }
 
-/// `emit_chain` joins each hop's `to_node` onto the running FROM, so every hop
-/// after the first must attach via an already-reached `from_node` to a new
-/// `to_node`. This accepts a branching tree (e.g. Pipeline←MR→Diff→File), not
-/// just a strictly linear chain, while rejecting reversed or convergent hops the
-/// join builder can't place.
+/// `emit_chain` joins each hop's not-yet-reached endpoint onto the running FROM,
+/// so every hop after the first must attach via exactly one already-reached node
+/// (accepts branching trees and either hop orientation; rejects disconnected hops).
 fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
     let Some(first) = hops.first() else {
         return false;
@@ -588,56 +581,11 @@ fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
     let mut reached: HashSet<&str> =
         HashSet::from([first.from_node.as_str(), first.to_node.as_str()]);
     hops[1..].iter().all(|h| {
-        let ok = reached.contains(h.from_node.as_str()) && !reached.contains(h.to_node.as_str());
+        let ok = reached.contains(h.from_node.as_str()) != reached.contains(h.to_node.as_str());
+        reached.insert(h.from_node.as_str());
         reached.insert(h.to_node.as_str());
         ok
     })
-}
-
-/// Topological (index, swap) order making an FK-chain-eligible hop set emittable by
-/// `emit_chain` after a container hop is elided; `None` if ineligible or already so.
-fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
-    let fk_eligible = hops.len() >= 2 && hops.iter().all(is_fk_chain_hop);
-    if !fk_eligible || is_emittable_fk_chain(hops) {
-        return None;
-    }
-
-    let root = hops[0].from_node.as_str();
-    let mut reached: HashSet<&str> = HashSet::from([root]);
-    let mut used = vec![false; hops.len()];
-    let mut order = Vec::with_capacity(hops.len());
-
-    while order.len() < hops.len() {
-        let next = hops.iter().enumerate().find(|(i, h)| {
-            !used[*i]
-                && (reached.contains(h.from_node.as_str()) ^ reached.contains(h.to_node.as_str()))
-        });
-        let (i, h) = next?;
-        let swap = !reached.contains(h.from_node.as_str());
-        used[i] = true;
-        reached.insert(h.from_node.as_str());
-        reached.insert(h.to_node.as_str());
-        order.push((i, swap));
-    }
-    Some(order)
-}
-
-/// Apply an [`emittable_fk_chain_order`] permutation to `hops`, swapping endpoints +
-/// direction on flipped hops. `input.relationships` is not reordered; no later pass reads it.
-fn apply_hop_order(hops: &mut Vec<Hop>, order: &[(usize, bool)]) {
-    let mut taken: Vec<Option<Hop>> = hops.drain(..).map(Some).collect();
-    for &(i, swap) in order {
-        let mut hop = taken[i].take().expect("hop index reused");
-        if swap {
-            std::mem::swap(&mut hop.from_node, &mut hop.to_node);
-            hop.direction = match hop.direction {
-                Direction::Outgoing => Direction::Incoming,
-                Direction::Incoming => Direction::Outgoing,
-                Direction::Both => Direction::Both,
-            };
-        }
-        hops.push(hop);
-    }
 }
 
 fn reorder_by_selectivity(

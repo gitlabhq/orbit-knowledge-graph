@@ -1887,6 +1887,37 @@ mod tests {
     }
 
     #[test]
+    fn scope_implied_contains_elided_for_fk_star_with_non_scope_preserving_hop() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "mrs"}],
+            "limit": 20
+        }"#;
+
+        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
+        assert!(
+            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
+            "AUTHORED is FK-backed but not scope-preserving; the FK star must still elide CONTAINS to zero edge scans, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_group"),
+            "the orphaned anchor Group must be dropped, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",
