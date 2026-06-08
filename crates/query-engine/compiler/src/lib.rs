@@ -1777,7 +1777,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_implied_contains_hop_elided_yields_fk_chain() {
+    fn scope_implied_contains_hop_elided_only_with_resolved_scope_prefix() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1796,45 +1796,26 @@ mod tests {
             "limit": 20
         }"#;
 
-        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
-
+        let scoped = compile_sql_scoped(query, &[("g", "1/9970/")]);
         assert!(
-            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
-            "the CONTAINS anchor hop is scope-implied; eliding it must leave a pure FK node-join chain with no edge scans, got:\n{sql}"
+            !scoped.contains("gl_edge") && !scoped.contains("gl_ci_edge"),
+            "with a resolved scope prefix the CONTAINS anchor hop is elided to a pure FK node-join chain with no edge scans, got:\n{scoped}"
         );
         for on in ["pipe.project_id = p.id", "j.pipeline_id = pipe.id"] {
-            assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
+            assert!(
+                scoped.contains(on),
+                "expected FK join `{on}`, got:\n{scoped}"
+            );
         }
         assert!(
-            !sql.contains("gl_group"),
-            "the orphaned anchor Group must be dropped, got:\n{sql}"
+            !scoped.contains("gl_group"),
+            "the orphaned anchor Group must be dropped, got:\n{scoped}"
         );
-    }
 
-    #[test]
-    fn scope_implied_contains_elision_requires_resolved_scope_prefix() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "p", "entity": "Project"},
-                {"id": "pipe", "entity": "Pipeline"},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
-            ],
-            "relationships": [
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "IN_PROJECT", "from": "pipe", "to": "p"},
-                {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
-            ],
-            "group_by": [{"kind": "node", "node": "pipe"}],
-            "aggregations": [{"function": "count", "target": "j", "alias": "failjobs"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql(query);
+        let unscoped = compile_sql(query);
         assert!(
-            sql.contains("gl_edge"),
-            "without a resolved scope prefix the container hop must keep its edge scan, got:\n{sql}"
+            unscoped.contains("gl_edge"),
+            "without a resolved scope prefix the container hop must keep its edge scan, got:\n{unscoped}"
         );
     }
 
