@@ -1,12 +1,20 @@
-use std::path::{Path, PathBuf};
+#[cfg(feature = "code-indexing")]
+use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+#[cfg(feature = "code-indexing")]
 use duckdb_client::DuckDbClient;
+#[cfg(feature = "code-indexing")]
 use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
+#[cfg(feature = "code-indexing")]
 use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
+#[cfg(feature = "code-indexing")]
 use serde_json::json;
+#[cfg(feature = "code-indexing")]
 use strum::{AsRefStr, Display};
 
+#[cfg(feature = "code-indexing")]
 /// Repo indexing status, stored as a DuckDB `repo_status` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
@@ -45,6 +53,7 @@ impl Workspace {
         self.root.join("graph.duckdb")
     }
 
+    #[cfg(feature = "code-indexing")]
     /// Discover git repos in a directory, including nested repos when
     /// the path itself is a git repo. Returns canonical paths.
     pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
@@ -59,6 +68,7 @@ impl Workspace {
     }
 }
 
+#[cfg(feature = "code-indexing")]
 /// Update manifest status on the given client connection.
 pub fn set_status(
     client: &DuckDbClient,
@@ -97,6 +107,7 @@ pub fn set_status(
     Ok(())
 }
 
+#[cfg(feature = "code-indexing")]
 /// Git metadata for an indexed repository.
 pub struct GitInfo {
     /// Canonical repo path.
@@ -111,12 +122,14 @@ pub struct GitInfo {
     pub parent_repo_path: PathBuf,
 }
 
+#[cfg(feature = "code-indexing")]
 impl GitInfo {
     pub fn repository(&self) -> &CoreGitaliskRepository {
         &self.repository
     }
 }
 
+#[cfg(feature = "code-indexing")]
 /// Resolve git metadata (branch, commit, parent repo) for a repo path.
 pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     let canonical = dunce::canonicalize(repo_path)
@@ -146,6 +159,7 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
     })
 }
 
+#[cfg(feature = "code-indexing")]
 /// Deterministic project ID from canonical path. Mask clears the sign bit
 /// so the result is always a positive i64.
 pub fn project_id_from_path(path: &str) -> i64 {
@@ -157,11 +171,13 @@ pub fn project_id_from_path(path: &str) -> i64 {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+#[cfg(feature = "code-indexing")]
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
     git.is_dir() || git.is_file()
 }
 
+#[cfg(feature = "code-indexing")]
 fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
     let ws = CoreGitaliskWorkspaceFolder::new(workspace_path.to_string_lossy().to_string());
     if ws.index_repositories().is_err() {
@@ -173,7 +189,7 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "code-indexing"))]
 mod tests {
     use super::*;
     use std::process::Command;

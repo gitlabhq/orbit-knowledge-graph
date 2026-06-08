@@ -4,6 +4,7 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use duckdb::params;
 
+#[cfg(feature = "code-indexing")]
 use crate::converter::LocalGraphData;
 use crate::error::{DuckDbError, Result};
 
@@ -180,6 +181,7 @@ impl DuckDbClient {
     ///
     /// Table names come from `LocalGraphData.tables`, which are derived from
     /// the ontology during conversion.
+    #[cfg(feature = "code-indexing")]
     pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
         for (table, batch) in data.tables {
             self.insert_batch(&table, &batch)?;

@@ -7,15 +7,17 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gitalisk_core::repository::gitalisk_repository::IterFileOptions;
 use ontology::Ontology;
-use serde::Serialize;
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{Level, info};
-use tracing_subscriber::fmt::format::FmtSpan;
+
+#[cfg(feature = "code-indexing")]
+use {
+    gitalisk_core::repository::gitalisk_repository::IterFileOptions,
+    std::collections::HashMap,
+    std::sync::Arc,
+    tracing::{Level, info},
+    tracing_subscriber::fmt::format::FmtSpan,
+};
 
 /// Generate the full DuckDB DDL (graph tables + manifest) from the ontology.
 fn generate_local_ddl(ontology: &Ontology) -> String {
@@ -35,114 +37,124 @@ fn generate_local_ddl(ontology: &Ontology) -> String {
     ddl
 }
 
-#[derive(Serialize)]
-struct IndexOutput {
-    repository: String,
-    path: String,
-    time_seconds: f64,
-    graph: GraphStats,
-    processing: ProcessingStats,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    database_path: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detailed: Option<DetailedStats>,
+#[cfg(feature = "code-indexing")]
+mod index_types {
+    use serde::Serialize;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    #[derive(Serialize)]
+    pub struct IndexOutput {
+        pub repository: String,
+        pub path: String,
+        pub time_seconds: f64,
+        pub graph: GraphStats,
+        pub processing: ProcessingStats,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub database_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub detailed: Option<DetailedStats>,
+    }
+
+    #[derive(Serialize)]
+    pub struct GraphStats {
+        pub directories: usize,
+        pub files: usize,
+        pub definitions: usize,
+        pub imported_symbols: usize,
+        pub relationships: usize,
+    }
+
+    #[derive(Serialize)]
+    pub struct ProcessingStats {
+        pub skipped_files: usize,
+        pub errored_files: usize,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct IndexGraphStats {
+        pub directories: usize,
+        pub files: usize,
+        pub definitions: usize,
+        pub imported_symbols: usize,
+        pub relationships: usize,
+        pub relationship_types: HashMap<String, usize>,
+        pub definition_types: HashMap<String, usize>,
+    }
+
+    pub struct IndexRunResult {
+        pub total_processing_time: Duration,
+        pub skipped_files: Vec<code_graph::v2::SkippedFile>,
+        pub faulted_files: Vec<code_graph::v2::FaultedFile>,
+        pub graph_stats: IndexGraphStats,
+        pub database_path: Option<String>,
+        pub slowest_files: Vec<code_graph::v2::FileTimingEntry>,
+        pub language_timings: Vec<code_graph::v2::LanguageTimings>,
+        pub phase_timings: code_graph::v2::PhaseTimings,
+    }
+
+    #[derive(Serialize)]
+    pub struct DetailedStats {
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub skipped_files: Vec<SkippedFile>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub errored_files: Vec<ErroredFile>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        pub slowest_files: Vec<SlowFile>,
+        pub language_timings: Vec<LanguageTiming>,
+        pub phase_timings: PhaseTiming,
+        pub relationship_types: HashMap<String, usize>,
+        pub definition_types: HashMap<String, usize>,
+    }
+
+    #[derive(Serialize)]
+    pub struct LanguageTiming {
+        pub language: String,
+        pub file_count: usize,
+        pub total_bytes: u64,
+        pub parse_ms: f64,
+        pub graph_build_ms: f64,
+        pub resolve_ms: f64,
+        pub total_ms: f64,
+    }
+
+    #[derive(Serialize)]
+    pub struct PhaseTiming {
+        pub file_discovery_ms: f64,
+        pub structural_graph_ms: f64,
+        pub language_processing_ms: f64,
+        pub total_ms: f64,
+    }
+
+    #[derive(Serialize)]
+    pub struct SlowFile {
+        pub path: String,
+        pub language: String,
+        pub size_bytes: u64,
+        pub parse_ms: f64,
+        pub resolve_ms: f64,
+        pub total_ms: f64,
+    }
+
+    #[derive(Serialize)]
+    pub struct SkippedFile {
+        pub path: String,
+        pub reason: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        pub detail: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct ErroredFile {
+        pub path: String,
+        pub kind: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        pub detail: String,
+    }
 }
 
-#[derive(Serialize)]
-struct GraphStats {
-    directories: usize,
-    files: usize,
-    definitions: usize,
-    imported_symbols: usize,
-    relationships: usize,
-}
-
-#[derive(Serialize)]
-struct ProcessingStats {
-    skipped_files: usize,
-    errored_files: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-struct IndexGraphStats {
-    directories: usize,
-    files: usize,
-    definitions: usize,
-    imported_symbols: usize,
-    relationships: usize,
-    relationship_types: HashMap<String, usize>,
-    definition_types: HashMap<String, usize>,
-}
-
-struct IndexRunResult {
-    total_processing_time: Duration,
-    skipped_files: Vec<code_graph::v2::SkippedFile>,
-    faulted_files: Vec<code_graph::v2::FaultedFile>,
-    graph_stats: IndexGraphStats,
-    database_path: Option<String>,
-    slowest_files: Vec<code_graph::v2::FileTimingEntry>,
-    language_timings: Vec<code_graph::v2::LanguageTimings>,
-    phase_timings: code_graph::v2::PhaseTimings,
-}
-
-#[derive(Serialize)]
-struct DetailedStats {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    skipped_files: Vec<SkippedFile>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    errored_files: Vec<ErroredFile>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    slowest_files: Vec<SlowFile>,
-    language_timings: Vec<LanguageTiming>,
-    phase_timings: PhaseTiming,
-    relationship_types: HashMap<String, usize>,
-    definition_types: HashMap<String, usize>,
-}
-
-#[derive(Serialize)]
-struct LanguageTiming {
-    language: String,
-    file_count: usize,
-    total_bytes: u64,
-    parse_ms: f64,
-    graph_build_ms: f64,
-    resolve_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct PhaseTiming {
-    file_discovery_ms: f64,
-    structural_graph_ms: f64,
-    language_processing_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct SlowFile {
-    path: String,
-    language: String,
-    size_bytes: u64,
-    parse_ms: f64,
-    resolve_ms: f64,
-    total_ms: f64,
-}
-
-#[derive(Serialize)]
-struct SkippedFile {
-    path: String,
-    reason: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    detail: String,
-}
-
-#[derive(Serialize)]
-struct ErroredFile {
-    path: String,
-    kind: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    detail: String,
-}
+#[cfg(feature = "code-indexing")]
+use index_types::*;
 
 #[derive(Parser)]
 #[command(name = "orbit")]
@@ -155,6 +167,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Index a code repository and output graph statistics as JSON
+    #[cfg(feature = "code-indexing")]
     Index {
         /// Path to the repository to index
         #[arg(value_name = "PATH")]
@@ -236,6 +249,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        #[cfg(feature = "code-indexing")]
         Commands::Index {
             path,
             threads,
@@ -549,6 +563,7 @@ fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()>
     Ok(())
 }
 
+#[cfg(feature = "code-indexing")]
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
@@ -652,6 +667,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     Ok(())
 }
 
+#[cfg(feature = "code-indexing")]
 async fn index_repo(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
@@ -748,6 +764,7 @@ async fn index_repo(
     })
 }
 
+#[cfg(feature = "code-indexing")]
 fn gitalisk_file_inventory(
     git: &workspace::GitInfo,
 ) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
@@ -786,6 +803,7 @@ fn gitalisk_file_inventory(
     Ok(Arc::from(entries))
 }
 
+#[cfg(feature = "code-indexing")]
 fn build_index_output(
     repo_name: &str,
     path: &str,

@@ -5,14 +5,16 @@ edition = "2024"
 license = "LicenseRef-EE"
 
 [features]
+default = ["code-indexing"]
 # Compile DuckDB from C++ source for a fully static, self-contained binary.
 # Use for Docker/release builds: cargo build --release --features duckdb-client/bundled
 bundled = ["duckdb/bundled"]
+code-indexing = ["code-graph"]
 
 [dependencies]
 duckdb = { workspace = true }
 arrow = { workspace = true }
-code-graph = { path = "../code-graph" }
+code-graph = { path = "../code-graph", optional = true }
 gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 serde_json = { workspace = true }

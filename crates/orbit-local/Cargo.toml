@@ -8,6 +8,10 @@ build = "build.rs"
 name = "orbit"
 path = "src/main.rs"
 
+[features]
+default = ["code-indexing"]
+code-indexing = ["code-graph", "duckdb-client/code-indexing"]
+
 [lints]
 workspace = true
 
@@ -15,8 +19,8 @@ workspace = true
 mimalloc = { workspace = true }
 arrow = { workspace = true, features = ["prettyprint"] }
 async-trait = { workspace = true }
-code-graph = { path = "../code-graph" }
-duckdb-client = { path = "../duckdb-client" }
+code-graph = { path = "../code-graph", optional = true }
+duckdb-client = { path = "../duckdb-client", default-features = false }
 gkg-utils = { path = "../utils" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
