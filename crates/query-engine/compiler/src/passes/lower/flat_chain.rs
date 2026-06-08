@@ -199,6 +199,23 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     prev_start,
                     prev_end,
                 );
+                // Include node-filter narrowing from the prev hop's
+                // endpoints. If a _filter_<node> CTE already exists,
+                // reference it so the anchor inherits the node-level
+                // selectivity (e.g. File path filter on g1).
+                for (node_alias, id_col) in [
+                    (&prev_hop.from_node, prev_start),
+                    (&prev_hop.to_node, prev_end),
+                ] {
+                    let cte_name = format!("_filter_{node_alias}");
+                    if ctes.iter().any(|c| c.name == cte_name) {
+                        prev_preds.push(Expr::InSubquery {
+                            expr: Box::new(Expr::col(&prev_alias_inner, id_col)),
+                            cte_name,
+                            column: DEFAULT_PRIMARY_KEY.to_string(),
+                        });
+                    }
+                }
                 prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
 
                 let anchor_query = Query {
@@ -357,6 +374,18 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             }
                             pp.extend(edge_scope_predicate(prev_hop, &pa));
                             emit_node_ids_on_edge(&mut pp, &pa, prev_hop, &plan.nodes, ps, pe);
+                            for (node_alias, id_col) in
+                                [(&prev_hop.from_node, ps), (&prev_hop.to_node, pe)]
+                            {
+                                let cte_name = format!("_filter_{node_alias}");
+                                if ctes.iter().any(|c| c.name == cte_name) {
+                                    pp.push(Expr::InSubquery {
+                                        expr: Box::new(Expr::col(&pa, id_col)),
+                                        cte_name,
+                                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                                    });
+                                }
+                            }
                             nw.push(Expr::InSelect {
                                 expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
                                 query: Box::new(Query {
