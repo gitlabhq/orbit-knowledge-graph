@@ -138,13 +138,10 @@ process_mr() {
   printf '%s\n' "$labels" | grep -qxF "$KEEP_LABEL" && has_keep=true
   printf '%s\n' "$labels" | grep -qxF "$SCHEDULED_LABEL" && has_scheduled=true
 
+  # KEEP_LABEL and SCHEDULED_LABEL share the "stale" scope, so adding keep makes
+  # GitLab drop the scheduled label automatically — an MR never carries both, and
+  # a kept MR falls through to the has_keep skip below.
   if [ "$has_scheduled" = true ]; then
-    if [ "$has_keep" = true ]; then
-      log "MR !$iid: has $KEEP_LABEL, removing $SCHEDULED_LABEL (kept by author)"
-      remove_scheduled_label "$iid"
-      return
-    fi
-
     local label_epoch activity_epoch
     label_epoch="$(get_scheduled_label_epoch "$iid")"
     activity_epoch="$(get_last_activity_epoch "$iid" "$created_at")"
