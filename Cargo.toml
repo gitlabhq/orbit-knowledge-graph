@@ -130,7 +130,7 @@ oxc_resolver = "11.20.0"
 # Simulator dependencies
 rand = "0.10"
 sqlformat = "0.5"
-tabled = "0.20"
+tabled = "0.21"
 indicatif = "0.18"
 
 # Codegraph integration tests dependencies
