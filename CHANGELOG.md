@@ -1,3 +1,22 @@
+## [0.72.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.72.0...v0.72.1) (2026-06-08)
+
+### Fixes
+
+* **indexer:** resume interrupted SDLC pulls from window floor, not epoch ([f0d533f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0d533f3ebc1bfa62e6634e494e0ef0e2e517134)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** lower FK-backed aggregation chains as node joins ([f689a9e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f689a9efd4a1fc6472fc151f9d5edfaf678746d5)) by Michael Angelo Rivera
+* **compiler:** skip reorder projections for neighbors queries ([5c33ecc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5c33ecc5bd4b465424bdba57f868765a85ebc4e3)) by Michael Angelo Rivera
+* **indexer:** restore whole-page bulk writes in SDLC pipeline ([c169d0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c169d0a1e5154e6b1bc88de0dc213152627fa6fe)) by Jean-Gabriel Doyon
+
+### Other
+
+* **deps:** update rust crate tabled to 0.21 ([8ce1d29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8ce1d29a974c9e4c0516a15f56165034bfbd1894)) by GitLab Renovate Bot
+* **getting-started:** use glab orbit remote status to check Orbit ([e8dc261](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e8dc2614f36770909702fe9f4b2593a731d67b9b)) by Meg Corren
+* **graph-status:** return a generic indexing error message to clients ([b2fb389](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2fb389d073c2fbc5b0cd89eb37e25a6c265534b)) by Jean-Gabriel Doyon
+* **orbit-skill:** split SKILL.md into references to meet length budget ([da78843](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da78843777cda368f77a5ac085e654115747024c)) by Dmitry Gruzd
+
 ## [0.72.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.71.0...v0.72.0) (2026-06-07)
 
 ### Features
