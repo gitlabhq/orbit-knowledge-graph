@@ -9,7 +9,7 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::constants::*;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use crate::passes::plan::{EdgeTableConfig, Plan};
@@ -114,6 +114,14 @@ pub fn emit_neighbors(
         None => vec![],
     };
 
+    let center_sort_key_vec = plan
+        .table_sort_keys
+        .get(center_table.as_str())
+        .ok_or_else(|| {
+            QueryError::Lowering(format!("no sort key for node table '{center_table}'"))
+        })?
+        .clone();
+
     let build_arm = |dir: Direction| -> Query {
         let (center_edge_col, center_kind_col, neighbor_id, neighbor_type, is_outgoing) = match dir
         {
@@ -212,11 +220,7 @@ pub fn emit_neighbors(
             } else {
                 Vec::new()
             };
-            let center_sk = plan
-                .table_sort_keys
-                .get(center_table.as_str())
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
+            let center_sk = center_sort_key_vec.as_slice();
             let (center_subq, deleted_filter) = build_center_dedup(
                 &center_id,
                 &center_table,
@@ -245,11 +249,7 @@ pub fn emit_neighbors(
             ));
         } else {
             if !has_non_denorm {
-                let center_sort_key = plan
-                    .table_sort_keys
-                    .get(center_table.as_str())
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let center_sort_key = center_sort_key_vec.as_slice();
                 let center_node_scan = {
                     let mut ob: Vec<OrderExpr> = center_sort_key
                         .iter()

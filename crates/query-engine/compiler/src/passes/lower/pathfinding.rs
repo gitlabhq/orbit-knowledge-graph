@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::ast::*;
 use crate::constants::*;
-use crate::error::Result;
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use crate::passes::plan::{NodePlan, PathFindingBody, Plan};
@@ -37,14 +37,14 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         &mut anchor_ctes,
         pf.scoped_by_tp,
         &plan.table_sort_keys,
-    );
+    )?;
     let end_anchor = build_anchor(
         end_np,
         TARGET_ID_COLUMN,
         &mut anchor_ctes,
         pf.scoped_by_tp,
         &plan.table_sort_keys,
-    );
+    )?;
     let path_scope_cte = build_scope_cte(&start_anchor, &end_anchor);
 
     let start_entity = start_np.entity.as_deref().unwrap_or("");
@@ -285,14 +285,14 @@ fn build_anchor(
     ctes: &mut Vec<Cte>,
     force_cte: bool,
     table_sort_keys: &HashMap<String, Vec<String>>,
-) -> Anchor {
+) -> Result<Anchor> {
     let alias = &np.alias;
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
 
     // Literal IN for concrete node_ids (no CTE needed).
     if !force_cte && !np.node_ids.is_empty() {
-        return Anchor {
+        return Ok(Anchor {
             edge_filter: Expr::col_in(
                 "e1",
                 edge_col,
@@ -301,16 +301,16 @@ fn build_anchor(
             ),
             cte_name: None,
             has_tp: false,
-        };
+        });
     }
 
     let has_conds = !np.node_ids.is_empty() || !np.filters.is_empty() || np.id_range.is_some();
     if !has_conds {
-        return Anchor {
+        return Ok(Anchor {
             edge_filter: None,
             cte_name: None,
             has_tp: false,
-        };
+        });
     }
 
     let cte_name = node_filter_cte(alias);
@@ -334,8 +334,8 @@ fn build_anchor(
 
     let sort_key = table_sort_keys
         .get(table)
-        .map(|v| v.as_slice())
-        .unwrap_or(&[]);
+        .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))?
+        .as_slice();
     let dedup_scan = dedup_query(alias, table, select, scan_where, sort_key);
 
     let mut outer_select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
@@ -355,7 +355,7 @@ fn build_anchor(
     };
     ctes.push(Cte::new(&cte_name, cte_query));
 
-    Anchor {
+    Ok(Anchor {
         edge_filter: Some(Expr::InSubquery {
             expr: Box::new(Expr::col("e1", edge_col)),
             cte_name: cte_name.clone(),
@@ -363,7 +363,7 @@ fn build_anchor(
         }),
         cte_name: Some(cte_name),
         has_tp,
-    }
+    })
 }
 
 fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {

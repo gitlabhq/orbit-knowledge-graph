@@ -1667,7 +1667,7 @@ mod tests {
 
         assert!(
             !sql.contains("_candidate_"),
-            "filter-only FK predicates should keep the direct FINAL scan, got:\n{sql}"
+            "filter-only FK predicates should not emit candidate CTEs, got:\n{sql}"
         );
         assert!(
             sql.contains("LIMIT 1 BY"),
