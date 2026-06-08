@@ -695,6 +695,7 @@ fn build_extract_plan(
             deleted,
             order_by,
             traversal_path_filter,
+            page_join,
             ..
         } => {
             let mut columns: Vec<ExtractColumn> = select
@@ -702,6 +703,51 @@ fn build_extract_plan(
                 .map(|s| ExtractColumn::Bare(s.trim().to_string()))
                 .collect();
             append_missing(&mut columns, order_by);
+
+            // Only one page_join is supported; the CTE alias is fixed at _e0.
+            let enrichment = page_join.as_ref().map(|pj| {
+                let alias = &pj.alias;
+                let fk = &pj.fk_column;
+                let wm = pj.watermark.as_deref().unwrap_or("_siphon_replicated_at");
+                let agg_cols: Vec<String> = pj
+                    .select
+                    .iter()
+                    .map(|c| format!("argMax({alias}.{c}, {alias}.{wm}) AS {c}"))
+                    .collect();
+                let sub_cols = std::iter::once(format!("{alias}.{fk} AS id"))
+                    .chain(agg_cols)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let mut where_frag = pj
+                    .where_clause
+                    .as_ref()
+                    .map(|w| format!(" AND {w}"))
+                    .unwrap_or_default();
+                // Reuses the base scan's `{traversal_path:String}` param to prune
+                // the enrichment by the joined table's leading PK column.
+                if let Some(tp_col) = pj.traversal_path_column.as_ref().filter(|_| namespaced) {
+                    where_frag.push_str(&format!(
+                        " AND startsWith({alias}.{tp_col}, {{traversal_path:String}})"
+                    ));
+                }
+                let cte_def = format!(
+                    "_e0 AS (SELECT {sub_cols} FROM {table} AS {alias} \
+                     WHERE {alias}.{fk} IN (SELECT DISTINCT id FROM _batch){where_frag} \
+                     GROUP BY {alias}.{fk})",
+                    table = pj.table,
+                );
+                let join_clause = "LEFT JOIN _e0 ON _batch.id = _e0.id".to_string();
+                let select_exprs: Vec<String> = pj
+                    .select
+                    .iter()
+                    .map(|c| format!("_e0.{c} AS {c}"))
+                    .collect();
+                EnrichmentSql {
+                    cte_defs: vec![cte_def],
+                    join_clauses: vec![join_clause],
+                    select_exprs,
+                }
+            });
 
             ExtractPlan {
                 destination_table: destination_table.to_string(),
@@ -714,7 +760,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: traversal_path_filter.clone(),
                 additional_where: where_clause.clone(),
-                enrichment: None,
+                enrichment,
             }
         }
     }

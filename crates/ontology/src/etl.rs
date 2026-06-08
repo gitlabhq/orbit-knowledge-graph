@@ -16,6 +16,32 @@ pub enum EtlScope {
     Namespaced,
 }
 
+/// A secondary table joined to the page after `LIMIT`, so ClickHouse never
+/// builds a hash table over the entire secondary table. The lowering wraps
+/// the base query in a `_batch` CTE and enriches via
+/// `fk_column IN (SELECT id FROM _batch)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageJoin {
+    /// Datalake table to join (e.g. `siphon_system_note_metadata`).
+    pub table: String,
+    /// Table alias (e.g. `snm`).
+    pub alias: String,
+    /// FK column on the joined table that references the base table's `id`
+    /// (e.g. `note_id`).
+    pub fk_column: String,
+    /// Columns to select from the joined table (e.g. `["action"]`).
+    pub select: Vec<String>,
+    /// Extra WHERE predicate on the joined table (e.g. `_siphon_deleted = false`).
+    pub where_clause: Option<String>,
+    /// Watermark column for `argMax` deduplication. Defaults to `_siphon_replicated_at`.
+    pub watermark: Option<String>,
+    /// `traversal_path` column on the joined table. When set on a namespaced
+    /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
+    /// prune by the joined table's leading PK column. A superset of the matched
+    /// rows; correctness still comes from the `IN (_batch)` bound.
+    pub traversal_path_column: Option<String>,
+}
+
 /// Direction of an edge relative to the node defining the FK column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -75,6 +101,11 @@ pub enum EtlConfig {
         /// Used to qualify bare column references (e.g. `id`) that would
         /// otherwise be ambiguous across JOINed tables.
         table_alias: Option<String>,
+        /// Join pushed below the page `LIMIT` to avoid materializing the
+        /// full joined table in ClickHouse's hash-join build phase.
+        /// When set, the lowering wraps the base query in a `_batch` CTE
+        /// and enriches via `fk IN (SELECT id FROM _batch)`.
+        page_join: Option<Box<PageJoin>>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -116,6 +147,13 @@ impl EtlConfig {
         match self {
             EtlConfig::Table { .. } => None,
             EtlConfig::Query { table_alias, .. } => table_alias.as_deref(),
+        }
+    }
+
+    pub fn page_join(&self) -> Option<&PageJoin> {
+        match self {
+            EtlConfig::Table { .. } => None,
+            EtlConfig::Query { page_join, .. } => page_join.as_deref(),
         }
     }
 
@@ -184,6 +222,7 @@ mod tests {
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
+            page_join: None,
             edges: BTreeMap::new(),
         }
     }

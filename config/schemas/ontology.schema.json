@@ -328,6 +328,44 @@
               "type": "string",
               "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
             },
+            "page_join": {
+              "type": "object",
+              "description": "Secondary table joined after the page LIMIT to avoid materializing the full secondary table in ClickHouse's hash-join build phase. The lowering wraps the base query in a _batch CTE and enriches via fk_column IN (SELECT id FROM _batch).",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Datalake table to join (e.g. siphon_system_note_metadata)."
+                },
+                "alias": {
+                  "type": "string",
+                  "description": "Table alias used in the enrichment CTE (e.g. snm)."
+                },
+                "fk_column": {
+                  "type": "string",
+                  "description": "FK column on the joined table that references the base table's id (e.g. note_id)."
+                },
+                "select": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1,
+                  "description": "Columns to select from the joined table (e.g. [action])."
+                },
+                "where": {
+                  "type": "string",
+                  "description": "Extra WHERE predicate on the joined table (e.g. _siphon_deleted = false)."
+                },
+                "watermark": {
+                  "type": "string",
+                  "description": "Watermark column for argMax deduplication. Defaults to _siphon_replicated_at."
+                },
+                "traversal_path_column": {
+                  "type": "string",
+                  "description": "traversal_path column on the joined table. When set and the entity is namespaced, the enrichment CTE adds startsWith(<col>, {traversal_path}) so the join prunes by the joined table's leading PK column instead of scanning its whole FK index. The IN (SELECT id FROM _batch) bound already guarantees correctness; this is a pruning hint that must be a superset of the matched rows."
+                }
+              },
+              "required": ["table", "alias", "fk_column", "select"],
+              "additionalProperties": false
+            },
             "transform": {
               "type": "string",
               "pattern": "^[a-z][a-z0-9_]*$",
