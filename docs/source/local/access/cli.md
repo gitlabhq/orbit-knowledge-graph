@@ -26,26 +26,22 @@ against a local DuckDB file. No GitLab connection required.
 
 ## Install
 
-Install the managed `orbit` binary with the GitLab CLI (`glab`):
-
-```shell
-glab orbit local --install --yes
-```
-
-This downloads the binary, verifies its checksum, and keeps it up to date.
-Requires `glab` 1.94 or later.
-
-You can also install the binary directly with the one-line installer:
+Install the standalone `orbit` binary with the one-line installer:
 
 ```shell
 curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
 ```
 
-Open a new terminal, then verify the install:
+This adds `orbit` to your `PATH`. Open a new terminal, then verify the install:
 
 ```shell
 orbit help
 ```
+
+If you already use the GitLab CLI (`glab`), you can instead install a managed
+binary with `glab orbit local --install --yes`. That binary is invoked as
+`glab orbit local <command>` rather than `orbit` directly - see
+[Use Orbit Local with glab](glab.md).
 
 ### Build from source
 
