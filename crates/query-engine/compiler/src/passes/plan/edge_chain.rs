@@ -772,9 +772,8 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
-    let has_cascade_anchor = hops.iter().any(|h| h.cascade_anchor);
 
-    if has_filter_only || has_cascade_anchor {
+    if has_filter_only {
         let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
         for hop in hops {
             *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
