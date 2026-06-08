@@ -235,7 +235,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 } else {
                     where_parts.extend(narrow_in);
                 }
-                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
+                dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)?
             } else {
                 where_parts.extend(narrow_in);
                 where_parts.extend(edge_scope_predicate(hop, &alias));

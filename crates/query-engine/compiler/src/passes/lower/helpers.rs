@@ -337,9 +337,11 @@ pub(super) fn dedup_edge_scan(
     alias: &str,
     table_columns: &HashMap<String, HashSet<String>>,
     inner_predicates: Vec<Expr>,
-) -> TableRef {
+) -> Result<TableRef> {
     let Some(cols) = table_columns.get(edge_table) else {
-        panic!("dedup_edge_scan: no column metadata for edge table '{edge_table}'");
+        return Err(QueryError::Lowering(format!(
+            "no column metadata for edge table '{edge_table}'"
+        )));
     };
 
     let identity: Vec<&str> = EDGE_RESERVED_COLUMNS
@@ -395,7 +397,7 @@ pub(super) fn dedup_edge_scan(
         having: Some(having),
         ..Default::default()
     };
-    TableRef::subquery(query, alias)
+    Ok(TableRef::subquery(query, alias))
 }
 
 /// Build a `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` subquery
