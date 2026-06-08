@@ -670,19 +670,27 @@ Links each failed pipeline back to the user who triggered it.
 
 ### See the stage-by-stage status of a pipeline
 
-_Break a pipeline into its stages to see exactly where it stalls._
+_Break one pipeline into its stages, in order, to see exactly where it stalls._
 
 ```plaintext
-Use Orbit to show the stage-by-stage status of <project name>'s pipelines, in execution order.
+Use Orbit to show the stage-by-stage status of pipeline <pipeline ID> in <project name>.
 ```
 
 <details><summary>Show query</summary>
+
+Bound to a single pipeline by `iid`, so each row is self-identifying and the
+stages read in execution order.
 
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {"id": "pl", "entity": "Pipeline", "filters": {"project_id": 278964}},
+    {
+      "id": "pl",
+      "entity": "Pipeline",
+      "filters": {"project_id": 278964, "iid": 1400097},
+      "columns": ["iid", "status", "ref"]
+    },
     {"id": "s", "entity": "Stage", "columns": ["name", "status", "position"]}
   ],
   "relationships": [
