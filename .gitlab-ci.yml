@@ -111,12 +111,13 @@ stages:
       junit:
         - target/nextest/ci/junit.xml
 
-# The stale-MR sweep schedule (SCHEDULE_TYPE=stale_mr_sweep) should run only the
-# stale-mr-sweep job. Reference this first in any rule set that otherwise matches
-# the default branch, so the rest of the pipeline is skipped on that schedule.
-.skip-on-stale-sweep:
+# "Solo" scheduled pipelines run exactly one job and skip the rest of the CI
+# suite. A schedule opts in by setting SCHEDULE_ONLY=<job-name>: the named job
+# gates on that value, and every shared job/anchor references this guard so it
+# drops out. Adding a new solo schedule needs no edits to existing jobs here.
+.skip-on-solo-schedule:
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "stale_mr_sweep"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY != ""
       when: never
 
 .mr-only-rules:
@@ -125,7 +126,7 @@ stages:
 
 .mr-and-main-rules:
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -380,7 +381,7 @@ generate-sbom:
     - .job-template
   needs: []
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -396,7 +397,7 @@ semgrep-sast:
   stage: security
   needs: []
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       exists:
         - "**/*.rs"
@@ -411,7 +412,7 @@ secret_detection:
   stage: security
   needs: []
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -762,7 +763,7 @@ code-indexing-benchmark-v2-analyze:
     DOCKER_TLS_CERTDIR: ""
     IMAGE_NAME: gkg
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - git fetch --tags
@@ -795,7 +796,7 @@ docker-manifest:
   variables:
     IMAGE_NAME: gkg
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
@@ -837,7 +838,7 @@ check-go-proto:
     - scripts/proto-go.sh check
     - cd clients/gkgpb && go build ./...
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
@@ -861,7 +862,7 @@ build-proto-gem:
         ruby clients/protogem/build-proto-gem
       fi
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
     - if: $CI_COMMIT_TAG
       when: never
@@ -912,7 +913,7 @@ semantic-release:
     - job: build-proto-gem
       optional: true
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
@@ -1118,7 +1119,7 @@ e2e:
     - job: docker-manifest
       optional: true
   rules:
-    - !reference [.skip-on-stale-sweep, rules]
+    - !reference [.skip-on-solo-schedule, rules]
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
