@@ -124,10 +124,6 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
         create_user(ctx, id).await;
     }
 
-    // A cursored partition left by a prior run under a different split (6-way)
-    // is not among this 4-way run's spawned ranges, so its id range is never
-    // re-pulled this dispatch. Consolidating the parent now would mark the
-    // namespace complete while silently dropping that range — the bug this guards.
     ctx.execute(&format!(
         "INSERT INTO {} (key, watermark, cursor_values) \
          VALUES ('global.User.p5of6', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}')",
