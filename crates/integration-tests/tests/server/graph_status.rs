@@ -502,7 +502,10 @@ async fn indexing_status_error_state(ctx: &TestContext) {
 
     let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::Error as i32);
-    assert_eq!(indexing.last_error.as_deref(), Some("deadline exceeded"));
+    assert_eq!(
+        indexing.last_error.as_deref(),
+        Some("Something went wrong during indexing.")
+    );
 }
 
 async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
@@ -565,7 +568,10 @@ async fn indexing_status_per_entity_worst_state_wins(ctx: &TestContext) {
 
     let indexing = status.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::Error as i32);
-    assert_eq!(indexing.last_error.as_deref(), Some("scan failure"));
+    assert_eq!(
+        indexing.last_error.as_deref(),
+        Some("Something went wrong during indexing.")
+    );
 }
 
 async fn indexing_status_per_entity_missing_key_treated_as_not_indexed(ctx: &TestContext) {
