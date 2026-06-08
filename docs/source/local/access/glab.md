@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local. The glab orbit setup, mcp serve, and status commands are planned.
+description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup. The local mcp serve and status commands are planned.
 title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -29,16 +29,16 @@ run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
 instance or your local machine.
 
 > [!note]
-> `glab orbit local` ships today, in `glab` 1.94 or later. `glab orbit setup`,
-> `glab orbit local mcp serve`, and `glab orbit local status` are planned and
-> marked as such below.
+> `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or
+> later. `glab orbit local mcp serve` and `glab orbit local status` are
+> planned and marked as such below.
 
 Two top-level commands:
 
 - `glab orbit local`: wraps the managed `orbit` binary to index and query the
-  local graph. Available now.
-- `glab orbit setup`: install the Orbit skill and point your AI agent at the
-  local graph. Planned.
+  local graph.
+- `glab orbit setup`: guided onboarding that verifies access, installs the
+  Orbit skill, and installs the local binary.
 
 ## Prerequisites
 
@@ -64,34 +64,28 @@ glab orbit local help
 
 ## Set up your AI agent
 
-> [!note]
-> `glab orbit setup` is planned, not yet shipped. Until it ships,
-> [configure your MCP client manually](mcp.md#manual-config-claude-code).
-
-Once shipped, `glab orbit setup` will install the Orbit skill and write the
-MCP config in one command. It prompts for **Local** or **Remote** and
-auto-detects your agent.
+`glab orbit setup` runs a guided onboarding: it verifies that Orbit is
+reachable, installs the Orbit skill so AI coding agents can discover it, and
+installs the local `orbit` binary.
 
 ```shell
 glab orbit setup
-# Pick "Local" when prompted to point the MCP config at your local graph.
 ```
-
-Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
 
 | Flag | Purpose |
 |------|---------|
-| `--agent=<name>` | Override auto-detection. |
-| `--skill-only` | Install the skill files only; skip MCP config. |
-| `--mcp-only` | Write MCP config only; skip skill install. |
-| `--dry-run` | Print what would change without writing anything. |
+| `--yes` | Accept every prompt (non-interactive). |
+| `--global` | Install the skill at user scope (`~/.agents/skills/`) instead of the current repository. |
+| `--path` | Install the skill to a specific directory. |
+| `--skip-skill` | Skip the skill install step. |
+| `--skip-local` | Skip the local binary install step. |
+| `--upgrade` | Re-fetch the skill and update the binary in place. |
 
-The MCP config points at `orbit mcp serve` instead of the remote endpoint.
-Your agent can call `query_graph` and `get_graph_schema` against the local
-DuckDB graph.
+The skill drives the `orbit` binary directly. To connect an MCP client to the
+local graph instead, see [Connect via MCP](mcp.md).
 
 You can also [install the Orbit skill manually](../../ai_coding_agents.md)
-today with `glab skills install --global orbit`.
+with `glab skills install --global orbit`.
 
 ## Index a repository
 
