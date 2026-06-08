@@ -34,7 +34,8 @@ the prompt into a graph query for you. If you want to call the API directly, the
 exact query is behind the **Show query** toggle. All queries use the REST API
 format. To run them via MCP, pass the JSON body to `query_graph`.
 
-Replace the example group paths, project paths, and IDs with your own. For the
+Replace the placeholders in each prompt, such as `<group name>` and
+`<project name>`, and the example values in each query, with your own. For the
 full query grammar, see the [Orbit query language](queries/query-language.md).
 For every entity and property you can query, see the
 [schema reference](schema.md).
@@ -58,7 +59,7 @@ Answer: "What do we have, and where does it live?"
 ### List the projects in a group
 
 ```plaintext
-Use Orbit to list all the projects in the my-org group.
+Use Orbit to list all the projects in the <group name> group.
 ```
 
 <details><summary>Show query</summary>
@@ -86,10 +87,8 @@ Use Orbit to list all the projects in the my-org group.
 
 ## Analytics
 
-Answer: "What does our whole estate look like?"
-
-Organization-wide reports an agent can assemble from a single prompt. These
-sweep across every project you can access, so they work best with a group or
+Org-wide reports that roll your whole estate up into a single answer. Each one
+sweeps across every project you can access, so they work best with a group or
 top-level namespace token.
 
 ### Find dead or dormant repositories
@@ -116,6 +115,43 @@ Adjust the `last_activity_at` cutoff to match your definition of dormant.
   },
   "order_by": {"node": "p", "property": "last_activity_at", "direction": "ASC"},
   "limit": 100
+}
+```
+
+</details>
+
+### Measure merge request throughput
+
+```plaintext
+Use Orbit to show our merge request throughput: how many merge requests we merged each month over the past year.
+```
+
+<details><summary>Show query</summary>
+
+Groups merged merge requests by the month they merged. Adjust the `merged_at`
+window to change the reporting period.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {
+        "state": "merged",
+        "merged_at": {"op": "gte", "value": "2025-06-01"}
+      }
+    }
+  ],
+  "group_by": [
+    {"kind": "property", "node": "mr", "property": "merged_at", "transform": {"kind": "truncate", "unit": "month"}, "alias": "month"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "mr", "alias": "merged"}
+  ],
+  "aggregation_sort": {"column": "month", "direction": "ASC"},
+  "limit": 18
 }
 ```
 
@@ -195,7 +231,7 @@ Answer: "Help me understand this codebase."
 ### Find the most active contributors to a project
 
 ```plaintext
-Use Orbit to find the top 10 contributors to my-org/my-project by merged merge requests.
+Use Orbit to find the top 10 contributors to <project name> by merged merge requests.
 ```
 
 <details><summary>Show query</summary>
@@ -234,7 +270,7 @@ Use Orbit to find the top 10 contributors to my-org/my-project by merged merge r
 ### List the files in a directory
 
 ```plaintext
-Use Orbit to list the files under the app/models directory in this project.
+Use Orbit to list the files under the <directory path> directory in <project name>.
 ```
 
 <details><summary>Show query</summary>
@@ -272,7 +308,7 @@ Answer: "What breaks if I change this?"
 ### Find all files that import a specific module
 
 ```plaintext
-Use Orbit to find which files import the payments-service module.
+Use Orbit to find which files import the <module name> module.
 ```
 
 <details><summary>Show query</summary>
@@ -297,7 +333,7 @@ Use Orbit to find which files import the payments-service module.
 ### Find projects that depend on a shared library
 
 ```plaintext
-Use Orbit to find which projects depend on the shared-auth-lib library.
+Use Orbit to find which projects depend on the <library name> library.
 ```
 
 <details><summary>Show query</summary>
@@ -331,7 +367,7 @@ Answer: "How are our services connected?"
 ### Map imported definitions
 
 ```plaintext
-Use Orbit to find which definitions in our payments code are imported the most.
+Use Orbit to find which definitions in our <module name> code are imported the most.
 ```
 
 <details><summary>Show query</summary>
@@ -371,7 +407,7 @@ Answer: "What changed, and what did reviewers say?"
 ### Read the review discussion on a merge request
 
 ```plaintext
-Use Orbit to show the review discussion on merge request 12345, including who said what.
+Use Orbit to show the review discussion on merge request <merge request ID>, including who said what.
 ```
 
 <details><summary>Show query</summary>
@@ -399,7 +435,7 @@ Use Orbit to show the review discussion on merge request 12345, including who sa
 ### Find the largest merge requests in a project
 
 ```plaintext
-Use Orbit to find the largest merge requests in this project by number of files changed.
+Use Orbit to find the largest merge requests in <project name> by number of files changed.
 ```
 
 <details><summary>Show query</summary>
@@ -434,7 +470,7 @@ Answer: "What is the team working on?"
 ### List the open issues in a project
 
 ```plaintext
-Use Orbit to list the open issues in my-org/my-project.
+Use Orbit to list the open issues in <project name>.
 ```
 
 <details><summary>Show query</summary>
@@ -468,7 +504,7 @@ Use Orbit to list the open issues in my-org/my-project.
 ### Count open issues by label
 
 ```plaintext
-Use Orbit to count the open issues in my-org/my-project, grouped by label.
+Use Orbit to count the open issues in <project name>, grouped by label.
 ```
 
 <details><summary>Show query</summary>
@@ -507,7 +543,7 @@ Use Orbit to count the open issues in my-org/my-project, grouped by label.
 ### List the milestones in a project
 
 ```plaintext
-Use Orbit to list the milestones in my-org/my-project with their due dates.
+Use Orbit to list the milestones in <project name> with their due dates.
 ```
 
 <details><summary>Show query</summary>
@@ -596,7 +632,7 @@ Use Orbit to show failed CI jobs and why they failed.
 ### See the stage-by-stage status of a pipeline
 
 ```plaintext
-Use Orbit to show the stage-by-stage status of this project's pipelines, in execution order.
+Use Orbit to show the stage-by-stage status of <project name>'s pipelines, in execution order.
 ```
 
 <details><summary>Show query</summary>
@@ -625,7 +661,7 @@ Answer: "Where are our security risks, and how did they get there?"
 ### Find all critical and high vulnerabilities in a group
 
 ```plaintext
-Use Orbit to list the critical and high severity vulnerabilities across this group.
+Use Orbit to list the critical and high severity vulnerabilities across <group name>.
 ```
 
 <details><summary>Show query</summary>
@@ -722,7 +758,7 @@ Use Orbit to count our detected vulnerabilities by severity.
 ### Trace a specific CVE across your projects
 
 ```plaintext
-Use Orbit to find where CVE-2021-44228 (Log4Shell) appears across our projects.
+Use Orbit to find where <CVE ID> appears across our projects.
 ```
 
 <details><summary>Show query</summary>
@@ -757,7 +793,7 @@ Replace `CVE-2021-44228` with the CVE or CWE identifier you are hunting.
 ### List the findings from the latest security scan
 
 ```plaintext
-Use Orbit to show what the latest security scan found in this project.
+Use Orbit to show what the latest security scan found in <project name>.
 ```
 
 <details><summary>Show query</summary>
@@ -790,7 +826,7 @@ Use Orbit to show what the latest security scan found in this project.
 ### See which scanners run on a project
 
 ```plaintext
-Use Orbit to show which security scanners run on my-org/my-project.
+Use Orbit to show which security scanners run on <project name>.
 ```
 
 <details><summary>Show query</summary>
