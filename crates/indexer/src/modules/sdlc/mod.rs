@@ -74,7 +74,6 @@ pub async fn register_handlers(
             metrics.clone(),
             config.engine.datalake_retry.clone(),
         )
-        .with_write_channel_capacity(entity_handler_config.write_channel_capacity)
         .with_registry(Arc::clone(&transform_registry)),
     );
 
