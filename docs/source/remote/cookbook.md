@@ -42,42 +42,41 @@ For every entity and property you can query, see the
 
 ## Use cases
 
-- [Explore your organization](#explore-your-organization) - groups and projects
+- [Explore your organization](#explore-your-organization) - map projects to the people who own them
 - [Analytics](#analytics) - org-wide reports across your whole estate
-- [Onboarding and codebase exploration](#onboarding-and-codebase-exploration) - contributors, directories
+- [Onboarding and codebase exploration](#onboarding-and-codebase-exploration) - contributors and the cross-file call graph
 - [Blast radius analysis](#blast-radius-analysis) - what breaks if I change this
 - [Dependency mapping](#dependency-mapping) - how services are connected
-- [Merge requests and code review](#merge-requests-and-code-review) - diffs and review discussion
+- [Merge requests and code review](#merge-requests-and-code-review) - review discussion and pipeline status
 - [Planning and delivery](#planning-and-delivery) - issues linked to merge requests, contributors, and related work
-- [Pipeline health](#pipeline-health) - CI/CD problems, stages, jobs
+- [Pipeline health](#pipeline-health) - failed pipelines, who triggered them, stages
 - [Vulnerability tracing](#vulnerability-tracing) - findings, scanners, CVE tracing
 
 ## Explore your organization
 
 Answer: "What do we have, and where does it live?"
 
-### List the projects in a group
+### Map a group's projects and their owners
 
 ```plaintext
-Use Orbit to list all the projects in the <group name> group.
+Use Orbit to map the projects in <group name>, showing who created each one and when it was last active.
 ```
 
 <details><summary>Show query</summary>
+
+Joins every project in the group to the user who created it, in one query.
 
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {
-      "id": "g",
-      "entity": "Group",
-      "filters": {"full_path": "my-org"},
-      "columns": ["full_path", "name"]
-    },
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path", "star_count"]}
+    {"id": "g", "entity": "Group", "filters": {"full_path": "my-org"}, "columns": ["full_path"]},
+    {"id": "p", "entity": "Project", "columns": ["full_path", "last_activity_at"]},
+    {"id": "u", "entity": "User", "columns": ["username", "name"]}
   ],
   "relationships": [
-    {"type": "CONTAINS", "from": "g", "to": "p"}
+    {"type": "CONTAINS", "from": "g", "to": "p"},
+    {"type": "CREATOR", "from": "u", "to": "p"}
   ],
   "limit": 100
 }
@@ -267,35 +266,34 @@ Use Orbit to find the top 10 contributors to <project name> by merged merge requ
 
 </details>
 
-### List the files in a directory
+### Find everywhere a function is called
 
 ```plaintext
-Use Orbit to list the files under the <directory path> directory in <project name>.
+Use Orbit to find every place that calls the <function name> method, with the file each call lives in.
 ```
 
 <details><summary>Show query</summary>
 
-The `path` filter uses `starts_with`, so it also returns nested subdirectories.
+Follows the `CALLS` edge from each caller to the target definition. This is the
+resolved cross-file call graph, not a text search, so it finds real references
+even when the name is reused elsewhere.
 
 ```json
 {
   "query_type": "traversal",
   "nodes": [
     {
-      "id": "d",
-      "entity": "Directory",
-      "filters": {
-        "project_id": 278964,
-        "path": {"op": "starts_with", "value": "app/models"}
-      },
-      "columns": ["path", "name"]
+      "id": "callee",
+      "entity": "Definition",
+      "filters": {"project_id": 278964, "name": "execute", "definition_type": "Method"},
+      "columns": ["fqn", "file_path"]
     },
-    {"id": "f", "entity": "File", "columns": ["name", "language"]}
+    {"id": "caller", "entity": "Definition", "columns": ["fqn", "file_path"]}
   ],
   "relationships": [
-    {"type": "CONTAINS", "from": "d", "to": "f"}
+    {"type": "CALLS", "from": "caller", "to": "callee"}
   ],
-  "limit": 50
+  "limit": 25
 }
 ```
 
@@ -432,27 +430,36 @@ Use Orbit to show the review discussion on merge request <merge request ID>, inc
 
 </details>
 
-### Find the largest merge requests in a project
+### Find merge requests whose pipeline failed
 
 ```plaintext
-Use Orbit to find the largest merge requests in <project name> by number of files changed.
+Use Orbit to find merged merge requests in <project name> whose head pipeline failed.
 ```
 
 <details><summary>Show query</summary>
 
+Joins each merge request to its head pipeline and keeps only the failed ones.
+
 ```json
 {
   "query_type": "traversal",
-  "node": {
-    "id": "diff",
-    "entity": "MergeRequestDiff",
-    "filters": {
-      "project_id": 278964,
-      "files_count": {"op": "gte", "value": 1}
+  "nodes": [
+    {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {"project_id": 278964, "state": "merged"},
+      "columns": ["iid", "title"]
     },
-    "columns": ["merge_request_id", "commits_count", "files_count"]
-  },
-  "order_by": {"node": "diff", "property": "files_count", "direction": "DESC"},
+    {
+      "id": "pl",
+      "entity": "Pipeline",
+      "filters": {"status": "failed"},
+      "columns": ["ref", "status", "failure_reason"]
+    }
+  ],
+  "relationships": [
+    {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"}
+  ],
   "limit": 20
 }
 ```
@@ -596,24 +603,32 @@ Use Orbit to find which projects have the most failed pipelines.
 
 </details>
 
-### Find failed jobs and their failure reasons
+### Find failed pipelines and who triggered them
 
 ```plaintext
-Use Orbit to show failed CI jobs and why they failed.
+Use Orbit to show failed pipelines in <project name> and the person who triggered each one.
 ```
 
 <details><summary>Show query</summary>
 
+Links each failed pipeline back to the user who triggered it.
+
 ```json
 {
   "query_type": "traversal",
-  "node": {
-    "id": "j",
-    "entity": "Job",
-    "columns": ["name", "status", "failure_reason"],
-    "filters": {"status": "failed"}
-  },
-  "limit": 10
+  "nodes": [
+    {
+      "id": "pl",
+      "entity": "Pipeline",
+      "filters": {"project_id": 278964, "status": "failed"},
+      "columns": ["iid", "ref", "failure_reason"]
+    },
+    {"id": "u", "entity": "User", "columns": ["username"]}
+  ],
+  "relationships": [
+    {"type": "TRIGGERED", "from": "u", "to": "pl"}
+  ],
+  "limit": 20
 }
 ```
 
