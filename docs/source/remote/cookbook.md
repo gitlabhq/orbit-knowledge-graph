@@ -42,6 +42,7 @@ For every entity and property you can query, see the
 ## Use cases
 
 - [Explore your organization](#explore-your-organization) - groups and projects
+- [Analytics](#analytics) - org-wide reports across your whole estate
 - [Onboarding and codebase exploration](#onboarding-and-codebase-exploration) - contributors, directories
 - [Blast radius analysis](#blast-radius-analysis) - what breaks if I change this
 - [Dependency mapping](#dependency-mapping) - how services are connected
@@ -78,6 +79,110 @@ Use Orbit to list all the projects in the my-org group.
     {"type": "CONTAINS", "from": "g", "to": "p"}
   ],
   "limit": 100
+}
+```
+
+</details>
+
+## Analytics
+
+Answer: "What does our whole estate look like?"
+
+Organization-wide reports an agent can assemble from a single prompt. These
+sweep across every project you can access, so they work best with a group or
+top-level namespace token.
+
+### Find dead or dormant repositories
+
+```plaintext
+Use Orbit to find all the dead repositories across our organization that have had no activity in the last two years.
+```
+
+<details><summary>Show query</summary>
+
+Adjust the `last_activity_at` cutoff to match your definition of dormant.
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "p",
+    "entity": "Project",
+    "filters": {
+      "archived": false,
+      "last_activity_at": {"op": "lt", "value": "2024-01-01"}
+    },
+    "columns": ["full_path", "name", "last_activity_at", "star_count"]
+  },
+  "order_by": {"node": "p", "property": "last_activity_at", "direction": "ASC"},
+  "limit": 100
+}
+```
+
+</details>
+
+### Generate a security posture report
+
+```plaintext
+Use Orbit to generate a security posture report showing how many vulnerabilities we detected each year over the last five years.
+```
+
+<details><summary>Show query</summary>
+
+Groups vulnerability occurrences by the year they were detected. The agent can
+run further cuts, such as by severity, scanner, or project, to fill out the report.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {
+      "id": "occ",
+      "entity": "VulnerabilityOccurrence",
+      "filters": {"detected_at": {"op": "gte", "value": "2021-01-01"}}
+    }
+  ],
+  "group_by": [
+    {"kind": "property", "node": "occ", "property": "detected_at", "transform": {"kind": "truncate", "unit": "year"}, "alias": "year"}
+  ],
+  "aggregations": [
+    {"function": "count", "target": "occ", "alias": "occurrences"}
+  ],
+  "aggregation_sort": {"column": "year", "direction": "ASC"},
+  "limit": 10
+}
+```
+
+</details>
+
+### Map critical services and their owners
+
+```plaintext
+Use Orbit to generate a report of our most critical services and who owns them.
+```
+
+<details><summary>Show query</summary>
+
+Ranks services by star count as a popularity proxy and returns the user who
+created each one. Order by `last_activity_at` instead to rank by recent activity.
+
+```json
+{
+  "query_type": "traversal",
+  "nodes": [
+    {"id": "u", "entity": "User", "columns": ["username", "name"]},
+    {
+      "id": "p",
+      "entity": "Project",
+      "filters": {"star_count": {"op": "gte", "value": 100}},
+      "columns": ["full_path", "star_count"]
+    }
+  ],
+  "relationships": [
+    {"type": "CREATOR", "from": "u", "to": "p"}
+  ],
+  "order_by": {"node": "p", "property": "star_count", "direction": "DESC"},
+  "limit": 25
 }
 ```
 
