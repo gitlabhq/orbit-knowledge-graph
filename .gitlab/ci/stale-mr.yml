@@ -8,7 +8,8 @@
 #      Protected is required so scheduled pipelines on the default branch can
 #      read it.
 #   3. Create a pipeline schedule (Project → CI/CD → Schedules, daily) with a
-#      variable SCHEDULE_TYPE=stale_mr_sweep.
+#      variable SCHEDULE_ONLY=stale-mr-sweep. That marker makes the schedule run
+#      only this job (see .skip-on-solo-schedule in .gitlab-ci.yml).
 #   4. To rehearse without side effects, run the schedule once with DRY_RUN=true
 #      set on the schedule; remove it to go live.
 stale-mr-sweep:
@@ -16,6 +17,9 @@ stale-mr-sweep:
   image: registry.gitlab.com/gitlab-org/cli:v1.102.0
   tags:
     - saas-linux-small-amd64
+  # Run independently of stage order so the blocking manual release job can't
+  # gate it; on the solo schedule this is the only job anyway.
+  needs: []
   variables:
     STALE_IDLE_DAYS: "14"
     STALE_GRACE_DAYS: "3"
@@ -24,7 +28,7 @@ stale-mr-sweep:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "stale_mr_sweep"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_ONLY == "stale-mr-sweep"
   before_script:
     - test -n "${STALE_MR_GITLAB_TOKEN}" || (echo "Missing STALE_MR_GITLAB_TOKEN" && exit 1)
     - apk add --no-cache bash jq coreutils
