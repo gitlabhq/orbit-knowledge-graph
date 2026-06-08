@@ -47,6 +47,12 @@ pub struct Hop {
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
     pub scope_preserving: bool,
+    /// Anchor this hop's join column with an IN-subquery over the previous
+    /// hop's output ids, so ClickHouse can use the by_source/by_target
+    /// projection or bloom filter instead of scanning the full relationship
+    /// range. Set by the plan pass for interior single-hop edges in a
+    /// multi-edge chain.
+    pub cascade_anchor: bool,
 }
 
 /// Pre-resolved join columns for connecting a hop to the previous hop.
@@ -201,6 +207,7 @@ pub fn plan(input: &mut Input) -> Plan {
     };
 
     resolve_join_columns(&mut hops);
+    resolve_cascade_anchors(&mut hops);
 
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
 
@@ -307,6 +314,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                     .collect(),
                 join_prev: None,
                 scope_prefix: rel.scope_prefix.clone(),
+                cascade_anchor: false,
             }
         })
         .collect()
@@ -597,6 +605,19 @@ fn filter_covered_by_denorm(
     })
 }
 
+/// Mark interior hops for cascade SIP anchoring. A hop qualifies when it
+/// is a non-first, single-hop edge with a resolved `join_prev` in a
+/// multi-edge chain. Variable-length hops (max_hops > 1) are excluded
+/// because their UNION-ALL arms have their own internal join structure.
+fn resolve_cascade_anchors(hops: &mut [Hop]) {
+    if hops.len() < 2 {
+        return;
+    }
+    for hop in hops.iter_mut().skip(1) {
+        hop.cascade_anchor = hop.join_prev.is_some() && hop.max_hops == 1;
+    }
+}
+
 /// Pre-resolve join columns for each hop based on shared-node topology
 /// with the previous hop.
 fn resolve_join_columns(hops: &mut [Hop]) {
@@ -694,7 +715,9 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
-    if has_filter_only {
+    let has_cascade_anchor = hops.iter().any(|h| h.cascade_anchor);
+
+    if has_filter_only || has_cascade_anchor {
         let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
         for hop in hops {
             *convergent_targets.entry(hop.to_node.as_str()).or_insert(0) += 1;
