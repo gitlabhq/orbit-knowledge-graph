@@ -83,10 +83,22 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         table_alias: Option<String>,
         #[serde(default)]
+        page_join: Option<Box<PageJoinYaml>>,
+        #[serde(default)]
         transform: Option<String>,
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PageJoinYaml {
+    table: String,
+    alias: String,
+    fk_column: String,
+    select: Vec<String>,
+    #[serde(default, rename = "where")]
+    where_clause: Option<String>,
 }
 
 impl EtlYaml {
@@ -554,6 +566,7 @@ impl EtlYaml {
                 order_by,
                 traversal_path_filter,
                 table_alias,
+                page_join,
                 transform: _,
                 edges,
             } => Ok(EtlConfig::Query {
@@ -567,6 +580,16 @@ impl EtlYaml {
                 order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
                 traversal_path_filter,
                 table_alias,
+                page_join: page_join.map(|pj| {
+                    let pj = *pj;
+                    Box::new(crate::etl::PageJoin {
+                        table: pj.table,
+                        alias: pj.alias,
+                        fk_column: pj.fk_column,
+                        select: pj.select,
+                        where_clause: pj.where_clause,
+                    })
+                }),
                 edges: convert_edge_mappings(edges)?,
             }),
         }

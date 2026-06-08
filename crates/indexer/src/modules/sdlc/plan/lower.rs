@@ -1086,4 +1086,50 @@ mod tests {
         }
         assert!(count > 0, "ontology produced no plans");
     }
+
+    #[test]
+    fn system_note_extract_bounds_metadata_join_to_page() {
+        let ontology = test_ontology();
+        let plans = build_plans(&ontology, 10_000);
+
+        let plan = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "SystemNote")
+            .expect("SystemNote plan");
+
+        let sql = render_namespaced_extract(plan, "1/2/");
+
+        // _batch CTE wraps the base table scan with LIMIT inside the CTE.
+        assert!(sql.contains("WITH _batch AS ("), "sql: {sql}");
+        assert!(sql.contains("LIMIT 10000"), "sql: {sql}");
+
+        // The base scan inside _batch is the bare siphon_notes table, not the
+        // INNER JOIN that previously caused FillingRightJoinSide OOM (#830).
+        let batch_body = sql
+            .split("WITH _batch AS (")
+            .nth(1)
+            .and_then(|s| s.split("), _e0 AS (").next())
+            .unwrap_or("");
+        assert!(
+            batch_body.contains("FROM siphon_notes AS sn"),
+            "batch body: {batch_body}"
+        );
+        assert!(
+            !batch_body.contains("siphon_system_note_metadata"),
+            "_batch must not join the metadata table: {batch_body}"
+        );
+
+        // Enrichment CTE scopes metadata read to the page's note IDs.
+        assert!(
+            sql.contains("note_id IN (SELECT DISTINCT id FROM _batch)"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("LEFT JOIN _e0 ON _batch.id = _e0.id"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("_e0.action AS action"), "sql: {sql}");
+        assert!(sql.contains("snm._siphon_deleted = false"), "sql: {sql}");
+    }
 }

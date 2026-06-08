@@ -29,6 +29,11 @@ datalake:
   # password: ""
   query_settings:
     max_execution_time: "900"
+    # Guard rail: cap per-query memory so a single extract can't starve the
+    # shared datalake into collateral OOMs on unrelated pipelines (#830).
+    # 8 GiB is well above any page-bounded query but well below the shared
+    # ClickHouse ceiling.
+    max_memory_usage: "8000000000"
 
 graph:
   url: "http://127.0.0.1:8123"

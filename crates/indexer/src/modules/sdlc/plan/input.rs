@@ -695,6 +695,7 @@ fn build_extract_plan(
             deleted,
             order_by,
             traversal_path_filter,
+            page_join,
             ..
         } => {
             let mut columns: Vec<ExtractColumn> = select
@@ -702,6 +703,42 @@ fn build_extract_plan(
                 .map(|s| ExtractColumn::Bare(s.trim().to_string()))
                 .collect();
             append_missing(&mut columns, order_by);
+
+            let enrichment = page_join.as_ref().map(|pj| {
+                let alias = &pj.alias;
+                let fk = &pj.fk_column;
+                let agg_cols: Vec<String> = pj
+                    .select
+                    .iter()
+                    .map(|c| format!("argMax({alias}.{c}, {alias}._siphon_replicated_at) AS {c}"))
+                    .collect();
+                let sub_cols = std::iter::once(format!("{alias}.{fk} AS id"))
+                    .chain(agg_cols)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let where_frag = pj
+                    .where_clause
+                    .as_ref()
+                    .map(|w| format!(" AND {w}"))
+                    .unwrap_or_default();
+                let cte_def = format!(
+                    "_e0 AS (SELECT {sub_cols} FROM {table} AS {alias} \
+                     WHERE {alias}.{fk} IN (SELECT DISTINCT id FROM _batch){where_frag} \
+                     GROUP BY {alias}.{fk})",
+                    table = pj.table,
+                );
+                let join_clause = "LEFT JOIN _e0 ON _batch.id = _e0.id".to_string();
+                let select_exprs: Vec<String> = pj
+                    .select
+                    .iter()
+                    .map(|c| format!("_e0.{c} AS {c}"))
+                    .collect();
+                EnrichmentSql {
+                    cte_defs: vec![cte_def],
+                    join_clauses: vec![join_clause],
+                    select_exprs,
+                }
+            });
 
             ExtractPlan {
                 destination_table: destination_table.to_string(),
@@ -714,7 +751,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: traversal_path_filter.clone(),
                 additional_where: where_clause.clone(),
-                enrichment: None,
+                enrichment,
             }
         }
     }
