@@ -92,6 +92,11 @@ struct Cli {
     /// Compile only: print rendered SQL without executing.
     #[arg(long, value_enum)]
     compile_only: Option<CompileShow>,
+
+    /// Seed a resolved scope prefix for a DSL node as `alias=prefix` (repeatable,
+    /// e.g. `g=1/9970/`); mirrors the server PathResolutionStage the profiler skips.
+    #[arg(long = "scope-prefix")]
+    scope_prefixes: Vec<String>,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -226,6 +231,31 @@ fn embedded_schema_version() -> u32 {
         .expect("config/SCHEMA_VERSION must contain a valid u32")
 }
 
+fn seed_scope_prefixes(
+    security_ctx: SecurityContext,
+    query_json: &str,
+    ontology: &Ontology,
+    cli: &Cli,
+) -> Result<SecurityContext> {
+    let mut seed = std::collections::HashMap::new();
+    for spec in &cli.scope_prefixes {
+        let (alias, prefix) = spec
+            .split_once('=')
+            .context("--scope-prefix must be alias=prefix")?;
+        if let Some(prev) = seed.insert(alias.to_string(), prefix.to_string()) {
+            eprintln!(
+                "warning: --scope-prefix alias '{alias}' specified more than once ('{prev}' overwritten by '{prefix}')"
+            );
+        }
+    }
+
+    let input = compiler::validate_normalize(query_json, ontology)
+        .map_err(|e| anyhow::anyhow!("validate_normalize failed: {e}"))?;
+    let edges = compiler::scope_edges(&input);
+    let scope_prefixes = ontology.propagate_scope_prefixes(&edges, &seed);
+    Ok(security_ctx.with_scope_prefixes(scope_prefixes))
+}
+
 fn compile_one(
     query_json: &str,
     ontology: &Ontology,
@@ -350,8 +380,12 @@ async fn main() -> Result<()> {
     let org_id = gkg_utils::traversal_path::org_id(&cli.traversal_paths[0])
         .context("failed to parse org_id from first traversal path")?;
 
-    let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
+    let mut security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())
         .map_err(|e| anyhow::anyhow!("invalid security context: {e}"))?;
+
+    if !cli.scope_prefixes.is_empty() {
+        security_ctx = seed_scope_prefixes(security_ctx, &query_json, &ontology, &cli)?;
+    }
 
     if let Some(show) = &cli.compile_only {
         return run_compile_only(&query_json, &ontology, &security_ctx, show, &cli);

@@ -128,7 +128,7 @@ Discover the schema:
 
 Run a query:
 > "Use `query_graph` to find the 10 projects with the most open merge requests in
-> the `gitlab-org` group."
+> your group."
 
 Blast radius analysis:
 > "Use Orbit to find all files in this project that import `AuthService` directly

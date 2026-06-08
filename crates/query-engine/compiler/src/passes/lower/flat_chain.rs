@@ -319,25 +319,61 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 HydrationStrategy::Join => {
                     let narrow_source = if np.use_narrowing {
                         let narrow_alias = format!("{edge_alias}n");
+                        let mut nw = Vec::new();
+                        push_edge_predicates(
+                            &mut nw,
+                            &narrow_alias,
+                            hop,
+                            &plan.nodes,
+                            &plan.table_columns,
+                            false,
+                        );
+                        nw.extend(edge_scope_predicate(hop, &narrow_alias));
+                        emit_node_ids_on_edge(
+                            &mut nw,
+                            &narrow_alias,
+                            hop,
+                            &plan.nodes,
+                            start_col,
+                            end_col,
+                        );
+                        if hop.cascade_anchor
+                            && let Some(ref jc) = hop.join_prev
+                        {
+                            let prev_hop = &plan.hops[i - 1];
+                            let pa = format!("{}np", jc.prev_alias);
+                            let (ps, pe) = prev_hop.direction.edge_columns();
+                            let mut pp = Vec::new();
+                            push_edge_predicates(
+                                &mut pp,
+                                &pa,
+                                prev_hop,
+                                &plan.nodes,
+                                &plan.table_columns,
+                                false,
+                            );
+                            for (prop, filter) in &prev_hop.filters {
+                                pp.push(filter_to_expr(&pa, prop, filter));
+                            }
+                            pp.extend(edge_scope_predicate(prev_hop, &pa));
+                            emit_node_ids_on_edge(&mut pp, &pa, prev_hop, &plan.nodes, ps, pe);
+                            nw.push(Expr::InSelect {
+                                expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
+                                query: Box::new(Query {
+                                    select: vec![SelectExpr::col(&pa, &jc.prev_col)],
+                                    from: TableRef::scan(&prev_hop.edge_table, &pa),
+                                    where_clause: Expr::conjoin(pp),
+                                    ..Default::default()
+                                }),
+                            });
+                        }
                         let narrow_query = Query {
                             select: vec![SelectExpr::new(
                                 Expr::col(&narrow_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
-                            distinct: true,
                             from: TableRef::scan(&hop.edge_table, &narrow_alias),
-                            where_clause: {
-                                let mut nw = Vec::new();
-                                push_edge_predicates(
-                                    &mut nw,
-                                    &format!("{edge_alias}n"),
-                                    hop,
-                                    &plan.nodes,
-                                    &plan.table_columns,
-                                    false,
-                                );
-                                Expr::conjoin(nw)
-                            },
+                            where_clause: Expr::conjoin(nw),
                             ..Default::default()
                         };
                         let narrow_name = format!("_narrow_{}", np.alias);

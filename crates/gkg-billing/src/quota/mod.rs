@@ -78,6 +78,11 @@ impl QuotaService {
             return Ok(());
         }
 
+        let correlation_id = labkit::correlation::current()
+            .as_ref()
+            .map(|id| id.as_str().to_string())
+            .unwrap_or_default();
+
         let Some(request) = CdotRequest::from_inputs(inputs) else {
             warn!(
                 user_id = inputs.user_id,
@@ -87,6 +92,7 @@ impl QuotaService {
                 instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                 unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                 source_type = %inputs.source_type,
+                correlation_id = %correlation_id,
                 "quota check failed: required claim fields missing"
             );
             return Err(Status::internal(
@@ -98,7 +104,21 @@ impl QuotaService {
         record_decision(&gate_decision, cache_outcome, &inputs.source_type);
 
         match gate_decision {
-            QuotaGateDecision::Allow | QuotaGateDecision::FailOpen => Ok(()),
+            QuotaGateDecision::Allow => Ok(()),
+            QuotaGateDecision::FailOpen => {
+                warn!(
+                    user_id = inputs.user_id,
+                    realm = inputs.realm.as_deref().unwrap_or(""),
+                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
+                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
+                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
+                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
+                    source_type = %inputs.source_type,
+                    correlation_id = %correlation_id,
+                    "quota gate decision: fail_open"
+                );
+                Ok(())
+            }
             QuotaGateDecision::Deny(reason) => {
                 debug!(
                     user_id = inputs.user_id,
@@ -109,7 +129,8 @@ impl QuotaService {
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
                     reason = ?reason,
-                    "quota check denied request"
+                    correlation_id = %correlation_id,
+                    "quota gate decision: denied"
                 );
                 Err(Status::resource_exhausted(reason.message()))
             }

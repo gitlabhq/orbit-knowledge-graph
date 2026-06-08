@@ -207,17 +207,26 @@ impl EntityHandler {
                         ))
                         .await
                         .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                    let consolidated_watermark = partition_checkpoints
-                        .iter()
-                        .map(|(_, cp)| cp.watermark)
-                        .min()
-                        .unwrap_or(request.watermark);
 
-                    self.checkpoint_store
-                        .consolidate(&checkpoint_key, &consolidated_watermark)
-                        .await
-                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                    Ok(stats)
+                    match consolidated_watermark(&partition_checkpoints, request.watermark) {
+                        Ok(watermark) => self
+                            .checkpoint_store
+                            .consolidate(&checkpoint_key, &watermark)
+                            .await
+                            .map(|()| stats)
+                            .map_err(|err| HandlerError::Processing(err.to_string())),
+                        // Leaving the parent absent re-triggers partitioning next dispatch; Ok keeps this expected mid-load state out of pipeline-error metrics.
+                        Err(incomplete) => {
+                            info!(
+                                entity = %self.plan.name,
+                                checkpoint = %checkpoint_key,
+                                incomplete = incomplete.len(),
+                                partitions = %incomplete.join(", "),
+                                "partitions still in progress; deferring consolidation to next dispatch"
+                            );
+                            Ok(stats)
+                        }
+                    }
                 }
                 Err(e) => Err(e),
             }
@@ -325,6 +334,28 @@ fn pull_window(
         Some(checkpoint) => (checkpoint.watermark, request_watermark),
         None => (DateTime::<Utc>::UNIX_EPOCH, request_watermark),
     }
+}
+
+/// Parent watermark for a finished partitioned load, or the partitions still
+/// mid-pull: consolidating past a cursored partition silently drops its id range.
+fn consolidated_watermark(
+    partition_checkpoints: &[(String, Checkpoint)],
+    fallback: DateTime<Utc>,
+) -> Result<DateTime<Utc>, Vec<String>> {
+    let incomplete: Vec<String> = partition_checkpoints
+        .iter()
+        .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+        .map(|(key, _)| key.clone())
+        .collect();
+    if !incomplete.is_empty() {
+        return Err(incomplete);
+    }
+
+    Ok(partition_checkpoints
+        .iter()
+        .map(|(_, checkpoint)| checkpoint.watermark)
+        .min()
+        .unwrap_or(fallback))
 }
 
 fn serialization_error(error: SerializationError) -> HandlerError {
@@ -548,6 +579,63 @@ mod tests {
             pull_window(Some(&legacy), now),
             (DateTime::<Utc>::UNIX_EPOCH, ts("2026-06-07T22:00:00Z"))
         );
+    }
+
+    fn completed_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
+        (
+            key.to_string(),
+            Checkpoint {
+                watermark: ts(watermark),
+                cursor_values: None,
+                resume_floor: None,
+            },
+        )
+    }
+
+    fn cursored_partition(key: &str, watermark: &str) -> (String, Checkpoint) {
+        (
+            key.to_string(),
+            Checkpoint {
+                watermark: ts(watermark),
+                cursor_values: Some(vec!["42".to_string()]),
+                resume_floor: Some(ts(watermark)),
+            },
+        )
+    }
+
+    #[test]
+    fn consolidated_watermark_all_complete_returns_min() {
+        let partitions = vec![
+            completed_partition("ns.7.Job.p1of3", "2026-06-07T22:00:00Z"),
+            completed_partition("ns.7.Job.p2of3", "2026-06-07T21:30:00Z"),
+            completed_partition("ns.7.Job.p3of3", "2026-06-07T22:15:00Z"),
+        ];
+        assert_eq!(
+            consolidated_watermark(&partitions, ts("2026-06-07T23:00:00Z")),
+            Ok(ts("2026-06-07T21:30:00Z"))
+        );
+    }
+
+    #[test]
+    fn consolidated_watermark_any_cursored_returns_incomplete_keys() {
+        let partitions = vec![
+            completed_partition("ns.7.Job.p1of3", "2026-06-07T22:00:00Z"),
+            cursored_partition("ns.7.Job.p2of3", "2026-06-07T21:30:00Z"),
+            cursored_partition("ns.7.Job.p3of3", "2026-06-07T22:15:00Z"),
+        ];
+        assert_eq!(
+            consolidated_watermark(&partitions, ts("2026-06-07T23:00:00Z")),
+            Err(vec![
+                "ns.7.Job.p2of3".to_string(),
+                "ns.7.Job.p3of3".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn consolidated_watermark_empty_returns_fallback() {
+        let fallback = ts("2026-06-07T23:00:00Z");
+        assert_eq!(consolidated_watermark(&[], fallback), Ok(fallback));
     }
 
     #[tokio::test]

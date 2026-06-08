@@ -125,14 +125,14 @@ storage:
     - {name: group_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_state, column: state, type: "set(4)", granularity: 2}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_group_id, column: group_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_group_id, column: group_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

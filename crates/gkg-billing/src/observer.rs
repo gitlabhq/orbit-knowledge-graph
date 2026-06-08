@@ -54,6 +54,9 @@ impl BillingObserver {
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
             tracing::warn!(
                 user_id = self.inputs.user_id,
+                source_type = %self.inputs.source_type,
+                root_namespace_id = ?self.inputs.root_namespace_id,
+                deployment_type = ?self.inputs.deployment_type,
                 correlation_id = %correlation_id,
                 "billing event skipped: realm missing from JWT claims"
             );
@@ -64,6 +67,9 @@ impl BillingObserver {
             tracing::warn!(
                 user_id = self.inputs.user_id,
                 raw_realm = raw_realm,
+                source_type = %self.inputs.source_type,
+                root_namespace_id = ?self.inputs.root_namespace_id,
+                deployment_type = ?self.inputs.deployment_type,
                 correlation_id = %correlation_id,
                 "billing event skipped: unrecognized realm value"
             );
@@ -122,6 +128,10 @@ impl BillingObserver {
                 tracing::error!(
                     error = %e,
                     user_id = self.inputs.user_id,
+                    realm = realm,
+                    source_type = %self.inputs.source_type,
+                    root_namespace_id = ?self.inputs.root_namespace_id,
+                    deployment_type = ?self.inputs.deployment_type,
                     correlation_id = %correlation_id,
                     "failed to build billing event"
                 );
@@ -156,16 +166,67 @@ impl PipelineObserver for BillingObserver {
     }
 
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
+        let correlation_id = correlation_id_string();
         if self.errored.get() {
+            tracing::debug!(
+                user_id = self.inputs.user_id,
+                source_type = %self.inputs.source_type,
+                root_namespace_id = ?self.inputs.root_namespace_id,
+                deployment_type = ?self.inputs.deployment_type,
+                correlation_id = %correlation_id,
+                "billing event skipped: pipeline reported an error"
+            );
             return;
         }
         if let Some(ref tracker) = self.tracker
             && let Some(event) = self.build_event()
         {
-            let _span =
-                tracing::info_span!("billing.track", query_type = self.query_type).entered();
-            tracker.track(event);
-            METRICS.emitted.add(1, &[]);
+            let realm = self
+                .inputs
+                .realm
+                .as_deref()
+                .and_then(normalize_realm)
+                .unwrap_or("");
+            let _span = tracing::info_span!(
+                "billing.track",
+                query_type = self.query_type,
+                user_id = self.inputs.user_id,
+                realm = realm,
+                source_type = %self.inputs.source_type,
+                root_namespace_id = ?self.inputs.root_namespace_id,
+                deployment_type = ?self.inputs.deployment_type,
+                correlation_id = %correlation_id,
+            )
+            .entered();
+            match tracker.track(event) {
+                Ok(()) => {
+                    tracing::debug!(
+                        user_id = self.inputs.user_id,
+                        realm = realm,
+                        source_type = %self.inputs.source_type,
+                        query_type = self.query_type,
+                        root_namespace_id = ?self.inputs.root_namespace_id,
+                        deployment_type = ?self.inputs.deployment_type,
+                        correlation_id = %correlation_id,
+                        "billing event enqueued for delivery"
+                    );
+                    METRICS.emitted.add(1, &[]);
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = %e,
+                        user_id = self.inputs.user_id,
+                        realm = realm,
+                        query_type = self.query_type,
+                        source_type = %self.inputs.source_type,
+                        root_namespace_id = ?self.inputs.root_namespace_id,
+                        deployment_type = ?self.inputs.deployment_type,
+                        correlation_id = %correlation_id,
+                        "billing tracker rejected event at enqueue"
+                    );
+                    METRICS.rejected.add(1, &[]);
+                }
+            }
         }
     }
 }
@@ -177,7 +238,7 @@ mod tests {
     use query_engine::pipeline::{PipelineError, PipelineObserver};
 
     use super::*;
-    use crate::tracker::InMemoryBillingTracker;
+    use crate::tracker::{FailingBillingTracker, InMemoryBillingTracker};
 
     fn test_inputs() -> BillingInputs {
         BillingInputs {
@@ -300,5 +361,15 @@ mod tests {
         let mut obs = BillingObserver::new(None, test_inputs());
         obs.set_query_type("traversal");
         obs.finish(1, 0);
+    }
+
+    #[test]
+    fn billing_observer_handles_tracker_rejection() {
+        let tracker = Arc::new(FailingBillingTracker::new());
+        let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
+        obs.set_query_type("traversal");
+        obs.finish(1, 0);
+
+        assert_eq!(tracker.count(), 1);
     }
 }

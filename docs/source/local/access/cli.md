@@ -24,19 +24,34 @@ title: Use Orbit Local with the Orbit CLI (`orbit`)
 The Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.
 
-> [!note]
-> Orbit Local is experimental. Until packaged binaries ship,
-> you must build from source. The packaged install path will be `glab orbit local`.
+## Install
 
-## Prerequisites
+Install the standalone `orbit` binary with the one-line installer:
+
+```shell
+curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+```
+
+This adds `orbit` to your `PATH`. Open a new terminal, then verify the install:
+
+```shell
+orbit help
+```
+
+If you already use the GitLab CLI (`glab`), you can instead install a managed
+binary with `glab orbit local --install`. That binary is invoked as
+`glab orbit local <command>` rather than `orbit` directly - see
+[Use Orbit Local with glab](glab.md).
+
+### Build from source
+
+To contribute to Orbit or run an unreleased build, compile the binary
+yourself.
+
+Prerequisites:
 
 - [Rust toolchain](https://rustup.rs/) (stable)
 - [`mise`](https://mise.jdx.dev/) for tool management
-- A local Git repository to index
-
-## Install
-
-Build from source:
 
 ```shell
 git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
@@ -66,13 +81,17 @@ in the manifest table.
 
 ## Inspect the schema
 
+`orbit schema` requires either `--ontology` or `--query`:
+
 ```shell
-orbit schema
-orbit schema --raw
+orbit schema --ontology
+orbit schema --query
 ```
 
-`orbit schema` reads `information_schema.columns` from the local DuckDB
-and prints every table and column. Pass `--raw` for JSON output.
+- `--ontology` shows the graph ontology: entities, edges, and properties.
+- `--query` shows the query DSL schema: how to write structured queries.
+
+Add `--raw` to either for JSON instead of the default LLM-friendly output.
 
 ## Run SQL against the local graph
 

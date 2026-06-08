@@ -557,8 +557,6 @@ pub(super) fn emit_filter_narrowing(
             .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High);
         let selective = has_point_selectivity || has_selective_filters;
         let should_narrow = match np.hydration {
-            // FilterOnly nodes are JOINed directly in the node
-            // processing loop — no narrowing CTE needed here.
             HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
             HydrationStrategy::Skip => false,
@@ -567,7 +565,6 @@ pub(super) fn emit_filter_narrowing(
             continue;
         }
         let cte_name = format!("_filter_{node_alias}");
-        // Create the CTE once per node for selective Join nodes.
         if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
             let table = np.table.as_deref().unwrap_or("");
             let sort_key = table_sort_keys

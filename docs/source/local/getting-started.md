@@ -94,9 +94,9 @@ for details.
 
 | Method | Best for | Setup |
 |---|---|---|
-| [The Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | Build the binary from source |
-| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit local` (planned) - today, use `orbit` directly |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | Manual MCP config; `glab orbit setup` planned |
+| [The Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
+| [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `glab orbit setup`, or manual MCP config |
 
 The query language is identical across all three. Whatever you learn in one
 transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
@@ -104,15 +104,16 @@ transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
 ## 60-second quickstart
 
 > [!note]
-> `glab orbit local` is the planned packaging path. Until it ships, use the
-> `orbit` binary directly - see [Use the `orbit` CLI directly](access/cli.md).
-> The shapes shown below match what `glab orbit local` will support.
+> `glab orbit local` wraps the managed `orbit` binary. The binary downloads,
+> is checksum-verified, and stays up to date on first use. Requires `glab`
+> 1.94 or later. To run the binary directly instead, see
+> [Use the `orbit` CLI directly](access/cli.md).
 
 Index a repository and inspect what Orbit found:
 
 ```shell
 glab orbit local index /path/to/your/repo
-glab orbit local schema
+glab orbit local schema --ontology
 ```
 
 That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints the
@@ -121,8 +122,8 @@ node types: `Definition`, `File`, `Directory`, `ImportedSymbol`.
 Next:
 
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: see [Connect via MCP](access/mcp.md) for the
-  manual config. (`glab orbit setup` is planned to automate this.)
+- Wire it into your AI agent: run `glab orbit setup`, or see
+  [Connect via MCP](access/mcp.md) for the manual config.
 - Browse the table layout: [Schema reference](schema.md).
 
 ## Billing
