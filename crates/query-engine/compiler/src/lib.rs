@@ -1634,9 +1634,7 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(
-                "_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"
-            ),
+            sql.contains("_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"),
             "joined target should get a candidate CTE, got:\n{sql}"
         );
         assert!(
