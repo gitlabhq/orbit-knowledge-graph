@@ -119,6 +119,61 @@ pub async fn incomplete_partition_checkpoint_does_not_advance_watermark_on_resum
     );
 }
 
+pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext) {
+    for id in 1..=12 {
+        create_user(ctx, id).await;
+    }
+
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User.p5of6', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}')",
+        t("checkpoint")
+    ))
+    .await;
+
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("deferred consolidation must surface as Ok, not a pipeline error");
+
+    let parent = ctx
+        .query(&format!(
+            "SELECT count() AS cnt FROM {} FINAL \
+             WHERE key = 'global.User' AND _deleted = false",
+            t("checkpoint")
+        ))
+        .await;
+    let parent_count =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&parent[0], "cnt").expect("cnt column");
+    assert_eq!(
+        parent_count.value(0),
+        0,
+        "parent must stay absent so the next dispatch re-triggers partitioning"
+    );
+
+    let leftover = ctx
+        .query(&format!(
+            "SELECT cursor_values FROM {} FINAL \
+             WHERE key = 'global.User.p5of6' AND _deleted = false",
+            t("checkpoint")
+        ))
+        .await;
+    let leftover_cursor =
+        ArrowUtils::get_column_by_name::<StringArray>(&leftover[0], "cursor_values")
+            .expect("cursor_values column");
+    assert_eq!(
+        leftover_cursor.len(),
+        1,
+        "the unfinished partition must not be tombstoned, so its range is re-pulled"
+    );
+    assert!(
+        !leftover_cursor.value(0).is_empty() && leftover_cursor.value(0) != "null",
+        "the unfinished partition must keep its resume cursor, got: {}",
+        leftover_cursor.value(0)
+    );
+}
+
 pub async fn second_run_after_consolidation_skips_partitioning(ctx: &TestContext) {
     for id in 1..=8 {
         create_user(ctx, id).await;

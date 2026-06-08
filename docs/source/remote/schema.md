@@ -31,8 +31,7 @@ Orbit indexes 24 node types across 6 domains. Use these as entity names in your 
 To fetch the live schema at any time:
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/schema"
+glab orbit remote schema
 ```
 
 ## Core

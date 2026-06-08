@@ -37,6 +37,7 @@ async fn global_indexing() {
         global::resume_is_bounded_by_window_floor_for_partitioned_entity,
         partitioning::partitioned_initial_load_indexes_all_rows_and_consolidates,
         partitioning::incomplete_partition_checkpoint_does_not_advance_watermark_on_resume,
+        partitioning::unfinished_partition_blocks_parent_consolidation,
         partitioning::second_run_after_consolidation_skips_partitioning,
         partitioning::skips_already_completed_partitions_on_retry,
         partitioning::all_partitions_completed_runs_consolidate_only,
