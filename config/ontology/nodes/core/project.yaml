@@ -166,10 +166,10 @@ storage:
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_last_activity_at, column: last_activity_at, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_full_path, column: full_path, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_full_path, column: full_path, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
