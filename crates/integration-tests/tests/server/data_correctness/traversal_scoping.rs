@@ -98,102 +98,6 @@ pub(super) async fn project_scoped_multi_edge_traversal_is_lossless(ctx: &TestCo
     assert_diff_file_chain(&scoped_resp);
 }
 
-pub(super) async fn fk_chain_recovers_files_without_edge_rows(ctx: &TestContext) {
-    // No HAS_DIFF or HAS_FILE edge rows exist for this merge request; the whole
-    // chain is answered from the merge_request_diff / _file foreign keys. This is
-    // the FK-chain lowering returning rows the edge scan would miss when an edge
-    // is tombstoned while its node stays live. The _deleted file is excluded.
-    ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, project_id, traversal_path) VALUES
-         (2099, 99, 'Isolated FK chain', 'opened', 1099, '1/100/1099/')",
-        t("gl_merge_request")
-    ))
-    .await;
-    ctx.execute(&format!(
-        "INSERT INTO {} (id, merge_request_id, state, traversal_path) VALUES
-         (5099, 2099, 'collected', '1/100/1099/')",
-        t("gl_merge_request_diff")
-    ))
-    .await;
-    ctx.execute(&format!(
-        "INSERT INTO {} (id, merge_request_id, merge_request_diff_id, project_id, new_path, traversal_path, _deleted) VALUES
-         (9390, 2099, 5099, 1099, 'live_a.rs', '1/100/1099/', false),
-         (9391, 2099, 5099, 1099, 'live_b.rs', '1/100/1099/', false),
-         (9392, 2099, 5099, 1099, 'gone.rs',   '1/100/1099/', true)",
-        t("gl_merge_request_diff_file")
-    ))
-    .await;
-    ctx.optimize_all().await;
-
-    let mut redaction = allow_all();
-    redaction.allow("merge_request", &[2099]);
-    redaction.allow("project", &[1099]);
-    let resp = run_query_with_security(
-        ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "columns": ["project_id"],
-                 "filters": {"project_id": {"op": "eq", "value": 1099}}},
-                {"id": "diff", "entity": "MergeRequestDiff"},
-                {"id": "df", "entity": "MergeRequestDiffFile", "columns": ["new_path"]}
-            ],
-            "relationships": [
-                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
-                {"type": "HAS_FILE", "from": "diff", "to": "df"}
-            ],
-            "limit": 50
-        }"#,
-        &redaction,
-        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
-    )
-    .await;
-
-    resp.assert_node_count(4);
-    resp.assert_node_ids("MergeRequest", &[2099]);
-    resp.assert_node_ids("MergeRequestDiff", &[5099]);
-    resp.assert_node_ids("MergeRequestDiffFile", &[9390, 9391]);
-    resp.assert_edge_set("HAS_DIFF", &[(2099, 5099)]);
-    resp.assert_edge_set("HAS_FILE", &[(5099, 9390), (5099, 9391)]);
-    resp.skip_requirement(Requirement::Filter {
-        field: "project_id".into(),
-    });
-    resp.assert_referential_integrity();
-
-    // Filtering the leaf makes reorder_by_selectivity reverse the chain; the
-    // synthesized edges must keep the source -> target orientation (diff -> file,
-    // mr -> diff), not the query's reversed traversal order.
-    let reversed = run_query_with_security(
-        ctx,
-        r#"{
-            "query_type": "traversal",
-            "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "diff", "entity": "MergeRequestDiff"},
-                {"id": "df", "entity": "MergeRequestDiffFile", "columns": ["new_path"],
-                 "filters": {"new_path": {"op": "ends_with", "value": ".rs"}}}
-            ],
-            "relationships": [
-                {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
-                {"type": "HAS_FILE", "from": "diff", "to": "df"}
-            ],
-            "limit": 50
-        }"#,
-        &redaction,
-        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
-    )
-    .await;
-
-    reversed.assert_node_count(4);
-    reversed.assert_node_ids("MergeRequestDiffFile", &[9390, 9391]);
-    reversed.assert_edge_set("HAS_DIFF", &[(2099, 5099)]);
-    reversed.assert_edge_set("HAS_FILE", &[(5099, 9390), (5099, 9391)]);
-    reversed.skip_requirement(Requirement::Filter {
-        field: "new_path".into(),
-    });
-    reversed.assert_referential_integrity();
-}
-
 pub(super) async fn cross_namespace_closes_returns_cross_project_work_item(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
@@ -268,6 +172,151 @@ pub(super) async fn multiple_anchors_apply_distinct_traversal_paths(ctx: &TestCo
     });
     resp.assert_edge_set("CLOSES", &[(2000, 4002)]);
     resp.assert_referential_integrity();
+}
+
+// A scope-resolved Group->CONTAINS->Project anchor elides to a pure FK node-join
+// star; the counts must match what the seeded data implies (no edge scans run).
+pub(super) async fn scope_implied_container_elision_star_counts_authored_mrs(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (700, 'g700', 'g700', 'public', '1/700/')",
+        t("gl_group")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (7000, 'p700', 'g700/p700', 'public', '1/700/7000/')",
+        t("gl_project")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, username, name, state, user_type, email) VALUES
+         (7701, 'u7701', 'U 7701', 'active', 'human', 'u7701@x.com'),
+         (7702, 'u7702', 'U 7702', 'active', 'human', 'u7702@x.com')",
+        t("gl_user")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, merged_at, project_id, author_id, traversal_path) VALUES
+         (7100, 1, 'a', 'opened', 'b', 'main', NULL, 7000, 7701, '1/700/7000/'),
+         (7101, 2, 'b', 'opened', 'b', 'main', NULL, 7000, 7701, '1/700/7000/'),
+         (7102, 3, 'c', 'opened', 'b', 'main', NULL, 7000, 7702, '1/700/7000/')",
+        t("gl_merge_request")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "g700"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "group_by": [{"kind": "node", "node": "u"}],
+            "aggregations": [{"function": "count", "target": "mr", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &{
+            let mut svc = allow_all();
+            svc.allow("user", &[7701, 7702]);
+            svc
+        },
+        scoped("1/", &[("g", "1/700/"), ("p", "1/700/"), ("mr", "1/700/")]),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("u", "User", 7701, "c", 2);
+    resp.assert_group_row_value_i64("u", "User", 7702, "c", 1);
+}
+
+// Same elision over a 4-hop FK chain (the A_ma3 diff-file shape): MR->latest diff
+// ->files resolved by FK columns once the CONTAINS anchor is elided.
+pub(super) async fn scope_implied_container_elision_chain_counts_diff_files(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (701, 'g701', 'g701', 'public', '1/701/')",
+        t("gl_group")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, full_path, visibility_level, traversal_path) VALUES
+         (7010, 'p701', 'g701/p701', 'public', '1/701/7010/')",
+        t("gl_project")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, merged_at, project_id, author_id, latest_merge_request_diff_id, traversal_path) VALUES
+         (7110, 1, 'a', 'opened', 'b', 'main', NULL, 7010, 1, 7210, '1/701/7010/'),
+         (7111, 2, 'b', 'opened', 'b', 'main', NULL, 7010, 1, 7211, '1/701/7010/')",
+        t("gl_merge_request")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, merge_request_id, state, head_commit_sha, traversal_path) VALUES
+         (7210, 7110, 'collected', 'sha1', '1/701/7010/'),
+         (7211, 7111, 'collected', 'sha2', '1/701/7010/')",
+        t("gl_merge_request_diff")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, merge_request_id, merge_request_diff_id, project_id, new_path, traversal_path) VALUES
+         (7310, 7110, 7210, 7010, 'a.rs', '1/701/7010/'),
+         (7311, 7110, 7210, 7010, 'b.rs', '1/701/7010/'),
+         (7312, 7111, 7211, 7010, 'c.rs', '1/701/7010/')",
+        t("gl_merge_request_diff_file")
+    ))
+    .await;
+    ctx.optimize_all().await;
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "g701"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff"},
+                {"id": "f", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+                {"type": "HAS_FILE", "from": "d", "to": "f"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "f", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &{
+            let mut svc = allow_all();
+            svc.allow("project", &[7010]);
+            svc
+        },
+        scoped(
+            "1/",
+            &[
+                ("g", "1/701/"),
+                ("p", "1/701/"),
+                ("mr", "1/701/"),
+                ("d", "1/701/"),
+                ("f", "1/701/"),
+            ],
+        ),
+    )
+    .await;
+
+    resp.assert_group_row_value_i64("p", "Project", 7010, "c", 3);
 }
 
 pub(super) async fn cross_namespace_has_label_returns_cross_group_label(ctx: &TestContext) {

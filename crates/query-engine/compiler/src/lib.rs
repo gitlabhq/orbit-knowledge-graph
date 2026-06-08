@@ -1817,6 +1817,50 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
+    fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
+        let query = format!(
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":[{{"kind":"node","node":"{group}"}}],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+        compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
+    }
+
+    // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
+    // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
+    // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.
+    // End-to-end result parity (chain/star, scoped vs unscoped) lives in the
+    // data-correctness suite (`scope_implied_container_elision_*`).
+    #[test]
+    fn scope_implied_container_hop_elision() {
+        let cases: &[(&str, &str, &str, &str, &str)] = &[
+            (
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
+                "p",
+                "f",
+                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
+                "p",
+                "n",
+                "'CONTAINS'|'HAS_NOTE'",
+            ),
+        ];
+        for (nodes, rels, group, agg, expect) in cases {
+            let sql = compile_sql_scoped(nodes, rels, group, agg);
+            for e in expect.split('|') {
+                match e.strip_prefix('!') {
+                    Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
+                    None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
+                }
+            }
+        }
+    }
+
     #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
