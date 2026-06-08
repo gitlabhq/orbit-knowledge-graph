@@ -242,7 +242,11 @@ fn seed_scope_prefixes(
         let (alias, prefix) = spec
             .split_once('=')
             .context("--scope-prefix must be alias=prefix")?;
-        seed.insert(alias.to_string(), prefix.to_string());
+        if let Some(prev) = seed.insert(alias.to_string(), prefix.to_string()) {
+            eprintln!(
+                "warning: --scope-prefix alias '{alias}' specified more than once ('{prev}' overwritten by '{prefix}')"
+            );
+        }
     }
 
     let input = compiler::validate_normalize(query_json, ontology)
