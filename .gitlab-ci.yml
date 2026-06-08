@@ -47,6 +47,7 @@ include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - local: .gitlab/ci/release-local.yml
+  - local: .gitlab/ci/stale-mr.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'

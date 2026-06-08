@@ -1,0 +1,32 @@
+# Daily stale merge-request sweeper.
+#
+# Setup:
+#   1. Create a project access token (Settings → Access Tokens) with `api`
+#      scope and the Developer role — it needs to label, comment, and close.
+#      Its bot user (project_<id>_bot) becomes the sweeper's identity.
+#   2. Store it as a masked + protected CI/CD variable STALE_MR_GITLAB_TOKEN.
+#      Protected is required so scheduled pipelines on the default branch can
+#      read it.
+#   3. Create a pipeline schedule (Project → CI/CD → Schedules, daily) with a
+#      variable SCHEDULE_TYPE=stale_mr_sweep.
+#   4. Watch a few DRY_RUN runs, then flip DRY_RUN to "false".
+stale-mr-sweep:
+  stage: review
+  image: registry.gitlab.com/gitlab-org/cli:latest
+  tags:
+    - saas-linux-medium-amd64
+  variables:
+    STALE_IDLE_DAYS: "14"
+    STALE_GRACE_DAYS: "3"
+    STALE_LABEL_PREFIX: "stale"
+    DRY_RUN: "true"
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "stale_mr_sweep"
+  before_script:
+    - test -n "${STALE_MR_GITLAB_TOKEN}" || (echo "Missing STALE_MR_GITLAB_TOKEN" && exit 1)
+    - apk add --no-cache bash jq coreutils
+    - glab auth login --hostname "$CI_SERVER_HOST" --token "$STALE_MR_GITLAB_TOKEN"
+  script:
+    - bash scripts/ci/close-stale-mrs.sh
