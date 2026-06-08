@@ -238,3 +238,49 @@ fn extract_create_dictionary_name(stmt: &str) -> Option<String> {
         Some(name.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_ddl_contains_create_table() {
+        let ont = ontology::Ontology::load_embedded().unwrap();
+        let tables = query_engine::compiler::generate_graph_tables(&ont);
+        assert!(!tables.is_empty());
+        let sql = query_engine::compiler::emit_create_table(&tables[0]);
+        assert!(sql.contains("CREATE TABLE"));
+    }
+
+    #[test]
+    fn local_ddl_contains_create_table_and_manifest() {
+        let ont = ontology::Ontology::load_embedded().unwrap();
+        let ddl = query_engine::compiler::generate_local_ddl(&ont);
+        assert!(ddl.contains("CREATE TABLE"));
+        assert!(ddl.contains("_orbit_manifest"));
+        assert!(ddl.contains("SCHEMA_VERSION="));
+    }
+
+    #[test]
+    fn extract_tables_from_sql_parses_create_table() {
+        let sql = "CREATE TABLE IF NOT EXISTS foo (id BIGINT);\n\
+                   CREATE TABLE IF NOT EXISTS bar (name VARCHAR);";
+        let tables = extract_tables_from_sql(sql);
+        assert_eq!(tables.len(), 2);
+        assert!(tables.contains_key("foo"));
+        assert!(tables.contains_key("bar"));
+    }
+
+    #[test]
+    fn extract_tables_from_sql_parses_dictionary() {
+        let sql = "CREATE DICTIONARY IF NOT EXISTS my_dict (id UInt64) PRIMARY KEY id;";
+        let tables = extract_tables_from_sql(sql);
+        assert!(tables.contains_key("my_dict"));
+    }
+
+    #[test]
+    fn strip_leading_comments_removes_header() {
+        let stmt = "-- comment\n-- another\nCREATE TABLE foo;";
+        assert_eq!(strip_leading_comments(stmt), "CREATE TABLE foo;");
+    }
+}
