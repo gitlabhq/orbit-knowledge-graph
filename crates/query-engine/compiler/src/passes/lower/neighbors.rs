@@ -250,9 +250,7 @@ pub fn emit_neighbors(
                     .get(center_table.as_str())
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]);
-                let center_node_scan = if center_sort_key.is_empty() {
-                    TableRef::scan_final(&center_table, &center_id)
-                } else {
+                let center_node_scan = {
                     let mut ob: Vec<OrderExpr> = center_sort_key
                         .iter()
                         .map(|c| OrderExpr::asc(Expr::col(&center_id, c)))

@@ -35,6 +35,9 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
     })?;
 
+    let center_sort_key = plan.table_sort_keys.get(center_table).ok_or_else(|| {
+        QueryError::Lowering(format!("no sort key for node table '{center_table}'"))
+    })?;
     let mut center_where_parts = latest_node_predicates(center_alias, center_np);
     let mut where_parts = Vec::new();
     let mut selects = node_select_columns(center_alias, center_np);
@@ -42,13 +45,13 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let mut candidate_ctes = HashMap::new();
     let mut candidate_extra_predicates = fk_candidate_extra_predicates(plan)?;
 
-    // Elevated access: FilterOnly CTE so SecurityPass injects the role-gated filter.
     if center_np.needs_elevated_filter {
         center_where_parts.extend(emit_filter_subquery(
             center_np,
             center_alias,
             DEFAULT_PRIMARY_KEY,
             &mut ctes,
+            center_sort_key,
         )?);
     }
 
@@ -132,11 +135,22 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         }
     }
 
+    let mut center_ob: Vec<OrderExpr> = center_sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(center_alias, col)))
+        .collect();
+    center_ob.push(OrderExpr::desc(Expr::col(center_alias, VERSION_COLUMN)));
+    let center_lb: Vec<Expr> = center_sort_key
+        .iter()
+        .map(|col| Expr::col(center_alias, col))
+        .collect();
     let mut from = TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
-            from: TableRef::scan_final(center_table, center_alias),
+            from: TableRef::scan(center_table, center_alias),
             where_clause: Expr::conjoin(center_where_parts),
+            order_by: center_ob,
+            limit_by: Some((1, center_lb)),
             ..Default::default()
         },
         center_alias,
@@ -221,11 +235,18 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         } else if target_np.hydration == HydrationStrategy::FilterOnly
             || target_np.needs_elevated_filter
         {
+            let target_table = target_np.table.as_deref().unwrap_or("");
+            let target_sk = plan
+                .table_sort_keys
+                .get(target_table)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             where_parts.extend(emit_filter_subquery(
                 target_np,
                 &fk_alias,
                 &fk.fk_column,
                 &mut ctes,
+                target_sk,
             )?);
         }
     }

@@ -1670,8 +1670,8 @@ mod tests {
             "filter-only FK predicates should keep the direct FINAL scan, got:\n{sql}"
         );
         assert!(
-            sql.contains("FROM gl_job AS j FINAL"),
-            "latest-row read should still use FINAL, got:\n{sql}"
+            sql.contains("LIMIT 1 BY"),
+            "latest-row read should use LIMIT BY dedup, got:\n{sql}"
         );
     }
 

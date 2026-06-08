@@ -44,7 +44,7 @@ fn collect_edge_predicates(
     ctes: &mut Vec<Cte>,
     tagged_nodes: &mut HashSet<(String, String)>,
     narrowed_nodes: &mut HashSet<String>,
-) {
+) -> Result<()> {
     push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
     for (prop, filter) in &hop.filters {
         target.push(filter_to_expr(alias, prop, filter));
@@ -60,7 +60,9 @@ fn collect_edge_predicates(
         end_col,
         ctes,
         narrowed_nodes,
-    );
+        &plan.table_sort_keys,
+    )?;
+    Ok(())
 }
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
@@ -109,7 +111,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut ctes,
                 &mut tagged_nodes,
                 &mut narrowed_nodes,
-            );
+            )?;
 
             inner_preds.extend(edge_scope_predicate(hop, &alias));
 
@@ -133,11 +135,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 end_col,
                 &mut ctes,
                 &mut narrowed_nodes,
-            );
-            // For multi-hop dedup queries, FilterOnly nodes still use
-            // CTEs so their IN-subqueries can be pushed inside the edge
-            // dedup scan for PK pruning. Single-hop queries handle
-            // FilterOnly via JOIN in the node processing loop below.
+                &plan.table_sort_keys,
+            )?;
             if dedup_edges {
                 for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)]
                 {
@@ -150,7 +149,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     if (is_filter_only || elevated_skip)
                         && filter_only_done.insert(node_alias.clone())
                     {
-                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                        let node_table = np.table.as_deref().unwrap_or("");
+                        let node_sk = plan
+                            .table_sort_keys
+                            .get(node_table)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]);
+                        narrow_in.extend(emit_filter_subquery(
+                            np, &alias, edge_col, &mut ctes, node_sk,
+                        )?);
                     }
                 }
             }

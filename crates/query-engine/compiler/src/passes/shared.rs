@@ -332,8 +332,7 @@ pub fn edge_table_scan_filtered(
 /// Build a latest-row scan over a ReplacingMergeTree node table.
 ///
 /// Uses `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` instead of
-/// `FINAL` so ClickHouse can use projections and bloom filters. When `sort_key`
-/// is empty (unknown table), falls back to `FINAL`.
+/// `FINAL` so ClickHouse can use projections and bloom filters.
 pub fn dedup_query(
     alias: &str,
     table: &str,
@@ -341,14 +340,10 @@ pub fn dedup_query(
     scan_where: Vec<Expr>,
     sort_key: &[String],
 ) -> Query {
-    if sort_key.is_empty() {
-        return Query {
-            select,
-            from: TableRef::scan_final(table, alias),
-            where_clause: Expr::conjoin(scan_where),
-            ..Default::default()
-        };
-    }
+    assert!(
+        !sort_key.is_empty(),
+        "dedup_query: empty sort_key for table '{table}'"
+    );
     let mut order_by: Vec<OrderExpr> = sort_key
         .iter()
         .map(|col| OrderExpr::asc(Expr::col(alias, col)))
