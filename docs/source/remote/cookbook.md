@@ -48,7 +48,7 @@ For every entity and property you can query, see the
 - [Blast radius analysis](#blast-radius-analysis) - what breaks if I change this
 - [Dependency mapping](#dependency-mapping) - how services are connected
 - [Merge requests and code review](#merge-requests-and-code-review) - diffs and review discussion
-- [Planning and delivery](#planning-and-delivery) - issues, milestones, labels
+- [Planning and delivery](#planning-and-delivery) - issues linked to merge requests, contributors, and related work
 - [Pipeline health](#pipeline-health) - CI/CD problems, stages, jobs
 - [Vulnerability tracing](#vulnerability-tracing) - findings, scanners, CVE tracing
 
@@ -465,12 +465,16 @@ query language reference.
 
 ## Planning and delivery
 
-Answer: "What is the team working on?"
+Answer: "How does our planning connect to the work that delivered it?"
 
-### List the open issues in a project
+These recipes traverse from issues to the merge requests, people, and related
+work that surround them, in a single query. Joining planning data to code
+review like this is what the graph gives you over the issues API.
+
+### Find the merge request that resolved an issue
 
 ```plaintext
-Use Orbit to list the open issues in <project name>.
+Use Orbit to find which merge requests closed issue <issue ID> in <project name>.
 ```
 
 <details><summary>Show query</summary>
@@ -480,70 +484,60 @@ Use Orbit to list the open issues in <project name>.
   "query_type": "traversal",
   "nodes": [
     {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"},
-      "columns": ["full_path"]
-    },
-    {
       "id": "wi",
       "entity": "WorkItem",
-      "filters": {"state": "opened", "work_item_type": "issue"},
-      "columns": ["iid", "title", "weight"]
-    }
+      "filters": {"project_id": 278964, "iid": 21584},
+      "columns": ["iid", "title", "state"]
+    },
+    {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "merged_at"]}
   ],
   "relationships": [
-    {"type": "IN_PROJECT", "from": "wi", "to": "p"}
+    {"type": "CLOSES", "from": "mr", "to": "wi"}
   ],
-  "limit": 50
+  "limit": 10
 }
 ```
 
 </details>
 
-### Count open issues by label
+### See what a contributor shipped
 
 ```plaintext
-Use Orbit to count the open issues in <project name>, grouped by label.
+Use Orbit to show the issues that <username>'s merged merge requests closed in <project name>.
 ```
 
 <details><summary>Show query</summary>
 
+Walks from a user to their merged merge requests to the issues those merge
+requests closed. There is no single API call for this.
+
 ```json
 {
-  "query_type": "aggregation",
+  "query_type": "traversal",
   "nodes": [
+    {"id": "u", "entity": "User", "filters": {"username": "<username>"}, "columns": ["username", "name"]},
     {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"}
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": {"state": "merged", "project_id": 278964},
+      "columns": ["iid", "title"]
     },
-    {
-      "id": "wi",
-      "entity": "WorkItem",
-      "filters": {"state": "opened"}
-    },
-    {"id": "l", "entity": "Label", "columns": ["title"]}
+    {"id": "wi", "entity": "WorkItem", "columns": ["iid", "title", "state"]}
   ],
   "relationships": [
-    {"type": "IN_PROJECT", "from": "wi", "to": "p"},
-    {"type": "HAS_LABEL", "from": "wi", "to": "l"}
+    {"type": "AUTHORED", "from": "u", "to": "mr"},
+    {"type": "CLOSES", "from": "mr", "to": "wi"}
   ],
-  "group_by": [{"kind": "node", "node": "l"}],
-  "aggregations": [
-    {"function": "count", "target": "wi", "alias": "open_issues"}
-  ],
-  "aggregation_sort": {"column": "open_issues", "direction": "DESC"},
-  "limit": 20
+  "limit": 25
 }
 ```
 
 </details>
 
-### List the milestones in a project
+### See related and blocking work
 
 ```plaintext
-Use Orbit to list the milestones in <project name> with their due dates.
+Use Orbit to show the work items related to issue <issue ID> in <project name>.
 ```
 
 <details><summary>Show query</summary>
@@ -553,20 +547,16 @@ Use Orbit to list the milestones in <project name> with their due dates.
   "query_type": "traversal",
   "nodes": [
     {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"}
+      "id": "wi",
+      "entity": "WorkItem",
+      "filters": {"project_id": 278964, "iid": 476658},
+      "columns": ["iid", "title"]
     },
-    {
-      "id": "m",
-      "entity": "Milestone",
-      "columns": ["title", "state", "due_date", "start_date"]
-    }
+    {"id": "rel", "entity": "WorkItem", "columns": ["iid", "title", "state"]}
   ],
   "relationships": [
-    {"type": "IN_PROJECT", "from": "m", "to": "p"}
+    {"type": "RELATED_TO", "from": "wi", "to": "rel", "direction": "both"}
   ],
-  "order_by": {"node": "m", "property": "due_date", "direction": "DESC"},
   "limit": 25
 }
 ```
