@@ -59,6 +59,10 @@ pub fn extract_request_context<T>(
         unique_instance_id = ?claims.unique_instance_id,
         instance_version = ?claims.instance_version,
         global_user_id = ?claims.global_user_id,
+        correlation_id = %labkit::correlation::current()
+            .as_ref()
+            .map(|id| id.as_str())
+            .unwrap_or_default(),
         "JWT claims received"
     );
 
