@@ -409,7 +409,7 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         engine,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
-        settings: table_settings(Some(2048), !projections.is_empty(), &node.storage.settings),
+        settings: table_settings(Some(1024), !projections.is_empty(), &node.storage.settings),
     }
 }
 
