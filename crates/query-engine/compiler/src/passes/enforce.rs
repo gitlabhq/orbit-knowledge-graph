@@ -301,6 +301,36 @@ fn enforce_return_columns(
                     }
                     node_predicates.push(deleted_false(&node.id));
 
+                    if let Some(edge_idx) = edge_alias
+                        .strip_prefix('e')
+                        .and_then(|s| s.parse::<usize>().ok())
+                        && let Some(rel) = input.relationships.get(edge_idx)
+                    {
+                        let edge_table = input
+                            .compiler
+                            .resolve_edge_tables(&rel.types)
+                            .into_iter()
+                            .next()
+                            .unwrap_or_else(|| input.compiler.default_edge_table.clone());
+                        let anchor_alias = format!("{edge_alias}_narrow");
+                        let mut anchor_preds = vec![deleted_false(&anchor_alias)];
+                        if let Some(f) =
+                            crate::passes::shared::rel_kind_filter(&anchor_alias, &rel.types)
+                        {
+                            anchor_preds.push(f);
+                        }
+                        node_predicates.push(Expr::InSelect {
+                            expr: Box::new(Expr::col(&node.id, DEFAULT_PRIMARY_KEY)),
+                            query: Box::new(Query {
+                                select: vec![SelectExpr::col(&anchor_alias, edge_col.as_str())],
+                                distinct: true,
+                                from: TableRef::scan(&edge_table, &anchor_alias),
+                                where_clause: Expr::conjoin(anchor_preds),
+                                ..Default::default()
+                            }),
+                        });
+                    }
+
                     let mut order_by: Vec<OrderExpr> = sort_key
                         .iter()
                         .map(|col| OrderExpr::asc(Expr::col(&node.id, col)))
