@@ -17,7 +17,7 @@ use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeError, DatalakeQuery, ReadStats, ScanStats};
+use super::datalake::{DatalakeQuery, ScanStats};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
@@ -27,13 +27,6 @@ use gkg_server_config::DatalakeRetryConfig;
 const MAX_RETRIES: u32 = 3;
 
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
-
-/// A fully-read page: every block buffered in memory, plus its read and scan costs.
-struct ExtractedPage {
-    batches: Vec<RecordBatch>,
-    read_stats: ReadStats,
-    scan_stats: ScanStats,
-}
 
 /// `read_*` count the rows/bytes actually returned from the datalake; `scanned_*`
 /// ClickHouse's storage-scan cost from the summary; `written_*` the transformed
@@ -119,43 +112,38 @@ impl Pipeline {
         let params = base_query.params();
         let mut stats = PipelineStats::default();
 
-        let mut page = self
-            .extract_page(
+        let (mut batches, mut scan_stats) = self
+            .extract_batch(
                 transform.name(),
                 &self.page_sql(&base_query, &plan.sort_key, &cursor),
                 params.clone(),
             )
             .await?;
-        stats.read_rows += page.read_stats.read_rows;
-        stats.read_bytes += page.read_stats.read_bytes;
-        stats.scanned_rows += page.scan_stats.scanned_rows;
-        stats.scanned_bytes += page.scan_stats.scanned_bytes;
 
         loop {
-            if page.batches.is_empty() {
+            if batches.is_empty() {
                 break;
             }
 
-            let rows_in_page: u64 = page.batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes_in_page: u64 = page
-                .batches
+            let rows_in_page: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
+            let bytes_in_page: u64 = batches
                 .iter()
                 .map(|b| b.get_array_memory_size() as u64)
                 .sum();
+            stats.read_rows += rows_in_page;
+            stats.read_bytes += bytes_in_page;
+            stats.scanned_rows += scan_stats.scanned_rows;
+            stats.scanned_bytes += scan_stats.scanned_bytes;
             info!(rows = rows_in_page, "page extracted");
 
             cursor = cursor.advance(
-                page.batches
-                    .last()
-                    .expect("non-empty page has a last block"),
+                batches.last().expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
             let has_more = rows_in_page >= plan.batch_size;
 
             let transform_start = Instant::now();
-            let grouped = self
-                .transform_page(transform.as_ref(), &page.batches)
-                .await?;
+            let grouped = self.transform_page(transform.as_ref(), &batches).await?;
             self.metrics
                 .record_transform_duration(transform_start.elapsed().as_secs_f64());
 
@@ -185,19 +173,16 @@ impl Pipeline {
             let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
             let (write_result, extract_result) = tokio::join!(
                 self.drain_writes(write_futures),
-                self.extract_page(transform.name(), &next_sql, params.clone()),
+                self.extract_batch(transform.name(), &next_sql, params.clone()),
             );
             write_result?;
-            let next_page = extract_result?;
+            let (next_batches, next_scan) = extract_result?;
 
             self.save_batch_progress(position_key, window, &cursor, &context.progress)
                 .await?;
 
-            stats.read_rows += next_page.read_stats.read_rows;
-            stats.read_bytes += next_page.read_stats.read_bytes;
-            stats.scanned_rows += next_page.scan_stats.scanned_rows;
-            stats.scanned_bytes += next_page.scan_stats.scanned_bytes;
-            page = next_page;
+            batches = next_batches;
+            scan_stats = next_scan;
         }
 
         self.checkpoint_store
@@ -251,15 +236,15 @@ impl Pipeline {
             .to_sql()
     }
 
-    /// Reads a whole page into memory, halving the block size on a datalake
-    /// failure so an Arrow 2GB offset overflow self-corrects without bouncing
-    /// the message to the dead letter stream.
-    async fn extract_page(
+    /// Reads a whole page into memory and its ClickHouse scan cost, halving the
+    /// block size on a datalake failure so an Arrow 2GB offset overflow
+    /// self-corrects without bouncing the message to the dead letter stream.
+    async fn extract_batch(
         &self,
         transform_name: &str,
         sql: &str,
         params: Value,
-    ) -> Result<ExtractedPage, HandlerError> {
+    ) -> Result<(Vec<RecordBatch>, ScanStats), HandlerError> {
         let mut last_error = None;
         let mut max_block_size: Option<u64> = None;
 
@@ -270,14 +255,22 @@ impl Pipeline {
             }
 
             let query_start = Instant::now();
-            match self.drain_page(sql, params.clone(), max_block_size).await {
-                Ok(page) => {
+            match self
+                .datalake
+                .query_batches_with_summary(sql, params.clone(), max_block_size)
+                .await
+            {
+                Ok((batches, scan_stats)) => {
+                    let bytes: u64 = batches
+                        .iter()
+                        .map(|b| b.get_array_memory_size() as u64)
+                        .sum();
                     self.metrics.record_datalake_query(
                         transform_name,
                         query_start.elapsed().as_secs_f64(),
-                        page.read_stats.read_bytes,
+                        bytes,
                     );
-                    return Ok(page);
+                    return Ok((batches, scan_stats));
                 }
                 Err(err) => {
                     warn!(
@@ -285,7 +278,7 @@ impl Pipeline {
                         max_retries = MAX_RETRIES,
                         max_block_size = ?max_block_size,
                         %err,
-                        "datalake page failed, retrying with smaller block size"
+                        "datalake query failed, retrying with smaller block size"
                     );
                     last_error = Some(HandlerError::Processing(format!(
                         "datalake query failed: {err}"
@@ -299,41 +292,6 @@ impl Pipeline {
         }
 
         Err(last_error.expect("loop runs once and only exits here after a failure"))
-    }
-
-    /// Drains the page's blocks into a buffer; the scan summary follows the body.
-    async fn drain_page(
-        &self,
-        sql: &str,
-        params: Value,
-        max_block_size: Option<u64>,
-    ) -> Result<ExtractedPage, DatalakeError> {
-        let (mut stream, scan_stats) = self
-            .datalake
-            .query_arrow_with_scan(sql, params, max_block_size)
-            .await?;
-
-        let mut batches = Vec::new();
-        let mut read_rows: u64 = 0;
-        let mut read_bytes: u64 = 0;
-        while let Some(result) = stream.next().await {
-            let batch = result?;
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            read_rows += batch.num_rows() as u64;
-            read_bytes += batch.get_array_memory_size() as u64;
-            batches.push(batch);
-        }
-
-        Ok(ExtractedPage {
-            batches,
-            read_stats: ReadStats {
-                read_rows,
-                read_bytes,
-            },
-            scan_stats: scan_stats.await,
-        })
     }
 
     /// Drives the transform over every block of the page, grouping output rows
@@ -458,9 +416,7 @@ mod tests {
     use super::super::plan::{TransformSpec, Transformation};
     use super::*;
     use crate::checkpoint::CheckpointError;
-    use crate::modules::sdlc::datalake::{
-        DatalakeError, RecordBatchStream, ScanStats, ScanStatsFuture,
-    };
+    use crate::modules::sdlc::datalake::{DatalakeError, RecordBatchStream, ScanStats};
     use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::observer::NoOpObserver;
     use crate::testkit::MockDestination;
@@ -576,6 +532,15 @@ mod tests {
             _params: Value,
             _max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
 
@@ -585,24 +550,14 @@ mod tests {
                 self.batch_size / 2
             };
 
-            // Split each page into two blocks to exercise multi-block streaming
-            // within a page; the last block's last row drives the cursor.
+            // Two blocks per page so the cursor must come from the last block's
+            // last row, not from row order.
             let first = rows / 2;
             let second = rows - first;
-            let blocks = vec![
-                Ok(test_batch_range(1, first)),
-                Ok(test_batch_range(first as i64 + 1, second)),
-            ];
-            Ok(Box::pin(futures::stream::iter(blocks)))
-        }
-
-        async fn query_batches(
-            &self,
-            _sql: &str,
-            _params: Value,
-            _max_block_size: Option<u64>,
-        ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            Ok(vec![])
+            Ok(vec![
+                test_batch_range(1, first),
+                test_batch_range(first as i64 + 1, second),
+            ])
         }
     }
 
@@ -792,30 +747,26 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
-            max_block_size: Option<u64>,
+            _max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                return Ok(Box::pin(futures::stream::empty()));
-            }
-            match responses.remove(0) {
-                Ok(batches) => {
-                    let items: Vec<Result<RecordBatch, DatalakeError>> =
-                        batches.into_iter().map(Ok).collect();
-                    Ok(Box::pin(futures::stream::iter(items)))
-                }
-                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
-            }
+            Ok(Box::pin(futures::stream::empty()))
         }
 
         async fn query_batches(
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            Ok(vec![])
+            self.calls.lock().unwrap().push(max_block_size);
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Ok(vec![]);
+            }
+            match responses.remove(0) {
+                Ok(batches) => Ok(batches),
+                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
+            }
         }
     }
 
@@ -931,54 +882,53 @@ mod tests {
         );
     }
 
-    struct StreamFailingDatalake {
+    struct OverflowingDatalake {
         calls: Mutex<Vec<Option<u64>>>,
         recover_at_block_size: u64,
     }
 
-    impl StreamFailingDatalake {
+    impl OverflowingDatalake {
         fn observed_block_sizes(&self) -> Vec<Option<u64>> {
             self.calls.lock().unwrap().clone()
         }
     }
 
     #[async_trait]
-    impl DatalakeQuery for StreamFailingDatalake {
+    impl DatalakeQuery for OverflowingDatalake {
         async fn query_arrow(
             &self,
             _sql: &str,
             _params: Value,
-            max_block_size: Option<u64>,
+            _max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
-            self.calls.lock().unwrap().push(max_block_size);
-
-            let small_enough =
-                matches!(max_block_size, Some(size) if size <= self.recover_at_block_size);
-            let blocks: Vec<Result<RecordBatch, DatalakeError>> = if small_enough {
-                vec![Ok(test_batch_range(1, 5))]
-            } else {
-                vec![Err(DatalakeError::Query(
-                    "Code: 1002. DB::Exception: Error with a Arrow column \"String\": \
-                     Capacity error: array cannot contain more than 2147483646 bytes"
-                        .to_string(),
-                ))]
-            };
-            Ok(Box::pin(futures::stream::iter(blocks)))
+            Ok(Box::pin(futures::stream::empty()))
         }
 
         async fn query_batches(
             &self,
             _sql: &str,
             _params: Value,
-            _max_block_size: Option<u64>,
+            max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
-            Ok(vec![])
+            self.calls.lock().unwrap().push(max_block_size);
+
+            let small_enough =
+                matches!(max_block_size, Some(size) if size <= self.recover_at_block_size);
+            if small_enough {
+                Ok(vec![test_batch_range(1, 5)])
+            } else {
+                Err(DatalakeError::Query(
+                    "Code: 1002. DB::Exception: Error with a Arrow column \"String\": \
+                     Capacity error: array cannot contain more than 2147483646 bytes"
+                        .to_string(),
+                ))
+            }
         }
     }
 
     #[tokio::test]
-    async fn mid_stream_overflow_recovers_via_block_size_halving() {
-        let datalake = Arc::new(StreamFailingDatalake {
+    async fn arrow_overflow_recovers_via_block_size_halving() {
+        let datalake = Arc::new(OverflowingDatalake {
             calls: Mutex::new(Vec::new()),
             recover_at_block_size: 8_000,
         });
@@ -1005,13 +955,13 @@ mod tests {
 
         assert!(
             result.is_ok(),
-            "mid-stream overflow should self-correct: {result:?}"
+            "arrow overflow should self-correct: {result:?}"
         );
         assert_eq!(
             datalake.observed_block_sizes(),
             vec![None, Some(8_000)],
-            "first attempt streams at the default and fails mid-drain; the retry \
-             must shrink the block rather than abort"
+            "first attempt reads at the default and overflows; the retry must \
+             shrink the block rather than abort"
         );
     }
 
@@ -1075,24 +1025,19 @@ mod tests {
             Ok(vec![])
         }
 
-        async fn query_arrow_with_scan(
+        async fn query_batches_with_summary(
             &self,
             _sql: &str,
             _params: Value,
             _max_block_size: Option<u64>,
-        ) -> Result<(RecordBatchStream<'_>, ScanStatsFuture), DatalakeError> {
+        ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;
-            let (blocks, stats): (Vec<Result<RecordBatch, DatalakeError>>, ScanStats) =
-                if *calls == 1 {
-                    (vec![Ok(test_batch(self.rows))], self.scan_stats)
-                } else {
-                    (vec![], ScanStats::default())
-                };
-            Ok((
-                Box::pin(futures::stream::iter(blocks)),
-                Box::pin(async move { stats }),
-            ))
+            if *calls == 1 {
+                Ok((vec![test_batch(self.rows)], self.scan_stats))
+            } else {
+                Ok((vec![], ScanStats::default()))
+            }
         }
     }
 
