@@ -704,13 +704,15 @@ fn build_extract_plan(
                 .collect();
             append_missing(&mut columns, order_by);
 
+            // Only one page_join is supported; the CTE alias is fixed at _e0.
             let enrichment = page_join.as_ref().map(|pj| {
                 let alias = &pj.alias;
                 let fk = &pj.fk_column;
+                let wm = pj.watermark.as_deref().unwrap_or("_siphon_replicated_at");
                 let agg_cols: Vec<String> = pj
                     .select
                     .iter()
-                    .map(|c| format!("argMax({alias}.{c}, {alias}._siphon_replicated_at) AS {c}"))
+                    .map(|c| format!("argMax({alias}.{c}, {alias}.{wm}) AS {c}"))
                     .collect();
                 let sub_cols = std::iter::once(format!("{alias}.{fk} AS id"))
                     .chain(agg_cols)

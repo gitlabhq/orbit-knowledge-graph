@@ -99,6 +99,8 @@ pub(crate) struct PageJoinYaml {
     select: Vec<String>,
     #[serde(default, rename = "where")]
     where_clause: Option<String>,
+    #[serde(default)]
+    watermark: Option<String>,
 }
 
 impl EtlYaml {
@@ -588,6 +590,7 @@ impl EtlYaml {
                         fk_column: pj.fk_column,
                         select: pj.select,
                         where_clause: pj.where_clause,
+                        watermark: pj.watermark,
                     })
                 }),
                 edges: convert_edge_mappings(edges)?,

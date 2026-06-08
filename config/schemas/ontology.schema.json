@@ -353,6 +353,10 @@
                 "where": {
                   "type": "string",
                   "description": "Extra WHERE predicate on the joined table (e.g. _siphon_deleted = false)."
+                },
+                "watermark": {
+                  "type": "string",
+                  "description": "Watermark column for argMax deduplication. Defaults to _siphon_replicated_at."
                 }
               },
               "required": ["table", "alias", "fk_column", "select"],

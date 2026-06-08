@@ -33,6 +33,8 @@ pub struct PageJoin {
     pub select: Vec<String>,
     /// Extra WHERE predicate on the joined table (e.g. `_siphon_deleted = false`).
     pub where_clause: Option<String>,
+    /// Watermark column for `argMax` deduplication. Defaults to `_siphon_replicated_at`.
+    pub watermark: Option<String>,
 }
 
 /// Direction of an edge relative to the node defining the FK column.
