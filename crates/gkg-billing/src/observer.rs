@@ -46,7 +46,7 @@ impl BillingObserver {
         }
     }
 
-    fn build_event(&self) -> Option<(BillingEvent, &'static str)> {
+    fn build_event(&self) -> Option<BillingEvent> {
         let correlation_id = correlation_id_string();
         let Some(raw_realm) = self.inputs.realm.as_deref() else {
             tracing::warn!(
@@ -114,7 +114,7 @@ impl BillingObserver {
         }));
 
         match builder.build() {
-            Ok(event) => Some((event, realm)),
+            Ok(event) => Some(event),
             Err(e) => {
                 tracing::error!(
                     error = %e,
@@ -166,8 +166,14 @@ impl PipelineObserver for BillingObserver {
             return;
         }
         if let Some(ref tracker) = self.tracker
-            && let Some((event, realm)) = self.build_event()
+            && let Some(event) = self.build_event()
         {
+            let realm = self
+                .inputs
+                .realm
+                .as_deref()
+                .and_then(normalize_realm)
+                .unwrap_or("");
             let _span = tracing::info_span!(
                 "billing.track",
                 query_type = self.query_type,
