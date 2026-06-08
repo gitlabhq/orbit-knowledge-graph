@@ -93,11 +93,8 @@ struct Cli {
     #[arg(long, value_enum)]
     compile_only: Option<CompileShow>,
 
-    /// Seed a resolved scope prefix for a DSL node, as `alias=prefix`
-    /// (repeatable, e.g. `--scope-prefix g=1/9970/`). Mirrors the server's
-    /// PathResolutionStage, which the profiler otherwise skips: the prefix is
-    /// propagated across scope-preserving edges and attached to the security
-    /// context so compile-only output matches what the server produces.
+    /// Seed a resolved scope prefix for a DSL node as `alias=prefix` (repeatable,
+    /// e.g. `g=1/9970/`); mirrors the server PathResolutionStage the profiler skips.
     #[arg(long = "scope-prefix")]
     scope_prefixes: Vec<String>,
 }

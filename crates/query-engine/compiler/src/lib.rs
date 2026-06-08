@@ -1831,8 +1831,6 @@ mod tests {
             "limit": 20
         }"#;
 
-        // No scope prefix resolved: containment is not provably implied by tp,
-        // so the container hop must NOT be elided (edge scan stays).
         let sql = compile_sql(query);
         assert!(
             sql.contains("gl_edge"),
@@ -1875,9 +1873,36 @@ mod tests {
         ] {
             assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
         }
-        // p is the group key, so it stays; the orphaned anchor g goes.
         assert!(sql.contains("gl_project"), "got:\n{sql}");
         assert!(!sql.contains("gl_group"), "got:\n{sql}");
+    }
+
+    #[test]
+    fn scope_implied_contains_not_elided_when_a_survivor_lacks_fk() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [
+                {"type": "CONTAINS", "from": "g", "to": "p"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{"function": "count", "target": "n", "alias": "notes"}],
+            "limit": 20
+        }"#;
+
+        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
+
+        assert!(
+            sql.contains("'CONTAINS'") && sql.contains("'HAS_NOTE'"),
+            "a non-FK survivor must block elision, keeping all three edge arms, got:\n{sql}"
+        );
     }
 
     #[test]

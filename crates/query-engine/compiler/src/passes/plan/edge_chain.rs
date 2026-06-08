@@ -352,27 +352,17 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .collect()
 }
 
-/// Drop a container hop (e.g. `Group -CONTAINS-> Project`) whose only effect is
-/// to assert that the rest of the traversal lives under a resolved scope anchor.
-///
-/// A scope-preserving hop carries a `scope_prefix` only when `restrict` proved
-/// both endpoints resolve to the same `traversal_path` prefix and the security
-/// pass tp-scopes every node scan to it. When one endpoint is a *pure anchor* —
-/// a path-scopable node whose sole job in the query is to pin that scope (only a
-/// `full_path`/`id` filter, no group/agg/order/display role, touched by no other
-/// hop) — the hop only re-asserts containment the surviving nodes' tp prefix
-/// already guarantees. Dropping it (and the now-orphaned anchor) lets the
-/// remaining FK hops resolve as a node-join chain with no edge-table scans, and
-/// is lossless: the tp prefix is the containment.
+/// Drop a container hop (e.g. `Group -CONTAINS-> Project`) to a pure scope anchor:
+/// once both endpoints carry the same resolved `traversal_path` prefix the hop only
+/// re-asserts containment the prefix already guarantees, so dropping it lets the
+/// remaining FK hops resolve as a node-join chain with no edge scans (lossless).
 fn elide_scope_implied_container_hops(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &mut Input,
 ) -> Vec<Hop> {
-    // Restricted to aggregations: that is where the dense container edge scans
-    // (IN_PROJECT / CONTAINS over a whole group) dominate, and where a non-group
-    // node never surfaces columns, so an anchor's display role reduces cleanly to
-    // group-by membership.
+    // Aggregations only: that is where dense container edge scans (IN_PROJECT /
+    // CONTAINS over a whole group) dominate and an anchor's role is group-by only.
     if input.query_type != QueryType::Aggregation {
         return hops;
     }
@@ -383,13 +373,21 @@ fn elide_scope_implied_container_hops(
         *hop_count.entry(hop.to_node.as_str()).or_insert(0) += 1;
     }
 
-    let drop_idx = hops.iter().position(|hop| {
+    let drop_idx = (0..hops.len()).find(|&idx| {
+        let hop = &hops[idx];
         if !hop.scope_preserving || hop.scope_prefix.is_none() || !hop.filters.is_empty() {
             return false;
         }
-        [&hop.from_node, &hop.to_node]
+        let anchors = [&hop.from_node, &hop.to_node]
             .into_iter()
-            .any(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count))
+            .any(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count));
+        // Elide only when every survivor is FK-resolvable, so the result is a
+        // complete FK chain with no edge scans; otherwise the elision buys nothing.
+        anchors
+            && hops
+                .iter()
+                .enumerate()
+                .all(|(i, h)| i == idx || h.fk.is_some())
     });
 
     let Some(idx) = drop_idx else {
