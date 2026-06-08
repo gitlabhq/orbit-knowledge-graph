@@ -180,9 +180,7 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let hops = elide_scope_implied_container_hops(hops, &mut nodes, input);
-
-    let (mut hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
+    let (mut hops, elided_fks, input) = elide_hops(hops, &mut nodes, input);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
@@ -348,67 +346,13 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .collect()
 }
 
-/// Drop a `CONTAINS`/`IN_PROJECT` hop to a pure scope anchor: the shared resolved
-/// `traversal_path` prefix already implies the containment, so removal is lossless.
-fn elide_scope_implied_container_hops(
-    hops: Vec<Hop>,
-    nodes: &mut HashMap<String, NodePlan>,
-    input: &mut Input,
-) -> Vec<Hop> {
-    // Aggregations only: that is where dense container edge scans (IN_PROJECT /
-    // CONTAINS over a whole group) dominate and an anchor's role is group-by only.
-    if input.query_type != QueryType::Aggregation {
-        return hops;
-    }
-
-    let mut hop_count: HashMap<&str, usize> = HashMap::new();
-    for hop in &hops {
-        *hop_count.entry(hop.from_node.as_str()).or_insert(0) += 1;
-        *hop_count.entry(hop.to_node.as_str()).or_insert(0) += 1;
-    }
-
-    // Elide only when every survivor carries an FK, so detect_fk lowers them as a
-    // node-join star/chain with no edge scans; otherwise the elision buys nothing.
-    let drop = (0..hops.len()).find_map(|idx| {
-        let hop = &hops[idx];
-        if !hop.scope_preserving || hop.scope_prefix.is_none() || !hop.filters.is_empty() {
-            return None;
-        }
-        if !hops
-            .iter()
-            .enumerate()
-            .all(|(i, h)| i == idx || h.fk.is_some())
-        {
-            return None;
-        }
-        let anchor = [hop.from_node.as_str(), hop.to_node.as_str()]
-            .into_iter()
-            .find(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count))?;
-        Some((idx, anchor.to_string()))
-    });
-
-    let Some((idx, anchor)) = drop else {
-        return hops;
-    };
-
-    let mut kept = hops;
-    kept.remove(idx);
-    if idx < input.relationships.len() {
-        input.relationships.remove(idx);
-    }
-    nodes.remove(&anchor);
-    input.nodes.retain(|n| n.id != anchor);
-
-    kept
-}
-
 /// Whether `alias` exists only to pin scope: path-scopable, only a `full_path`/`id`
 /// filter, no group-by/agg/order/display role, and touched by exactly one hop.
 fn is_pure_scope_anchor(
     alias: &str,
     nodes: &HashMap<String, NodePlan>,
     input: &Input,
-    hop_count: &HashMap<&str, usize>,
+    hop_count: &HashMap<String, usize>,
 ) -> bool {
     let Some(np) = nodes.get(alias) else {
         return false;
@@ -434,11 +378,15 @@ fn is_pure_scope_anchor(
     !in_group_by && !is_agg_target && !is_order_target
 }
 
-/// Elide hops that have an FK column when the far-end node is pinned.
-/// Converts the FK into a node-level filter and removes the hop + its
-/// input.relationships entry so edge alias indices stay in sync.
+/// Elide hops the node-join path answers without an edge scan, keeping
+/// `input.relationships` in sync:
+///   - an FK hop whose far end is pinned: push the FK as a node-level filter;
+///   - the sole non-FK hop, when it is a scope-implied container (aggregations
+///     only): drop it and its orphaned anchor, since the resolved
+///     `traversal_path` prefix already encodes the containment and every
+///     survivor is then FK-lowerable by `detect_fk`.
 #[allow(clippy::type_complexity)]
-fn elide_fk_hops<'a>(
+fn elide_hops<'a>(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &'a mut Input,
@@ -447,11 +395,33 @@ fn elide_fk_hops<'a>(
     let mut keep_rels = Vec::new();
     let mut elided_fks = Vec::new();
 
+    let mut hop_count: HashMap<String, usize> = HashMap::new();
+    for hop in &hops {
+        *hop_count.entry(hop.from_node.clone()).or_insert(0) += 1;
+        *hop_count.entry(hop.to_node.clone()).or_insert(0) += 1;
+    }
+    let sole_non_fk = input.query_type == QueryType::Aggregation
+        && hops.iter().filter(|h| h.fk.is_none()).count() == 1;
+
     for (i, hop) in hops.into_iter().enumerate() {
+        if sole_non_fk
+            && hop.fk.is_none()
+            && hop.scope_preserving
+            && hop.scope_prefix.is_some()
+            && hop.filters.is_empty()
+            && let Some(anchor) = [hop.from_node.as_str(), hop.to_node.as_str()]
+                .into_iter()
+                .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
+                .map(str::to_string)
+        {
+            nodes.remove(&anchor);
+            input.nodes.retain(|n| n.id != anchor);
+            continue;
+        }
+
         // Only elide if at least one non-FK hop would remain — otherwise
         // the emit loop has no edges to populate node_edge_col from.
-        let remaining_non_fk = keep_hops.len();
-        let would_be_last = remaining_non_fk == 0;
+        let would_be_last = keep_hops.is_empty();
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last {
@@ -544,20 +514,10 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     Some(first_center.clone())
 }
 
-/// Linear FK chain that the node-join path answers without edge scans. Gated out
-/// of edge-property filters, `Both`, non-scope-preserving targets (an independent
-/// entity can outlive its edge), and point-selective endpoints (SIP narrowing on
-/// the edge scan beats a full leaf-node scan there).
-/// A hop the FK node-join path answers without an edge scan (FK, scope-preserving,
-/// single fixed-length, no edge filter, not Both). Shared by detection and elision.
-fn is_fk_chain_hop(hop: &Hop) -> bool {
-    hop.fk.is_some()
-        && hop.scope_preserving
-        && hop.max_hops == 1
-        && hop.filters.is_empty()
-        && !matches!(hop.direction, Direction::Both)
-}
-
+/// Linear FK chain the node-join path answers without edge scans. Each hop must be
+/// FK-backed, scope-preserving, single fixed-length, edge-filter-free, and not
+/// `Both`; gated out of point-selective endpoints (SIP narrowing on the edge scan
+/// beats a full leaf-node scan there) and non-emittable shapes.
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
@@ -566,7 +526,13 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     };
     hops.len() >= 2
         && hops.iter().all(|h| {
-            is_fk_chain_hop(h) && !point_selective(&h.from_node) && !point_selective(&h.to_node)
+            h.fk.is_some()
+                && h.scope_preserving
+                && h.max_hops == 1
+                && h.filters.is_empty()
+                && !matches!(h.direction, Direction::Both)
+                && !point_selective(&h.from_node)
+                && !point_selective(&h.to_node)
         })
         && is_emittable_fk_chain(hops)
 }
