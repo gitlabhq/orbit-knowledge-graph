@@ -29,9 +29,11 @@ run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
 instance or your local machine.
 
 > [!note]
-> `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or
-> later. `glab orbit local mcp serve` and `glab orbit local status` are
-> planned and marked as such below.
+> `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or later.
+> The following are planned and marked as such below:
+>
+> - `glab orbit local mcp serve`
+> - `glab orbit local status`
 
 Two top-level commands:
 
