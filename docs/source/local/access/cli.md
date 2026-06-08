@@ -39,7 +39,7 @@ orbit help
 ```
 
 If you already use the GitLab CLI (`glab`), you can instead install a managed
-binary with `glab orbit local --install --yes`. That binary is invoked as
+binary with `glab orbit local --install`. That binary is invoked as
 `glab orbit local <command>` rather than `orbit` directly - see
 [Use Orbit Local with glab](glab.md).
 
@@ -81,13 +81,17 @@ in the manifest table.
 
 ## Inspect the schema
 
+`orbit schema` requires either `--ontology` or `--query`:
+
 ```shell
-orbit schema
-orbit schema --raw
+orbit schema --ontology
+orbit schema --query
 ```
 
-`orbit schema` reads `information_schema.columns` from the local DuckDB
-and prints every table and column. Pass `--raw` for JSON output.
+- `--ontology` shows the graph ontology: entities, edges, and properties.
+- `--query` shows the query DSL schema: how to write structured queries.
+
+Add `--raw` to either for JSON instead of the default LLM-friendly output.
 
 ## Run SQL against the local graph
 

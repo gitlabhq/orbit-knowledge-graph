@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup. The local mcp serve and status commands are planned.
+description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup. The local mcp serve command is planned.
 title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -30,10 +30,8 @@ instance or your local machine.
 
 > [!note]
 > `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or later.
-> The following are planned and marked as such below:
->
-> - `glab orbit local mcp serve`
-> - `glab orbit local status`
+> An MCP server subcommand (`glab orbit local mcp serve`) is planned but not yet
+> available, and is marked as such below.
 
 Two top-level commands:
 
@@ -55,7 +53,7 @@ once the binary is installed.
 Install the managed `orbit` binary:
 
 ```shell
-glab orbit local --install --yes
+glab orbit local --install
 ```
 
 `glab` downloads the binary, verifies its checksum, and keeps it up to date.
@@ -111,10 +109,17 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## Inspect the schema
 
+`glab orbit local schema` requires either `--ontology` or `--query`:
+
 ```shell
-glab orbit local schema
-glab orbit local schema --raw
+glab orbit local schema --ontology
+glab orbit local schema --query
 ```
+
+- `--ontology` shows the graph ontology: entities, edges, and properties.
+- `--query` shows the query DSL schema: how to write structured queries.
+
+Add `--raw` to either for JSON instead of the default LLM-friendly output.
 
 ## Run as an MCP server
 
@@ -132,29 +137,10 @@ It will serve `query_graph` and `get_graph_schema` over the MCP protocol
 against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
 agent integration guide.
 
-## List indexed repositories
-
-> [!note]
-> `glab orbit local status` is planned, not yet shipped.
-
-Once shipped, this command will show which repositories are present in the
-local graph, their indexing state, and the database path:
-
-```shell
-glab orbit local status
-```
-
 ## Exit codes
 
-`glab orbit local` maps errors to stable exit codes so scripts and agents can
-branch on them.
-
-| Status | Exit code | Meaning |
-|--------|-----------|---------|
-| Success | `0` | Command completed. |
-| No graph | `2` | `~/.orbit/graph.duckdb` not found. Run `index` first. |
-| Bad query | `4` | Query DSL failed validation or compilation. |
-| Other | `1` | Unstructured error. Stderr contains details. |
+`glab orbit local` returns `0` on success and a non-zero exit code on failure,
+with details on stderr. Scripts and agents can branch on success or failure.
 
 ## Billing
 

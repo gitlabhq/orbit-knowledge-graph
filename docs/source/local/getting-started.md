@@ -113,7 +113,7 @@ Index a repository and inspect what Orbit found:
 
 ```shell
 glab orbit local index /path/to/your/repo
-glab orbit local schema
+glab orbit local schema --ontology
 ```
 
 That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints the
