@@ -67,7 +67,7 @@ pub fn run_remote(
         ));
     }
 
-    let schema_version = include_str!("../../../config/SCHEMA_VERSION").trim();
+    let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
 
     match diff {
         Some(path) => run_schema_diff(&generated, &path),
