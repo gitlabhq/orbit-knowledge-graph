@@ -207,17 +207,20 @@ impl EntityHandler {
                         ))
                         .await
                         .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                    let consolidated_watermark = partition_checkpoints
-                        .iter()
-                        .map(|(_, cp)| cp.watermark)
-                        .min()
-                        .unwrap_or(request.watermark);
 
-                    self.checkpoint_store
-                        .consolidate(&checkpoint_key, &consolidated_watermark)
-                        .await
-                        .map_err(|err| HandlerError::Processing(err.to_string()))?;
-                    Ok(stats)
+                    match consolidated_watermark(&partition_checkpoints, request.watermark) {
+                        Ok(watermark) => self
+                            .checkpoint_store
+                            .consolidate(&checkpoint_key, &watermark)
+                            .await
+                            .map(|()| stats)
+                            .map_err(|err| HandlerError::Processing(err.to_string())),
+                        Err(incomplete) => Err(HandlerError::Processing(format!(
+                            "refusing to consolidate {checkpoint_key}: {} partition(s) still in progress: {}",
+                            incomplete.len(),
+                            incomplete.join(", "),
+                        ))),
+                    }
                 }
                 Err(e) => Err(e),
             }
@@ -325,6 +328,28 @@ fn pull_window(
         Some(checkpoint) => (checkpoint.watermark, request_watermark),
         None => (DateTime::<Utc>::UNIX_EPOCH, request_watermark),
     }
+}
+
+/// Parent watermark for a finished partitioned load, or the partitions still
+/// mid-pull: consolidating past a cursored partition silently drops its id range.
+fn consolidated_watermark(
+    partition_checkpoints: &[(String, Checkpoint)],
+    fallback: DateTime<Utc>,
+) -> Result<DateTime<Utc>, Vec<String>> {
+    let incomplete: Vec<String> = partition_checkpoints
+        .iter()
+        .filter(|(_, checkpoint)| checkpoint.cursor_values.is_some())
+        .map(|(key, _)| key.clone())
+        .collect();
+    if !incomplete.is_empty() {
+        return Err(incomplete);
+    }
+
+    Ok(partition_checkpoints
+        .iter()
+        .map(|(_, checkpoint)| checkpoint.watermark)
+        .min()
+        .unwrap_or(fallback))
 }
 
 fn serialization_error(error: SerializationError) -> HandlerError {
