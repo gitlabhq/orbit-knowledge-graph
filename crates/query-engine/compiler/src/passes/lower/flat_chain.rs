@@ -162,6 +162,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     let (prev_start, prev_end) = prev_hop.direction.edge_columns();
 
                     let mut prev_preds = Vec::new();
+                    let mut anchor_tags = HashSet::new();
                     push_edge_predicates(
                         &mut prev_preds,
                         &prev_alias_inner,
@@ -173,7 +174,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     for (prop, filter) in &prev_hop.filters {
                         prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
                     }
-                    prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
+                    emit_denorm_tags(
+                        &mut prev_preds,
+                        plan,
+                        prev_hop,
+                        &prev_alias_inner,
+                        prev_start,
+                        prev_end,
+                        &mut anchor_tags,
+                    );
                     emit_node_ids_on_edge(
                         &mut prev_preds,
                         &prev_alias_inner,
@@ -182,10 +191,10 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         prev_start,
                         prev_end,
                     );
+                    prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
 
                     let anchor_query = Query {
                         select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
-                        distinct: true,
                         from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
                         where_clause: Expr::conjoin(prev_preds),
                         ..Default::default()
