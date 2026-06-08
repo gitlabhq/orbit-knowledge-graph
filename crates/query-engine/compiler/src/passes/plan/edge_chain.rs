@@ -180,12 +180,18 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
+    let hops = elide_scope_implied_container_hops(hops, &mut nodes, input);
+
     let (mut hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
     if reversed {
         input.relationships.reverse();
+    }
+
+    if let Some(order) = emittable_fk_chain_order(&hops) {
+        apply_hop_order(&mut hops, input, &order);
     }
 
     for node_plan in nodes.values_mut() {
@@ -346,6 +352,106 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .collect()
 }
 
+/// Drop a container hop (e.g. `Group -CONTAINS-> Project`) whose only effect is
+/// to assert that the rest of the traversal lives under a resolved scope anchor.
+///
+/// A scope-preserving hop carries a `scope_prefix` only when `restrict` proved
+/// both endpoints resolve to the same `traversal_path` prefix and the security
+/// pass tp-scopes every node scan to it. When one endpoint is a *pure anchor* —
+/// a path-scopable node whose sole job in the query is to pin that scope (only a
+/// `full_path`/`id` filter, no group/agg/order/display role, touched by no other
+/// hop) — the hop only re-asserts containment the surviving nodes' tp prefix
+/// already guarantees. Dropping it (and the now-orphaned anchor) lets the
+/// remaining FK hops resolve as a node-join chain with no edge-table scans, and
+/// is lossless: the tp prefix is the containment.
+fn elide_scope_implied_container_hops(
+    hops: Vec<Hop>,
+    nodes: &mut HashMap<String, NodePlan>,
+    input: &mut Input,
+) -> Vec<Hop> {
+    // Restricted to aggregations: that is where the dense container edge scans
+    // (IN_PROJECT / CONTAINS over a whole group) dominate, and where a non-group
+    // node never surfaces columns, so an anchor's display role reduces cleanly to
+    // group-by membership.
+    if input.query_type != QueryType::Aggregation {
+        return hops;
+    }
+
+    let mut hop_count: HashMap<&str, usize> = HashMap::new();
+    for hop in &hops {
+        *hop_count.entry(hop.from_node.as_str()).or_insert(0) += 1;
+        *hop_count.entry(hop.to_node.as_str()).or_insert(0) += 1;
+    }
+
+    let drop_idx = hops.iter().position(|hop| {
+        if !hop.scope_preserving || hop.scope_prefix.is_none() || !hop.filters.is_empty() {
+            return false;
+        }
+        [&hop.from_node, &hop.to_node]
+            .into_iter()
+            .any(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count))
+    });
+
+    let Some(idx) = drop_idx else {
+        return hops;
+    };
+
+    let hop = &hops[idx];
+    let anchor = if is_pure_scope_anchor(&hop.from_node, nodes, input, &hop_count) {
+        hop.from_node.clone()
+    } else {
+        hop.to_node.clone()
+    };
+
+    let mut kept = hops;
+    kept.remove(idx);
+    if idx < input.relationships.len() {
+        input.relationships.remove(idx);
+    }
+    nodes.remove(&anchor);
+    input.nodes.retain(|n| n.id != anchor);
+
+    kept
+}
+
+/// Whether `alias` exists only to pin the query's scope: it is path-scopable,
+/// filtered solely by an anchor predicate (`full_path` or `id`), carries no
+/// group-by/aggregation/order-by/display role, and is referenced by exactly one
+/// relationship (so eliding that relationship leaves it orphaned).
+fn is_pure_scope_anchor(
+    alias: &str,
+    nodes: &HashMap<String, NodePlan>,
+    input: &Input,
+    hop_count: &HashMap<&str, usize>,
+) -> bool {
+    let Some(np) = nodes.get(alias) else {
+        return false;
+    };
+    if !np.has_traversal_path || hop_count.get(alias).copied().unwrap_or(0) != 1 {
+        return false;
+    }
+    let only_anchor_filters = np
+        .filters
+        .iter()
+        .all(|(prop, _)| prop == "full_path" || prop == DEFAULT_PRIMARY_KEY);
+    if !only_anchor_filters || np.filters.is_empty() {
+        return false;
+    }
+
+    let in_group_by = crate::input::node_group_ids(&input.aggregation.group_by).any(|n| n == alias)
+        || input.aggregation.group_by.iter().any(
+            |g| matches!(g, crate::input::InputGroupByKey::Property { node, .. } if node == alias),
+        );
+    let is_agg_target = input
+        .aggregation
+        .metrics
+        .iter()
+        .any(|m| m.target.as_deref() == Some(alias));
+    let is_order_target = input.order_by.as_ref().is_some_and(|ob| ob.node == alias);
+
+    !in_group_by && !is_agg_target && !is_order_target
+}
+
 /// Elide hops that have an FK column when the far-end node is pinned.
 /// Converts the FK into a node-level filter and removes the hop + its
 /// input.relationships entry so edge alias indices stay in sync.
@@ -495,6 +601,68 @@ fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
         reached.insert(h.to_node.as_str());
         ok
     })
+}
+
+/// Topological order (with per-hop orientation) that makes an FK-chain-eligible
+/// hop set emittable by `emit_chain`. Eliding a container hop can leave the
+/// survivors out of join order (e.g. `[pipe→p, j→pipe]`, where `j` is introduced
+/// on a hop's `from` side); this re-roots and re-orients them into a connected
+/// tree (`from` reached, `to` new) without changing the inner-join result.
+///
+/// Returns `None` when the hops aren't FK-chain-eligible (so the normal strategy
+/// applies) or are already emittable (no reordering needed).
+fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
+    let fk_eligible = hops.len() >= 2
+        && hops.iter().all(|h| {
+            h.fk.is_some()
+                && h.scope_preserving
+                && h.max_hops == 1
+                && h.filters.is_empty()
+                && !matches!(h.direction, Direction::Both)
+        });
+    if !fk_eligible || is_emittable_fk_chain(hops) {
+        return None;
+    }
+
+    let root = hops[0].from_node.as_str();
+    let mut reached: HashSet<&str> = HashSet::from([root]);
+    let mut used = vec![false; hops.len()];
+    let mut order = Vec::with_capacity(hops.len());
+
+    while order.len() < hops.len() {
+        let next = hops.iter().enumerate().find(|(i, h)| {
+            !used[*i]
+                && (reached.contains(h.from_node.as_str()) ^ reached.contains(h.to_node.as_str()))
+        });
+        let (i, h) = next?;
+        let swap = !reached.contains(h.from_node.as_str());
+        used[i] = true;
+        reached.insert(h.from_node.as_str());
+        reached.insert(h.to_node.as_str());
+        order.push((i, swap));
+    }
+    Some(order)
+}
+
+/// Apply an [`emittable_fk_chain_order`] permutation to `hops` and the parallel
+/// `input.relationships`, flipping endpoints + direction on swapped hops.
+fn apply_hop_order(hops: &mut Vec<Hop>, input: &mut Input, order: &[(usize, bool)]) {
+    let mut taken: Vec<Option<Hop>> = hops.drain(..).map(Some).collect();
+    let rels_aligned = input.relationships.len() == taken.len();
+    let mut rels: Vec<Option<InputRelationship>> =
+        input.relationships.drain(..).map(Some).collect();
+
+    for &(i, swap) in order {
+        let mut hop = taken[i].take().expect("hop index reused");
+        if swap {
+            std::mem::swap(&mut hop.from_node, &mut hop.to_node);
+            hop.direction = hop.direction.flipped();
+        }
+        hops.push(hop);
+        if rels_aligned && let Some(rel) = rels[i].take() {
+            input.relationships.push(rel);
+        }
+    }
 }
 
 fn reorder_by_selectivity(

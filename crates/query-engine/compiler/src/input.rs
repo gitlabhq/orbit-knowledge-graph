@@ -631,6 +631,16 @@ impl Direction {
             Direction::Incoming => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN),
         }
     }
+
+    /// Direction with the endpoints swapped. Used when a hop's `from`/`to` nodes
+    /// are exchanged so the edge orientation stays consistent.
+    pub fn flipped(self) -> Self {
+        match self {
+            Direction::Outgoing => Direction::Incoming,
+            Direction::Incoming => Direction::Outgoing,
+            Direction::Both => Direction::Both,
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
