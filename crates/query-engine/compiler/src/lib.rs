@@ -1773,66 +1773,44 @@ mod tests {
     }
 
     // Group(gitlab-org)->CONTAINS->Project scope anchor + FK-resolvable survivors.
-    // A `!x` expectation asserts `x` is absent. Covers the A_ma1/A_ma3/A_ma4 prod
-    // benchmarks (3-hop chain, 4-hop diff chain, FK star), plus the non-FK guard.
+    // `expect` is `|`-separated; a `!x` token asserts `x` is absent. Covers the
+    // A_ma1/A_ma3/A_ma4 prod benchmarks (3-hop chain, 4-hop diff chain, FK star)
+    // plus the non-FK guard.
     #[test]
     fn scope_implied_container_hop_elision() {
-        const G: &str = r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"}"#;
-        let cases: &[(String, &str, &str, &str, &[&str])] = &[
+        let cases: &[(&str, &str, &str, &str, &str)] = &[
             (
-                format!(
-                    r#"{G},{{"id":"pipe","entity":"Pipeline"}},{{"id":"j","entity":"Job","filters":{{"status":"failed"}}}}"#
-                ),
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job","filters":{"status":"failed"}}"#,
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"pipe","to":"p"},{"type":"IN_PIPELINE","from":"j","to":"pipe"}"#,
                 "pipe",
                 "j",
-                &[
-                    "pipe.project_id = p.id",
-                    "j.pipeline_id = pipe.id",
-                    "!gl_edge",
-                    "!gl_ci_edge",
-                    "!gl_group",
-                ],
+                "pipe.project_id = p.id|j.pipeline_id = pipe.id|!gl_edge|!gl_ci_edge|!gl_group",
             ),
             (
-                format!(
-                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"d","entity":"MergeRequestDiff"}},{{"id":"f","entity":"MergeRequestDiffFile"}}"#
-                ),
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
-                &[
-                    "mr.project_id = p.id",
-                    "mr.latest_merge_request_diff_id = d.id",
-                    "f.merge_request_diff_id = d.id",
-                    "gl_project",
-                    "!gl_edge",
-                    "!gl_ci_edge",
-                    "!gl_group",
-                ],
+                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
             ),
             (
-                format!(
-                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"u","entity":"User"}}"#
-                ),
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
                 "u",
                 "mr",
-                &["!gl_edge", "!gl_ci_edge", "!gl_group"],
+                "!gl_edge|!gl_ci_edge|!gl_group",
             ),
             (
-                format!(
-                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"n","entity":"Note"}}"#
-                ),
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
                 "p",
                 "n",
-                &["'CONTAINS'", "'HAS_NOTE'"],
+                "'CONTAINS'|'HAS_NOTE'",
             ),
         ];
         for (nodes, rels, group, agg, expect) in cases {
             let sql = compile_sql_scoped(nodes, rels, group, agg);
-            for e in *expect {
+            for e in expect.split('|') {
                 match e.strip_prefix('!') {
                     Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
                     None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
