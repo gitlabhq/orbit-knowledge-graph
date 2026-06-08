@@ -485,8 +485,11 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
 /// just a strictly linear chain, while rejecting reversed or convergent hops the
 /// join builder can't place.
 fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
+    let Some(first) = hops.first() else {
+        return false;
+    };
     let mut reached: HashSet<&str> =
-        HashSet::from([hops[0].from_node.as_str(), hops[0].to_node.as_str()]);
+        HashSet::from([first.from_node.as_str(), first.to_node.as_str()]);
     hops[1..].iter().all(|h| {
         let ok = reached.contains(h.from_node.as_str()) && !reached.contains(h.to_node.as_str());
         reached.insert(h.to_node.as_str());
