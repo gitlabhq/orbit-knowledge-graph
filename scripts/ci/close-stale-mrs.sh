@@ -165,6 +165,9 @@ process_mr() {
       log "MR !$iid: grace elapsed (${age}s >= ${GRACE_SECONDS}s), closing"
       post_comment "$iid" "$(close_comment_body)"
       close_mr "$iid"
+      # Drop the label so a later reopen starts a fresh warn/grace cycle instead
+      # of being closed again immediately off the original (now-ancient) warning.
+      remove_scheduled_label "$iid"
     else
       local remaining=$(( (GRACE_SECONDS - age + 86399) / 86400 ))
       log "MR !$iid: in grace period, ~${remaining}d until close"

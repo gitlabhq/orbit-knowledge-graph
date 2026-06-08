@@ -9,17 +9,18 @@
 #      read it.
 #   3. Create a pipeline schedule (Project → CI/CD → Schedules, daily) with a
 #      variable SCHEDULE_TYPE=stale_mr_sweep.
-#   4. Watch a few DRY_RUN runs, then flip DRY_RUN to "false".
+#   4. To rehearse without side effects, run the schedule once with DRY_RUN=true
+#      set on the schedule; remove it to go live.
 stale-mr-sweep:
   stage: review
-  image: registry.gitlab.com/gitlab-org/cli:latest
+  image: registry.gitlab.com/gitlab-org/cli:v1.102.0
   tags:
     - saas-linux-medium-amd64
   variables:
     STALE_IDLE_DAYS: "14"
     STALE_GRACE_DAYS: "3"
     STALE_LABEL_PREFIX: "stale"
-    DRY_RUN: "true"
+    DRY_RUN: "false"
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
