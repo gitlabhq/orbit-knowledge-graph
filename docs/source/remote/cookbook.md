@@ -54,7 +54,7 @@ For every entity and property you can query, see the
 
 ## Explore your organization
 
-Answer: "What do we have, and where does it live?"
+Get the lay of the land: what you have and where it lives.
 
 ### Map a group's projects and their owners
 
@@ -235,7 +235,7 @@ created each one. Order by `last_activity_at` instead to rank by recent activity
 
 ## Onboarding and codebase exploration
 
-Answer: "Help me understand this codebase."
+Get up to speed on an unfamiliar codebase fast.
 
 ### Find the most active contributors to a project
 
@@ -315,7 +315,7 @@ even when the name is reused elsewhere.
 
 ## Blast radius analysis
 
-Answer: "What breaks if I change this?"
+Understand what a change touches before you make it.
 
 ### Find all files that import a specific module
 
@@ -378,7 +378,7 @@ Use Orbit to find which projects depend on the <library name> library.
 
 ## Dependency mapping
 
-Answer: "How are our services connected?"
+See how your code and services connect.
 
 ### Map imported definitions
 
@@ -420,7 +420,7 @@ Use Orbit to find which definitions in our <module name> code are imported the m
 
 ## Merge requests and code review
 
-Answer: "What changed, and what did reviewers say?"
+Follow what changed and how it was reviewed.
 
 ### Read the review discussion on a merge request
 
@@ -496,7 +496,7 @@ query language reference.
 
 ## Planning and delivery
 
-Answer: "How does our planning connect to the work that delivered it?"
+Connect planning to the work that delivered it.
 
 These recipes traverse from issues to the merge requests, people, and related
 work that surround them, in a single query. Joining planning data to code
@@ -602,7 +602,7 @@ Use Orbit to show the work items related to issue <issue ID> in <project name>.
 
 ## Pipeline health
 
-Answer: "Where are our CI/CD problems?"
+Find where CI/CD is breaking down.
 
 ### Find projects with the most failed pipelines
 
@@ -697,7 +697,7 @@ Use Orbit to show the stage-by-stage status of <project name>'s pipelines, in ex
 
 ## Vulnerability tracing
 
-Answer: "Where are our security risks, and how did they get there?"
+Find your security risks and trace how they got there.
 
 ### Find all critical and high vulnerabilities in a group
 
