@@ -206,6 +206,10 @@ mod tests {
         );
         assert!(template.contains("sn.system = true"));
         assert!(template.contains("snm._siphon_deleted = false"));
+        assert!(
+            template.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
+            "enrichment CTE must prune by traversal_path: {template}"
+        );
         assert!(template.contains("ORDER BY traversal_path, id"));
         assert_eq!(system_note.watermark_column, "sn._siphon_replicated_at");
     }

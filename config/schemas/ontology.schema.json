@@ -357,6 +357,10 @@
                 "watermark": {
                   "type": "string",
                   "description": "Watermark column for argMax deduplication. Defaults to _siphon_replicated_at."
+                },
+                "traversal_path_column": {
+                  "type": "string",
+                  "description": "traversal_path column on the joined table. When set and the entity is namespaced, the enrichment CTE adds startsWith(<col>, {traversal_path}) so the join prunes by the joined table's leading PK column instead of scanning its whole FK index. The IN (SELECT id FROM _batch) bound already guarantees correctness; this is a pruning hint that must be a superset of the matched rows."
                 }
               },
               "required": ["table", "alias", "fk_column", "select"],

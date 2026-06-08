@@ -718,11 +718,21 @@ fn build_extract_plan(
                     .chain(agg_cols)
                     .collect::<Vec<_>>()
                     .join(", ");
-                let where_frag = pj
+                let mut where_frag = pj
                     .where_clause
                     .as_ref()
                     .map(|w| format!(" AND {w}"))
                     .unwrap_or_default();
+                // Prune the enrichment scan by the joined table's leading PK
+                // column. Reuses the base scan's `{traversal_path:String}`
+                // named param, so the same namespace value binds. The `IN
+                // (SELECT id FROM _batch)` bound still guards correctness; this
+                // is a superset predicate, so it cannot drop matched rows (#830).
+                if let Some(tp_col) = pj.traversal_path_column.as_ref().filter(|_| namespaced) {
+                    where_frag.push_str(&format!(
+                        " AND startsWith({alias}.{tp_col}, {{traversal_path:String}})"
+                    ));
+                }
                 let cte_def = format!(
                     "_e0 AS (SELECT {sub_cols} FROM {table} AS {alias} \
                      WHERE {alias}.{fk} IN (SELECT DISTINCT id FROM _batch){where_frag} \

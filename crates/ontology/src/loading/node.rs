@@ -101,6 +101,8 @@ pub(crate) struct PageJoinYaml {
     where_clause: Option<String>,
     #[serde(default)]
     watermark: Option<String>,
+    #[serde(default)]
+    traversal_path_column: Option<String>,
 }
 
 impl EtlYaml {
@@ -591,6 +593,7 @@ impl EtlYaml {
                         select: pj.select,
                         where_clause: pj.where_clause,
                         watermark: pj.watermark,
+                        traversal_path_column: pj.traversal_path_column,
                     })
                 }),
                 edges: convert_edge_mappings(edges)?,

@@ -1131,5 +1131,9 @@ mod tests {
         );
         assert!(sql.contains("_e0.action AS action"), "sql: {sql}");
         assert!(sql.contains("snm._siphon_deleted = false"), "sql: {sql}");
+        assert!(
+            sql.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
+            "sql: {sql}"
+        );
     }
 }
