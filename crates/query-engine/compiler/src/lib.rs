@@ -1635,12 +1635,12 @@ mod tests {
 
         assert!(
             sql.contains(
-                "_candidate_pipe AS (SELECT DISTINCT pipe.id AS id FROM gl_pipeline AS pipe WHERE"
+                "_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"
             ),
-            "joined target should get a non-FINAL candidate CTE, got:\n{sql}"
+            "joined target should get a candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("_candidate_j AS (SELECT DISTINCT j.id AS id FROM gl_job AS j WHERE"),
+            sql.contains("_candidate_j AS (SELECT j.id AS id FROM gl_job AS j WHERE"),
             "center should get a non-FINAL candidate CTE, got:\n{sql}"
         );
         assert!(
@@ -1701,13 +1701,13 @@ mod tests {
 
         assert!(
             sql.contains(
-                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
+                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
             ),
-            "unfiltered joined target should be narrowed by a non-FINAL candidate scan, got:\n{sql}"
+            "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
         );
         assert!(
             !sql.contains(
-                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
+                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
             ),
             "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
         );
