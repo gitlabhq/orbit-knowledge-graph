@@ -354,6 +354,19 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             start_col,
                             end_col,
                         );
+                        // Reference existing _filter_<node> CTEs for this
+                        // hop's endpoints so the narrow CTE inherits
+                        // node-level selectivity (e.g. File path filter).
+                        for (na, ic) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+                            let cte_name = format!("_filter_{na}");
+                            if ctes.iter().any(|c| c.name == cte_name) {
+                                nw.push(Expr::InSubquery {
+                                    expr: Box::new(Expr::col(&narrow_alias, ic)),
+                                    cte_name,
+                                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                                });
+                            }
+                        }
                         if hop.cascade_anchor
                             && let Some(ref jc) = hop.join_prev
                         {
