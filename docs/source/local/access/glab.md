@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: The glab orbit local subcommands and glab orbit setup are planned for a future glab release. Until they ship, build from source and use the orbit binary directly.
+description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local. The glab orbit setup, mcp serve, and status commands are planned.
 title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -29,29 +29,38 @@ run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
 instance or your local machine.
 
 > [!note]
-> Both `glab orbit local` and `glab orbit setup` are planned for a future glab
-> release. Every command on this page is the future shape, not the current one.
-> Until they ship, build from source - see [use `orbit` directly](cli.md).
+> `glab orbit local` ships today, in `glab` 1.94 or later. `glab orbit setup`,
+> `glab orbit local mcp serve`, and `glab orbit local status` are planned and
+> marked as such below.
 
-Two top-level commands (both planned, not yet shipped):
+Two top-level commands:
 
-- `glab orbit setup`: install the Orbit skill and point your AI
-  agent at the local graph.
-- `glab orbit local`: typed subcommands that wrap the `orbit` binary.
-  Includes `glab orbit local mcp serve` to run Orbit Local as an MCP server.
+- `glab orbit local`: wraps the managed `orbit` binary to index and query the
+  local graph. Available now.
+- `glab orbit setup`: install the Orbit skill and point your AI agent at the
+  local graph. Planned.
 
 ## Prerequisites
 
-- `glab` is installed and authenticated:
-
-  ```shell
-  glab auth login
-  ```
-
+- `glab` 1.94 or later is installed.
 - A local Git repository to index.
 
-No GitLab account or network connection is required to use `glab orbit local`
-once the binary is installed.
+No GitLab account or network connection is required to use `glab orbit local`.
+
+## Install
+
+Install the managed `orbit` binary:
+
+```shell
+glab orbit local --install --yes
+```
+
+`glab` downloads the binary, verifies its checksum, and keeps it up to date.
+Verify the install:
+
+```shell
+glab orbit local help
+```
 
 ## Set up your AI agent
 
@@ -112,24 +121,31 @@ glab orbit local schema --raw
 
 ## Run as an MCP server
 
-Expose the local graph to any MCP-compatible AI agent:
+> [!note]
+> `glab orbit local mcp serve` is planned, not yet shipped.
+
+Once shipped, this command will expose the local graph to any MCP-compatible
+AI agent:
 
 ```shell
 glab orbit local mcp serve
 ```
 
-This serves `query_graph` and `get_graph_schema` over the MCP protocol against
-`~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full agent
-integration guide.
+It will serve `query_graph` and `get_graph_schema` over the MCP protocol
+against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
+agent integration guide.
 
 ## List indexed repositories
+
+> [!note]
+> `glab orbit local status` is planned, not yet shipped.
+
+Once shipped, this command will show which repositories are present in the
+local graph, their indexing state, and the database path:
 
 ```shell
 glab orbit local status
 ```
-
-Shows which repositories are present in the local graph, their indexing state,
-and the database path.
 
 ## Exit codes
 

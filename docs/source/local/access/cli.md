@@ -24,19 +24,38 @@ title: Use Orbit Local with the Orbit CLI (`orbit`)
 The Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.
 
-> [!note]
-> Orbit Local is experimental. Until packaged binaries ship,
-> you must build from source. The packaged install path will be `glab orbit local`.
+## Install
 
-## Prerequisites
+Install the managed `orbit` binary with the GitLab CLI (`glab`):
+
+```shell
+glab orbit local --install --yes
+```
+
+This downloads the binary, verifies its checksum, and keeps it up to date.
+Requires `glab` 1.94 or later.
+
+You can also install the binary directly with the one-line installer:
+
+```shell
+curl -fsSL "https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/raw/main/install.sh" | bash
+```
+
+Open a new terminal, then verify the install:
+
+```shell
+orbit help
+```
+
+### Build from source
+
+To contribute to Orbit or run an unreleased build, compile the binary
+yourself.
+
+Prerequisites:
 
 - [Rust toolchain](https://rustup.rs/) (stable)
 - [`mise`](https://mise.jdx.dev/) for tool management
-- A local Git repository to index
-
-## Install
-
-Build from source:
 
 ```shell
 git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
