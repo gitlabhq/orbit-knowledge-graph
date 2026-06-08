@@ -191,7 +191,7 @@ pub fn plan(input: &mut Input) -> Plan {
     }
 
     if let Some(order) = emittable_fk_chain_order(&hops) {
-        apply_hop_order(&mut hops, input, &order);
+        apply_hop_order(&mut hops, &order);
     }
 
     for node_plan in nodes.values_mut() {
@@ -381,13 +381,13 @@ fn elide_scope_implied_container_hops(
         let anchors = [&hop.from_node, &hop.to_node]
             .into_iter()
             .any(|alias| is_pure_scope_anchor(alias, nodes, input, &hop_count));
-        // Elide only when every survivor is FK-resolvable, so the result is a
-        // complete FK chain with no edge scans; otherwise the elision buys nothing.
+        // Elide only when every survivor is an FK-chain hop, so the result lowers
+        // through the FK node-join path with no edge scans; otherwise it buys nothing.
         anchors
             && hops
                 .iter()
                 .enumerate()
-                .all(|(i, h)| i == idx || h.fk.is_some())
+                .all(|(i, h)| i == idx || is_fk_chain_hop(h))
     });
 
     let Some(idx) = drop_idx else {
@@ -564,6 +564,17 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 /// of edge-property filters, `Both`, non-scope-preserving targets (an independent
 /// entity can outlive its edge), and point-selective endpoints (SIP narrowing on
 /// the edge scan beats a full leaf-node scan there).
+/// A hop the FK node-join path can answer without an edge scan: carries an FK,
+/// stays in one scope, is fixed single-length, has no edge-property filter, and is
+/// not bidirectional. Shared by chain detection, reordering, and container elision.
+fn is_fk_chain_hop(hop: &Hop) -> bool {
+    hop.fk.is_some()
+        && hop.scope_preserving
+        && hop.max_hops == 1
+        && hop.filters.is_empty()
+        && !matches!(hop.direction, Direction::Both)
+}
+
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
@@ -572,13 +583,7 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     };
     hops.len() >= 2
         && hops.iter().all(|h| {
-            h.fk.is_some()
-                && h.scope_preserving
-                && h.max_hops == 1
-                && h.filters.is_empty()
-                && !matches!(h.direction, Direction::Both)
-                && !point_selective(&h.from_node)
-                && !point_selective(&h.to_node)
+            is_fk_chain_hop(h) && !point_selective(&h.from_node) && !point_selective(&h.to_node)
         })
         && is_emittable_fk_chain(hops)
 }
@@ -610,14 +615,7 @@ fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
 /// Returns `None` when the hops aren't FK-chain-eligible (so the normal strategy
 /// applies) or are already emittable (no reordering needed).
 fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
-    let fk_eligible = hops.len() >= 2
-        && hops.iter().all(|h| {
-            h.fk.is_some()
-                && h.scope_preserving
-                && h.max_hops == 1
-                && h.filters.is_empty()
-                && !matches!(h.direction, Direction::Both)
-        });
+    let fk_eligible = hops.len() >= 2 && hops.iter().all(is_fk_chain_hop);
     if !fk_eligible || is_emittable_fk_chain(hops) {
         return None;
     }
@@ -642,14 +640,11 @@ fn emittable_fk_chain_order(hops: &[Hop]) -> Option<Vec<(usize, bool)>> {
     Some(order)
 }
 
-/// Apply an [`emittable_fk_chain_order`] permutation to `hops` and the parallel
-/// `input.relationships`, flipping endpoints + direction on swapped hops.
-fn apply_hop_order(hops: &mut Vec<Hop>, input: &mut Input, order: &[(usize, bool)]) {
+/// Apply an [`emittable_fk_chain_order`] permutation to `hops`, flipping endpoints
+/// and direction on swapped hops. `input.relationships` is not reordered: no pass
+/// after lowering reads it, and the lowerer consumes `hops`, not relationships.
+fn apply_hop_order(hops: &mut Vec<Hop>, order: &[(usize, bool)]) {
     let mut taken: Vec<Option<Hop>> = hops.drain(..).map(Some).collect();
-    let rels_aligned = input.relationships.len() == taken.len();
-    let mut rels: Vec<Option<InputRelationship>> =
-        input.relationships.drain(..).map(Some).collect();
-
     for &(i, swap) in order {
         let mut hop = taken[i].take().expect("hop index reused");
         if swap {
@@ -657,9 +652,6 @@ fn apply_hop_order(hops: &mut Vec<Hop>, input: &mut Input, order: &[(usize, bool
             hop.direction = hop.direction.flipped();
         }
         hops.push(hop);
-        if rels_aligned && let Some(rel) = rels[i].take() {
-            input.relationships.push(rel);
-        }
     }
 }
 
