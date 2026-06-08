@@ -47,7 +47,8 @@ Two top-level commands:
 - `glab` 1.94 or later is installed.
 - A local Git repository to index.
 
-No GitLab account or network connection is required to use `glab orbit local`.
+No GitLab account or network connection is required to use `glab orbit local`
+once the binary is installed.
 
 ## Install
 
