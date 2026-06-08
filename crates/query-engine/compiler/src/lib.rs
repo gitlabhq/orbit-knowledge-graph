@@ -1639,7 +1639,7 @@ mod tests {
         );
         assert!(
             sql.contains("_candidate_j AS (SELECT j.id AS id FROM gl_job AS j WHERE"),
-            "center should get a non-FINAL candidate CTE, got:\n{sql}"
+            "center should get a candidate CTE, got:\n{sql}"
         );
         assert!(
             sql.contains("FROM (SELECT * FROM gl_job AS j")
