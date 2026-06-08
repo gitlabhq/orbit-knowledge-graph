@@ -44,7 +44,7 @@ fn collect_edge_predicates(
     ctes: &mut Vec<Cte>,
     tagged_nodes: &mut HashSet<(String, String)>,
     narrowed_nodes: &mut HashSet<String>,
-) {
+) -> Result<()> {
     push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
     for (prop, filter) in &hop.filters {
         target.push(filter_to_expr(alias, prop, filter));
@@ -61,7 +61,8 @@ fn collect_edge_predicates(
         ctes,
         narrowed_nodes,
         &plan.table_sort_keys,
-    );
+    )?;
+    Ok(())
 }
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
@@ -110,7 +111,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut ctes,
                 &mut tagged_nodes,
                 &mut narrowed_nodes,
-            );
+            )?;
 
             inner_preds.extend(edge_scope_predicate(hop, &alias));
 
@@ -135,7 +136,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut ctes,
                 &mut narrowed_nodes,
                 &plan.table_sort_keys,
-            );
+            )?;
             // For multi-hop dedup queries, FilterOnly nodes still use
             // CTEs so their IN-subqueries can be pushed inside the edge
             // dedup scan for PK pruning. Single-hop queries handle
