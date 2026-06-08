@@ -174,7 +174,12 @@ async fn main() -> Result<()> {
             diff,
         } => match target {
             DdlTarget::Remote => ddl::run_remote(ontology, prefix, diff),
-            DdlTarget::Local => ddl::run_local(ontology),
+            DdlTarget::Local => {
+                if !prefix.is_empty() || diff.is_some() {
+                    anyhow::bail!("--prefix and --diff are only supported for --target remote");
+                }
+                ddl::run_local(ontology)
+            }
         },
         Command::Schema { output } => schema::run(output),
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),

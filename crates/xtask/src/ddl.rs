@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use ontology::Ontology;
@@ -91,7 +91,7 @@ pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
 
 // ── Schema diff helpers ────────────────────────────────────────────────────
 
-fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()> {
+fn run_schema_diff(generated_stmts: &[String], sql_path: &Path) -> Result<()> {
     let existing_sql = std::fs::read_to_string(sql_path)
         .with_context(|| format!("failed to read {}", sql_path.display()))?;
 
