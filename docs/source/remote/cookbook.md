@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Copy-paste Orbit queries for common use cases including organization mapping, onboarding, blast radius analysis, dependency mapping, code review, planning, pipeline health, and vulnerability tracing.
+description: Copy-paste Orbit prompts and queries for common use cases including organization mapping, onboarding, blast radius analysis, dependency mapping, code review, planning, pipeline health, and vulnerability tracing.
 title: Cookbook
 ---
 
@@ -26,14 +26,18 @@ title: Cookbook
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Ready-to-use queries for the most common Orbit use cases. All examples use the
-REST API format. To run them via MCP, pass the JSON body to `query_graph`.
+Ready-to-use recipes for the most common Orbit use cases.
 
-Each recipe answers a real question, then hides the query behind a **Show query**
-toggle. Expand the ones you need, replace the example IDs and paths with your
-own, and run them. For the full query grammar, see the
-[Orbit query language](queries/query-language.md). For every entity and property
-you can query, see the [schema reference](schema.md).
+Each recipe starts with a **natural-language prompt** you can copy and paste into
+an agent connected to Orbit, such as Claude Code or GitLab Duo. The agent turns
+the prompt into a graph query for you. If you want to call the API directly, the
+exact query is behind the **Show query** toggle. All queries use the REST API
+format. To run them via MCP, pass the JSON body to `query_graph`.
+
+Replace the example group paths, project paths, and IDs with your own. For the
+full query grammar, see the [Orbit query language](queries/query-language.md).
+For every entity and property you can query, see the
+[schema reference](schema.md).
 
 ## Use cases
 
@@ -52,7 +56,9 @@ Answer: "What do we have, and where does it live?"
 
 ### List the projects in a group
 
-Replace `my-org` with the full path of the group you want to map.
+```plaintext
+List all the projects in the my-org group.
+```
 
 <details><summary>Show query</summary>
 
@@ -82,6 +88,10 @@ Replace `my-org` with the full path of the group you want to map.
 Answer: "Help me understand this codebase."
 
 ### Find the most active contributors to a project
+
+```plaintext
+Who are the top 10 contributors to my-org/my-project by merged merge requests?
+```
 
 <details><summary>Show query</summary>
 
@@ -118,10 +128,13 @@ Answer: "Help me understand this codebase."
 
 ### List the files in a directory
 
-The `path` filter uses `starts_with`, so it also returns nested subdirectories.
-Replace the `project_id` and `path` with your own.
+```plaintext
+List the files under the app/models directory in this project.
+```
 
 <details><summary>Show query</summary>
+
+The `path` filter uses `starts_with`, so it also returns nested subdirectories.
 
 ```json
 {
@@ -153,7 +166,9 @@ Answer: "What breaks if I change this?"
 
 ### Find all files that import a specific module
 
-Replace `payments-service` with the module or library you want to trace.
+```plaintext
+Which files import the payments-service module?
+```
 
 <details><summary>Show query</summary>
 
@@ -175,6 +190,10 @@ Replace `payments-service` with the module or library you want to trace.
 </details>
 
 ### Find projects that depend on a shared library
+
+```plaintext
+Which projects depend on the shared-auth-lib library?
+```
 
 <details><summary>Show query</summary>
 
@@ -205,6 +224,10 @@ Replace `payments-service` with the module or library you want to trace.
 Answer: "How are our services connected?"
 
 ### Map imported definitions
+
+```plaintext
+Which definitions in our payments code are imported the most?
+```
 
 <details><summary>Show query</summary>
 
@@ -242,11 +265,13 @@ Answer: "What changed, and what did reviewers say?"
 
 ### Read the review discussion on a merge request
 
-Returns every note on a merge request with its author. `internal` is `true` for
-notes visible only to users with Reporter or higher access. Replace the
-`node_ids` value with your own merge request ID.
+```plaintext
+Show me the review discussion on merge request 12345, including who said what.
+```
 
 <details><summary>Show query</summary>
+
+`internal` is `true` for notes visible only to users with Reporter or higher access.
 
 ```json
 {
@@ -268,8 +293,9 @@ notes visible only to users with Reporter or higher access. Replace the
 
 ### Find the largest merge requests in a project
 
-Ranks merge request diffs by the number of files changed, to surface oversized
-changes that are hard to review. Replace the `project_id` with your own.
+```plaintext
+What are the largest merge requests in this project by number of files changed?
+```
 
 <details><summary>Show query</summary>
 
@@ -302,7 +328,9 @@ Answer: "What is the team working on?"
 
 ### List the open issues in a project
 
-Replace `my-org/my-project` with your own project full path.
+```plaintext
+List the open issues in my-org/my-project.
+```
 
 <details><summary>Show query</summary>
 
@@ -334,7 +362,9 @@ Replace `my-org/my-project` with your own project full path.
 
 ### Count open issues by label
 
-Groups open work items in a project by label to show where work is concentrated.
+```plaintext
+How many open issues does my-org/my-project have, grouped by label?
+```
 
 <details><summary>Show query</summary>
 
@@ -371,6 +401,10 @@ Groups open work items in a project by label to show where work is concentrated.
 
 ### List the milestones in a project
 
+```plaintext
+List the milestones in my-org/my-project with their due dates.
+```
+
 <details><summary>Show query</summary>
 
 ```json
@@ -404,6 +438,10 @@ Answer: "Where are our CI/CD problems?"
 
 ### Find projects with the most failed pipelines
 
+```plaintext
+Which projects have the most failed pipelines?
+```
+
 <details><summary>Show query</summary>
 
 ```json
@@ -429,6 +467,10 @@ Answer: "Where are our CI/CD problems?"
 
 ### Find failed jobs and their failure reasons
 
+```plaintext
+Show me failed CI jobs and why they failed.
+```
+
 <details><summary>Show query</summary>
 
 ```json
@@ -448,8 +490,9 @@ Answer: "Where are our CI/CD problems?"
 
 ### See the stage-by-stage status of a pipeline
 
-Breaks a pipeline into its stages, in execution order. Replace the `project_id`
-with your own.
+```plaintext
+Show the stage-by-stage status of this project's pipelines, in execution order.
+```
 
 <details><summary>Show query</summary>
 
@@ -475,6 +518,10 @@ with your own.
 Answer: "Where are our security risks, and how did they get there?"
 
 ### Find all critical and high vulnerabilities in a group
+
+```plaintext
+List the critical and high severity vulnerabilities across this group.
+```
 
 <details><summary>Show query</summary>
 
@@ -505,6 +552,10 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Count vulnerabilities by project
 
+```plaintext
+Count our detected vulnerabilities by project.
+```
+
 <details><summary>Show query</summary>
 
 ```json
@@ -534,6 +585,10 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Count vulnerabilities by severity
 
+```plaintext
+How many detected vulnerabilities do we have, broken down by severity?
+```
+
 <details><summary>Show query</summary>
 
 ```json
@@ -561,10 +616,13 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Trace a specific CVE across your projects
 
-Finds every vulnerability occurrence tied to an external identifier such as a CVE
-or CWE. Replace `CVE-2021-44228` (Log4Shell) with the identifier you are hunting.
+```plaintext
+Where does CVE-2021-44228 (Log4Shell) appear across our projects?
+```
 
 <details><summary>Show query</summary>
+
+Replace `CVE-2021-44228` with the CVE or CWE identifier you are hunting.
 
 ```json
 {
@@ -593,8 +651,9 @@ or CWE. Replace `CVE-2021-44228` (Log4Shell) with the identifier you are hunting
 
 ### List the findings from the latest security scan
 
-Walks from a project's latest scans to the findings they produced. Replace the
-`project_id` with your own.
+```plaintext
+What did the latest security scan find in this project?
+```
 
 <details><summary>Show query</summary>
 
@@ -625,7 +684,9 @@ Walks from a project's latest scans to the findings they produced. Replace the
 
 ### See which scanners run on a project
 
-Lists the security scanners that have produced results, with their vendor.
+```plaintext
+Which security scanners run on my-org/my-project?
+```
 
 <details><summary>Show query</summary>
 
