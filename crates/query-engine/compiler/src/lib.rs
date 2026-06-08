@@ -1606,12 +1606,6 @@ mod tests {
                 sql.contains(" FINAL") || sql.contains("LIMIT 1 BY"),
                 "{name} should use FINAL or LIMIT BY for node-table dedup, got:\n{sql}"
             );
-            if name == "traversal" || name == "path_finding" || name == "neighbors" {
-                assert!(
-                    sql.contains(" FINAL"),
-                    "{name} must still use FINAL for its primary node scan, got:\n{sql}"
-                );
-            }
         }
     }
 

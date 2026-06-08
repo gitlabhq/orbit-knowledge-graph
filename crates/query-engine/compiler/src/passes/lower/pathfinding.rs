@@ -36,8 +36,15 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         SOURCE_ID_COLUMN,
         &mut anchor_ctes,
         pf.scoped_by_tp,
+        &plan.table_sort_keys,
     );
-    let end_anchor = build_anchor(end_np, TARGET_ID_COLUMN, &mut anchor_ctes, pf.scoped_by_tp);
+    let end_anchor = build_anchor(
+        end_np,
+        TARGET_ID_COLUMN,
+        &mut anchor_ctes,
+        pf.scoped_by_tp,
+        &plan.table_sort_keys,
+    );
     let path_scope_cte = build_scope_cte(&start_anchor, &end_anchor);
 
     let start_entity = start_np.entity.as_deref().unwrap_or("");
@@ -272,7 +279,13 @@ struct Anchor {
     has_tp: bool,
 }
 
-fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: bool) -> Anchor {
+fn build_anchor(
+    np: &NodePlan,
+    edge_col: &str,
+    ctes: &mut Vec<Cte>,
+    force_cte: bool,
+    table_sort_keys: &HashMap<String, Vec<String>>,
+) -> Anchor {
     let alias = &np.alias;
     let table = np.table.as_deref().unwrap_or("");
     let has_tp = np.has_traversal_path;
@@ -319,7 +332,11 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
     }
     select.push(SelectExpr::col(alias, DELETED_COLUMN));
 
-    let dedup_scan = dedup_query(alias, table, select, scan_where);
+    let sort_key = table_sort_keys
+        .get(table)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    let dedup_scan = dedup_query(alias, table, select, scan_where, sort_key);
 
     let mut outer_select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
     if has_tp {

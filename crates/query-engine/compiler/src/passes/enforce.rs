@@ -9,14 +9,14 @@
 //! For path finding queries, the start node's ID is added to the base query and
 //! the end node's ID is added to the final query.
 
-use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
+use crate::ast::{Expr, JoinType, Node, OrderExpr, Query, SelectExpr, TableRef};
 use crate::constants::{
     primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
 };
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
 use crate::passes::shared::{deleted_false, filter_to_expr, id_list_predicate, id_range_predicate};
-use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -272,52 +272,62 @@ fn enforce_return_columns(
                     ))
                 })?;
                 if !alias_exists_in_from(&q.from, &node.id) {
+                    let sort_key = input
+                        .compiler
+                        .table_sort_keys
+                        .get(table.as_str())
+                        .ok_or_else(|| {
+                            QueryError::Enforcement(format!("no sort key for node table '{table}'"))
+                        })?;
                     let join_cond = Expr::eq(
                         Expr::col(edge_alias, edge_col.as_str()),
                         Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
                     );
-                    let node_scan = if node.filters.is_empty() {
-                        TableRef::scan_final(table, &node.id)
-                    } else {
-                        let mut node_predicates = Vec::new();
-                        for (prop, filters) in &node.filters {
-                            for filter in filters {
-                                node_predicates.push(filter_to_expr(&node.id, prop, filter));
-                            }
+                    let mut node_predicates = Vec::new();
+                    for (prop, filters) in &node.filters {
+                        for filter in filters {
+                            node_predicates.push(filter_to_expr(&node.id, prop, filter));
                         }
-                        if !node.node_ids.is_empty() {
-                            node_predicates.push(id_list_predicate(
-                                &node.id,
-                                DEFAULT_PRIMARY_KEY,
-                                &node.node_ids,
-                            ));
-                        }
-                        if let Some(ref range) = node.id_range {
-                            node_predicates.push(id_range_predicate(&node.id, range));
-                        }
-                        node_predicates.push(deleted_false(&node.id));
-                        TableRef::subquery(
-                            Query {
-                                select: vec![SelectExpr::star()],
-                                from: TableRef::scan_final(table, &node.id),
-                                where_clause: Expr::conjoin(node_predicates),
-                                ..Default::default()
-                            },
+                    }
+                    if !node.node_ids.is_empty() {
+                        node_predicates.push(id_list_predicate(
                             &node.id,
-                        )
-                    };
+                            DEFAULT_PRIMARY_KEY,
+                            &node.node_ids,
+                        ));
+                    }
+                    if let Some(ref range) = node.id_range {
+                        node_predicates.push(id_range_predicate(&node.id, range));
+                    }
+                    node_predicates.push(deleted_false(&node.id));
+
+                    let mut order_by: Vec<OrderExpr> = sort_key
+                        .iter()
+                        .map(|col| OrderExpr::asc(Expr::col(&node.id, col)))
+                        .collect();
+                    order_by.push(OrderExpr::desc(Expr::col(&node.id, VERSION_COLUMN)));
+                    let limit_by_cols: Vec<Expr> = sort_key
+                        .iter()
+                        .map(|col| Expr::col(&node.id, col))
+                        .collect();
+
+                    let node_scan = TableRef::subquery(
+                        Query {
+                            select: vec![SelectExpr::star()],
+                            from: TableRef::scan(table, &node.id),
+                            where_clause: Expr::conjoin(node_predicates),
+                            order_by,
+                            limit_by: Some((1, limit_by_cols)),
+                            ..Default::default()
+                        },
+                        &node.id,
+                    );
                     q.from = TableRef::join(
                         JoinType::Inner,
                         std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
                         node_scan,
                         join_cond,
                     );
-                    if node.filters.is_empty() {
-                        q.where_clause = Some(match q.where_clause.take() {
-                            Some(existing) => Expr::and(existing, deleted_false(&node.id)),
-                            None => deleted_false(&node.id),
-                        });
-                    }
                 }
 
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
@@ -1149,11 +1159,20 @@ mod tests {
         node_edge_col: HashMap<String, (String, String)>,
     ) -> Input {
         use crate::input::CompilerMetadata;
+        let mut table_sort_keys = HashMap::new();
+        for n in &nodes {
+            if let Some(ref table) = n.table {
+                table_sort_keys
+                    .entry(table.clone())
+                    .or_insert_with(|| vec!["traversal_path".into(), "id".into()]);
+            }
+        }
         Input {
             query_type: QueryType::Traversal,
             nodes,
             compiler: CompilerMetadata {
                 node_edge_col,
+                table_sort_keys,
                 ..Default::default()
             },
             ..Input::default()

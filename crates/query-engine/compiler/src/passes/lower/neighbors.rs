@@ -54,6 +54,7 @@ pub fn emit_neighbors(
         node_ids: &[i64],
         id_range: Option<&InputIdRange>,
         extra_select: &[&str],
+        sort_key: &[String],
     ) -> (TableRef, Expr) {
         let mut scan_where = Vec::new();
         for (prop, filter) in filters {
@@ -72,7 +73,7 @@ pub fn emit_neighbors(
         for col in extra_select {
             select.push(SelectExpr::col(alias, *col));
         }
-        dedup_subquery(alias, table, select, scan_where)
+        dedup_subquery(alias, table, select, scan_where, sort_key)
     }
 
     let edge_tiebreakers = || -> Vec<OrderExpr> {
@@ -211,6 +212,11 @@ pub fn emit_neighbors(
             } else {
                 Vec::new()
             };
+            let center_sk = plan
+                .table_sort_keys
+                .get(center_table.as_str())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             let (center_subq, deleted_filter) = build_center_dedup(
                 &center_id,
                 &center_table,
@@ -218,6 +224,7 @@ pub fn emit_neighbors(
                 &center_node_ids,
                 center_id_range.as_ref(),
                 &extra,
+                center_sk,
             );
             from = TableRef::join(
                 JoinType::Inner,
@@ -238,16 +245,44 @@ pub fn emit_neighbors(
             ));
         } else {
             if !has_non_denorm {
+                let center_sort_key = plan
+                    .table_sort_keys
+                    .get(center_table.as_str())
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                let center_node_scan = if center_sort_key.is_empty() {
+                    TableRef::scan_final(&center_table, &center_id)
+                } else {
+                    let mut ob: Vec<OrderExpr> = center_sort_key
+                        .iter()
+                        .map(|c| OrderExpr::asc(Expr::col(&center_id, c)))
+                        .collect();
+                    ob.push(OrderExpr::desc(Expr::col(&center_id, VERSION_COLUMN)));
+                    let lb: Vec<Expr> = center_sort_key
+                        .iter()
+                        .map(|c| Expr::col(&center_id, c))
+                        .collect();
+                    TableRef::subquery(
+                        Query {
+                            select: vec![SelectExpr::star()],
+                            from: TableRef::scan(&center_table, &center_id),
+                            where_clause: Some(deleted_false(&center_id)),
+                            order_by: ob,
+                            limit_by: Some((1, lb)),
+                            ..Default::default()
+                        },
+                        &center_id,
+                    )
+                };
                 from = TableRef::join(
                     JoinType::Inner,
                     from,
-                    TableRef::scan_final(&center_table, &center_id),
+                    center_node_scan,
                     Expr::eq(
                         Expr::col(edge_alias, center_edge_col),
                         Expr::col(&center_id, DEFAULT_PRIMARY_KEY),
                     ),
                 );
-                where_parts.push(deleted_false(&center_id));
             }
             select.push(SelectExpr::new(
                 Expr::col(&center_id, &center_redaction_col),

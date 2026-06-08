@@ -331,19 +331,36 @@ pub fn edge_table_scan_filtered(
 
 /// Build a latest-row scan over a ReplacingMergeTree node table.
 ///
-/// `FINAL` applies the table engine's merge semantics at read time, so filters
-/// are evaluated against the latest row rather than historical matching
-/// versions.
+/// Uses `LIMIT 1 BY <sort_key> ORDER BY <sort_key>, _version DESC` instead of
+/// `FINAL` so ClickHouse can use projections and bloom filters. When `sort_key`
+/// is empty (unknown table), falls back to `FINAL`.
 pub fn dedup_query(
     alias: &str,
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
+    sort_key: &[String],
 ) -> Query {
+    if sort_key.is_empty() {
+        return Query {
+            select,
+            from: TableRef::scan_final(table, alias),
+            where_clause: Expr::conjoin(scan_where),
+            ..Default::default()
+        };
+    }
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
     Query {
         select,
-        from: TableRef::scan_final(table, alias),
+        from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(scan_where),
+        order_by,
+        limit_by: Some((1, limit_by_cols)),
         ..Default::default()
     }
 }
@@ -354,8 +371,9 @@ pub fn dedup_subquery(
     table: &str,
     select: Vec<SelectExpr>,
     scan_where: Vec<Expr>,
+    sort_key: &[String],
 ) -> (TableRef, Expr) {
-    let query = dedup_query(alias, table, select, scan_where);
+    let query = dedup_query(alias, table, select, scan_where, sort_key);
     (
         TableRef::Subquery {
             query: Box::new(query),
