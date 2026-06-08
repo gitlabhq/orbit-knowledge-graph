@@ -69,6 +69,18 @@ pub fn scope_keys(node: &InputNode, anchor_fks: &[(&str, &str)]) -> Vec<PathReso
     keys
 }
 
+/// True when `node`'s entire constraint is a single scope anchor that `scope_keys`
+/// resolves, so the resolved traversal_path prefix fully captures it and the node
+/// can be dropped without losing a filter. Reuses the `scope_keys` anchor logic.
+pub fn is_scope_only(node: &InputNode) -> bool {
+    if scope_keys(node, &[]).len() != 1 || node.id_range.is_some() || node.node_ids.len() > 1 {
+        return false;
+    }
+    let anchor_filters = single_full_path(node).is_some() as usize
+        + (node.node_ids.is_empty() && single_id(node).is_some()) as usize;
+    node.filters.len() == anchor_filters
+}
+
 fn single_id(node: &InputNode) -> Option<i64> {
     if node.node_ids.len() == 1 {
         return Some(node.node_ids[0]);

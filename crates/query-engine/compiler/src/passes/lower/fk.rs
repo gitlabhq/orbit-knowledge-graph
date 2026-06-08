@@ -459,13 +459,21 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut selects = node_select_columns(root_alias, root_np);
     let mut edge_aliases = Vec::new();
 
+    let mut reached: HashSet<&str> = HashSet::from([root_alias.as_str()]);
     for (i, hop) in plan.hops.iter().enumerate() {
         let fk = hop
             .fk
             .as_ref()
             .ok_or_else(|| QueryError::Lowering("FK chain hop missing FK metadata".into()))?;
-        let to_np = plan.nodes.get(&hop.to_node).ok_or_else(|| {
-            QueryError::Lowering(format!("FK chain node '{}' not found", hop.to_node))
+        // Join whichever endpoint isn't reached yet, so the chain emits in any
+        // orientation without a pre-sort.
+        let new_alias = if reached.contains(hop.from_node.as_str()) {
+            &hop.to_node
+        } else {
+            &hop.from_node
+        };
+        let new_np = plan.nodes.get(new_alias).ok_or_else(|| {
+            QueryError::Lowering(format!("FK chain node '{new_alias}' not found"))
         })?;
 
         let on = if fk.fk_node == hop.to_node {
@@ -482,10 +490,12 @@ fn emit_chain(plan: &Plan) -> Result<EmitOutput> {
         from = TableRef::join(
             JoinType::Inner,
             from,
-            node_scan(to_np, plan, hop.scope_prefix.as_deref())?,
+            node_scan(new_np, plan, hop.scope_prefix.as_deref())?,
             on,
         );
-        selects.extend(node_select_columns(&hop.to_node, to_np));
+        selects.extend(node_select_columns(new_alias, new_np));
+        reached.insert(hop.from_node.as_str());
+        reached.insert(hop.to_node.as_str());
 
         // Aggregations group by node properties only; per-hop edge columns would
         // be unaggregated SELECT items. Emit them solely for traversal output.
