@@ -47,6 +47,12 @@ pub struct Hop {
     /// child). Gates the FK-chain lowering, which is only result-equivalent to
     /// the edge scan for such relationships.
     pub scope_preserving: bool,
+    /// Anchor this hop's join column with an IN-subquery over the previous
+    /// hop's output ids, so ClickHouse can use the by_source/by_target
+    /// projection or bloom filter instead of scanning the full relationship
+    /// range. Set by the plan pass for interior single-hop edges in a
+    /// multi-edge chain.
+    pub cascade_anchor: bool,
 }
 
 /// Pre-resolved join columns for connecting a hop to the previous hop.
@@ -201,6 +207,7 @@ pub fn plan(input: &mut Input) -> Plan {
     };
 
     resolve_join_columns(&mut hops);
+    resolve_cascade_anchors(&mut hops);
 
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
 
@@ -307,6 +314,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                     .collect(),
                 join_prev: None,
                 scope_prefix: rel.scope_prefix.clone(),
+                cascade_anchor: false,
             }
         })
         .collect()
@@ -595,6 +603,20 @@ fn filter_covered_by_denorm(
                     .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
             })
     })
+}
+
+/// Mark interior hops for cascade SIP anchoring. A hop qualifies when it
+/// is a non-first, single-hop edge with a resolved `join_prev` in a
+/// multi-edge chain. Variable-length hops (max_hops > 1) are excluded
+/// because their UNION-ALL arms have their own internal join structure.
+fn resolve_cascade_anchors(hops: &mut [Hop]) {
+    if hops.len() < 2 {
+        return;
+    }
+    for i in 1..hops.len() {
+        hops[i].cascade_anchor =
+            hops[i].join_prev.is_some() && hops[i].max_hops == 1;
+    }
 }
 
 /// Pre-resolve join columns for each hop based on shared-node topology
