@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.13.0
+version: 0.13.1
 license: MIT
 metadata:
   audience: developers
@@ -145,4 +145,5 @@ pass-through args: [`references/local_cli.md`](references/local_cli.md).
 | Local repository map helper | [`references/local_repo_map.md`](references/local_repo_map.md) |
 | Remote repository map helper | [`references/remote_repo_map.md`](references/remote_repo_map.md) |
 | CLI exit codes (1-5), errors, iteration budget | [`references/troubleshooting.md`](references/troubleshooting.md) |
+| Local CLI flags, config keys & pass-through args | [`references/local_cli.md`](references/local_cli.md) |
 | Maintaining this skill (contributing, doc sync) | [`references/maintaining.md`](references/maintaining.md) |
