@@ -45,8 +45,7 @@ and up to 30 minutes for groups with thousands of projects.
 Check indexing status at any time:
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/status"
+glab orbit remote status
 ```
 
 ## Step 2: Run your first query

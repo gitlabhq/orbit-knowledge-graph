@@ -14,7 +14,7 @@ use ontology::Ontology;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
-use crate::input::Input;
+use crate::input::{Input, QueryType};
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
@@ -221,6 +221,9 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     let query_plan = require(ctx.take_query_plan(), "query_plan")?;
     if query_plan.hops.len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
+    }
+    if input.query_type == QueryType::Neighbors {
+        config.compiler_derived.disable_projections = true;
     }
     ctx.set_query_plan(query_plan);
     ctx.set_query_config(config);

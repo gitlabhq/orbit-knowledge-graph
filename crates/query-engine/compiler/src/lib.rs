@@ -849,6 +849,32 @@ mod tests {
     }
 
     #[test]
+    fn neighbors_disable_reorder_projections_but_traversal_keeps_them() {
+        let neighbors = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "both"},
+            "limit": 10
+        }"#;
+        assert!(
+            compile_sql(neighbors).contains("optimize_use_projections = 0"),
+            "neighbors must disable reorder projections: the auth-scoped id seek degrades them to a generic-exclusion scan, got:\n{}",
+            compile_sql(neighbors)
+        );
+
+        let traversal = r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+            "limit": 10
+        }"#;
+        assert!(
+            !compile_sql(traversal).contains("optimize_use_projections"),
+            "non-neighbors queries keep projections enabled, got:\n{}",
+            compile_sql(traversal)
+        );
+    }
+
+    #[test]
     fn cursor_neighbors_both_orders_by_projected_columns() {
         let query = r#"{
             "query_type": "neighbors",
