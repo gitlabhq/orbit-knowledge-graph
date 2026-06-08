@@ -613,8 +613,8 @@ fn resolve_cascade_anchors(hops: &mut [Hop]) {
     if hops.len() < 2 {
         return;
     }
-    for i in 1..hops.len() {
-        hops[i].cascade_anchor = hops[i].join_prev.is_some() && hops[i].max_hops == 1;
+    for hop in hops.iter_mut().skip(1) {
+        hop.cascade_anchor = hop.join_prev.is_some() && hop.max_hops == 1;
     }
 }
 
