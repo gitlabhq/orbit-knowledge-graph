@@ -85,6 +85,9 @@ glab orbit remote tools
 
 ### Run a query
 
+Replace `your-group` with your own group path. This query returns the first
+five projects in that group:
+
 ```shell
 glab orbit remote query - <<'EOF'
 {
@@ -116,7 +119,7 @@ final fallback.
 Pass exactly one scope flag:
 
 ```shell
-glab orbit remote graph-status --full-path gitlab-org/gitlab
+glab orbit remote graph-status --full-path your-group/your-project
 glab orbit remote graph-status --namespace-id 24
 glab orbit remote graph-status --project-id 2
 ```
