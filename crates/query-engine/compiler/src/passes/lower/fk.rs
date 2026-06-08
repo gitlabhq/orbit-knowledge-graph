@@ -166,11 +166,16 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         }
 
         if target_np.fk_needs_join {
+            // The aggregation's GROUP BY plus the `target.id = center.fk_column`
+            // join already narrow the target, so a `_narrow_*` re-scan is redundant.
+            let narrowed_by_center_join =
+                !matches!(plan.body, PlanBody::Traversal) && fk_alias == center_alias;
             // Narrow the target scan to the FK values the center references, else
             // it scans the full org (e.g. all Jobs) just to join a handful.
             let narrow = if let Some(cte_name) = candidate_ctes.get(&fk.target_node) {
                 Some(NarrowSource::Cte(cte_name.clone()))
-            } else if target_np.filters.is_empty()
+            } else if !narrowed_by_center_join
+                && target_np.filters.is_empty()
                 && target_np.node_ids.is_empty()
                 && target_np.id_range.is_none()
                 && center_np.has_selective_filters()

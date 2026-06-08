@@ -1727,6 +1727,61 @@ mod tests {
     }
 
     #[test]
+    fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+                {"id": "proj", "entity": "Project"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
+            "group_by": [{"kind": "node", "node": "proj"}],
+            "aggregations": [{"function": "count", "target": "j", "alias": "failed_jobs"}],
+            "limit": 200
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("_narrow_proj"),
+            "FK-center group-by aggregation must not re-scan the center for narrowing, got:\n{sql}"
+        );
+        assert_eq!(
+            sql.matches("FROM gl_job").count(),
+            1,
+            "gl_job must be scanned exactly once, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("proj.id = j.project_id"),
+            "Project hydration must still join on the center FK, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_center_traversal_keeps_narrow_scan() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
+                {"id": "j2", "entity": "Job"},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [
+                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
+                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("_narrow_j2"),
+            "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn fk_chain_aggregation_joins_nodes_without_edge_scans() {
         let query = r#"{
             "query_type": "aggregation",
