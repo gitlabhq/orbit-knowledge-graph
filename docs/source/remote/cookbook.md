@@ -57,7 +57,7 @@ Answer: "What do we have, and where does it live?"
 ### List the projects in a group
 
 ```plaintext
-List all the projects in the my-org group.
+Use Orbit to list all the projects in the my-org group.
 ```
 
 <details><summary>Show query</summary>
@@ -90,7 +90,7 @@ Answer: "Help me understand this codebase."
 ### Find the most active contributors to a project
 
 ```plaintext
-Who are the top 10 contributors to my-org/my-project by merged merge requests?
+Use Orbit to find the top 10 contributors to my-org/my-project by merged merge requests.
 ```
 
 <details><summary>Show query</summary>
@@ -129,7 +129,7 @@ Who are the top 10 contributors to my-org/my-project by merged merge requests?
 ### List the files in a directory
 
 ```plaintext
-List the files under the app/models directory in this project.
+Use Orbit to list the files under the app/models directory in this project.
 ```
 
 <details><summary>Show query</summary>
@@ -167,7 +167,7 @@ Answer: "What breaks if I change this?"
 ### Find all files that import a specific module
 
 ```plaintext
-Which files import the payments-service module?
+Use Orbit to find which files import the payments-service module.
 ```
 
 <details><summary>Show query</summary>
@@ -192,7 +192,7 @@ Which files import the payments-service module?
 ### Find projects that depend on a shared library
 
 ```plaintext
-Which projects depend on the shared-auth-lib library?
+Use Orbit to find which projects depend on the shared-auth-lib library.
 ```
 
 <details><summary>Show query</summary>
@@ -226,7 +226,7 @@ Answer: "How are our services connected?"
 ### Map imported definitions
 
 ```plaintext
-Which definitions in our payments code are imported the most?
+Use Orbit to find which definitions in our payments code are imported the most.
 ```
 
 <details><summary>Show query</summary>
@@ -266,7 +266,7 @@ Answer: "What changed, and what did reviewers say?"
 ### Read the review discussion on a merge request
 
 ```plaintext
-Show me the review discussion on merge request 12345, including who said what.
+Use Orbit to show the review discussion on merge request 12345, including who said what.
 ```
 
 <details><summary>Show query</summary>
@@ -294,7 +294,7 @@ Show me the review discussion on merge request 12345, including who said what.
 ### Find the largest merge requests in a project
 
 ```plaintext
-What are the largest merge requests in this project by number of files changed?
+Use Orbit to find the largest merge requests in this project by number of files changed.
 ```
 
 <details><summary>Show query</summary>
@@ -329,7 +329,7 @@ Answer: "What is the team working on?"
 ### List the open issues in a project
 
 ```plaintext
-List the open issues in my-org/my-project.
+Use Orbit to list the open issues in my-org/my-project.
 ```
 
 <details><summary>Show query</summary>
@@ -363,7 +363,7 @@ List the open issues in my-org/my-project.
 ### Count open issues by label
 
 ```plaintext
-How many open issues does my-org/my-project have, grouped by label?
+Use Orbit to count the open issues in my-org/my-project, grouped by label.
 ```
 
 <details><summary>Show query</summary>
@@ -402,7 +402,7 @@ How many open issues does my-org/my-project have, grouped by label?
 ### List the milestones in a project
 
 ```plaintext
-List the milestones in my-org/my-project with their due dates.
+Use Orbit to list the milestones in my-org/my-project with their due dates.
 ```
 
 <details><summary>Show query</summary>
@@ -439,7 +439,7 @@ Answer: "Where are our CI/CD problems?"
 ### Find projects with the most failed pipelines
 
 ```plaintext
-Which projects have the most failed pipelines?
+Use Orbit to find which projects have the most failed pipelines.
 ```
 
 <details><summary>Show query</summary>
@@ -468,7 +468,7 @@ Which projects have the most failed pipelines?
 ### Find failed jobs and their failure reasons
 
 ```plaintext
-Show me failed CI jobs and why they failed.
+Use Orbit to show failed CI jobs and why they failed.
 ```
 
 <details><summary>Show query</summary>
@@ -491,7 +491,7 @@ Show me failed CI jobs and why they failed.
 ### See the stage-by-stage status of a pipeline
 
 ```plaintext
-Show the stage-by-stage status of this project's pipelines, in execution order.
+Use Orbit to show the stage-by-stage status of this project's pipelines, in execution order.
 ```
 
 <details><summary>Show query</summary>
@@ -520,7 +520,7 @@ Answer: "Where are our security risks, and how did they get there?"
 ### Find all critical and high vulnerabilities in a group
 
 ```plaintext
-List the critical and high severity vulnerabilities across this group.
+Use Orbit to list the critical and high severity vulnerabilities across this group.
 ```
 
 <details><summary>Show query</summary>
@@ -553,7 +553,7 @@ List the critical and high severity vulnerabilities across this group.
 ### Count vulnerabilities by project
 
 ```plaintext
-Count our detected vulnerabilities by project.
+Use Orbit to count our detected vulnerabilities by project.
 ```
 
 <details><summary>Show query</summary>
@@ -586,7 +586,7 @@ Count our detected vulnerabilities by project.
 ### Count vulnerabilities by severity
 
 ```plaintext
-How many detected vulnerabilities do we have, broken down by severity?
+Use Orbit to count our detected vulnerabilities by severity.
 ```
 
 <details><summary>Show query</summary>
@@ -617,7 +617,7 @@ How many detected vulnerabilities do we have, broken down by severity?
 ### Trace a specific CVE across your projects
 
 ```plaintext
-Where does CVE-2021-44228 (Log4Shell) appear across our projects?
+Use Orbit to find where CVE-2021-44228 (Log4Shell) appears across our projects.
 ```
 
 <details><summary>Show query</summary>
@@ -652,7 +652,7 @@ Replace `CVE-2021-44228` with the CVE or CWE identifier you are hunting.
 ### List the findings from the latest security scan
 
 ```plaintext
-What did the latest security scan find in this project?
+Use Orbit to show what the latest security scan found in this project.
 ```
 
 <details><summary>Show query</summary>
@@ -685,7 +685,7 @@ What did the latest security scan find in this project?
 ### See which scanners run on a project
 
 ```plaintext
-Which security scanners run on my-org/my-project?
+Use Orbit to show which security scanners run on my-org/my-project.
 ```
 
 <details><summary>Show query</summary>
