@@ -58,6 +58,8 @@ Answer: "What do we have, and where does it live?"
 
 ### Map a group's projects and their owners
 
+_See every project in a group next to who created it and when it last saw activity._
+
 ```plaintext
 Use Orbit to map the projects in <group name>, showing who created each one and when it was last active.
 ```
@@ -92,6 +94,8 @@ top-level namespace token.
 
 ### Find dead or dormant repositories
 
+_Surface repositories that have gone quiet, so you can archive, consolidate, or reassign them._
+
 ```plaintext
 Use Orbit to find all the dead repositories across our organization that have had no activity in the last two years.
 ```
@@ -120,6 +124,8 @@ Adjust the `last_activity_at` cutoff to match your definition of dormant.
 </details>
 
 ### Measure merge request throughput
+
+_Track delivery velocity by counting merged merge requests per month._
 
 ```plaintext
 Use Orbit to show our merge request throughput: how many merge requests we merged each month over the past year.
@@ -158,6 +164,8 @@ window to change the reporting period.
 
 ### Generate a security posture report
 
+_Show how your vulnerability load has shifted year over year._
+
 ```plaintext
 Use Orbit to generate a security posture report showing how many vulnerabilities we detected each year over the last five years.
 ```
@@ -191,6 +199,8 @@ run further cuts, such as by severity, scanner, or project, to fill out the repo
 </details>
 
 ### Map critical services and their owners
+
+_Rank your most important services and pin down who owns each one._
 
 ```plaintext
 Use Orbit to generate a report of our most critical services and who owns them.
@@ -228,6 +238,8 @@ created each one. Order by `last_activity_at` instead to rank by recent activity
 Answer: "Help me understand this codebase."
 
 ### Find the most active contributors to a project
+
+_Learn who to ask about a codebase by ranking authors by merged work._
 
 ```plaintext
 Use Orbit to find the top 10 contributors to <project name> by merged merge requests.
@@ -268,6 +280,8 @@ Use Orbit to find the top 10 contributors to <project name> by merged merge requ
 
 ### Find everywhere a function is called
 
+_Trace every caller of a function across files before you change it._
+
 ```plaintext
 Use Orbit to find every place that calls the <function name> method, with the file each call lives in.
 ```
@@ -305,6 +319,8 @@ Answer: "What breaks if I change this?"
 
 ### Find all files that import a specific module
 
+_See which files pull in a module, so you know what a change touches._
+
 ```plaintext
 Use Orbit to find which files import the <module name> module.
 ```
@@ -329,6 +345,8 @@ Use Orbit to find which files import the <module name> module.
 </details>
 
 ### Find projects that depend on a shared library
+
+_Find every project that leans on a shared library across your estate._
 
 ```plaintext
 Use Orbit to find which projects depend on the <library name> library.
@@ -363,6 +381,8 @@ Use Orbit to find which projects depend on the <library name> library.
 Answer: "How are our services connected?"
 
 ### Map imported definitions
+
+_Rank the most depended-on definitions, so you know what is risky to change._
 
 ```plaintext
 Use Orbit to find which definitions in our <module name> code are imported the most.
@@ -404,6 +424,8 @@ Answer: "What changed, and what did reviewers say?"
 
 ### Read the review discussion on a merge request
 
+_Pull every comment on a merge request, with its author, in one query._
+
 ```plaintext
 Use Orbit to show the review discussion on merge request <merge request ID>, including who said what.
 ```
@@ -431,6 +453,8 @@ Use Orbit to show the review discussion on merge request <merge request ID>, inc
 </details>
 
 ### Find merge requests whose pipeline failed
+
+_Catch merged merge requests that shipped on a red pipeline._
 
 ```plaintext
 Use Orbit to find merged merge requests in <project name> whose head pipeline failed.
@@ -480,6 +504,8 @@ review like this is what the graph gives you over the issues API.
 
 ### Find the merge request that resolved an issue
 
+_Jump from an issue straight to the merge requests that closed it._
+
 ```plaintext
 Use Orbit to find which merge requests closed issue <issue ID> in <project name>.
 ```
@@ -508,6 +534,8 @@ Use Orbit to find which merge requests closed issue <issue ID> in <project name>
 </details>
 
 ### See what a contributor shipped
+
+_Summarize a person's impact by the issues their merged work resolved._
 
 ```plaintext
 Use Orbit to show the issues that <username>'s merged merge requests closed in <project name>.
@@ -543,6 +571,8 @@ requests closed. There is no single API call for this.
 
 ### See related and blocking work
 
+_Map the issues linked to a given issue to understand its dependencies._
+
 ```plaintext
 Use Orbit to show the work items related to issue <issue ID> in <project name>.
 ```
@@ -576,6 +606,8 @@ Answer: "Where are our CI/CD problems?"
 
 ### Find projects with the most failed pipelines
 
+_Spot the projects where CI is breaking most often._
+
 ```plaintext
 Use Orbit to find which projects have the most failed pipelines.
 ```
@@ -604,6 +636,8 @@ Use Orbit to find which projects have the most failed pipelines.
 </details>
 
 ### Find failed pipelines and who triggered them
+
+_Connect failed pipelines to the person who kicked each one off._
 
 ```plaintext
 Use Orbit to show failed pipelines in <project name> and the person who triggered each one.
@@ -636,6 +670,8 @@ Links each failed pipeline back to the user who triggered it.
 
 ### See the stage-by-stage status of a pipeline
 
+_Break a pipeline into its stages to see exactly where it stalls._
+
 ```plaintext
 Use Orbit to show the stage-by-stage status of <project name>'s pipelines, in execution order.
 ```
@@ -664,6 +700,8 @@ Use Orbit to show the stage-by-stage status of <project name>'s pipelines, in ex
 Answer: "Where are our security risks, and how did they get there?"
 
 ### Find all critical and high vulnerabilities in a group
+
+_Get a prioritized list of the vulnerabilities that matter most across a group._
 
 ```plaintext
 Use Orbit to list the critical and high severity vulnerabilities across <group name>.
@@ -698,6 +736,8 @@ Use Orbit to list the critical and high severity vulnerabilities across <group n
 
 ### Count vulnerabilities by project
 
+_Rank projects by open vulnerability count to focus remediation._
+
 ```plaintext
 Use Orbit to count our detected vulnerabilities by project.
 ```
@@ -731,6 +771,8 @@ Use Orbit to count our detected vulnerabilities by project.
 
 ### Count vulnerabilities by severity
 
+_See the shape of your risk by breaking vulnerabilities down by severity._
+
 ```plaintext
 Use Orbit to count our detected vulnerabilities by severity.
 ```
@@ -761,6 +803,8 @@ Use Orbit to count our detected vulnerabilities by severity.
 </details>
 
 ### Trace a specific CVE across your projects
+
+_Find every place a specific CVE appears, the way you would during an incident._
 
 ```plaintext
 Use Orbit to find where <CVE ID> appears across our projects.
@@ -797,6 +841,8 @@ Replace `CVE-2021-44228` with the CVE or CWE identifier you are hunting.
 
 ### List the findings from the latest security scan
 
+_Review what your most recent scan surfaced for a project._
+
 ```plaintext
 Use Orbit to show what the latest security scan found in <project name>.
 ```
@@ -829,6 +875,8 @@ Use Orbit to show what the latest security scan found in <project name>.
 </details>
 
 ### See which scanners run on a project
+
+_Audit which security scanners are actually producing results._
 
 ```plaintext
 Use Orbit to show which security scanners run on <project name>.
