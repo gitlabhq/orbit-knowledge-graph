@@ -1701,6 +1701,42 @@ mod tests {
     }
 
     #[test]
+    fn fk_chain_aggregation_joins_nodes_without_edge_scans() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed", "source": "merge_request_event"}},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff"},
+                {"id": "f", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+                {"type": "HAS_FILE", "from": "d", "to": "f"}
+            ],
+            "aggregations": [{"function": "count", "target": "f", "alias": "appearances"}],
+            "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+            "limit": 60
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
+            "FK-chain aggregation must join node tables, not scan edge tables, got:\n{sql}"
+        );
+        for on in [
+            "pl.merge_request_id = mr.id",
+            "mr.latest_merge_request_diff_id = d.id",
+            "f.merge_request_diff_id = d.id",
+        ] {
+            assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
+        }
+        assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
+    }
+
+    #[test]
     fn single_filter_only_skips_cascade_narrowing_when_in_cte_push_covers_it() {
         let query = r#"{
             "query_type": "aggregation",

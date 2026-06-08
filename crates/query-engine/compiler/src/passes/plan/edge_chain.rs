@@ -194,7 +194,7 @@ pub fn plan(input: &mut Input) -> Plan {
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(shape) = detect_fk(&hops, &nodes, input.query_type) {
+    } else if let Some(shape) = detect_fk(&hops, &nodes) {
         Strategy::Fk(shape)
     } else {
         Strategy::Flat
@@ -432,17 +432,14 @@ fn elide_fk_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
-/// Star first (covers single-hop FK), then linear chain. Chain is traversal-only
-/// because aggregations keep the edge-scan path.
-fn detect_fk(
-    hops: &[Hop],
-    nodes: &HashMap<String, NodePlan>,
-    query_type: QueryType,
-) -> Option<FkShape> {
+/// Star first (covers single-hop FK), then chain. Chain applies to aggregations
+/// too: it joins node tables on FK columns, which is the source of truth for a
+/// relationship whose edge rows can lag (e.g. stale `HAS_LATEST_DIFF` edges).
+fn detect_fk(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> Option<FkShape> {
     if let Some(center) = detect_fk_star(hops) {
         return Some(FkShape::Star { center });
     }
-    if query_type == QueryType::Traversal && detect_fk_chain(hops, nodes) {
+    if detect_fk_chain(hops, nodes) {
         return Some(FkShape::Chain);
     }
     None
@@ -479,7 +476,22 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
                 && !point_selective(&h.from_node)
                 && !point_selective(&h.to_node)
         })
-        && hops.windows(2).all(|w| w[0].to_node == w[1].from_node)
+        && is_emittable_fk_chain(hops)
+}
+
+/// `emit_chain` joins each hop's `to_node` onto the running FROM, so every hop
+/// after the first must attach via an already-reached `from_node` to a new
+/// `to_node`. This accepts a branching tree (e.g. Pipeline←MR→Diff→File), not
+/// just a strictly linear chain, while rejecting reversed or convergent hops the
+/// join builder can't place.
+fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
+    let mut reached: HashSet<&str> =
+        HashSet::from([hops[0].from_node.as_str(), hops[0].to_node.as_str()]);
+    hops[1..].iter().all(|h| {
+        let ok = reached.contains(h.from_node.as_str()) && !reached.contains(h.to_node.as_str());
+        reached.insert(h.to_node.as_str());
+        ok
+    })
 }
 
 fn reorder_by_selectivity(
