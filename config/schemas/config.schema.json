@@ -80,8 +80,7 @@
             "datalake_batch_size": 500000,
             "partition_overrides": {},
             "stream_block_size": 65536,
-            "system_notes_resolve_lookup_batch_size": 1000,
-            "write_channel_capacity": 8
+            "system_notes_resolve_lookup_batch_size": 1000
           }
         },
         "max_concurrent_workers": 16,
@@ -535,8 +534,7 @@
               "datalake_batch_size": 500000,
               "partition_overrides": {},
               "stream_block_size": 65536,
-              "system_notes_resolve_lookup_batch_size": 1000,
-              "write_channel_capacity": 8
+              "system_notes_resolve_lookup_batch_size": 1000
             }
           }
         },
@@ -609,13 +607,6 @@
           "type": "integer",
           "format": "uint",
           "default": 1000,
-          "minimum": 1
-        },
-        "write_channel_capacity": {
-          "description": "Read-ahead window for the streaming ingestion pipeline: how many extracted\nblocks may be buffered ahead of the ClickHouse writer. Higher values keep the\nwriter fed (more throughput) at the cost of peak memory. Tune up in\nmemory-generous deployments; the default is conservative.",
-          "type": "integer",
-          "format": "uint",
-          "default": 8,
           "minimum": 1
         }
       },
@@ -764,8 +755,7 @@
             "datalake_batch_size": 500000,
             "partition_overrides": {},
             "stream_block_size": 65536,
-            "system_notes_resolve_lookup_batch_size": 1000,
-            "write_channel_capacity": 8
+            "system_notes_resolve_lookup_batch_size": 1000
           }
         }
       },

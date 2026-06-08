@@ -116,10 +116,6 @@ fn default_datalake_batch_size() -> u64 {
     500_000
 }
 
-fn default_write_channel_capacity() -> usize {
-    8
-}
-
 fn default_stream_block_size() -> u64 {
     65_536
 }
@@ -178,14 +174,6 @@ pub struct EntityHandlerConfig {
     #[serde(default)]
     pub partition_overrides: HashMap<String, u32>,
 
-    /// Read-ahead window for the streaming ingestion pipeline: how many extracted
-    /// blocks may be buffered ahead of the ClickHouse writer. Higher values keep the
-    /// writer fed (more throughput) at the cost of peak memory. Tune up in
-    /// memory-generous deployments; the default is conservative.
-    #[serde(default = "default_write_channel_capacity")]
-    #[schemars(range(min = 1))]
-    pub write_channel_capacity: usize,
-
     /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
     /// amortize per-batch write round-trips (more throughput) at the cost of peak
     /// memory per in-flight block.
@@ -205,7 +193,6 @@ impl Default for EntityHandlerConfig {
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
-            write_channel_capacity: default_write_channel_capacity(),
             stream_block_size: default_stream_block_size(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
@@ -525,9 +512,6 @@ impl EngineConfiguration {
             return Err(EngineConfigError::NoModulesEnabled);
         }
         let entity_handler = &self.handlers.entity_handler;
-        if entity_handler.write_channel_capacity == 0 {
-            return Err(EngineConfigError::ZeroWriteChannelCapacity);
-        }
         if entity_handler.stream_block_size == 0 {
             return Err(EngineConfigError::ZeroStreamBlockSize);
         }
@@ -545,9 +529,6 @@ pub enum EngineConfigError {
          leave it unset to register all modules (universal indexer)"
     )]
     NoModulesEnabled,
-
-    #[error("engine.handlers.entity_handler.write_channel_capacity must be at least 1")]
-    ZeroWriteChannelCapacity,
 
     #[error("engine.handlers.entity_handler.stream_block_size must be at least 1")]
     ZeroStreamBlockSize,
@@ -626,28 +607,16 @@ modules: [sdlc, namespace_deletion]
     #[test]
     fn entity_handler_streaming_knobs_default_to_pre_tunable_constants() {
         let cfg = EntityHandlerConfig::default();
-        assert_eq!(cfg.write_channel_capacity, 8);
         assert_eq!(cfg.stream_block_size, 65_536);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 1_000);
     }
 
     #[test]
     fn entity_handler_streaming_knobs_override_from_yaml() {
-        let yaml = "write_channel_capacity: 32\nstream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
+        let yaml = "stream_block_size: 262144\nsystem_notes_resolve_lookup_batch_size: 2048\n";
         let cfg: EntityHandlerConfig = serde_yaml::from_str(yaml).expect("valid yaml");
-        assert_eq!(cfg.write_channel_capacity, 32);
         assert_eq!(cfg.stream_block_size, 262_144);
         assert_eq!(cfg.system_notes_resolve_lookup_batch_size, 2_048);
-    }
-
-    #[test]
-    fn zero_write_channel_capacity_fails_validation() {
-        let mut cfg = EngineConfiguration::default();
-        cfg.handlers.entity_handler.write_channel_capacity = 0;
-        assert!(matches!(
-            cfg.validate(),
-            Err(EngineConfigError::ZeroWriteChannelCapacity)
-        ));
     }
 
     #[test]
