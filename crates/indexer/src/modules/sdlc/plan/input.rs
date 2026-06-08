@@ -723,11 +723,8 @@ fn build_extract_plan(
                     .as_ref()
                     .map(|w| format!(" AND {w}"))
                     .unwrap_or_default();
-                // Prune the enrichment scan by the joined table's leading PK
-                // column. Reuses the base scan's `{traversal_path:String}`
-                // named param, so the same namespace value binds. The `IN
-                // (SELECT id FROM _batch)` bound still guards correctness; this
-                // is a superset predicate, so it cannot drop matched rows (#830).
+                // Reuses the base scan's `{traversal_path:String}` param to prune
+                // the enrichment by the joined table's leading PK column.
                 if let Some(tp_col) = pj.traversal_path_column.as_ref().filter(|_| namespaced) {
                     where_frag.push_str(&format!(
                         " AND startsWith({alias}.{tp_col}, {{traversal_path:String}})"

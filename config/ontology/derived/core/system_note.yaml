@@ -28,7 +28,5 @@ etl:
     fk_column: note_id
     select: [action]
     where: "snm._siphon_deleted = false"
-    # siphon_system_note_metadata is sorted by (traversal_path, id), so this
-    # prunes the enrichment scan by its leading PK column (2.36B -> 40M rows on
-    # gitlab-org). The note_id IN (_batch) bound still guarantees correctness.
+    # Sorted by (traversal_path, id), so this prunes by the leading PK column.
     traversal_path_column: traversal_path

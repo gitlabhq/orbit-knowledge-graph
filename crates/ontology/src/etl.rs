@@ -35,12 +35,10 @@ pub struct PageJoin {
     pub where_clause: Option<String>,
     /// Watermark column for `argMax` deduplication. Defaults to `_siphon_replicated_at`.
     pub watermark: Option<String>,
-    /// `traversal_path` column on the joined table. When set and the entity is
-    /// namespaced, the enrichment CTE adds a `startsWith(<col>, {traversal_path})`
-    /// predicate so the join prunes by the joined table's leading PK column
-    /// instead of scanning its whole FK index (#830 follow-up). The `IN
-    /// (SELECT id FROM _batch)` bound already guarantees correctness, so this is
-    /// purely a pruning hint and must be a superset of the matched rows.
+    /// `traversal_path` column on the joined table. When set on a namespaced
+    /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
+    /// prune by the joined table's leading PK column. A superset of the matched
+    /// rows; correctness still comes from the `IN (_batch)` bound.
     pub traversal_path_column: Option<String>,
 }
 
