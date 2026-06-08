@@ -348,10 +348,6 @@ fn indexing_status_from_progress(state: IndexingState, p: &IndexingProgress) -> 
     }
 }
 
-/// Raw indexing errors carry internal table names, pod IPs and ports,
-/// ClickHouse server versions, and SQL fragments — none of which a client can
-/// act on. The verbatim error stays in indexer logs and NATS KV for debugging;
-/// clients only learn that indexing failed.
 const SANITIZED_INDEXING_ERROR: &str = "Something went wrong during indexing.";
 
 fn present_domain_response(
