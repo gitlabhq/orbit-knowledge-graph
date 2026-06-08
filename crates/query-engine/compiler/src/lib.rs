@@ -1762,158 +1762,92 @@ mod tests {
         assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
     }
 
-    fn compile_sql_scoped(query: &str, scope: &[(&str, &str)]) -> String {
-        let prefixes = scope
-            .iter()
-            .map(|(a, p)| (a.to_string(), p.to_string()))
-            .collect();
+    fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
+        let query = format!(
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":[{{"kind":"node","node":"{group}"}}],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+        );
         let ctx = SecurityContext::new(1, vec!["1/".into()])
             .unwrap()
-            .with_scope_prefixes(prefixes);
-        compile(query, &ONTOLOGY, &ctx)
-            .expect("should compile")
-            .base
-            .render()
+            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+        compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
+    // Group(gitlab-org)->CONTAINS->Project scope anchor + FK-resolvable survivors.
+    // A `!x` expectation asserts `x` is absent. Covers the A_ma1/A_ma3/A_ma4 prod
+    // benchmarks (3-hop chain, 4-hop diff chain, FK star), plus the non-FK guard.
     #[test]
-    fn scope_implied_contains_hop_elided_only_with_resolved_scope_prefix() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "p", "entity": "Project"},
-                {"id": "pipe", "entity": "Pipeline"},
-                {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
-            ],
-            "relationships": [
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "IN_PROJECT", "from": "pipe", "to": "p"},
-                {"type": "IN_PIPELINE", "from": "j", "to": "pipe"}
-            ],
-            "group_by": [{"kind": "node", "node": "pipe"}],
-            "aggregations": [{"function": "count", "target": "j", "alias": "failjobs"}],
-            "limit": 20
-        }"#;
-
-        let scoped = compile_sql_scoped(query, &[("g", "1/9970/")]);
-        assert!(
-            !scoped.contains("gl_edge") && !scoped.contains("gl_ci_edge"),
-            "with a resolved scope prefix the CONTAINS anchor hop is elided to a pure FK node-join chain with no edge scans, got:\n{scoped}"
-        );
-        for on in ["pipe.project_id = p.id", "j.pipeline_id = pipe.id"] {
-            assert!(
-                scoped.contains(on),
-                "expected FK join `{on}`, got:\n{scoped}"
-            );
+    fn scope_implied_container_hop_elision() {
+        const G: &str = r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"}"#;
+        let cases: &[(String, &str, &str, &str, &[&str])] = &[
+            (
+                format!(
+                    r#"{G},{{"id":"pipe","entity":"Pipeline"}},{{"id":"j","entity":"Job","filters":{{"status":"failed"}}}}"#
+                ),
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"pipe","to":"p"},{"type":"IN_PIPELINE","from":"j","to":"pipe"}"#,
+                "pipe",
+                "j",
+                &[
+                    "pipe.project_id = p.id",
+                    "j.pipeline_id = pipe.id",
+                    "!gl_edge",
+                    "!gl_ci_edge",
+                    "!gl_group",
+                ],
+            ),
+            (
+                format!(
+                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"d","entity":"MergeRequestDiff"}},{{"id":"f","entity":"MergeRequestDiffFile"}}"#
+                ),
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
+                "p",
+                "f",
+                &[
+                    "mr.project_id = p.id",
+                    "mr.latest_merge_request_diff_id = d.id",
+                    "f.merge_request_diff_id = d.id",
+                    "gl_project",
+                    "!gl_edge",
+                    "!gl_ci_edge",
+                    "!gl_group",
+                ],
+            ),
+            (
+                format!(
+                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"u","entity":"User"}}"#
+                ),
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
+                "u",
+                "mr",
+                &["!gl_edge", "!gl_ci_edge", "!gl_group"],
+            ),
+            (
+                format!(
+                    r#"{G},{{"id":"mr","entity":"MergeRequest"}},{{"id":"n","entity":"Note"}}"#
+                ),
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
+                "p",
+                "n",
+                &["'CONTAINS'", "'HAS_NOTE'"],
+            ),
+        ];
+        for (nodes, rels, group, agg, expect) in cases {
+            let sql = compile_sql_scoped(nodes, rels, group, agg);
+            for e in *expect {
+                match e.strip_prefix('!') {
+                    Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
+                    None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
+                }
+            }
         }
-        assert!(
-            !scoped.contains("gl_group"),
-            "the orphaned anchor Group must be dropped, got:\n{scoped}"
-        );
-
-        let unscoped = compile_sql(query);
-        assert!(
-            unscoped.contains("gl_edge"),
-            "without a resolved scope prefix the container hop must keep its edge scan, got:\n{unscoped}"
-        );
     }
 
     #[test]
-    fn scope_implied_contains_elided_in_four_hop_diff_chain() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "d", "entity": "MergeRequestDiff"},
-                {"id": "f", "entity": "MergeRequestDiffFile"}
-            ],
-            "relationships": [
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
-                {"type": "HAS_FILE", "from": "d", "to": "f"}
-            ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "f", "alias": "difffiles"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
-
+    fn scope_implied_container_hop_kept_without_resolved_prefix() {
+        let query = r#"{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"pipe","to":"p"},{"type":"IN_PIPELINE","from":"j","to":"pipe"}],"group_by":[{"kind":"node","node":"pipe"}],"aggregations":[{"function":"count","target":"j","alias":"c"}],"limit":20}"#;
         assert!(
-            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
-            "diff chain must resolve via FK node joins once the CONTAINS anchor hop is elided, got:\n{sql}"
-        );
-        for on in [
-            "mr.project_id = p.id",
-            "mr.latest_merge_request_diff_id = d.id",
-            "f.merge_request_diff_id = d.id",
-        ] {
-            assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
-        }
-        assert!(sql.contains("gl_project"), "got:\n{sql}");
-        assert!(!sql.contains("gl_group"), "got:\n{sql}");
-    }
-
-    #[test]
-    fn scope_implied_contains_not_elided_when_a_survivor_lacks_fk() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "n", "entity": "Note"}
-            ],
-            "relationships": [
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
-            ],
-            "group_by": [{"kind": "node", "node": "p"}],
-            "aggregations": [{"function": "count", "target": "n", "alias": "notes"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
-
-        assert!(
-            sql.contains("'CONTAINS'") && sql.contains("'HAS_NOTE'"),
-            "a non-FK survivor must block elision, keeping all three edge arms, got:\n{sql}"
-        );
-    }
-
-    #[test]
-    fn scope_implied_contains_elided_for_fk_star_with_non_scope_preserving_hop() {
-        let query = r#"{
-            "query_type": "aggregation",
-            "nodes": [
-                {"id": "g", "entity": "Group", "filters": {"full_path": "gitlab-org"}},
-                {"id": "p", "entity": "Project"},
-                {"id": "mr", "entity": "MergeRequest"},
-                {"id": "u", "entity": "User"}
-            ],
-            "relationships": [
-                {"type": "CONTAINS", "from": "g", "to": "p"},
-                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
-                {"type": "AUTHORED", "from": "u", "to": "mr"}
-            ],
-            "group_by": [{"kind": "node", "node": "u"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "mrs"}],
-            "limit": 20
-        }"#;
-
-        let sql = compile_sql_scoped(query, &[("g", "1/9970/")]);
-        assert!(
-            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
-            "AUTHORED is FK-backed but not scope-preserving; the FK star must still elide CONTAINS to zero edge scans, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("gl_group"),
-            "the orphaned anchor Group must be dropped, got:\n{sql}"
+            compile_sql(query).contains("gl_edge"),
+            "{}",
+            compile_sql(query)
         );
     }
 
