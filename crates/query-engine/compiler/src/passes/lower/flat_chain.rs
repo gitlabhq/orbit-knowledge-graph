@@ -170,6 +170,9 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         &plan.table_columns,
                         false,
                     );
+                    for (prop, filter) in &prev_hop.filters {
+                        prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
+                    }
                     prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
                     emit_node_ids_on_edge(
                         &mut prev_preds,
