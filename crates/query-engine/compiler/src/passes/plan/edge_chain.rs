@@ -614,8 +614,7 @@ fn resolve_cascade_anchors(hops: &mut [Hop]) {
         return;
     }
     for i in 1..hops.len() {
-        hops[i].cascade_anchor =
-            hops[i].join_prev.is_some() && hops[i].max_hops == 1;
+        hops[i].cascade_anchor = hops[i].join_prev.is_some() && hops[i].max_hops == 1;
     }
 }
 
