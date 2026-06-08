@@ -1772,33 +1772,20 @@ mod tests {
         compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
     }
 
-    // Group(gitlab-org)->CONTAINS->Project scope anchor + FK-resolvable survivors.
-    // `expect` is `|`-separated; a `!x` token asserts `x` is absent. Covers the
-    // A_ma1/A_ma3/A_ma4 prod benchmarks (3-hop chain, 4-hop diff chain, FK star)
-    // plus the non-FK guard.
+    // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
+    // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
+    // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.
+    // End-to-end result parity (chain/star, scoped vs unscoped) lives in the
+    // data-correctness suite (`scope_implied_container_elision_*`).
     #[test]
     fn scope_implied_container_hop_elision() {
         let cases: &[(&str, &str, &str, &str, &str)] = &[
-            (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job","filters":{"status":"failed"}}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"pipe","to":"p"},{"type":"IN_PIPELINE","from":"j","to":"pipe"}"#,
-                "pipe",
-                "j",
-                "pipe.project_id = p.id|j.pipeline_id = pipe.id|!gl_edge|!gl_ci_edge|!gl_group",
-            ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
                 r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
                 "p",
                 "f",
                 "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
-            ),
-            (
-                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"u","entity":"User"}"#,
-                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"AUTHORED","from":"u","to":"mr"}"#,
-                "u",
-                "mr",
-                "!gl_edge|!gl_ci_edge|!gl_group",
             ),
             (
                 r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
@@ -1817,16 +1804,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn scope_implied_container_hop_kept_without_resolved_prefix() {
-        let query = r#"{"query_type":"aggregation","nodes":[{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"pipe","entity":"Pipeline"},{"id":"j","entity":"Job"}],"relationships":[{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"pipe","to":"p"},{"type":"IN_PIPELINE","from":"j","to":"pipe"}],"group_by":[{"kind":"node","node":"pipe"}],"aggregations":[{"function":"count","target":"j","alias":"c"}],"limit":20}"#;
-        assert!(
-            compile_sql(query).contains("gl_edge"),
-            "{}",
-            compile_sql(query)
-        );
     }
 
     #[test]
