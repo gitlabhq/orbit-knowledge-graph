@@ -26,12 +26,11 @@ fn prev_hop_is_selective(
     prev_hop: &Hop,
     nodes: &std::collections::HashMap<String, NodePlan>,
 ) -> bool {
-    let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
+    [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
         nodes
             .get(n.as_str())
             .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
-    });
-    has_pinned_ids || prev_hop.cascade_anchor
+    })
 }
 
 /// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
