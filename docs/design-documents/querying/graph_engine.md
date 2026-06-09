@@ -97,7 +97,7 @@ Filter placement rules for node `FINAL` scans:
 - **Candidate CTEs** are allowed to over-select because they are only a performance prefilter. The outer `FINAL` scan always re-applies the filters and `_deleted = false` before rows can affect traversal or aggregation results.
 - **Pinned FK target IDs** are pushed into the FK center `FINAL` subquery when the FK column lives on the center table.
 
-Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
+Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline/`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
 ### Scope rewrite (traversal_path prefix injection)
 

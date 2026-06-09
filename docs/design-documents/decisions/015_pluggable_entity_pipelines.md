@@ -7,7 +7,10 @@ toc_hide: true
 
 ## Status
 
-Accepted
+Accepted. The shared pipeline has since been decomposed into typed page stages
+(`pipeline/` module), so "the transform is the single seam" holds for
+*registry-pluggable* (ontology-named) transforms, while new processor stages
+can be added in code at the `PageStage` seam (`pipeline/stage.rs`).
 
 ## Date
 
@@ -18,7 +21,7 @@ Accepted
 Before this change, the SDLC indexer's transform stage was SQL-only. Every entity
 flows through one generic `EntityHandler`
 (`crates/indexer/src/modules/sdlc/handler/entity.rs`) that owns a `Plan` and drives
-a shared `Pipeline` (`crates/indexer/src/modules/sdlc/pipeline.rs`). The pipeline
+a shared `Pipeline` (now `crates/indexer/src/modules/sdlc/pipeline/`). The pipeline
 ran `Extractor → Transformer → Loader`, and the transform was a list of SQL strings
 (`Transformation { sql, destination_table, dict_encode_columns }`, `plan/mod.rs`)
 executed against an in-memory DataFusion `MemTable` named `source_data`. The
@@ -252,9 +255,9 @@ unaffected.
 - ADR 014 (Entity-level SDLC indexing) — [014_entity_level_indexing.md](014_entity_level_indexing.md)
 - ADR 013 (Materialize edges from system notes); multi-hop resolution shape —
   [013_system_note_edges.md](013_system_note_edges.md)
-- Shared pipeline + the transform seam: `crates/indexer/src/modules/sdlc/pipeline.rs`
-  (`Pipeline::run`, `Producer`, `Loader`, `Extractor`) and
-  `crates/indexer/src/modules/sdlc/transform.rs` (`BlockTransform`,
+- Shared pipeline + the transform seam: `crates/indexer/src/modules/sdlc/pipeline/`
+  (`Pipeline::run_plan` and the stage modules) and
+  `crates/indexer/src/modules/sdlc/transform/` (`BlockTransform`,
   `DataFusionTransform`, `TransformRegistry`)
 - Transform spec: `crates/indexer/src/modules/sdlc/plan/mod.rs` (`TransformSpec`,
   `Transformation`, `Cursor`, filters); ontology → SQL in `plan/lower.rs`

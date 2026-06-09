@@ -111,7 +111,7 @@ reuse-first **default**, not a hard rule — but in review it is the single most
 preventable feedback (see #2772, !1416). Check each of these first:
 
 - **Paging + checkpoint + cursor:** `Pipeline::run_plan` and `EntityHandler`
-  (`modules/sdlc/pipeline.rs`, `modules/sdlc/handler/entity.rs`) already provide windowed
+  (`modules/sdlc/pipeline/`, `modules/sdlc/handler/entity.rs`) already provide windowed
   extraction, keyset cursor persistence (`cursor_values` / `to_checkpoint_values()`), and
   watermark advance. Reuse them before hand-rolling a page loop. For code indexing, reuse the
   checkpoint store in `modules/code/checkpoint.rs`.
@@ -129,14 +129,14 @@ preventable feedback (see #2772, !1416). Check each of these first:
   magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
 
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
-shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.
+shared place (`crates/utils/`, `modules/sdlc/pipeline/`) over duplicating logic per handler.
 
 Do not ship `#[allow(dead_code)]` to silence scaffold warnings — see the no-shipped-dead-code rule
 below and in the root `AGENTS.md`.
 
 ### When a Rust transform is justified (ADR 015)
 
-The SDLC transform stage is pluggable (`modules/sdlc/transform.rs`): the built-in `data_fusion`
+The SDLC transform stage is pluggable (`modules/sdlc/transform/`): the built-in `data_fusion`
 transform is a row-wise SQL projection of one extracted block and is the **default** for every
 node and standalone-edge plan. A hand-written `BlockTransform` (a derived entity's `etl.transform`)
 is justified **only when the graph shape cannot be expressed as that SQL projection** — concretely,
