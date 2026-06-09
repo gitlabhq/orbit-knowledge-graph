@@ -151,6 +151,7 @@ properties:
     type: timestamp
     source: committed_at
     nullable: true
+    immutable: true
     description: "Commit timestamp."
 
   updated_at:
@@ -163,6 +164,7 @@ properties:
     type: string
     source: before_sha
     nullable: false
+    immutable: true
     description: "Previous commit SHA before the triggering push."
 
   yaml_errors:
@@ -195,6 +197,7 @@ properties:
     type: int64
     source: merge_request_id
     nullable: true
+    immutable: true
     description: "Triggering MR ID."
 
   auto_canceled_by_id:
