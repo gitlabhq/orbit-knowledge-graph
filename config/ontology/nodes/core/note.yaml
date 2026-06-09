@@ -104,6 +104,7 @@ properties:
     type: string
     source: commit_id
     nullable: false
+    immutable: true
     description: "Commit SHA for commit notes."
 
   st_diff:

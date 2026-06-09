@@ -55,6 +55,7 @@ properties:
       4: preparing
       5: preparation_failed
       6: purged
+    terminal_values: [succeeded, job_failed, report_error, preparation_failed, purged]
 
   latest:
     type: boolean

@@ -78,6 +78,7 @@ properties:
     type: string
     source: deployable_type
     nullable: false
+    immutable: true
     description: "Polymorphic type (typically CommitStatus, the STI base class for Ci::Build)."
     selectivity: low
 
