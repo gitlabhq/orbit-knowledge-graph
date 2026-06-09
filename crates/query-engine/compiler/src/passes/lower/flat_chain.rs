@@ -40,7 +40,8 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
     let has_filter_cte = [&prev_hop.from_node, &prev_hop.to_node]
         .iter()
         .any(|n| ctes.iter().any(|c| c.name == format!("_filter_{n}")));
-    if !has_pinned_ids && !has_filter_cte && !prev_hop.cascade_anchor {
+    let inner_anchor = build_cascade_anchor(plan, prev_idx, ctes);
+    if !has_pinned_ids && !has_filter_cte && inner_anchor.is_none() {
         return None;
     }
 
@@ -92,7 +93,7 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
     }
     prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
 
-    if let Some(inner_anchor) = build_cascade_anchor(plan, prev_idx, ctes) {
+    if let Some(inner_anchor) = inner_anchor {
         let prev_jc = prev_hop.join_prev.as_ref().unwrap();
         prev_preds.push(Expr::InSelect {
             expr: Box::new(Expr::col(&prev_alias_inner, &prev_jc.curr_col)),
