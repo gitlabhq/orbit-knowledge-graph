@@ -395,6 +395,71 @@ impl Default for MigrationCompletionConfig {
     }
 }
 
+fn default_stale_edge_max_threads() -> u64 {
+    2
+}
+
+fn default_stale_edge_max_memory_usage_bytes() -> u64 {
+    536_870_912
+}
+
+/// Mutable-FK edge kinds reconciled by default. Immutable FKs (project_id,
+/// author_id, …) can't orphan, so sweeping them is wasted work; this allowlist
+/// keeps per-run cost bounded. Other mutable kinds are eligible via config.
+fn default_stale_edge_relationship_kinds() -> Vec<String> {
+    [
+        "HAS_LATEST_DIFF",
+        "HAS_HEAD_PIPELINE",
+        "LAST_EDITED_BY",
+        "IN_MILESTONE",
+    ]
+    .iter()
+    .map(|kind| kind.to_string())
+    .collect()
+}
+
+/// Tombstones stale FK-derived "latest"/single-value edges whose endpoint no
+/// longer matches the owner node's current FK column. ReplacingMergeTree keys
+/// the edge on its (mutable) `target_id`, so an FK change orphans the old edge
+/// instead of replacing it; this sweep reconciles them off the indexing path.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct StaleEdgeReconciliationConfig {
+    #[serde(flatten)]
+    pub schedule: ScheduleConfiguration,
+
+    /// `max_threads` cap per reconcile statement. The no-`FINAL` form trades a
+    /// little speed for a low memory peak; 2 keeps the validated ~150 MiB peak.
+    #[serde(default = "default_stale_edge_max_threads")]
+    #[schemars(range(min = 1))]
+    pub max_threads: u64,
+
+    /// `max_memory_usage` cap (bytes) per reconcile statement. Acts as the
+    /// safety valve: a statement that exceeds it aborts that kind for the run
+    /// without affecting the others. Defaults to 512 MiB.
+    #[serde(default = "default_stale_edge_max_memory_usage_bytes")]
+    #[schemars(range(min = 1))]
+    pub max_memory_usage_bytes: u64,
+
+    /// Relationship kinds to reconcile. One `INSERT … SELECT` runs per
+    /// `(kind, FK-owner)` variant, so an empty list disables the sweep.
+    #[serde(default = "default_stale_edge_relationship_kinds")]
+    pub relationship_kinds: Vec<String>,
+}
+
+impl Default for StaleEdgeReconciliationConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration {
+                cron: Some("0 */15 * * * *".into()),
+            },
+            max_threads: default_stale_edge_max_threads(),
+            max_memory_usage_bytes: default_stale_edge_max_memory_usage_bytes(),
+            relationship_kinds: default_stale_edge_relationship_kinds(),
+        }
+    }
+}
+
 /// Typed per-task configuration for all registered scheduled tasks.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -414,6 +479,8 @@ pub struct ScheduledTasksConfiguration {
     pub namespace_deletion: NamespaceDeletionSchedulerConfig,
     #[serde(default)]
     pub migration_completion: MigrationCompletionConfig,
+    #[serde(default)]
+    pub stale_edge_reconciliation: StaleEdgeReconciliationConfig,
 }
 
 // ── Top-level engine config ──────────────────────────────────────────

@@ -250,6 +250,17 @@
           "namespace-deletion": {
             "cron": "0 0 3 * * *"
           },
+          "stale-edge-reconciliation": {
+            "cron": "0 */15 * * * *",
+            "max_memory_usage_bytes": 536870912,
+            "max_threads": 2,
+            "relationship_kinds": [
+              "HAS_LATEST_DIFF",
+              "HAS_HEAD_PIPELINE",
+              "LAST_EDITED_BY",
+              "IN_MILESTONE"
+            ]
+          },
           "table-cleanup": {
             "cron": "0 0 3 * * *"
           }
@@ -1339,6 +1350,17 @@
             "namespace-deletion": {
               "cron": "0 0 3 * * *"
             },
+            "stale-edge-reconciliation": {
+              "cron": "0 */15 * * * *",
+              "max_memory_usage_bytes": 536870912,
+              "max_threads": 2,
+              "relationship_kinds": [
+                "HAS_LATEST_DIFF",
+                "HAS_HEAD_PIPELINE",
+                "LAST_EDITED_BY",
+                "IN_MILESTONE"
+              ]
+            },
             "table-cleanup": {
               "cron": "0 0 3 * * *"
             }
@@ -1389,6 +1411,20 @@
           "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
           "default": {
             "cron": "0 0 3 * * *"
+          }
+        },
+        "stale-edge-reconciliation": {
+          "$ref": "#/$defs/StaleEdgeReconciliationConfig",
+          "default": {
+            "cron": "0 */15 * * * *",
+            "max_memory_usage_bytes": 536870912,
+            "max_threads": 2,
+            "relationship_kinds": [
+              "HAS_LATEST_DIFF",
+              "HAS_HEAD_PIPELINE",
+              "LAST_EDITED_BY",
+              "IN_MILESTONE"
+            ]
           }
         },
         "table-cleanup": {
@@ -1451,6 +1487,48 @@
           "default": "siphon_stream_main_db"
         }
       }
+    },
+    "StaleEdgeReconciliationConfig": {
+      "description": "Tombstones stale FK-derived \"latest\"/single-value edges whose endpoint no\nlonger matches the owner node's current FK column. ReplacingMergeTree keys\nthe edge on its (mutable) `target_id`, so an FK change orphans the old edge\ninstead of replacing it; this sweep reconciles them off the indexing path.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "max_memory_usage_bytes": {
+          "description": "`max_memory_usage` cap (bytes) per reconcile statement. Acts as the\nsafety valve: a statement that exceeds it aborts that kind for the run\nwithout affecting the others. Defaults to 512 MiB.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 536870912,
+          "minimum": 1
+        },
+        "max_threads": {
+          "description": "`max_threads` cap per reconcile statement. The no-`FINAL` form trades a\nlittle speed for a low memory peak; 2 keeps the validated ~150 MiB peak.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 2,
+          "minimum": 1
+        },
+        "relationship_kinds": {
+          "description": "Relationship kinds to reconcile. One `INSERT … SELECT` runs per\n`(kind, FK-owner)` variant, so an empty list disables the sweep.",
+          "type": "array",
+          "default": [
+            "HAS_LATEST_DIFF",
+            "HAS_HEAD_PIPELINE",
+            "LAST_EDITED_BY",
+            "IN_MILESTONE"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "SubscriptionConfig": {
       "description": "Per-subscription message processing policy (retry, concurrency, DLQ).\n\nLives under `engine.topics.<name>` in YAML. Applied to the `Subscription`\nat handler registration time, so all handlers sharing a subscription\nshare the same processing policy.\n\nRetries are opt-in: a subscription with no retry config will ack on failure.",

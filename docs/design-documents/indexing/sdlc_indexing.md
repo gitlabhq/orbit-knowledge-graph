@@ -320,6 +320,12 @@ Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"`
 
 Rows deleted in the source database have `_siphon_deleted` set to `true`. The extraction query pulls these rows alongside live data, and the `_deleted` flag carries through to the graph table. Downstream queries filter on the flag. Periodic cleanup jobs remove flagged rows from the graph tables.
 
+**Stale FK-edge reconciliation**
+
+Edge tables are `ReplacingMergeTree` keyed on `(traversal_path, relationship_kind, source_id, target_id, …)`. For an FK-derived edge whose FK column is *mutable* — a "latest"/"who did X last" pointer such as `HAS_LATEST_DIFF` (`latest_merge_request_diff_id`) — a changed FK value writes a new edge row with a different `target_id`. Because `target_id` is part of the dedup identity, the prior row keeps a distinct identity and is never replaced or tombstoned, so the owner accumulates one live edge per historical FK value. The before-image needed to tombstone the old edge at write time is unavailable (the datalake `siphon_*` tables are collapsed current-state), so this is reconciled out-of-band instead.
+
+`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column. A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op. The swept kinds are an allowlist (`schedule.tasks.stale-edge-reconciliation.relationship_kinds`) of mutable-FK edges; immutable FKs (`project_id`, `author_id`) can't orphan and are not swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is derived from the ontology. This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
+
 ##### Zero-downtime schema changes
 
 **Main PostgreSQL to Lake**
