@@ -239,6 +239,7 @@ impl MigrationCompletionChecker {
                 mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
+                self.stop_merges_for_version(entry.version).await;
             }
         }
 
@@ -505,9 +506,12 @@ impl MigrationCompletionChecker {
 
         for entry in to_cleanup {
             if entry.status != "retired" {
-                // Only drop tables for retired versions.
                 continue;
             }
+
+            // Idempotent: ensure merges are stopped for any retired version
+            // before dropping. Cheap no-op if already stopped.
+            self.stop_merges_for_version(entry.version).await;
 
             info!(
                 version = entry.version,
@@ -541,6 +545,41 @@ impl MigrationCompletionChecker {
         }
 
         Ok(())
+    }
+
+    /// Stops background merges on a retired version's graph tables so the merge
+    /// pool is reserved for the active version. Retired tables receive no further
+    /// writes; this prevents the scheduler from grinding their existing parts.
+    ///
+    /// `SYSTEM STOP MERGES` is node-local runtime state (unlike DROP TABLE, which
+    /// auto-replicates), so it is issued `ON CLUSTER` to reach every replica.
+    /// Best-effort: failures are logged but never propagated.
+    async fn stop_merges_for_version(&self, version: u32) {
+        let prefix = table_prefix(version);
+        let tables: Vec<String> = generate_graph_tables(&self.ontology)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+
+        for table_name in &tables {
+            let prefixed = format!("{prefix}{table_name}");
+            let ddl = format!("SYSTEM STOP MERGES ON CLUSTER 'default' {prefixed}");
+
+            if let Err(e) = self.graph.execute(&ddl).await {
+                warn!(
+                    version,
+                    table = %prefixed,
+                    error = %e,
+                    "failed to stop merges on retired table"
+                );
+            } else {
+                info!(
+                    version,
+                    table = %prefixed,
+                    "stopped background merges on retired table"
+                );
+            }
+        }
     }
 
     /// Drops all materialized views and graph tables for a given schema version.
