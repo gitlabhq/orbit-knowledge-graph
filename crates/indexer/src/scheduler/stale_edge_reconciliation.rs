@@ -103,28 +103,34 @@ impl StaleEdgeReconciliation {
             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
         let cursor = last_watermark.format(TIMESTAMP_FORMAT).to_string();
 
-        info!(
-            cursor = cursor,
-            new_watermark = new_watermark.format(TIMESTAMP_FORMAT).to_string(),
-            full_scan = last_watermark == DateTime::<Utc>::UNIX_EPOCH,
-            specs = self.specs.len(),
-            "stale-edge reconciliation started",
-        );
-
+        let full_scan = last_watermark == DateTime::<Utc>::UNIX_EPOCH;
         let mut failed = 0u64;
         for spec in &self.specs {
+            info!(
+                relationship_kind = spec.relationship_kind,
+                source_kind = spec.source_kind,
+                target_kind = spec.target_kind,
+                owner = spec.owner_node_table,
+                edge_table = spec.edge_table,
+                cursor = cursor,
+                full_scan,
+                "reconcile started",
+            );
             let statement_start = Instant::now();
-            match self.reconcile_one(spec, &cursor).await {
+            let result = self.reconcile_one(spec, &cursor).await;
+            let elapsed = statement_start.elapsed();
+            match result {
                 Ok(()) => {
-                    self.metrics.record_query_duration(
-                        &spec.relationship_kind,
-                        statement_start.elapsed().as_secs_f64(),
-                    );
+                    self.metrics
+                        .record_query_duration(&spec.relationship_kind, elapsed.as_secs_f64());
                     info!(
                         relationship_kind = spec.relationship_kind,
                         owner = spec.owner_node_table,
-                        duration_ms = statement_start.elapsed().as_millis() as u64,
-                        "reconciled stale edges",
+                        cursor = cursor,
+                        full_scan,
+                        duration_ms = elapsed.as_millis() as u64,
+                        outcome = "success",
+                        "reconcile completed",
                     );
                 }
                 Err(error) => {
@@ -133,8 +139,12 @@ impl StaleEdgeReconciliation {
                     warn!(
                         relationship_kind = spec.relationship_kind,
                         owner = spec.owner_node_table,
+                        cursor = cursor,
+                        full_scan,
+                        duration_ms = elapsed.as_millis() as u64,
+                        outcome = "error",
                         %error,
-                        "failed to reconcile stale edges",
+                        "reconcile completed",
                     );
                 }
             }
