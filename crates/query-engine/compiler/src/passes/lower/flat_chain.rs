@@ -16,12 +16,10 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
-/// Whether a hop's upstream has selective predicates that the cascade anchor
-/// actually carries. Currently that's only pinned ids (node_ids / id_range),
-/// which are propagated into the anchor via emit_node_ids_on_edge. Filter-based
-/// selectivity (_filter CTEs, node property filters) is not yet propagated
-/// into the anchor subquery, so green-lighting it would emit a
-/// relationship-only scan that materializes the entire range.
+/// Whether a hop's upstream has selective predicates that bound the cascade
+/// anchor's output. Passes on pinned ids (propagated via emit_node_ids_on_edge),
+/// existing _filter_<node> CTEs (the anchor references the bounded node set),
+/// or a transitive cascade anchor (the prev hop is itself anchored).
 fn prev_hop_is_selective(
     prev_hop: &Hop,
     nodes: &std::collections::HashMap<String, NodePlan>,
