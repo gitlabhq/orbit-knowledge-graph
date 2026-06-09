@@ -89,6 +89,7 @@ properties:
     type: enum
     source: when
     nullable: false
+    immutable: true
     description: "Run condition."
     enum_type: string
     values:

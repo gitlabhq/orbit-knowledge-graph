@@ -141,6 +141,7 @@ properties:
     type: int64
     source: merge_request_id
     nullable: true
+    immutable: true
     description: "MR that created this review environment."
 
   traversal_path:

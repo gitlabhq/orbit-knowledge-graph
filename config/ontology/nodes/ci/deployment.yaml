@@ -86,6 +86,7 @@ properties:
     type: int64
     source: deployable_id
     nullable: true
+    immutable: true
     description: "Deployable ID."
 
   on_stop:
