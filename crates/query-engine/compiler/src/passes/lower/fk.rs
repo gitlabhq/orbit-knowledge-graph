@@ -138,6 +138,25 @@ fn emit_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
         }
     }
 
+    let is_aggregation = matches!(plan.body, PlanBody::Aggregation { .. });
+    if is_aggregation && !center_where_parts.is_empty() {
+        let cte_name = format!("_candidate_{center_alias}");
+        ctes.push(Cte::new(
+            &cte_name,
+            Query {
+                select: vec![SelectExpr::col(center_alias, DEFAULT_PRIMARY_KEY)],
+                from: TableRef::scan(center_table, center_alias),
+                where_clause: Expr::conjoin(center_where_parts.clone()),
+                ..Default::default()
+            },
+        ));
+        center_where_parts.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(center_alias, DEFAULT_PRIMARY_KEY)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        });
+    }
+
     let mut from = TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],

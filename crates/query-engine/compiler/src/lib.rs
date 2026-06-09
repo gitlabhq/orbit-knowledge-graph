@@ -1654,7 +1654,7 @@ mod tests {
     }
 
     #[test]
-    fn fk_star_filter_only_relationships_do_not_emit_candidate_ctes() {
+    fn fk_star_aggregation_emits_candidate_prune_cte() {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
@@ -1670,12 +1670,16 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            !sql.contains("_candidate_"),
-            "filter-only FK predicates should keep the direct FINAL scan, got:\n{sql}"
+            sql.contains("_candidate_j"),
+            "aggregation should emit a candidate-prune CTE, got:\n{sql}"
         );
         assert!(
             sql.contains("FROM gl_job AS j FINAL"),
-            "latest-row read should still use FINAL, got:\n{sql}"
+            "FINAL should still be used (candidate prunes the merge scope), got:\n{sql}"
+        );
+        assert!(
+            sql.contains("j.id IN (SELECT id FROM _candidate_j)"),
+            "FINAL scan should be pruned by candidate id set, got:\n{sql}"
         );
     }
 
@@ -1746,8 +1750,8 @@ mod tests {
         );
         assert_eq!(
             sql.matches("FROM gl_job").count(),
-            1,
-            "gl_job must be scanned exactly once, got:\n{sql}"
+            2,
+            "gl_job scanned twice: once for candidate prune CTE, once for FINAL, got:\n{sql}"
         );
         assert!(
             sql.contains("proj.id = j.project_id"),
