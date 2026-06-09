@@ -83,9 +83,25 @@ pub fn run_remote(
     }
 }
 
+/// Manifest table DDL for DuckDB. Passed through to the compiler as
+/// external DDL so the codegen crate stays schema-agnostic.
+const MANIFEST_DDL: &str = "\
+CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
+
+CREATE TABLE IF NOT EXISTS _orbit_manifest (
+    repo_path VARCHAR PRIMARY KEY,
+    project_id BIGINT NOT NULL,
+    parent_repo_path VARCHAR,
+    branch VARCHAR,
+    commit_sha VARCHAR,
+    status repo_status NOT NULL DEFAULT 'pending',
+    last_indexed_at TIMESTAMP,
+    error_message VARCHAR
+);";
+
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
-    print!("{}", query_engine::compiler::generate_local_ddl(&ont));
+    print!("{}", query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL));
     Ok(())
 }
 
@@ -255,7 +271,7 @@ mod tests {
     #[test]
     fn local_ddl_contains_create_table_and_manifest() {
         let ont = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ont);
+        let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("SCHEMA_VERSION="));
