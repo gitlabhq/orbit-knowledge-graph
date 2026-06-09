@@ -14,8 +14,6 @@ use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
-/// One FK-derived edge variant the sweep can reconcile: a scalar, single-value,
-/// literal-target edge whose endpoint is a queryable column on the owner node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciliationSpec {
     relationship_kind: String,
@@ -34,9 +32,8 @@ struct ReconciliationSpec {
 
 /// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
 ///
-/// One `INSERT … SELECT` per spec, sequential (bounded memory). The watermark
-/// cursor advances only on full success; re-tombstoning is a no-op, so a failed
-/// run just widens the next window.
+/// The watermark cursor advances only on full success; re-tombstoning is a
+/// no-op, so a failed run just widens the next window.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -161,7 +158,6 @@ impl StaleEdgeReconciliation {
     }
 }
 
-/// All FK-edge variants to reconcile, derived from the ontology (edges marked `mutable`).
 fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     let mut specs = Vec::new();
     for node in ontology.nodes() {
@@ -180,14 +176,10 @@ fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     specs
 }
 
-/// A scalar edge has exactly one endpoint; `delimiter`/`array_field`/`array` all
-/// mark an edge that explodes into many, which no single-FK compare can reconcile.
 fn is_scalar_edge(mapping: &EdgeMapping) -> bool {
     mapping.delimiter.is_none() && mapping.array_field.is_none() && !mapping.array
 }
 
-/// Builds the spec for one edge mapping, or `None` when a single-FK comparison
-/// can't safely sweep it.
 fn reconciliation_spec(
     ontology: &Ontology,
     node: &NodeEntity,
@@ -203,8 +195,7 @@ fn reconciliation_spec(
     let EdgeTarget::Literal(other_kind) = &mapping.target else {
         return None;
     };
-    // Need the FK's column *name* on the node table (the field sourced from the
-    // extract column); no match means current truth isn't queryable, so skip.
+    // No stored field for this extract column means the current FK isn't queryable — skip.
     let owner_fk_column = node
         .fields
         .iter()
