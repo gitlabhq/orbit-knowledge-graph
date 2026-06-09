@@ -1465,7 +1465,7 @@
       }
     },
     "StaleEdgeReconciliationConfig": {
-      "description": "Tombstones stale FK-derived \"latest\"/single-value edges whose endpoint no\nlonger matches the owner node's current FK column. ReplacingMergeTree keys\nthe edge on its (mutable) `target_id`, so an FK change orphans the old edge\ninstead of replacing it; this sweep reconciles them off the indexing path.\n\nWhich edges are swept is ontology-derived (edges marked `mutable`), not\nconfigured here — only the schedule is.",
+      "description": "Tombstones stale FK-derived \"latest\"/single-value edges whose endpoint no\nlonger matches the owner node's current FK column. ReplacingMergeTree keys\nthe edge on its (mutable) `target_id`, so an FK change orphans the old edge\ninstead of replacing it; this sweep reconciles them off the indexing path.",
       "type": "object",
       "properties": {
         "cron": {
