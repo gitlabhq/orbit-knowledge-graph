@@ -145,7 +145,6 @@ properties:
     type: enum
     source: user_type
     nullable: false
-    immutable: true
     description: "Account type."
     values:
       0: human

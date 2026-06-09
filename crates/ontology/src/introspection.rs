@@ -207,33 +207,19 @@ fn node_relationships(
 
 fn format_property(field: &Field) -> String {
     let nullable = if field.nullable { "?" } else { "" };
-    let mut tags = Vec::new();
-    if field.immutable {
-        tags.push("immutable".to_string());
-    }
-    if let Some(ref tv) = field.terminal_values {
-        tags.push(format!("terminal: {}", tv.join(", ")));
-    }
-    let tag_suffix = if tags.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", tags.join("; "))
-    };
     match &field.description {
         Some(desc) => format!(
-            "{}:{}{} — {}{}",
+            "{}:{}{} — {}",
             field.name,
             field.data_type.to_string().to_lowercase(),
             nullable,
-            desc,
-            tag_suffix
+            desc
         ),
         None => format!(
-            "{}:{}{}{}",
+            "{}:{}{}",
             field.name,
             field.data_type.to_string().to_lowercase(),
-            nullable,
-            tag_suffix
+            nullable
         ),
     }
 }

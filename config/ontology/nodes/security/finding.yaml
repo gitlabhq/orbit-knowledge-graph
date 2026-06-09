@@ -73,7 +73,6 @@ properties:
     type: uuid
     source: overridden_uuid
     nullable: false
-    immutable: true
     description: "UUID of the overridden finding."
 
   project_id:

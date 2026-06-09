@@ -563,11 +563,6 @@ impl KnowledgeGraphServiceImpl {
                                 .map(|ev| ev.values().cloned().collect())
                                 .unwrap_or_default(),
                             description: f.description.clone().unwrap_or_default(),
-                            immutable: f.immutable,
-                            terminal_values: f
-                                .terminal_values
-                                .clone()
-                                .unwrap_or_default(),
                         })
                         .collect()
                 } else {

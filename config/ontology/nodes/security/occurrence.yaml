@@ -143,7 +143,6 @@ properties:
     type: int64
     source: scanner_id
     nullable: false
-    immutable: true
     description: "Detecting scanner ID."
 
   vulnerability_id:

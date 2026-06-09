@@ -42,21 +42,18 @@ properties:
     type: string
     source: base_commit_sha
     nullable: false
-    immutable: true
     description: "Base commit SHA (common ancestor)."
 
   head_commit_sha:
     type: string
     source: head_commit_sha
     nullable: false
-    immutable: true
     description: "Head commit SHA (latest on source branch)."
 
   start_commit_sha:
     type: string
     source: start_commit_sha
     nullable: false
-    immutable: true
     description: "Start commit SHA (target branch tip at diff creation)."
 
   commits_count:
