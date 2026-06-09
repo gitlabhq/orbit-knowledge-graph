@@ -29,7 +29,7 @@ fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
         return None;
     }
 
-    let prev_idx = i - 1;
+    let prev_idx = i.checked_sub(1).filter(|&idx| idx < plan.hops.len())?;
     let prev_hop = &plan.hops[prev_idx];
 
     let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
