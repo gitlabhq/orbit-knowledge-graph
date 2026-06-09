@@ -151,11 +151,6 @@ impl StaleEdgeReconciliation {
         self.graph
             .query(&build_reconcile_sql(spec))
             .param("cursor", cursor)
-            .with_setting("max_threads", self.config.max_threads.to_string())
-            .with_setting(
-                "max_memory_usage",
-                self.config.max_memory_usage_bytes.to_string(),
-            )
             .execute()
             .await
             .map_err(TaskError::new)

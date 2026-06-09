@@ -395,14 +395,6 @@ impl Default for MigrationCompletionConfig {
     }
 }
 
-fn default_stale_edge_max_threads() -> u64 {
-    2
-}
-
-fn default_stale_edge_max_memory_usage_bytes() -> u64 {
-    536_870_912
-}
-
 /// Mutable-FK edge kinds reconciled by default. Immutable FKs (project_id,
 /// author_id, …) can't orphan, so sweeping them is wasted work; this allowlist
 /// keeps per-run cost bounded. Other mutable kinds are eligible via config.
@@ -428,19 +420,6 @@ pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
 
-    /// `max_threads` cap per reconcile statement. The no-`FINAL` form trades a
-    /// little speed for a low memory peak; 2 keeps the validated ~150 MiB peak.
-    #[serde(default = "default_stale_edge_max_threads")]
-    #[schemars(range(min = 1))]
-    pub max_threads: u64,
-
-    /// `max_memory_usage` cap (bytes) per reconcile statement. Acts as the
-    /// safety valve: a statement that exceeds it aborts that kind for the run
-    /// without affecting the others. Defaults to 512 MiB.
-    #[serde(default = "default_stale_edge_max_memory_usage_bytes")]
-    #[schemars(range(min = 1))]
-    pub max_memory_usage_bytes: u64,
-
     /// Relationship kinds to reconcile. One `INSERT … SELECT` runs per
     /// `(kind, FK-owner)` variant, so an empty list disables the sweep.
     #[serde(default = "default_stale_edge_relationship_kinds")]
@@ -453,8 +432,6 @@ impl Default for StaleEdgeReconciliationConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */15 * * * *".into()),
             },
-            max_threads: default_stale_edge_max_threads(),
-            max_memory_usage_bytes: default_stale_edge_max_memory_usage_bytes(),
             relationship_kinds: default_stale_edge_relationship_kinds(),
         }
     }
