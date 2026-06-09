@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
     last_indexed_at TIMESTAMP,
     error_message VARCHAR
 );
+
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
     traversal_path VARCHAR NOT NULL,
@@ -80,4 +81,5 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     target_kind VARCHAR NOT NULL,
     traversal_path VARCHAR NOT NULL
 );
+
 
