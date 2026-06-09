@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use gkg_server_config::BillingConfig;
 use tonic::Status;
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 use crate::constants::{METERED_SOURCE_TYPES, QUOTA_MAX_CACHE_ENTRIES};
 use cache::{CacheOutcome, QuotaCache, QuotaGateDecision};
@@ -120,7 +120,7 @@ impl QuotaService {
                 Ok(())
             }
             QuotaGateDecision::Deny(reason) => {
-                debug!(
+                info!(
                     user_id = inputs.user_id,
                     realm = inputs.realm.as_deref().unwrap_or(""),
                     root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
