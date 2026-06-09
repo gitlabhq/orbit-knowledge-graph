@@ -25,12 +25,17 @@ use crate::passes::shared::filter_to_expr;
 fn prev_hop_is_selective(
     prev_hop: &Hop,
     nodes: &std::collections::HashMap<String, NodePlan>,
+    ctes: &[Cte],
 ) -> bool {
-    [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
+    let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
         nodes
             .get(n.as_str())
             .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
-    })
+    });
+    let has_filter_cte = [&prev_hop.from_node, &prev_hop.to_node]
+        .iter()
+        .any(|n| ctes.iter().any(|c| c.name == format!("_filter_{n}")));
+    has_pinned_ids || has_filter_cte || prev_hop.cascade_anchor
 }
 
 /// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
@@ -185,7 +190,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
             if hop.cascade_anchor
                 && let Some(ref jc) = hop.join_prev
-                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes)
+                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
             {
                 let prev_hop = &plan.hops[i - 1];
                 let prev_alias_inner = format!("{}p", jc.prev_alias);
@@ -361,7 +366,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         );
                         if hop.cascade_anchor
                             && let Some(ref jc) = hop.join_prev
-                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes)
+                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
                         {
                             let prev_hop = &plan.hops[i - 1];
                             let pa = format!("{}np", jc.prev_alias);
