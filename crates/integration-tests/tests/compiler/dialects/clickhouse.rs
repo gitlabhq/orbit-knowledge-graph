@@ -757,13 +757,13 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    // The anchor and the IN_PROJECT edge inherit the tight prefix; the
-    // cross-namespace RELATED_TO edge and its rel node must not. The cascade
-    // anchor is not emitted here because the prev hop has no pinned ids.
+    // The anchor, IN_PROJECT edge, and cascade anchor's IN-subquery (which
+    // re-scans IN_PROJECT) inherit the tight prefix; the cross-namespace
+    // RELATED_TO edge and its rel node must not.
     assert_eq!(
         sql.matches(SCOPED_PREFIX).count(),
-        2,
-        "prefix on the anchor node and IN_PROJECT edge only"
+        3,
+        "prefix on the anchor node, IN_PROJECT edge, and cascade anchor subquery"
     );
 
     let scoped_filter = sql.split("WHERE").nth(1).unwrap();
