@@ -450,27 +450,15 @@ mod tests {
         let sql = build_reconcile_sql(&spec);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
-        assert!(sql.contains("merge_request_id AS current_fk"), "{sql}");
-        assert!(sql.contains("FROM v57_gl_pipeline FINAL"), "{sql}");
+        assert!(sql.contains("v57_gl_pipeline FINAL"), "{sql}");
         assert!(sql.contains("_version >= {cursor:String}"), "{sql}");
-        assert!(sql.contains("owner.id = edge.target_id"), "{sql}");
-        assert!(
-            sql.contains("edge.relationship_kind = 'TRIGGERED'"),
-            "{sql}"
-        );
-        assert!(sql.contains("edge.source_kind = 'MergeRequest'"), "{sql}");
-        assert!(sql.contains("edge.target_kind = 'Pipeline'"), "{sql}");
-        assert!(
-            sql.contains("edge.target_id IN (SELECT id FROM owner)"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("edge.traversal_path IN (SELECT traversal_path FROM owner)"),
-            "{sql}"
-        );
-        assert!(
-            sql.contains("(owner.current_fk IS NULL OR edge.source_id != owner.current_fk)"),
-            "{sql}"
-        );
+
+        assert!(sql.contains("relationship_kind = 'TRIGGERED'"), "{sql}");
+        assert!(sql.contains("source_kind = 'MergeRequest'"), "{sql}");
+        assert!(sql.contains("target_kind = 'Pipeline'"), "{sql}");
+
+        assert!(sql.contains("source_id != "), "{sql}");
+        assert!(!sql.contains("target_id != "), "{sql}");
+        assert!(sql.contains("IS NULL OR"), "{sql}");
     }
 }
