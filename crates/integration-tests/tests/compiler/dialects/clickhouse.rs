@@ -257,7 +257,8 @@ fn path_finding_query() {
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [100]},
             {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [200]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                 "rel_types": ["CONTAINS"]}
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
