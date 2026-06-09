@@ -40,6 +40,10 @@ pub(in crate::modules::sdlc) struct PipelineStats {
     pub written_rows: u64,
     pub written_bytes: u64,
     pub duration_ms: u64,
+    // Per-phase time can exceed duration_ms: extract and write overlap via tokio::join!.
+    pub extract_ms: u64,
+    pub transform_ms: u64,
+    pub write_ms: u64,
 }
 
 impl PipelineStats {
@@ -51,6 +55,34 @@ impl PipelineStats {
         self.written_rows += other.written_rows;
         self.written_bytes += other.written_bytes;
         self.duration_ms = self.duration_ms.max(other.duration_ms);
+        self.extract_ms += other.extract_ms;
+        self.transform_ms += other.transform_ms;
+        self.write_ms += other.write_ms;
+    }
+}
+
+/// One extracted page and the cost of fetching it. Carried across loop
+/// iterations because the next page is read while the current one is written.
+struct Page {
+    batches: Vec<RecordBatch>,
+    scan_stats: ScanStats,
+    extract_elapsed: Duration,
+}
+
+impl Page {
+    fn is_empty(&self) -> bool {
+        self.batches.is_empty()
+    }
+
+    fn rows(&self) -> u64 {
+        self.batches.iter().map(|b| b.num_rows() as u64).sum()
+    }
+
+    fn bytes(&self) -> u64 {
+        self.batches
+            .iter()
+            .map(|b| b.get_array_memory_size() as u64)
+            .sum()
     }
 }
 
@@ -112,40 +144,42 @@ impl Pipeline {
         let params = base_query.params();
         let mut stats = PipelineStats::default();
 
-        let (mut batches, mut scan_stats) = self
+        let mut page = self
             .extract_batch(
                 transform.name(),
                 &self.page_sql(&base_query, &plan.sort_key, &cursor),
                 params.clone(),
             )
             .await?;
+        stats.extract_ms += page.extract_elapsed.as_millis() as u64;
 
-        loop {
-            if batches.is_empty() {
-                break;
-            }
+        let mut page_number: u64 = 0;
+        while !page.is_empty() {
+            page_number += 1;
 
-            let rows_in_page: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
-            let bytes_in_page: u64 = batches
-                .iter()
-                .map(|b| b.get_array_memory_size() as u64)
-                .sum();
+            let rows_in_page = page.rows();
+            let bytes_in_page = page.bytes();
             stats.read_rows += rows_in_page;
             stats.read_bytes += bytes_in_page;
-            stats.scanned_rows += scan_stats.scanned_rows;
-            stats.scanned_bytes += scan_stats.scanned_bytes;
-            info!(rows = rows_in_page, "page extracted");
+            stats.scanned_rows += page.scan_stats.scanned_rows;
+            stats.scanned_bytes += page.scan_stats.scanned_bytes;
 
             cursor = cursor.advance(
-                batches.last().expect("non-empty page has a last block"),
+                page.batches
+                    .last()
+                    .expect("non-empty page has a last block"),
                 &plan.sort_key,
             )?;
             let has_more = rows_in_page >= plan.batch_size;
 
             let transform_start = Instant::now();
-            let grouped = self.transform_page(transform.as_ref(), &batches).await?;
+            let grouped = self
+                .transform_page(transform.as_ref(), &page.batches)
+                .await?;
+            let transform_elapsed = transform_start.elapsed();
             self.metrics
-                .record_transform_duration(transform_start.elapsed().as_secs_f64());
+                .record_transform_duration(transform_elapsed.as_secs_f64());
+            stats.transform_ms += transform_elapsed.as_millis() as u64;
 
             let (write_futures, per_table) = self
                 .build_writes(context.destination.as_ref(), &outputs, grouped)
@@ -161,28 +195,38 @@ impl Pipeline {
                 }
             }
 
-            if !has_more {
-                self.drain_writes(write_futures).await?;
-                self.save_batch_progress(position_key, window, &cursor, &context.progress)
-                    .await?;
-                break;
-            }
-
             // Overlap the next page's read with this page's writes, exactly as
             // the pre-streaming pipeline did: peak memory is roughly two pages.
-            let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
-            let (write_result, extract_result) = tokio::join!(
-                self.drain_writes(write_futures),
-                self.extract_batch(transform.name(), &next_sql, params.clone()),
+            let (write_elapsed, next_page) = if has_more {
+                let next_sql = self.page_sql(&base_query, &plan.sort_key, &cursor);
+                let (write_result, extract_result) = tokio::join!(
+                    self.drain_writes(write_futures),
+                    self.extract_batch(transform.name(), &next_sql, params.clone()),
+                );
+                (write_result?, Some(extract_result?))
+            } else {
+                (self.drain_writes(write_futures).await?, None)
+            };
+            stats.write_ms += write_elapsed.as_millis() as u64;
+
+            info!(
+                page = page_number,
+                rows = rows_in_page,
+                scanned_rows = page.scan_stats.scanned_rows,
+                extract_ms = page.extract_elapsed.as_millis() as u64,
+                transform_ms = transform_elapsed.as_millis() as u64,
+                write_ms = write_elapsed.as_millis() as u64,
+                "page indexed"
             );
-            write_result?;
-            let (next_batches, next_scan) = extract_result?;
 
             self.save_batch_progress(position_key, window, &cursor, &context.progress)
                 .await?;
 
-            batches = next_batches;
-            scan_stats = next_scan;
+            let Some(next) = next_page else {
+                break;
+            };
+            stats.extract_ms += next.extract_elapsed.as_millis() as u64;
+            page = next;
         }
 
         self.checkpoint_store
@@ -214,6 +258,9 @@ impl Pipeline {
                 scanned_rows = stats.scanned_rows,
                 written_rows = stats.written_rows,
                 duration_ms = stats.duration_ms,
+                extract_ms = stats.extract_ms,
+                transform_ms = stats.transform_ms,
+                write_ms = stats.write_ms,
                 "pipeline completed"
             );
         } else {
@@ -244,7 +291,7 @@ impl Pipeline {
         transform_name: &str,
         sql: &str,
         params: Value,
-    ) -> Result<(Vec<RecordBatch>, ScanStats), HandlerError> {
+    ) -> Result<Page, HandlerError> {
         let mut last_error = None;
         let mut max_block_size: Option<u64> = None;
 
@@ -261,16 +308,21 @@ impl Pipeline {
                 .await
             {
                 Ok((batches, scan_stats)) => {
+                    let extract_elapsed = query_start.elapsed();
                     let bytes: u64 = batches
                         .iter()
                         .map(|b| b.get_array_memory_size() as u64)
                         .sum();
                     self.metrics.record_datalake_query(
                         transform_name,
-                        query_start.elapsed().as_secs_f64(),
+                        extract_elapsed.as_secs_f64(),
                         bytes,
                     );
-                    return Ok((batches, scan_stats));
+                    return Ok(Page {
+                        batches,
+                        scan_stats,
+                        extract_elapsed,
+                    });
                 }
                 Err(err) => {
                     warn!(
@@ -349,11 +401,12 @@ impl Pipeline {
         Ok((write_futures, per_table))
     }
 
-    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
+    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<Duration, HandlerError> {
+        let start = Instant::now();
         while let Some(result) = futures.next().await {
             result?;
         }
-        Ok(())
+        Ok(start.elapsed())
     }
 
     async fn save_batch_progress(
