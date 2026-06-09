@@ -12,6 +12,12 @@ use std::sync::Arc;
 use gkg_server_config::QueryConfig;
 use ontology::Ontology;
 
+/// Pathfinding hard ceilings. Config can tighten but never exceed these.
+/// Kept in sync with config/default.yaml `path_finding:` block.
+const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
+const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
+const PATHFINDING_MAX_ROWS_TO_READ: u64 = 300_000_000;
+
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
 use crate::input::{Input, QueryType};
@@ -230,14 +236,20 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
     if input.query_type == QueryType::PathFinding {
-        if config.max_execution_time.is_none() || config.max_execution_time > Some(15) {
-            config.max_execution_time = Some(15);
+        if config.max_execution_time.is_none()
+            || config.max_execution_time > Some(PATHFINDING_MAX_EXECUTION_TIME)
+        {
+            config.max_execution_time = Some(PATHFINDING_MAX_EXECUTION_TIME);
         }
-        if config.max_memory_usage.is_none() || config.max_memory_usage > Some(16_106_127_360) {
-            config.max_memory_usage = Some(16_106_127_360); // 15 GiB
+        if config.max_memory_usage.is_none()
+            || config.max_memory_usage > Some(PATHFINDING_MAX_MEMORY_USAGE)
+        {
+            config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
         }
-        if config.max_rows_to_read.is_none() || config.max_rows_to_read > Some(300_000_000) {
-            config.max_rows_to_read = Some(300_000_000); // 300M
+        if config.max_rows_to_read.is_none()
+            || config.max_rows_to_read > Some(PATHFINDING_MAX_ROWS_TO_READ)
+        {
+            config.max_rows_to_read = Some(PATHFINDING_MAX_ROWS_TO_READ);
         }
     }
     ctx.set_query_plan(query_plan);

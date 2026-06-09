@@ -921,6 +921,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn path_finding_clamps_settings_to_safety_floor() {
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("max_execution_time = 15"),
+            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("max_memory_usage = 16106127360"),
+            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("max_rows_to_read = 300000000"),
+            "pathfinding must clamp max_rows_to_read to 300M, got:\n{sql}"
+        );
+    }
+
     /// Multi-hop traversal must correctly resolve entity relationships.
     /// FK elision replaces edge table scans with direct FK column joins
     /// (e.g. `mr.project_id`, `mr.author_id`), which implicitly constrain
