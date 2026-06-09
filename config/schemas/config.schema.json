@@ -251,7 +251,7 @@
             "cron": "0 0 3 * * *"
           },
           "stale-edge-reconciliation": {
-            "cron": "0 */15 * * * *"
+            "cron": "0 */30 * * * *"
           },
           "table-cleanup": {
             "cron": "0 0 3 * * *"
@@ -1343,7 +1343,7 @@
               "cron": "0 0 3 * * *"
             },
             "stale-edge-reconciliation": {
-              "cron": "0 */15 * * * *"
+              "cron": "0 */30 * * * *"
             },
             "table-cleanup": {
               "cron": "0 0 3 * * *"
@@ -1400,7 +1400,7 @@
         "stale-edge-reconciliation": {
           "$ref": "#/$defs/StaleEdgeReconciliationConfig",
           "default": {
-            "cron": "0 */15 * * * *"
+            "cron": "0 */30 * * * *"
           }
         },
         "table-cleanup": {
