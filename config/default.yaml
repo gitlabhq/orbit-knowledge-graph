@@ -133,6 +133,9 @@ query:
     query_cache_ttl: 60
     graph_query_cache_enabled: false
     graph_query_cache_ttl: 60
+  path_finding:
+    max_execution_time: 15
+    max_memory_usage: 16106127360
 
 path_resolver:
   cache_ttl_secs: 60

@@ -204,7 +204,7 @@ pub(super) async fn path_finding_max_depth_too_shallow_returns_empty(ctx: &TestC
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CONTAINS", "MEMBER_OF"]}
         }"#,
         &allow_all(),
     )
@@ -230,7 +230,7 @@ pub(super) async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestCo
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
         }"#,
         &svc,
     )
