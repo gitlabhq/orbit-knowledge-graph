@@ -243,7 +243,6 @@ pub(super) fn node_ids_from_candidate_scan(
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        distinct: true,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(predicates),
         ..Default::default()
@@ -264,7 +263,6 @@ pub(super) fn fk_values_from_candidate_scan(
             Expr::col(alias, fk_column),
             DEFAULT_PRIMARY_KEY,
         )],
-        distinct: true,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(predicates),
         ..Default::default()
