@@ -635,7 +635,7 @@ fn multi_table_path_finding_scans_all_tables() {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Definition", "node_ids": [100]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "DEFINES"]}
     }"#;
     let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
