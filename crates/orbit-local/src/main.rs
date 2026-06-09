@@ -17,25 +17,7 @@ use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
-/// Manifest table DDL. This table is outside the ontology: it tracks
-/// indexed repos and maps repo paths to project IDs.
-const MANIFEST_DDL: &str = "\
-CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
-
-CREATE TABLE IF NOT EXISTS _orbit_manifest (
-    repo_path VARCHAR PRIMARY KEY,
-    project_id BIGINT NOT NULL,
-    parent_repo_path VARCHAR,
-    branch VARCHAR,
-    commit_sha VARCHAR,
-    status repo_status NOT NULL DEFAULT 'pending',
-    last_indexed_at TIMESTAMP,
-    error_message VARCHAR
-);";
-
-fn generate_local_ddl(ontology: &Ontology) -> String {
-    query_engine::compiler::generate_local_ddl(ontology, MANIFEST_DDL)
-}
+const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -293,9 +275,8 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         let db_path = store.db_path();
         let client =
             duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
-        let ddl = generate_local_ddl(&ontology);
         client
-            .initialize_schema(&ddl)
+            .initialize_schema(LOCAL_DDL)
             .context("failed to create schema")?;
     }
 
