@@ -16,24 +16,96 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
-/// Whether a hop's upstream has selective predicates that bound the cascade
-/// anchor's output. Passes on pinned ids (propagated via emit_node_ids_on_edge),
-/// existing _filter_<node> CTEs (the anchor references the bounded node set),
-/// or a transitive cascade anchor (the prev hop is itself anchored).
-fn prev_hop_is_selective(
-    prev_hop: &Hop,
-    nodes: &std::collections::HashMap<String, NodePlan>,
-    ctes: &[Cte],
-) -> bool {
+/// Build a cascade anchor subquery for hop `i`, recursing through the chain
+/// to nest each prior hop's anchor. Returns `None` when the hop shouldn't be
+/// anchored (first hop, or no selective upstream).
+///
+/// Terminates when a hop has no `cascade_anchor` (the chain root) or when
+/// `emit_node_ids_on_edge` / `_filter_<node>` CTEs supply the base selectivity.
+fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
+    let hop = &plan.hops[i];
+    let jc = hop.join_prev.as_ref()?;
+    if !hop.cascade_anchor {
+        return None;
+    }
+
+    let prev_idx = i - 1;
+    let prev_hop = &plan.hops[prev_idx];
+
     let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
-        nodes
+        plan.nodes
             .get(n.as_str())
             .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
     });
     let has_filter_cte = [&prev_hop.from_node, &prev_hop.to_node]
         .iter()
         .any(|n| ctes.iter().any(|c| c.name == format!("_filter_{n}")));
-    has_pinned_ids || has_filter_cte || prev_hop.cascade_anchor
+    if !has_pinned_ids && !has_filter_cte && !prev_hop.cascade_anchor {
+        return None;
+    }
+
+    let prev_alias_inner = format!("{}p", jc.prev_alias);
+    let (prev_start, prev_end) = prev_hop.direction.edge_columns();
+
+    let mut prev_preds = Vec::new();
+    let mut anchor_tags = HashSet::new();
+    push_edge_predicates(
+        &mut prev_preds,
+        &prev_alias_inner,
+        prev_hop,
+        &plan.nodes,
+        &plan.table_columns,
+        false,
+    );
+    for (prop, filter) in &prev_hop.filters {
+        prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
+    }
+    emit_denorm_tags(
+        &mut prev_preds,
+        plan,
+        prev_hop,
+        &prev_alias_inner,
+        prev_start,
+        prev_end,
+        &mut anchor_tags,
+    );
+    emit_node_ids_on_edge(
+        &mut prev_preds,
+        &prev_alias_inner,
+        prev_hop,
+        &plan.nodes,
+        prev_start,
+        prev_end,
+    );
+    for (node_alias, id_col) in [
+        (&prev_hop.from_node, prev_start),
+        (&prev_hop.to_node, prev_end),
+    ] {
+        let cte_name = format!("_filter_{node_alias}");
+        if ctes.iter().any(|c| c.name == cte_name) {
+            prev_preds.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(&prev_alias_inner, id_col)),
+                cte_name,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            });
+        }
+    }
+    prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
+
+    if let Some(inner_anchor) = build_cascade_anchor(plan, prev_idx, ctes) {
+        let prev_jc = prev_hop.join_prev.as_ref().unwrap();
+        prev_preds.push(Expr::InSelect {
+            expr: Box::new(Expr::col(&prev_alias_inner, &prev_jc.curr_col)),
+            query: Box::new(inner_anchor),
+        });
+    }
+
+    Some(Query {
+        select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
+        from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
+        where_clause: Expr::conjoin(prev_preds),
+        ..Default::default()
+    })
 }
 
 /// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
@@ -186,53 +258,11 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 }
             }
 
-            if hop.cascade_anchor
-                && let Some(ref jc) = hop.join_prev
-                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
-            {
-                let prev_hop = &plan.hops[i - 1];
-                let prev_alias_inner = format!("{}p", jc.prev_alias);
-                let (prev_start, prev_end) = prev_hop.direction.edge_columns();
-
-                let mut prev_preds = Vec::new();
-                let mut anchor_tags = HashSet::new();
-                push_edge_predicates(
-                    &mut prev_preds,
-                    &prev_alias_inner,
-                    prev_hop,
-                    &plan.nodes,
-                    &plan.table_columns,
-                    false,
-                );
-                for (prop, filter) in &prev_hop.filters {
-                    prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
-                }
-                emit_denorm_tags(
-                    &mut prev_preds,
-                    plan,
-                    prev_hop,
-                    &prev_alias_inner,
-                    prev_start,
-                    prev_end,
-                    &mut anchor_tags,
-                );
-                emit_node_ids_on_edge(
-                    &mut prev_preds,
-                    &prev_alias_inner,
-                    prev_hop,
-                    &plan.nodes,
-                    prev_start,
-                    prev_end,
-                );
-                prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
-
-                let anchor_query = Query {
-                    select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
-                    from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
-                    where_clause: Expr::conjoin(prev_preds),
-                    ..Default::default()
-                };
-
+            if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                let jc = hop
+                    .join_prev
+                    .as_ref()
+                    .expect("cascade-anchored hop must have join_prev");
                 narrow_in.push(Expr::InSelect {
                     expr: Box::new(Expr::col(&alias, &jc.curr_col)),
                     query: Box::new(anchor_query),
@@ -362,35 +392,14 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             start_col,
                             end_col,
                         );
-                        if hop.cascade_anchor
-                            && let Some(ref jc) = hop.join_prev
-                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
-                        {
-                            let prev_hop = &plan.hops[i - 1];
-                            let pa = format!("{}np", jc.prev_alias);
-                            let (ps, pe) = prev_hop.direction.edge_columns();
-                            let mut pp = Vec::new();
-                            push_edge_predicates(
-                                &mut pp,
-                                &pa,
-                                prev_hop,
-                                &plan.nodes,
-                                &plan.table_columns,
-                                false,
-                            );
-                            for (prop, filter) in &prev_hop.filters {
-                                pp.push(filter_to_expr(&pa, prop, filter));
-                            }
-                            pp.extend(edge_scope_predicate(prev_hop, &pa));
-                            emit_node_ids_on_edge(&mut pp, &pa, prev_hop, &plan.nodes, ps, pe);
+                        if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                            let jc = hop
+                                .join_prev
+                                .as_ref()
+                                .expect("cascade-anchored hop must have join_prev");
                             nw.push(Expr::InSelect {
                                 expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
-                                query: Box::new(Query {
-                                    select: vec![SelectExpr::col(&pa, &jc.prev_col)],
-                                    from: TableRef::scan(&prev_hop.edge_table, &pa),
-                                    where_clause: Expr::conjoin(pp),
-                                    ..Default::default()
-                                }),
+                                query: Box::new(anchor_query),
                             });
                         }
                         let narrow_query = Query {
