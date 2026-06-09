@@ -133,6 +133,34 @@ fn full_pipeline() {
 }
 
 #[test]
+fn package_built_by_pipeline_traversal() {
+    // Package provenance: "which pipeline built this package?" — the spike's
+    // primary unmet question. Exercises the Package node plus the BUILT_BY edge
+    // (join-table sourced from siphon_packages_build_infos).
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "pkg", "entity": "Package", "columns": ["name", "version", "package_type"], "filters": {"package_type": "npm"}},
+            {"id": "pl", "entity": "Pipeline", "columns": ["id", "status"]}
+        ],
+        "relationships": [{"type": "BUILT_BY", "from": "pkg", "to": "pl"}],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    // BUILT_BY is a join-table edge: it scans the shared gl_edge table, filtered
+    // to the relationship and endpoint kinds, joined to the filtered gl_package.
+    assert!(rendered.contains("gl_package"));
+    assert!(rendered.contains("gl_edge"));
+    assert!(rendered.contains("'BUILT_BY'"));
+    assert!(rendered.contains("(e0.source_kind = 'Package')"));
+    assert!(rendered.contains("(e0.target_kind = 'Pipeline')"));
+    assert!(rendered.contains("LIMIT 25"));
+}
+
+#[test]
 fn basic_search_query() {
     let json = r#"{
         "query_type": "traversal",
