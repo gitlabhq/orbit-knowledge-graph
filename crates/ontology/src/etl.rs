@@ -73,7 +73,6 @@ pub struct EdgeMapping {
     pub delimiter: Option<String>,
     pub array_field: Option<String>,
     pub array: bool,
-    /// The FK can change over the entity's lifetime, so prior edges orphan and need reconciling.
     pub mutable: bool,
 }
 
