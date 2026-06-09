@@ -233,10 +233,10 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
         if config.max_execution_time.is_none() || config.max_execution_time > Some(15) {
             config.max_execution_time = Some(15);
         }
-        if config.max_memory_usage.is_none() {
+        if config.max_memory_usage.is_none() || config.max_memory_usage > Some(16_106_127_360) {
             config.max_memory_usage = Some(16_106_127_360); // 15 GiB
         }
-        if config.max_rows_to_read.is_none() {
+        if config.max_rows_to_read.is_none() || config.max_rows_to_read > Some(300_000_000) {
             config.max_rows_to_read = Some(300_000_000); // 300M
         }
     }
