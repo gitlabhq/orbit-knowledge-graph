@@ -1000,7 +1000,7 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
             {"id": "start", "entity": "File", "node_ids": [5001]},
             {"id": "end", "entity": "Definition", "node_ids": [6001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
     }"#;
 
     let (result, _ctx_ref, plan) =

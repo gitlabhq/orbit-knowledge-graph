@@ -3262,7 +3262,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
             {"id": "start", "entity": "File", "node_ids": [3000]},
             {"id": "end", "entity": "Definition", "node_ids": [5000, 5001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["CONTAINS", "MEMBER_OF"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
