@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ontology::{EdgeDirection, EdgeTarget, EtlScope, Ontology};
+use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlScope, NodeEntity, Ontology};
 use tracing::{info, warn};
 
 use crate::checkpoint::CheckpointStore;
@@ -15,20 +15,14 @@ use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 const CHECKPOINT_KEY: &str = "maintenance.stale_edge_reconciliation";
 
 /// One FK-derived edge variant the sweep can reconcile: a scalar, single-value,
-/// literal-target edge whose endpoint is the value of a queryable column on the
-/// owning node table.
-///
-/// Array/multi-value edges (labels, assignees) and polymorphic edges are
-/// excluded — their endpoint is legitimately many-valued, so a single-FK
-/// comparison would wrongly tombstone live edges.
+/// literal-target edge whose endpoint is a queryable column on the owner node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconciliationSpec {
     relationship_kind: String,
     edge_table: String,
     owner_node_table: String,
-    /// Graph node-table column holding the current FK value. May differ from the
-    /// edge-map key, which is the *extract* column name (e.g. the CLOSED edge is
-    /// keyed by `metric_latest_closed_by_id` but stored as `closed_by_id`).
+    /// Graph node-table column holding the current FK value; can differ from the
+    /// edge-map (extract) key, e.g. `closed_by_id` vs `metric_latest_closed_by_id`.
     owner_fk_column: String,
     source_kind: String,
     target_kind: String,
@@ -40,10 +34,9 @@ struct ReconciliationSpec {
 
 /// Periodic, dispatcher-side sweep that tombstones stale FK-derived edges.
 ///
-/// Runs one `INSERT … SELECT` per spec sequentially (bounded memory), keyed off a
-/// single watermark cursor advanced only on full success. Idempotent:
-/// re-tombstoning an already-stale edge is a no-op, so a failed run just widens
-/// the next window.
+/// One `INSERT … SELECT` per spec, sequential (bounded memory). The watermark
+/// cursor advances only on full success; re-tombstoning is a no-op, so a failed
+/// run just widens the next window.
 pub struct StaleEdgeReconciliation {
     graph: ArrowClickHouseClient,
     checkpoint_store: Arc<dyn CheckpointStore>,
@@ -98,8 +91,7 @@ impl ScheduledTask for StaleEdgeReconciliation {
 
 impl StaleEdgeReconciliation {
     async fn reconcile_all(&self) -> Result<(), TaskError> {
-        // Capture the new watermark before reading so rows written during the run
-        // are caught next time (overlap is harmless given idempotency), never lost.
+        // Capture before reading so rows written mid-run are caught next time, not lost.
         let new_watermark = Utc::now();
         let last_watermark = self
             .checkpoint_store
@@ -175,80 +167,87 @@ impl StaleEdgeReconciliation {
 /// the *set* is scoped to `kinds` so immutable FKs aren't swept needlessly.
 fn reconciliation_specs(ontology: &Ontology, kinds: &[String]) -> Vec<ReconciliationSpec> {
     let mut specs = Vec::new();
-
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
-        // Global owners have no traversal_path on the node table, so the dual-IN
-        // PK prune that makes this cheap doesn't apply. The measured staleness is
-        // all on namespaced entities (MR, WorkItem, Pipeline).
+        // Global owners lack a traversal_path, so the dual-IN PK prune can't apply;
+        // measured staleness is all on namespaced entities (MR, WorkItem, Pipeline).
         if etl.scope() != EtlScope::Namespaced {
             continue;
         }
-
         for (fk_extract_column, mapping) in etl.edge_mappings() {
-            if !kinds.iter().any(|k| k == &mapping.relationship_kind) {
-                continue;
+            if let Some(spec) =
+                reconciliation_spec(ontology, node, fk_extract_column, mapping, kinds)
+            {
+                specs.push(spec);
             }
-            // Only scalar single-value edges: array/exploded endpoints are
-            // legitimately many-valued.
-            if mapping.delimiter.is_some() || mapping.array_field.is_some() || mapping.array {
-                continue;
-            }
-            // Polymorphic targets resolve their kind from a column, not a fixed
-            // node type; skip — the single-FK identity doesn't hold.
-            let EdgeTarget::Literal(other_kind) = &mapping.target else {
-                continue;
-            };
-
-            // The reconcile reads the graph node table, so we need the column
-            // *name* there, which is the field whose source is the extract column.
-            // No matching stored field means the FK isn't queryable on the node
-            // table and we can't establish current truth — skip.
-            let Some(owner_fk_column) = node
-                .fields
-                .iter()
-                .find(|field| field.column_name() == Some(fk_extract_column.as_str()))
-                .map(|field| field.name.clone())
-            else {
-                continue;
-            };
-
-            let edge_table = prefixed_table_name(
-                ontology.edge_table_for_relationship(&mapping.relationship_kind),
-                *SCHEMA_VERSION,
-            );
-            let owner_node_table = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
-
-            let (source_kind, target_kind, owner_id_column, other_id_column) =
-                match mapping.direction {
-                    EdgeDirection::Outgoing => (
-                        node.name.clone(),
-                        other_kind.clone(),
-                        "source_id",
-                        "target_id",
-                    ),
-                    EdgeDirection::Incoming => (
-                        other_kind.clone(),
-                        node.name.clone(),
-                        "target_id",
-                        "source_id",
-                    ),
-                };
-
-            specs.push(ReconciliationSpec {
-                relationship_kind: mapping.relationship_kind.clone(),
-                edge_table,
-                owner_node_table,
-                owner_fk_column,
-                source_kind,
-                target_kind,
-                owner_id_column,
-                other_id_column,
-            });
         }
     }
-
     specs
+}
+
+/// A scalar edge has exactly one endpoint; `delimiter`/`array_field`/`array` all
+/// mark an edge that explodes into many, which no single-FK compare can reconcile.
+fn is_scalar_edge(mapping: &EdgeMapping) -> bool {
+    mapping.delimiter.is_none() && mapping.array_field.is_none() && !mapping.array
+}
+
+/// Builds the spec for one edge mapping, or `None` when a single-FK comparison
+/// can't safely sweep it.
+fn reconciliation_spec(
+    ontology: &Ontology,
+    node: &NodeEntity,
+    fk_extract_column: &str,
+    mapping: &EdgeMapping,
+    kinds: &[String],
+) -> Option<ReconciliationSpec> {
+    if !kinds.iter().any(|kind| kind == &mapping.relationship_kind) {
+        return None;
+    }
+    if !is_scalar_edge(mapping) {
+        return None;
+    }
+    let EdgeTarget::Literal(other_kind) = &mapping.target else {
+        return None;
+    };
+    // Need the FK's column *name* on the node table (the field sourced from the
+    // extract column); no match means current truth isn't queryable, so skip.
+    let owner_fk_column = node
+        .fields
+        .iter()
+        .find(|field| field.column_name() == Some(fk_extract_column))
+        .map(|field| field.name.clone())?;
+
+    let edge_table = prefixed_table_name(
+        ontology.edge_table_for_relationship(&mapping.relationship_kind),
+        *SCHEMA_VERSION,
+    );
+    let owner_node_table = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
+
+    let (source_kind, target_kind, owner_id_column, other_id_column) = match mapping.direction {
+        EdgeDirection::Outgoing => (
+            node.name.clone(),
+            other_kind.clone(),
+            "source_id",
+            "target_id",
+        ),
+        EdgeDirection::Incoming => (
+            other_kind.clone(),
+            node.name.clone(),
+            "target_id",
+            "source_id",
+        ),
+    };
+
+    Some(ReconciliationSpec {
+        relationship_kind: mapping.relationship_kind.clone(),
+        edge_table,
+        owner_node_table,
+        owner_fk_column,
+        source_kind,
+        target_kind,
+        owner_id_column,
+        other_id_column,
+    })
 }
 
 /// Builds the single tombstone statement for one spec.
@@ -271,22 +270,22 @@ fn build_reconcile_sql(spec: &ReconciliationSpec) -> String {
     format!(
         "INSERT INTO {edge_table} \
            (traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind, _deleted) \
-         WITH c AS ( \
-           SELECT id, traversal_path, {owner_fk_column} AS fk \
+         WITH owner AS ( \
+           SELECT id, traversal_path, {owner_fk_column} AS current_fk \
            FROM {owner_node_table} FINAL \
            WHERE _version >= {{cursor:String}} \
          ) \
-         SELECT e.traversal_path, e.relationship_kind, e.source_id, e.source_kind, \
-                e.target_id, e.target_kind, true \
-         FROM {edge_table} e \
-         JOIN c ON c.id = e.{owner_id_column} AND c.traversal_path = e.traversal_path \
-         WHERE e.relationship_kind = '{relationship_kind}' \
-           AND e.source_kind = '{source_kind}' \
-           AND e.target_kind = '{target_kind}' \
-           AND e._deleted = false \
-           AND e.traversal_path IN (SELECT traversal_path FROM c) \
-           AND e.{owner_id_column} IN (SELECT id FROM c) \
-           AND (c.fk IS NULL OR e.{other_id_column} != c.fk)"
+         SELECT edge.traversal_path, edge.relationship_kind, edge.source_id, edge.source_kind, \
+                edge.target_id, edge.target_kind, true \
+         FROM {edge_table} edge \
+         JOIN owner ON owner.id = edge.{owner_id_column} AND owner.traversal_path = edge.traversal_path \
+         WHERE edge.relationship_kind = '{relationship_kind}' \
+           AND edge.source_kind = '{source_kind}' \
+           AND edge.target_kind = '{target_kind}' \
+           AND edge._deleted = false \
+           AND edge.traversal_path IN (SELECT traversal_path FROM owner) \
+           AND edge.{owner_id_column} IN (SELECT id FROM owner) \
+           AND (owner.current_fk IS NULL OR edge.{other_id_column} != owner.current_fk)"
     )
 }
 
@@ -451,20 +450,26 @@ mod tests {
         let sql = build_reconcile_sql(&spec);
 
         assert!(sql.contains("INSERT INTO v57_gl_ci_edge"), "{sql}");
-        assert!(sql.contains("merge_request_id AS fk"), "{sql}");
+        assert!(sql.contains("merge_request_id AS current_fk"), "{sql}");
         assert!(sql.contains("FROM v57_gl_pipeline FINAL"), "{sql}");
         assert!(sql.contains("_version >= {cursor:String}"), "{sql}");
-        assert!(sql.contains("c.id = e.target_id"), "{sql}");
-        assert!(sql.contains("e.relationship_kind = 'TRIGGERED'"), "{sql}");
-        assert!(sql.contains("e.source_kind = 'MergeRequest'"), "{sql}");
-        assert!(sql.contains("e.target_kind = 'Pipeline'"), "{sql}");
-        assert!(sql.contains("e.target_id IN (SELECT id FROM c)"), "{sql}");
+        assert!(sql.contains("owner.id = edge.target_id"), "{sql}");
         assert!(
-            sql.contains("e.traversal_path IN (SELECT traversal_path FROM c)"),
+            sql.contains("edge.relationship_kind = 'TRIGGERED'"),
+            "{sql}"
+        );
+        assert!(sql.contains("edge.source_kind = 'MergeRequest'"), "{sql}");
+        assert!(sql.contains("edge.target_kind = 'Pipeline'"), "{sql}");
+        assert!(
+            sql.contains("edge.target_id IN (SELECT id FROM owner)"),
             "{sql}"
         );
         assert!(
-            sql.contains("(c.fk IS NULL OR e.source_id != c.fk)"),
+            sql.contains("edge.traversal_path IN (SELECT traversal_path FROM owner)"),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("(owner.current_fk IS NULL OR edge.source_id != owner.current_fk)"),
             "{sql}"
         );
     }
