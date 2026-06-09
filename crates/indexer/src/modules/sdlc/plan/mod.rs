@@ -136,21 +136,75 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-pub(in crate::modules::sdlc) struct RangeFilter<'a> {
-    pub column: &'a str,
-    pub lower_bound: &'a str,
-    pub upper_bound: &'a str,
+/// Half-open partition window `[lower, upper)` over the leading sort-key prefix
+/// `columns`. Each bound is emitted as a flat DNF tuple comparison — the same
+/// shape as [`CursorFilter`] — so ClickHouse prunes granules by the primary
+/// index. A bare `id` range (id is the 2nd key) can only filter rows, so it
+/// rescans the whole namespace per page; this composite range does not.
+pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
+    pub columns: &'a [String],
+    pub lower: Option<&'a [String]>,
+    pub upper: Option<&'a [String]>,
 }
 
-impl Filter for RangeFilter<'_> {
+enum TupleBound {
+    LowerInclusive,
+    UpperExclusive,
+}
+
+impl Filter for CompositeRangeFilter<'_> {
     fn condition(&self) -> String {
-        format!(
-            "{col} >= '{lo}' AND {col} < '{hi}'",
-            col = self.column,
-            lo = self.lower_bound,
-            hi = self.upper_bound,
-        )
+        let mut clauses = Vec::new();
+        if let Some(lower) = self.lower {
+            clauses.push(tuple_compare(
+                self.columns,
+                lower,
+                TupleBound::LowerInclusive,
+            ));
+        }
+        if let Some(upper) = self.upper {
+            clauses.push(tuple_compare(
+                self.columns,
+                upper,
+                TupleBound::UpperExclusive,
+            ));
+        }
+        clauses.join(" AND ")
     }
+}
+
+// Lexicographic tuple comparison as flat OR-of-ANDs so the sort-key index applies:
+// `(c0,c1) >= (v0,v1)` → `(c0 > v0) OR (c0 = v0 AND c1 >= v1)`;
+// `(c0,c1) <  (v0,v1)` → `(c0 < v0) OR (c0 = v0 AND c1 < v1)`. A single column
+// degenerates to `c0 >= v0` / `c0 < v0`.
+fn tuple_compare(columns: &[String], values: &[String], bound: TupleBound) -> String {
+    let depth_count = columns.len();
+    let disjuncts: Vec<String> = (0..depth_count)
+        .map(|depth| {
+            let mut conjuncts: Vec<String> = columns
+                .iter()
+                .zip(values)
+                .take(depth)
+                .map(|(col, val)| format!("({col} = '{val}')"))
+                .collect();
+            let is_last = depth == depth_count - 1;
+            let op = match bound {
+                TupleBound::LowerInclusive if is_last => ">=",
+                TupleBound::LowerInclusive => ">",
+                TupleBound::UpperExclusive => "<",
+            };
+            conjuncts.push(format!("({} {op} '{}')", columns[depth], values[depth]));
+            conjuncts.join(" AND ")
+        })
+        .collect();
+    format!(
+        "({})",
+        disjuncts
+            .into_iter()
+            .map(|d| format!("({d})"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    )
 }
 
 pub(in crate::modules::sdlc) struct CursorFilter<'a> {
@@ -290,10 +344,10 @@ impl PreparedQuery {
         partitions
             .into_iter()
             .map(|p| {
-                let query = self.clone().with(RangeFilter {
-                    column: &p.column,
-                    lower_bound: &p.lower_bound,
-                    upper_bound: &p.upper_bound,
+                let query = self.clone().with(CompositeRangeFilter {
+                    columns: &p.key_columns,
+                    lower: p.lower_bound.as_deref(),
+                    upper: p.upper_bound.as_deref(),
                 });
                 (p, query)
             })
