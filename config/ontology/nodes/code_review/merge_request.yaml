@@ -478,10 +478,12 @@ etl:
       to: Pipeline
       as: HAS_HEAD_PIPELINE
       direction: outgoing
+      mutable: true
     latest_merge_request_diff_id:
       to: MergeRequestDiff
       as: HAS_LATEST_DIFF
       direction: outgoing
+      mutable: true
     author_id:
       to: User
       as: AUTHORED
@@ -498,6 +500,7 @@ etl:
       to: User
       as: LAST_EDITED_BY
       direction: incoming
+      mutable: true
     metric_latest_closed_by_id:
       to: User
       as: CLOSED
@@ -506,6 +509,7 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
+      mutable: true
     reviewers:
       to: User
       as: REVIEWER

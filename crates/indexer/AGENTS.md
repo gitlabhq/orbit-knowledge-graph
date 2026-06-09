@@ -67,8 +67,8 @@ stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orph
 the FK changes, because `target_id` is part of the `ReplacingMergeTree` identity, so the prior
 `(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
 `(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`), pruned
-to the changed set by a dual `IN` on the edge PK; variant metadata is ontology-derived and the swept
-kinds are a config allowlist. It runs directly in the dispatcher (not dispatched to indexer workers):
+to the changed set by a dual `IN` on the edge PK; the swept set is ontology-derived (edges marked
+`mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
 one cheap global sweep, off the insert hot path. See
 `docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
 

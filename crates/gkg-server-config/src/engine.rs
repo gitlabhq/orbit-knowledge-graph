@@ -395,21 +395,6 @@ impl Default for MigrationCompletionConfig {
     }
 }
 
-/// Mutable-FK edge kinds reconciled by default. Immutable FKs (project_id,
-/// author_id, …) can't orphan, so sweeping them is wasted work; this allowlist
-/// keeps per-run cost bounded. Other mutable kinds are eligible via config.
-fn default_stale_edge_relationship_kinds() -> Vec<String> {
-    [
-        "HAS_LATEST_DIFF",
-        "HAS_HEAD_PIPELINE",
-        "LAST_EDITED_BY",
-        "IN_MILESTONE",
-    ]
-    .iter()
-    .map(|kind| kind.to_string())
-    .collect()
-}
-
 /// Tombstones stale FK-derived "latest"/single-value edges whose endpoint no
 /// longer matches the owner node's current FK column. ReplacingMergeTree keys
 /// the edge on its (mutable) `target_id`, so an FK change orphans the old edge
@@ -419,11 +404,6 @@ fn default_stale_edge_relationship_kinds() -> Vec<String> {
 pub struct StaleEdgeReconciliationConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-
-    /// Relationship kinds to reconcile. One `INSERT … SELECT` runs per
-    /// `(kind, FK-owner)` variant, so an empty list disables the sweep.
-    #[serde(default = "default_stale_edge_relationship_kinds")]
-    pub relationship_kinds: Vec<String>,
 }
 
 impl Default for StaleEdgeReconciliationConfig {
@@ -432,7 +412,6 @@ impl Default for StaleEdgeReconciliationConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */15 * * * *".into()),
             },
-            relationship_kinds: default_stale_edge_relationship_kinds(),
         }
     }
 }

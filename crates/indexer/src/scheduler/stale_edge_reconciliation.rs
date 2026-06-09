@@ -53,10 +53,14 @@ impl StaleEdgeReconciliation {
         metrics: ScheduledTaskMetrics,
         config: StaleEdgeReconciliationConfig,
     ) -> Self {
-        let specs = reconciliation_specs(ontology, &config.relationship_kinds);
+        let specs = reconciliation_specs(ontology);
+        let kinds: Vec<&str> = specs
+            .iter()
+            .map(|spec| spec.relationship_kind.as_str())
+            .collect();
         info!(
             specs = specs.len(),
-            kinds = ?config.relationship_kinds,
+            ?kinds,
             "stale-edge reconciliation specs resolved",
         );
         Self {
@@ -157,10 +161,8 @@ impl StaleEdgeReconciliation {
     }
 }
 
-/// Enumerates the FK-derived edge variants to reconcile. Metadata (owner table,
-/// graph column, direction, endpoint kinds) is ontology-derived for correctness;
-/// the *set* is scoped to `kinds` so immutable FKs aren't swept needlessly.
-fn reconciliation_specs(ontology: &Ontology, kinds: &[String]) -> Vec<ReconciliationSpec> {
+/// All FK-edge variants to reconcile, derived from the ontology (edges marked `mutable`).
+fn reconciliation_specs(ontology: &Ontology) -> Vec<ReconciliationSpec> {
     let mut specs = Vec::new();
     for node in ontology.nodes() {
         let Some(etl) = &node.etl else { continue };
@@ -170,9 +172,7 @@ fn reconciliation_specs(ontology: &Ontology, kinds: &[String]) -> Vec<Reconcilia
             continue;
         }
         for (fk_extract_column, mapping) in etl.edge_mappings() {
-            if let Some(spec) =
-                reconciliation_spec(ontology, node, fk_extract_column, mapping, kinds)
-            {
+            if let Some(spec) = reconciliation_spec(ontology, node, fk_extract_column, mapping) {
                 specs.push(spec);
             }
         }
@@ -193,9 +193,8 @@ fn reconciliation_spec(
     node: &NodeEntity,
     fk_extract_column: &str,
     mapping: &EdgeMapping,
-    kinds: &[String],
 ) -> Option<ReconciliationSpec> {
-    if !kinds.iter().any(|kind| kind == &mapping.relationship_kind) {
+    if !mapping.mutable {
         return None;
     }
     if !is_scalar_edge(mapping) {
@@ -290,14 +289,7 @@ mod tests {
 
     fn specs() -> Vec<ReconciliationSpec> {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        let kinds = StaleEdgeReconciliationConfig::default().relationship_kinds;
-        reconciliation_specs(&ontology, &kinds)
-    }
-
-    fn specs_for(kinds: &[&str]) -> Vec<ReconciliationSpec> {
-        let ontology = Ontology::load_embedded().expect("ontology must load");
-        let kinds: Vec<String> = kinds.iter().map(|k| k.to_string()).collect();
-        reconciliation_specs(&ontology, &kinds)
+        reconciliation_specs(&ontology)
     }
 
     fn find<'a>(
@@ -311,6 +303,24 @@ mod tests {
                 s.relationship_kind == kind && s.owner_node_table.ends_with(owner_table_suffix)
             })
             .unwrap_or_else(|| panic!("expected spec {kind} owned by *{owner_table_suffix}"))
+    }
+
+    fn mapping(relationship_kind: &str) -> EdgeMapping {
+        EdgeMapping {
+            target: EdgeTarget::Literal("User".to_string()),
+            relationship_kind: relationship_kind.to_string(),
+            direction: EdgeDirection::Incoming,
+            delimiter: None,
+            array_field: None,
+            array: false,
+            mutable: true,
+        }
+    }
+
+    fn merge_request_node(ontology: &Ontology) -> &NodeEntity {
+        ontology
+            .get_node("MergeRequest")
+            .expect("MergeRequest node")
     }
 
     #[test]
@@ -335,48 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_renamed_graph_column() {
-        let specs = specs_for(&["CLOSED"]);
-        let closed = find(&specs, "CLOSED", "gl_merge_request");
-        // Edge-map key is `metric_latest_closed_by_id`; node table stores `closed_by_id`.
-        assert_eq!(closed.owner_fk_column, "closed_by_id");
-    }
-
-    #[test]
-    fn immutable_fk_kinds_are_not_swept_by_default() {
-        let specs = specs();
-        for immutable in ["IN_PROJECT", "AUTHORED", "HAS_JOB", "IN_PIPELINE"] {
-            assert!(
-                !specs.iter().any(|s| s.relationship_kind == immutable),
-                "{immutable} is not in the default allowlist and must not be swept",
-            );
-        }
-    }
-
-    #[test]
-    fn array_and_polymorphic_edges_are_excluded_even_when_allowlisted() {
-        let ontology = Ontology::load_embedded().unwrap();
-        let kinds = vec![
-            "REVIEWER".to_string(),
-            "APPROVED".to_string(),
-            "HAS_NOTE".to_string(),
-        ];
-        let specs = reconciliation_specs(&ontology, &kinds);
-        assert!(
-            specs.is_empty(),
-            "array_field (REVIEWER/APPROVED) and polymorphic (HAS_NOTE) edges must never be \
-             swept even if explicitly listed, got {specs:?}",
-        );
-    }
-
-    #[test]
-    fn empty_allowlist_disables_the_sweep() {
-        let ontology = Ontology::load_embedded().unwrap();
-        assert!(reconciliation_specs(&ontology, &[]).is_empty());
-    }
-
-    #[test]
-    fn default_allowlist_resolves_exactly_the_enabled_kinds() {
+    fn derives_exactly_the_mutable_kinds_from_the_ontology() {
         let specs = specs();
         let kinds: std::collections::BTreeSet<&str> =
             specs.iter().map(|s| s.relationship_kind.as_str()).collect();
@@ -394,30 +363,76 @@ mod tests {
     }
 
     #[test]
-    fn triggered_variants_are_disambiguated_by_kind() {
-        let specs = specs_for(&["TRIGGERED"]);
-        let triggered: Vec<&ReconciliationSpec> = specs
-            .iter()
-            .filter(|s| s.relationship_kind == "TRIGGERED")
-            .collect();
-        assert!(
-            triggered.len() >= 2,
-            "TRIGGERED should produce one spec per FK owner, got {triggered:?}",
-        );
-        for spec in &triggered {
+    fn immutable_fk_kinds_are_not_marked_mutable() {
+        let specs = specs();
+        for immutable in [
+            "IN_PROJECT",
+            "AUTHORED",
+            "HAS_JOB",
+            "IN_PIPELINE",
+            "UPDATED_BY",
+        ] {
             assert!(
-                !spec.source_kind.is_empty() && !spec.target_kind.is_empty(),
-                "each TRIGGERED spec must pin both endpoint kinds: {spec:?}",
+                !specs.iter().any(|s| s.relationship_kind == immutable),
+                "{immutable} is not marked mutable in the ontology and must not be swept",
             );
         }
-        let kind_pairs: std::collections::BTreeSet<(String, String)> = triggered
-            .iter()
-            .map(|s| (s.source_kind.clone(), s.target_kind.clone()))
-            .collect();
-        assert_eq!(
-            kind_pairs.len(),
-            triggered.len(),
-            "TRIGGERED variants must differ by endpoint kind so they don't tombstone each other",
+    }
+
+    #[test]
+    fn non_mutable_edge_is_skipped() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let immutable = EdgeMapping {
+            mutable: false,
+            ..mapping("AUTHORED")
+        };
+        assert!(
+            reconciliation_spec(
+                &ontology,
+                merge_request_node(&ontology),
+                "author_id",
+                &immutable
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn mutable_array_edge_is_skipped() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let array_edge = EdgeMapping {
+            array_field: Some("user_id".to_string()),
+            ..mapping("REVIEWER")
+        };
+        assert!(
+            reconciliation_spec(
+                &ontology,
+                merge_request_node(&ontology),
+                "reviewers",
+                &array_edge
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn mutable_polymorphic_edge_is_skipped() {
+        let ontology = Ontology::load_embedded().unwrap();
+        let polymorphic = EdgeMapping {
+            target: EdgeTarget::Column {
+                column: "noteable_type".to_string(),
+                type_mapping: Default::default(),
+            },
+            ..mapping("HAS_NOTE")
+        };
+        assert!(
+            reconciliation_spec(
+                &ontology,
+                merge_request_node(&ontology),
+                "noteable_id",
+                &polymorphic
+            )
+            .is_none()
         );
     }
 
