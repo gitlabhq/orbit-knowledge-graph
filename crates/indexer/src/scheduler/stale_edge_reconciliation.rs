@@ -103,11 +103,23 @@ impl StaleEdgeReconciliation {
             .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
         let cursor = last_watermark.format(TIMESTAMP_FORMAT).to_string();
 
+        info!(
+            cursor = cursor,
+            new_watermark = new_watermark.format(TIMESTAMP_FORMAT).to_string(),
+            full_scan = last_watermark == DateTime::<Utc>::UNIX_EPOCH,
+            specs = self.specs.len(),
+            "stale-edge reconciliation started",
+        );
+
         let mut failed = 0u64;
         for spec in &self.specs {
             let statement_start = Instant::now();
             match self.reconcile_one(spec, &cursor).await {
                 Ok(()) => {
+                    self.metrics.record_query_duration(
+                        &spec.relationship_kind,
+                        statement_start.elapsed().as_secs_f64(),
+                    );
                     info!(
                         relationship_kind = spec.relationship_kind,
                         owner = spec.owner_node_table,
@@ -343,11 +355,11 @@ mod tests {
         assert_eq!(
             kinds,
             [
-                "CLOSED",
                 "HAS_HEAD_PIPELINE",
                 "HAS_LATEST_DIFF",
                 "IN_MILESTONE",
-                "LAST_EDITED_BY"
+                "LAST_EDITED_BY",
+                "UPDATED_BY"
             ]
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
@@ -355,22 +367,9 @@ mod tests {
     }
 
     #[test]
-    fn resolves_renamed_graph_column() {
-        let specs = specs();
-        let closed = find(&specs, "CLOSED", "gl_merge_request");
-        assert_eq!(closed.owner_fk_column, "closed_by_id");
-    }
-
-    #[test]
     fn immutable_fk_kinds_are_not_marked_mutable() {
         let specs = specs();
-        for immutable in [
-            "IN_PROJECT",
-            "AUTHORED",
-            "HAS_JOB",
-            "IN_PIPELINE",
-            "UPDATED_BY",
-        ] {
+        for immutable in ["IN_PROJECT", "AUTHORED", "HAS_JOB", "IN_PIPELINE", "CLOSED"] {
             assert!(
                 !specs.iter().any(|s| s.relationship_kind == immutable),
                 "{immutable} is not marked mutable in the ontology and must not be swept",

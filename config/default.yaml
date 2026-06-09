@@ -108,7 +108,7 @@ schedule:
     migration-completion:
       cron: "0 */1 * * * *"           # every minute
     stale-edge-reconciliation:
-      cron: "0 */15 * * * *"          # every 15 minutes
+      cron: "0 */30 * * * *"          # every 30 minutes
 
 health_check:
   bind_address: "0.0.0.0:4201"

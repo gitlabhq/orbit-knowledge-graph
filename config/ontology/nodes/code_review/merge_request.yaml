@@ -496,6 +496,7 @@ etl:
       to: User
       as: UPDATED_BY
       direction: incoming
+      mutable: true
     last_edited_by_id:
       to: User
       as: LAST_EDITED_BY
@@ -505,7 +506,6 @@ etl:
       to: User
       as: CLOSED
       direction: incoming
-      mutable: true
     milestone_id:
       to: Milestone
       as: IN_MILESTONE

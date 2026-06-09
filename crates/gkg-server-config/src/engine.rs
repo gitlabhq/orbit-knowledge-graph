@@ -410,7 +410,7 @@ impl Default for StaleEdgeReconciliationConfig {
     fn default() -> Self {
         Self {
             schedule: ScheduleConfiguration {
-                cron: Some("0 */15 * * * *".into()),
+                cron: Some("0 */30 * * * *".into()),
             },
         }
     }
