@@ -944,10 +944,6 @@ mod tests {
             sql.contains("max_memory_usage = 16106127360"),
             "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
         );
-        assert!(
-            sql.contains("max_rows_to_read = 300000000"),
-            "pathfinding must clamp max_rows_to_read to 300M, got:\n{sql}"
-        );
     }
 
     /// Multi-hop traversal must correctly resolve entity relationships.

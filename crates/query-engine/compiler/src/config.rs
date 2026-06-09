@@ -16,7 +16,6 @@ use ontology::Ontology;
 /// Kept in sync with config/default.yaml `path_finding:` block.
 const PATHFINDING_MAX_EXECUTION_TIME: u64 = 15;
 const PATHFINDING_MAX_MEMORY_USAGE: u64 = 16_106_127_360; // 15 GiB
-const PATHFINDING_MAX_ROWS_TO_READ: u64 = 300_000_000;
 
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
@@ -245,11 +244,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
             || config.max_memory_usage > Some(PATHFINDING_MAX_MEMORY_USAGE)
         {
             config.max_memory_usage = Some(PATHFINDING_MAX_MEMORY_USAGE);
-        }
-        if config.max_rows_to_read.is_none()
-            || config.max_rows_to_read > Some(PATHFINDING_MAX_ROWS_TO_READ)
-        {
-            config.max_rows_to_read = Some(PATHFINDING_MAX_ROWS_TO_READ);
         }
     }
     ctx.set_query_plan(query_plan);

@@ -136,7 +136,6 @@ query:
   path_finding:
     max_execution_time: 15
     max_memory_usage: 16106127360
-    max_rows_to_read: 300000000
 
 path_resolver:
   cache_ttl_secs: 60
