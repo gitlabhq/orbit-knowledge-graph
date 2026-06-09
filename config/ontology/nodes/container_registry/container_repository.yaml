@@ -29,11 +29,16 @@ properties:
     nullable: false
     description: "Repository name (path within the project)."
 
+  # Source siphon_container_repositories.status is Nullable(Int16); NULL is the
+  # active/ready state and coerces to the '' storage default, so the materialized
+  # column is never NULL. Declared non-nullable to mirror Pipeline.failure_reason
+  # (also a nullable source enum stored non-nullable), keeping enum columns
+  # consistent across the ontology.
   status:
     type: enum
     source: status
     nullable: false
-    description: "Deletion lifecycle status. Empty when the repository is active (no deletion scheduled)."
+    description: "Deletion lifecycle status. Empty string when the repository is active (no deletion scheduled)."
     values:
       0: delete_scheduled
       1: delete_failed
