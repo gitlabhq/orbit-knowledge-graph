@@ -16,6 +16,24 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
+/// Whether a hop's upstream has selective predicates that the cascade anchor
+/// actually carries. Currently that's only pinned ids (node_ids / id_range),
+/// which are propagated into the anchor via emit_node_ids_on_edge. Filter-based
+/// selectivity (_filter CTEs, node property filters) is not yet propagated
+/// into the anchor subquery, so green-lighting it would emit a
+/// relationship-only scan that materializes the entire range.
+fn prev_hop_is_selective(
+    prev_hop: &Hop,
+    nodes: &std::collections::HashMap<String, NodePlan>,
+    _ctes: &[Cte],
+) -> bool {
+    [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
+        nodes
+            .get(n.as_str())
+            .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
+    })
+}
+
 /// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
 /// project/group scope, or `None` when the hop carries no resolved prefix.
 /// Emitted alongside the broad authorization filter so ClickHouse can seek the
@@ -168,6 +186,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
             if hop.cascade_anchor
                 && let Some(ref jc) = hop.join_prev
+                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
             {
                 let prev_hop = &plan.hops[i - 1];
                 let prev_alias_inner = format!("{}p", jc.prev_alias);
@@ -343,6 +362,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         );
                         if hop.cascade_anchor
                             && let Some(ref jc) = hop.join_prev
+                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
                         {
                             let prev_hop = &plan.hops[i - 1];
                             let pa = format!("{}np", jc.prev_alias);
