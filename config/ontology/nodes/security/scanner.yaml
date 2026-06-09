@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   external_id:
     type: string
     source: external_id
     nullable: false
+    immutable: true
     description: "External ID (e.g. gemnasium, bandit)."
 
   name:
@@ -47,6 +49,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: false
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -59,6 +62,7 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   traversal_path:

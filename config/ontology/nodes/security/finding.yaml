@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   uuid:
     type: uuid
     source: uuid
     nullable: false
+    immutable: true
     description: "Unique UUID."
 
   name:
@@ -77,18 +79,21 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   scan_id:
     type: int64
     source: scan_id
     nullable: false
+    immutable: true
     description: "Producing security scan ID."
 
   scanner_id:
     type: int64
     source: scanner_id
     nullable: false
+    immutable: true
     description: "Detecting scanner ID."
 
   traversal_path:

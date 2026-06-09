@@ -21,12 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   name:
     type: string
     source: name
     nullable: false
+    immutable: true
     description: "Job name from .gitlab-ci.yml."
 
   status:
@@ -49,17 +51,20 @@ properties:
       10: waiting_for_resource
       11: waiting_for_callback
       12: canceling
+    terminal_values: [success, failed, canceled, skipped]
 
   ref:
     type: string
     source: ref
     nullable: false
+    immutable: true
     description: "Branch or tag name."
 
   tag:
     type: boolean
     source: tag
     nullable: true
+    immutable: true
     description: "Whether running on a git tag."
 
   allow_failure:
@@ -156,6 +161,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   started_at:
@@ -180,6 +186,7 @@ properties:
     type: string
     source: type
     nullable: false
+    immutable: true
     description: "STI class: Ci::Build, Ci::Bridge, or GenericCommitStatus."
     selectivity: low
 
@@ -216,6 +223,7 @@ properties:
     type: enum
     source: scheduling_type
     nullable: false
+    immutable: true
     description: "Scheduling mode: stage or DAG."
     values:
       0: stage
@@ -225,6 +233,7 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   user_id:
@@ -237,18 +246,21 @@ properties:
     type: int64
     source: upstream_pipeline_id
     nullable: true
+    immutable: true
     description: "Upstream pipeline ID for bridge jobs."
 
   stage_id:
     type: int64
     source: stage_id
     nullable: true
+    immutable: true
     description: "Containing stage ID."
 
   pipeline_id:
     type: int64
     source: commit_id
     nullable: true
+    immutable: true
     description: "Containing pipeline ID. Source column is commit_id (legacy Rails naming)."
 
   auto_canceled_by_id:

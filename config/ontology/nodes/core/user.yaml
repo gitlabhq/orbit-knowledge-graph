@@ -22,6 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   username:
@@ -62,6 +63,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:

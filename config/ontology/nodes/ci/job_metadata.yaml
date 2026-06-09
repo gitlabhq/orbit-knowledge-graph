@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   build_id:
     type: int64
     source: build_id
     nullable: false
+    immutable: true
     description: "Job ID (Ci::Build.id) this metadata describes."
 
   interruptible:
@@ -87,6 +89,7 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   traversal_path:

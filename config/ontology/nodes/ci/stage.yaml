@@ -21,12 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   name:
     type: string
     source: name
     nullable: false
+    immutable: true
     description: "Stage name (e.g. build, test, deploy)."
 
   status:
@@ -48,6 +50,7 @@ properties:
       10: waiting_for_resource
       11: waiting_for_callback
       12: canceling
+    terminal_values: [success, failed, canceled, skipped]
 
   position:
     type: int64
@@ -59,6 +62,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -71,12 +75,14 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   pipeline_id:
     type: int64
     source: pipeline_id
     nullable: true
+    immutable: true
     description: "Containing pipeline ID."
 
   traversal_path:

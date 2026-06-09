@@ -25,6 +25,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
@@ -58,6 +59,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:

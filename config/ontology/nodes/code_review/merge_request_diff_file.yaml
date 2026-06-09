@@ -21,66 +21,77 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: false
+    immutable: true
     description: "Parent merge request ID."
 
   merge_request_diff_id:
     type: int64
     source: merge_request_diff_id
     nullable: false
+    immutable: true
     description: "Parent merge request diff ID."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   too_large:
     type: boolean
     source: too_large
     nullable: false
+    immutable: true
     description: "Whether the diff is too large to display."
 
   new_path:
     type: string
     source: new_path
     nullable: false
+    immutable: true
     description: "File path after the change. Differs from old_path only on renames."
 
   old_path:
     type: string
     source: old_path
     nullable: false
+    immutable: true
     description: "File path before the change. Preferred for file lookups."
 
   new_file:
     type: boolean
     source: new_file
     nullable: false
+    immutable: true
     description: "Whether this is a newly added file."
 
   renamed_file:
     type: boolean
     source: renamed_file
     nullable: false
+    immutable: true
     description: "Whether this file was renamed."
 
   deleted_file:
     type: boolean
     source: deleted_file
     nullable: false
+    immutable: true
     description: "Whether this file was deleted."
 
   binary:
     type: boolean
     source: binary
     nullable: true
+    immutable: true
     description: "Whether this is a binary file."
 
   generated:

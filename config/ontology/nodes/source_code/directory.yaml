@@ -22,6 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   traversal_path:
@@ -35,30 +36,35 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
+    immutable: true
     description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
+    immutable: true
     description: "Indexed commit SHA."
 
   path:
     type: string
     source: path
     nullable: false
+    immutable: true
     description: "Relative path within the repository."
 
   name:
     type: string
     source: name
     nullable: false
+    immutable: true
     description: "Directory name."
 
 storage:

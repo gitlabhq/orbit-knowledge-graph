@@ -21,6 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   note:
@@ -33,6 +34,7 @@ properties:
     type: enum
     source: noteable_type
     nullable: false
+    immutable: true
     description: "Type of object the note is attached to."
     enum_type: string
     values:
@@ -51,6 +53,7 @@ properties:
     type: int64
     source: noteable_id
     nullable: true
+    immutable: true
     description: "ID of the attached object. Null for commits."
 
   line_code:
@@ -63,6 +66,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -75,6 +79,7 @@ properties:
     type: string
     source: discussion_id
     nullable: true
+    immutable: true
     description: "Discussion thread ID."
 
   resolved_at:
@@ -111,12 +116,14 @@ properties:
     type: int64
     source: project_id
     nullable: true
+    immutable: true
     description: "Owning project ID."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
+    immutable: true
     description: "Author user ID."
 
   traversal_path:

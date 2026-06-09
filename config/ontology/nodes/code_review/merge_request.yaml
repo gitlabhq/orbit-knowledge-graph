@@ -21,6 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
@@ -31,6 +32,7 @@ properties:
     type: int64
     source: iid
     nullable: true
+    immutable: true
     description: "Project-scoped merge request number."
 
   title:
@@ -67,6 +69,7 @@ properties:
       2: closed
       3: merged
       4: locked
+    terminal_values: [merged]
 
   merge_status:
     type: string
@@ -91,6 +94,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -121,6 +125,7 @@ properties:
     type: int64
     source: target_project_id
     nullable: false
+    immutable: true
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
   merged_commit_sha:
@@ -241,6 +246,7 @@ properties:
     type: int64
     source: author_id
     nullable: true
+    immutable: true
     description: "Author user ID."
 
   merge_user_id:
@@ -277,6 +283,7 @@ properties:
     type: int64
     source: source_project_id
     nullable: true
+    immutable: true
     description: "Source project ID (may differ from target for cross-project MRs)."
 
   head_pipeline_id:

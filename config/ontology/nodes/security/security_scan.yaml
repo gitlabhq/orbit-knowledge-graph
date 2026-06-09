@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   scan_type:
     type: enum
     source: scan_type
     nullable: false
+    immutable: true
     description: "Scan type."
     values:
       1: sast
@@ -64,6 +66,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: false
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -76,18 +79,21 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   pipeline_id:
     type: int64
     source: pipeline_id
     nullable: true
+    immutable: true
     description: "Pipeline ID that ran this scan."
 
   build_id:
     type: int64
     source: build_id
     nullable: false
+    immutable: true
     description: "Job (build) ID that executed this scan."
 
   traversal_path:

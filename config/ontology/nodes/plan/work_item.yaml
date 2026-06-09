@@ -21,12 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: false
+    immutable: true
     description: "Scoped work item number."
 
   title:
@@ -56,6 +58,7 @@ properties:
     type: enum
     source: work_item_type_id
     nullable: false
+    immutable: true
     description: "Work item type."
     values:
       1: issue
@@ -96,6 +99,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
@@ -114,12 +118,14 @@ properties:
     type: int64
     source: project_id
     nullable: true
+    immutable: true
     description: "Owning project ID. Null for group-scoped."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
+    immutable: true
     description: "Author user ID."
 
   milestone_id:
@@ -132,6 +138,7 @@ properties:
     type: int64
     source: namespace_id
     nullable: false
+    immutable: true
     description: "Owning namespace (group) ID."
 
   closed_by_id:

@@ -21,24 +21,28 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: true
+    immutable: true
     description: "Project-scoped pipeline number."
 
   sha:
     type: string
     source: sha
     nullable: false
+    immutable: true
     description: "Commit SHA the pipeline runs against."
 
   ref:
     type: string
     source: ref
     nullable: false
+    immutable: true
     description: "Branch or tag name."
 
   status:
@@ -61,11 +65,13 @@ properties:
       10: waiting_for_resource
       11: waiting_for_callback
       12: canceling
+    terminal_values: [success, failed, canceled, skipped]
 
   source:
     type: enum
     source: source
     nullable: false
+    immutable: true
     description: "Trigger source."
     values:
       0: unknown
@@ -93,6 +99,7 @@ properties:
     type: boolean
     source: tag
     nullable: false
+    immutable: true
     description: "Whether running on a git tag."
 
   duration:
@@ -125,6 +132,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   started_at:
@@ -173,12 +181,14 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
+    immutable: true
     description: "Triggering user ID."
 
   merge_request_id:

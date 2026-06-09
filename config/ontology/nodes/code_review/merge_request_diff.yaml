@@ -21,12 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    immutable: true
     description: "Unique ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: false
+    immutable: true
     description: "Parent merge request ID."
 
   state:
@@ -70,12 +72,14 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    immutable: true
     description: "Owning project ID."
 
   diff_type:
     type: enum
     source: diff_type
     nullable: false
+    immutable: true
     description: "Source branch (regular) or merge-head state."
     values:
       1: regular
@@ -97,6 +101,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    immutable: true
     description: "Creation timestamp."
 
   updated_at:
