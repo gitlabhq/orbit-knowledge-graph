@@ -136,75 +136,92 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-/// Half-open partition window `[lower, upper)` over the leading sort-key prefix
-/// `columns`. Each bound is emitted as a flat DNF tuple comparison — the same
-/// shape as [`CursorFilter`] — so ClickHouse prunes granules by the primary
-/// index. A bare `id` range (id is the 2nd key) can only filter rows, so it
-/// rescans the whole namespace per page; this composite range does not.
+/// Half-open partition window `[lower, upper)` over the leading sort-key prefix,
+/// each bound emitted as index-friendly DNF (see [`sort_key_prefix_compare`]). A
+/// bare `id` range can only filter rows and rescans the namespace per page; this
+/// prunes by the primary index instead.
 pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
     pub columns: &'a [String],
     pub lower: Option<&'a [String]>,
     pub upper: Option<&'a [String]>,
 }
 
-enum TupleBound {
-    LowerInclusive,
-    UpperExclusive,
-}
-
 impl Filter for CompositeRangeFilter<'_> {
     fn condition(&self) -> String {
-        let mut clauses = Vec::new();
+        let mut edges = Vec::new();
         if let Some(lower) = self.lower {
-            clauses.push(tuple_compare(
+            edges.push(sort_key_prefix_compare(
                 self.columns,
                 lower,
-                TupleBound::LowerInclusive,
+                KeyComparison::AtLeast,
             ));
         }
         if let Some(upper) = self.upper {
-            clauses.push(tuple_compare(
+            edges.push(sort_key_prefix_compare(
                 self.columns,
                 upper,
-                TupleBound::UpperExclusive,
+                KeyComparison::Below,
             ));
         }
-        clauses.join(" AND ")
+        edges
+            .into_iter()
+            .map(|edge| format!("({edge})"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
     }
 }
 
-// Lexicographic tuple comparison as flat OR-of-ANDs so the sort-key index applies:
-// `(c0,c1) >= (v0,v1)` → `(c0 > v0) OR (c0 = v0 AND c1 >= v1)`;
-// `(c0,c1) <  (v0,v1)` → `(c0 < v0) OR (c0 = v0 AND c1 < v1)`. A single column
-// degenerates to `c0 >= v0` / `c0 < v0`.
-fn tuple_compare(columns: &[String], values: &[String], bound: TupleBound) -> String {
-    let depth_count = columns.len();
-    let disjuncts: Vec<String> = (0..depth_count)
-        .map(|depth| {
-            let mut conjuncts: Vec<String> = columns
+/// How a row's leading sort-key prefix is compared against a tuple of values.
+/// `Greater` paginates past the last row of a page (the cursor); `AtLeast` and
+/// `Below` are the inclusive-lower and exclusive-upper edges of a partition.
+enum KeyComparison {
+    Greater,
+    AtLeast,
+    Below,
+}
+
+impl KeyComparison {
+    // Every prefix depth narrows by direction; only the final pivot column
+    // carries the inclusive edge, where `>` becomes `>=`.
+    fn operator(&self, at_pivot: bool) -> &'static str {
+        match self {
+            KeyComparison::Greater => ">",
+            KeyComparison::AtLeast if at_pivot => ">=",
+            KeyComparison::AtLeast => ">",
+            KeyComparison::Below => "<",
+        }
+    }
+}
+
+/// Compares the sort-key prefix `columns` against `values` as a flat OR-of-ANDs
+/// (DNF): `(c0 > v0) OR (c0 = v0 AND c1 > v1) OR …`. ClickHouse matches this
+/// shape against the primary index and prunes granules; a packed
+/// `(c0, c1) > (v0, v1)` reads as an opaque expression and forces a full scan.
+fn sort_key_prefix_compare(
+    columns: &[String],
+    values: &[String],
+    comparison: KeyComparison,
+) -> String {
+    (0..columns.len())
+        .map(|pivot| {
+            let equal_prefix = columns[..pivot]
                 .iter()
                 .zip(values)
-                .take(depth)
-                .map(|(col, val)| format!("({col} = '{val}')"))
-                .collect();
-            let is_last = depth == depth_count - 1;
-            let op = match bound {
-                TupleBound::LowerInclusive if is_last => ">=",
-                TupleBound::LowerInclusive => ">",
-                TupleBound::UpperExclusive => "<",
-            };
-            conjuncts.push(format!("({} {op} '{}')", columns[depth], values[depth]));
-            conjuncts.join(" AND ")
+                .map(|(col, val)| format!("({col} = '{val}')"));
+            let pivot_clause = format!(
+                "({} {} '{}')",
+                columns[pivot],
+                comparison.operator(pivot == columns.len() - 1),
+                values[pivot],
+            );
+            equal_prefix
+                .chain(std::iter::once(pivot_clause))
+                .collect::<Vec<_>>()
+                .join(" AND ")
         })
-        .collect();
-    format!(
-        "({})",
-        disjuncts
-            .into_iter()
-            .map(|d| format!("({d})"))
-            .collect::<Vec<_>>()
-            .join(" OR ")
-    )
+        .map(|conjunction| format!("({conjunction})"))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 pub(in crate::modules::sdlc) struct CursorFilter<'a> {
@@ -213,35 +230,13 @@ pub(in crate::modules::sdlc) struct CursorFilter<'a> {
 }
 
 impl Filter for CursorFilter<'_> {
-    // Emits a DNF tuple comparison: `(c1 > v1) OR (c1 = v1 AND c2 > v2) OR ...`.
-    // The flat OR form lets ClickHouse use the sort key index; a single
-    // `(c1, c2) > (v1, v2)` would not. Empty values → no-op (first page).
+    // Empty values → no-op (first page).
     fn condition(&self) -> String {
         if self.values.is_empty() {
             return String::new();
         }
         debug_assert_eq!(self.sort_key.len(), self.values.len());
-        let disjuncts: Vec<String> = (0..self.sort_key.len())
-            .map(|depth| {
-                let mut conjuncts: Vec<String> = self
-                    .sort_key
-                    .iter()
-                    .zip(self.values)
-                    .take(depth)
-                    .map(|(k, v)| format!("({k} = '{v}')"))
-                    .collect();
-                conjuncts.push(format!(
-                    "({} > '{}')",
-                    self.sort_key[depth], self.values[depth]
-                ));
-                conjuncts.join(" AND ")
-            })
-            .collect();
-        disjuncts
-            .into_iter()
-            .map(|d| format!("({d})"))
-            .collect::<Vec<_>>()
-            .join(" OR ")
+        sort_key_prefix_compare(self.sort_key, self.values, KeyComparison::Greater)
     }
 }
 
@@ -506,6 +501,43 @@ mod tests {
             sql.contains("(project_id = '10')") && sql.contains("(id > '99')"),
             "sql: {sql}"
         );
+    }
+
+    // ── CompositeRangeFilter tests ──────────────────────────────────
+
+    #[test]
+    fn composite_range_filter_emits_both_edges_as_dnf() {
+        let columns = vec!["traversal_path".to_string(), "id".to_string()];
+        let lower = vec!["1/9970/".to_string(), "100".to_string()];
+        let upper = vec!["1/9970/".to_string(), "500".to_string()];
+        let sql = CompositeRangeFilter {
+            columns: &columns,
+            lower: Some(&lower),
+            upper: Some(&upper),
+        }
+        .condition();
+        assert!(
+            sql.contains("(traversal_path = '1/9970/') AND (id >= '100')"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("(traversal_path = '1/9970/') AND (id < '500')"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains(") AND ("), "sql: {sql}");
+    }
+
+    #[test]
+    fn composite_range_filter_open_lower_emits_only_upper() {
+        let columns = vec!["id".to_string()];
+        let upper = vec!["500".to_string()];
+        let sql = CompositeRangeFilter {
+            columns: &columns,
+            lower: None,
+            upper: Some(&upper),
+        }
+        .condition();
+        assert_eq!(sql, "(((id < '500')))");
     }
 
     // ── PreparedQuery tests ─────────────────────────────────────────

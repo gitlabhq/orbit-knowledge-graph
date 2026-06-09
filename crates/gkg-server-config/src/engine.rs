@@ -174,6 +174,10 @@ pub struct EntityHandlerConfig {
     #[serde(default)]
     pub partition_overrides: HashMap<String, u32>,
 
+    /// Skip partitioning a scope smaller than this; the probe isn't worth it.
+    #[serde(default = "default_partition_min_rows")]
+    pub partition_min_rows: u64,
+
     /// Rows per block streamed from the datalake (`max_block_size`). Larger blocks
     /// amortize per-batch write round-trips (more throughput) at the cost of peak
     /// memory per in-flight block.
@@ -193,6 +197,7 @@ impl Default for EntityHandlerConfig {
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
             partition_overrides: HashMap::new(),
+            partition_min_rows: default_partition_min_rows(),
             stream_block_size: default_stream_block_size(),
             system_notes_resolve_lookup_batch_size: default_system_notes_resolve_lookup_batch_size(
             ),
@@ -202,6 +207,10 @@ impl Default for EntityHandlerConfig {
 
 fn default_fetch_concurrency() -> usize {
     6
+}
+
+fn default_partition_min_rows() -> u64 {
+    50_000_000
 }
 
 fn default_code_indexing_max_file_size_bytes() -> u64 {

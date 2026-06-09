@@ -139,6 +139,7 @@ pub async fn entity_handler_with_partitions(
     let mut config: IndexerConfig = create_test_indexer_config(&ctx.config);
     config.engine.handlers.entity_handler.partition_overrides =
         HashMap::from([(entity_name.to_string(), partitions)]);
+    config.engine.handlers.entity_handler.partition_min_rows = 0;
 
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();

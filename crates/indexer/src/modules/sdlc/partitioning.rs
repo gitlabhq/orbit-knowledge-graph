@@ -10,15 +10,13 @@ use crate::handler::HandlerError;
 use super::datalake::DatalakeQuery;
 use super::plan::input::PlanInput;
 
-/// Granularity for bucketing the trailing (numeric) key during the cut probe.
-/// Coarse enough to keep the probe to a single aggregate scan, fine enough that
-/// a multi-million-row path still splits into balanced partitions.
-const KEY_BUCKET_WIDTH: i64 = 100_000_000;
+/// Buckets the probe aims for; width is derived from the id range to hit this at
+/// any scale. A fixed width would collapse a narrow id range into one bucket and
+/// silently disable partitioning.
+const TARGET_BUCKET_COUNT: i64 = 10_000;
 
-/// A contiguous half-open slice `[lower, upper)` of the table's leading sort-key
-/// prefix. Bounds are tuples over `key_columns` (e.g. `(traversal_path, id)`), so
-/// the extract prunes by the primary index instead of filtering on a non-leading
-/// column. `None` bound = open end (first/last partition).
+/// A half-open `[lower, upper)` slice of the leading sort-key prefix; `None` is an
+/// open end (first/last partition).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct PartitionAssignment {
     pub index: u32,
@@ -41,6 +39,7 @@ pub(in crate::modules::sdlc) struct PartitionStrategy {
     pub count: u32,
     pub key_columns: Vec<String>,
     pub datalake_table: String,
+    pub min_rows: u64,
 }
 
 impl PartitionStrategy {
@@ -54,6 +53,7 @@ impl PartitionStrategy {
             &self.datalake_table,
             &self.key_columns,
             self.count,
+            self.min_rows,
             traversal_path,
         )
         .await
@@ -63,6 +63,7 @@ impl PartitionStrategy {
 pub(in crate::modules::sdlc) fn build_strategies(
     inputs: &PlanInput,
     overrides: &HashMap<String, u32>,
+    min_rows: u64,
 ) -> HashMap<String, PartitionStrategy> {
     inputs
         .node_plans
@@ -79,17 +80,15 @@ pub(in crate::modules::sdlc) fn build_strategies(
                     count,
                     key_columns,
                     datalake_table: node.extract.base_table.clone(),
+                    min_rows,
                 },
             ))
         })
         .collect()
 }
 
-/// Partition on the leading sort-key prefix `(…, id)` so each slice is a
-/// contiguous granule range. The trailing column (`id`) is what we bucket;
-/// any leading columns (`traversal_path`) pin the prefix. Returns `None` if the
-/// trailing key isn't a numeric column we can bucket (e.g. `traversal_path`
-/// alone), since the probe would have nothing meaningful to split on.
+/// The `(…, id)` prefix to partition on; `None` when the trailing key isn't a
+/// numeric column we can bucket (e.g. `traversal_path` alone).
 fn partition_key_columns(order_by: &[String]) -> Option<Vec<String>> {
     let key: Vec<String> = order_by.iter().take(2).cloned().collect();
     match key.last().map(String::as_str) {
@@ -103,6 +102,7 @@ async fn compute_partition_ranges(
     table: &str,
     key_columns: &[String],
     count: u32,
+    min_rows: u64,
     traversal_path: Option<&str>,
 ) -> Result<Vec<PartitionAssignment>, HandlerError> {
     if count <= 1 || key_columns.is_empty() {
@@ -111,7 +111,7 @@ async fn compute_partition_ranges(
 
     let batches = datalake
         .query_batches(
-            &probe_sql(table, key_columns, count, traversal_path),
+            &probe_sql(table, key_columns, count, min_rows, traversal_path),
             probe_params(traversal_path),
             None,
         )
@@ -120,28 +120,23 @@ async fn compute_partition_ranges(
 
     let cuts = parse_cut_tuples(&batches, key_columns.len());
 
-    // One row per filled quintile bucket. Fewer than `count` means the data is
-    // too sparse to split into `count` balanced partitions — fall back to a
-    // single unpartitioned pass.
     if cuts.len() < count as usize {
         debug!(
             ?cuts,
-            count, "skipping partitioning: insufficient distinct cuts"
+            count, "skipping partitioning: too few buckets to fill all partitions"
         );
         return Ok(Vec::new());
     }
 
-    // cuts[0] is bucket 0's first tuple (the namespace start); the internal
-    // boundaries are cuts[1..count]. Partition i spans [boundary_{i-1}, boundary_i),
-    // with the first/last bound left open.
-    let boundaries = &cuts[1..count as usize];
+    // cuts[0] is the namespace start; cuts[1..] are the internal partition edges.
+    let internal_boundaries = &cuts[1..count as usize];
     Ok((0..count)
         .map(|i| PartitionAssignment {
             index: i,
             total: count,
             key_columns: key_columns.to_vec(),
-            lower_bound: (i > 0).then(|| boundaries[(i - 1) as usize].clone()),
-            upper_bound: (i < count - 1).then(|| boundaries[i as usize].clone()),
+            lower_bound: (i > 0).then(|| internal_boundaries[(i - 1) as usize].clone()),
+            upper_bound: (i < count - 1).then(|| internal_boundaries[i as usize].clone()),
         })
         .collect())
 }
@@ -153,61 +148,61 @@ fn probe_params(traversal_path: Option<&str>) -> Value {
     }
 }
 
-/// Row-balanced composite cut points: bucket the trailing key, accumulate row
-/// counts in sort-key order, then take the first `(leading…, id)` tuple of each
-/// quintile. A single aggregate scan (no `row_number` materialization), and it
-/// splits *within* a dominant path by id — which a path-only cut cannot.
+/// Carrying the leading keys lets a cut split *inside* a dominant path by id —
+/// which a path-only cut cannot — and `argMin` avoids a `row_number()` scan.
 fn probe_sql(
     table: &str,
     key_columns: &[String],
     count: u32,
+    min_rows: u64,
     traversal_path: Option<&str>,
 ) -> String {
     let scope = match traversal_path {
         Some(_) => "startsWith(traversal_path, {traversal_path:String})",
         None => "1=1",
     };
-    let (group_cols, bucket_col) = key_columns.split_at(key_columns.len() - 1);
-    let bucket_col = &bucket_col[0];
+    let (leading_keys, id_column) = key_columns.split_at(key_columns.len() - 1);
+    let id_column = &id_column[0];
 
-    let group_prefix = if group_cols.is_empty() {
-        String::new()
-    } else {
-        format!("{}, ", group_cols.join(", "))
-    };
-    let argmin_prefix = if group_cols.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "{}, ",
-            group_cols
-                .iter()
-                .map(|c| format!("argMin({c}, _cu) AS {c}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let w = KEY_BUCKET_WIDTH;
+    let leading_columns = comma_terminated(leading_keys.iter().cloned());
+    let leading_earliest = comma_terminated(
+        leading_keys
+            .iter()
+            .map(|key| format!("argMin({key}, rows_through_bucket) AS {key}")),
+    );
+    let target = TARGET_BUCKET_COUNT;
 
     format!(
-        "WITH g AS (\
-           SELECT {group_prefix}intDiv({bucket_col}, {w}) AS _b, count() AS _c \
-           FROM {table} WHERE {scope} GROUP BY {group_prefix}_b\
-         ), cum AS (\
-           SELECT {group_prefix}_b, \
-                  sum(_c) OVER (ORDER BY {group_prefix}_b) AS _cu, \
-                  sum(_c) OVER () AS _total \
-           FROM g\
+        "WITH span AS (\
+           SELECT greatest(1, intDiv(max({id_column}) - min({id_column}), {target})) AS width \
+           FROM {table} WHERE {scope}\
+         ), bucket_counts AS (\
+           SELECT {leading_columns}intDiv({id_column}, (SELECT width FROM span)) AS bucket, \
+                  min({id_column}) AS bucket_min_id, count() AS rows \
+           FROM {table} WHERE {scope} GROUP BY {leading_columns}bucket\
+         ), cumulative AS (\
+           SELECT {leading_columns}bucket_min_id, \
+                  sum(rows) OVER (ORDER BY {leading_columns}bucket) AS rows_through_bucket, \
+                  sum(rows) OVER () AS total_rows \
+           FROM bucket_counts\
          ) \
-         SELECT {argmin_prefix}toString(argMin(_b, _cu) * {w}) AS _idlo \
-         FROM cum \
-         GROUP BY least(intDiv((_cu - 1) * {count}, _total), {count} - 1) AS _bucket \
-         ORDER BY _bucket"
+         SELECT {leading_earliest}toString(argMin(bucket_min_id, rows_through_bucket)) AS id_lower \
+         FROM cumulative \
+         WHERE total_rows >= {min_rows} \
+         GROUP BY least(intDiv((rows_through_bucket - 1) * {count}, total_rows), {count} - 1) AS quantile \
+         ORDER BY quantile"
     )
 }
 
-/// Each probe row is one cut tuple, column-aligned with `key_columns`
-/// (leading group columns, then the bucketed id), all returned as strings.
+fn comma_terminated(items: impl Iterator<Item = String>) -> String {
+    let joined = items.collect::<Vec<_>>().join(", ");
+    if joined.is_empty() {
+        joined
+    } else {
+        format!("{joined}, ")
+    }
+}
+
 fn parse_cut_tuples(batches: &[RecordBatch], key_len: usize) -> Vec<Vec<String>> {
     let Some(batch) = batches.first() else {
         return Vec::new();
@@ -320,7 +315,7 @@ mod tests {
             vec!["300"],
             vec!["400"],
         ]);
-        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 5, None)
+        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 5, 0, None)
             .await
             .unwrap();
 
@@ -350,6 +345,7 @@ mod tests {
             "t",
             &keys(&["traversal_path", "id"]),
             5,
+            0,
             Some("1/9970/"),
         )
         .await
@@ -377,7 +373,7 @@ mod tests {
     #[tokio::test]
     async fn skips_when_too_few_buckets() {
         let datalake = ProbeDatalake::new(vec![vec!["0"], vec!["100"]]);
-        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 5, None)
+        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 5, 0, None)
             .await
             .unwrap();
         assert!(ranges.is_empty());
@@ -386,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn count_of_one_returns_empty() {
         let datalake = ProbeDatalake::new(vec![vec!["0"]]);
-        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 1, None)
+        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 1, 0, None)
             .await
             .unwrap();
         assert!(ranges.is_empty());
@@ -395,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn empty_probe_returns_empty() {
         let datalake = ProbeDatalake::new(vec![]);
-        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 4, None)
+        let ranges = compute_partition_ranges(&datalake, "t", &keys(&["id"]), 4, 0, None)
             .await
             .unwrap();
         assert!(ranges.is_empty());
@@ -414,6 +410,7 @@ mod tests {
             "t",
             &keys(&["traversal_path", "id"]),
             4,
+            50_000_000,
             Some("1/9970/"),
         )
         .await
@@ -421,11 +418,19 @@ mod tests {
 
         let sql = datalake.captured_sql.lock().unwrap().clone();
         assert!(
-            sql.contains("intDiv(id, 100000000)"),
-            "expected id bucketing: {sql}"
+            sql.contains("greatest(1, intDiv(max(id) - min(id), 10000))"),
+            "expected adaptive bucket width from id span: {sql}"
         );
         assert!(
-            sql.contains("argMin(traversal_path, _cu)"),
+            sql.contains("WHERE total_rows >= 50000000"),
+            "expected min-rows gate: {sql}"
+        );
+        assert!(
+            sql.contains("intDiv(id, (SELECT width FROM span))"),
+            "expected id bucketing by derived width: {sql}"
+        );
+        assert!(
+            sql.contains("argMin(traversal_path, rows_through_bucket)"),
             "expected leading-key argMin: {sql}"
         );
         assert!(
@@ -433,7 +438,7 @@ mod tests {
             "expected traversal_path scope: {sql}"
         );
         assert!(
-            sql.contains("GROUP BY least(intDiv((_cu - 1) * 4"),
+            sql.contains("GROUP BY least(intDiv((rows_through_bucket - 1) * 4"),
             "expected quintile bucketing: {sql}"
         );
         assert_eq!(
@@ -490,14 +495,15 @@ mod tests {
         };
 
         let overrides = HashMap::from([("User".to_string(), 4)]);
-        let strategies = build_strategies(&inputs, &overrides);
+        let strategies = build_strategies(&inputs, &overrides, 50_000_000);
         let user = strategies.get("User").expect("User should be partitioned");
         assert_eq!(user.count, 4);
         assert_eq!(user.key_columns, keys(&["id"]));
         assert_eq!(user.datalake_table, "siphon_users");
+        assert_eq!(user.min_rows, 50_000_000);
 
         let no_overrides = HashMap::new();
-        let strategies = build_strategies(&inputs, &no_overrides);
+        let strategies = build_strategies(&inputs, &no_overrides, 50_000_000);
         assert!(strategies.is_empty());
     }
 }
