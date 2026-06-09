@@ -294,8 +294,9 @@ async fn data_correctness() {
         dedup::search_three_versions_returns_latest,
         dedup::aggregation_excludes_deleted_from_count,
         traversal_scoping::project_scoped_multi_edge_traversal_is_lossless,
-        traversal_scoping::fk_chain_recovers_files_without_edge_rows,
         traversal_scoping::cross_namespace_closes_returns_cross_project_work_item,
         traversal_scoping::multiple_anchors_apply_distinct_traversal_paths,
+        traversal_scoping::scope_implied_container_elision_star_counts_authored_mrs,
+        traversal_scoping::scope_implied_container_elision_chain_counts_diff_files,
     );
 }

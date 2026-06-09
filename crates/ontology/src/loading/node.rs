@@ -149,6 +149,8 @@ pub(crate) struct EdgeMappingYaml {
     array_field: Option<String>,
     #[serde(default)]
     array: bool,
+    #[serde(default)]
+    mutable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,6 +532,7 @@ fn convert_edge_mappings(
                     delimiter: mapping.delimiter,
                     array_field: mapping.array_field,
                     array: mapping.array,
+                    mutable: mapping.mutable,
                 });
             }
             Ok((column, converted))

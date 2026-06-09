@@ -55,8 +55,8 @@ impl BillingObserver {
             tracing::warn!(
                 user_id = self.inputs.user_id,
                 source_type = %self.inputs.source_type,
-                root_namespace_id = ?self.inputs.root_namespace_id,
-                deployment_type = ?self.inputs.deployment_type,
+                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                 correlation_id = %correlation_id,
                 "billing event skipped: realm missing from JWT claims"
             );
@@ -68,8 +68,8 @@ impl BillingObserver {
                 user_id = self.inputs.user_id,
                 raw_realm = raw_realm,
                 source_type = %self.inputs.source_type,
-                root_namespace_id = ?self.inputs.root_namespace_id,
-                deployment_type = ?self.inputs.deployment_type,
+                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                 correlation_id = %correlation_id,
                 "billing event skipped: unrecognized realm value"
             );
@@ -130,8 +130,8 @@ impl BillingObserver {
                     user_id = self.inputs.user_id,
                     realm = realm,
                     source_type = %self.inputs.source_type,
-                    root_namespace_id = ?self.inputs.root_namespace_id,
-                    deployment_type = ?self.inputs.deployment_type,
+                    root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                    deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                     correlation_id = %correlation_id,
                     "failed to build billing event"
                 );
@@ -168,11 +168,11 @@ impl PipelineObserver for BillingObserver {
     fn finish(&self, _row_count: usize, _redacted_count: usize) {
         let correlation_id = correlation_id_string();
         if self.errored.get() {
-            tracing::debug!(
+            tracing::info!(
                 user_id = self.inputs.user_id,
                 source_type = %self.inputs.source_type,
-                root_namespace_id = ?self.inputs.root_namespace_id,
-                deployment_type = ?self.inputs.deployment_type,
+                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                 correlation_id = %correlation_id,
                 "billing event skipped: pipeline reported an error"
             );
@@ -193,20 +193,20 @@ impl PipelineObserver for BillingObserver {
                 user_id = self.inputs.user_id,
                 realm = realm,
                 source_type = %self.inputs.source_type,
-                root_namespace_id = ?self.inputs.root_namespace_id,
-                deployment_type = ?self.inputs.deployment_type,
+                root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                 correlation_id = %correlation_id,
             )
             .entered();
             match tracker.track(event) {
                 Ok(()) => {
-                    tracing::debug!(
+                    tracing::info!(
                         user_id = self.inputs.user_id,
                         realm = realm,
                         source_type = %self.inputs.source_type,
                         query_type = self.query_type,
-                        root_namespace_id = ?self.inputs.root_namespace_id,
-                        deployment_type = ?self.inputs.deployment_type,
+                        root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                        deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                         correlation_id = %correlation_id,
                         "billing event enqueued for delivery"
                     );
@@ -219,8 +219,8 @@ impl PipelineObserver for BillingObserver {
                         realm = realm,
                         query_type = self.query_type,
                         source_type = %self.inputs.source_type,
-                        root_namespace_id = ?self.inputs.root_namespace_id,
-                        deployment_type = ?self.inputs.deployment_type,
+                        root_namespace_id = self.inputs.root_namespace_id.unwrap_or_default(),
+                        deployment_type = self.inputs.deployment_type.as_deref().unwrap_or(""),
                         correlation_id = %correlation_id,
                         "billing tracker rejected event at enqueue"
                     );

@@ -73,7 +73,7 @@ use modules::namespace_deletion::{
 };
 use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
-use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use scheduler::{ScheduledTask, ScheduledTaskMetrics, StaleEdgeReconciliation, TableCleanup};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -338,6 +338,15 @@ pub async fn run_dispatcher(
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.namespace_deletion.clone(),
+        )),
+        Box::new(StaleEdgeReconciliation::new(
+            config.graph.build_client(),
+            ontology,
+            Arc::new(checkpoint::ClickHouseCheckpointStore::new(Arc::new(
+                config.graph.build_client(),
+            ))),
+            metrics.clone(),
+            config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
         Box::new(schema::completion::MigrationCompletionChecker::new(
             config.graph.build_client(),

@@ -257,7 +257,8 @@ fn path_finding_query() {
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [100]},
             {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [200]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                 "rel_types": ["CONTAINS"]}
     }"#;
 
     let result = compile(json, &test_ontology(), &test_ctx()).unwrap();
@@ -288,7 +289,7 @@ fn path_finding_depth_control() {
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
             {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
     let deep = r#"{
@@ -297,7 +298,7 @@ fn path_finding_depth_control() {
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
             {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
     }"#;
 
     let shallow_sql = compile(shallow, &test_ontology(), &test_ctx())
@@ -634,7 +635,7 @@ fn multi_table_path_finding_scans_all_tables() {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Definition", "node_ids": [100]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "DEFINES"]}
     }"#;
     let result = compile(json, &multi_table_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
@@ -757,9 +758,9 @@ fn cross_namespace_related_to_edge_stays_unscoped() {
     let compiled = compile(json, &embedded_ontology(), &scoped_ctx()).unwrap();
     let sql = compiled.base.render();
 
-    // The anchor, the IN_PROJECT edge, and the cascade anchor's IN-subquery
-    // (which re-scans IN_PROJECT) inherit the tight prefix; the
-    // cross-namespace RELATED_TO edge and its rel node must not.
+    // The anchor, IN_PROJECT edge, and cascade anchor's IN-subquery (which
+    // re-scans IN_PROJECT) inherit the tight prefix; the cross-namespace
+    // RELATED_TO edge and its rel node must not.
     assert_eq!(
         sql.matches(SCOPED_PREFIX).count(),
         3,

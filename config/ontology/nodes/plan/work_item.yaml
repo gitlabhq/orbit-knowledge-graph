@@ -160,6 +160,7 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
+      mutable: true
     namespace_id:
       to: Group
       as: IN_GROUP

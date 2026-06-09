@@ -229,6 +229,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when the FK can change over the entity's lifetime (a 'latest'/'current' pointer); such edges are reconciled by the stale-edge sweep. Immutable FKs leave this false."
         }
       },
       "required": ["as"],
