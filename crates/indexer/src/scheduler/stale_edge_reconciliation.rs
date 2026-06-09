@@ -343,6 +343,7 @@ mod tests {
         assert_eq!(
             kinds,
             [
+                "CLOSED",
                 "HAS_HEAD_PIPELINE",
                 "HAS_LATEST_DIFF",
                 "IN_MILESTONE",
@@ -351,6 +352,13 @@ mod tests {
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>(),
         );
+    }
+
+    #[test]
+    fn resolves_renamed_graph_column() {
+        let specs = specs();
+        let closed = find(&specs, "CLOSED", "gl_merge_request");
+        assert_eq!(closed.owner_fk_column, "closed_by_id");
     }
 
     #[test]

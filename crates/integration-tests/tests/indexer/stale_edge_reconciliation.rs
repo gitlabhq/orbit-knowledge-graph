@@ -23,6 +23,7 @@ async fn stale_edge_reconciliation() {
         reconciles_has_latest_diff,
         reconciles_has_head_pipeline,
         reconciles_last_edited_by,
+        reconciles_closed_by,
         reconciles_in_milestone_for_merge_request,
         reconciles_in_milestone_for_work_item,
         reconcile_is_idempotent,
@@ -193,6 +194,25 @@ async fn reconciles_last_edited_by(ctx: &TestContext) {
             owner_table: "gl_merge_request",
             owner_id: 10,
             owner_fk_column: "last_edited_by_id",
+            edge_table: "gl_edge",
+            source_kind: "User",
+            target_kind: "MergeRequest",
+            owner_is_source: false,
+            current_fk: 7,
+            stale_fk: 6,
+        },
+    )
+    .await;
+}
+
+async fn reconciles_closed_by(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "CLOSED",
+            owner_table: "gl_merge_request",
+            owner_id: 10,
+            owner_fk_column: "closed_by_id",
             edge_table: "gl_edge",
             source_kind: "User",
             target_kind: "MergeRequest",

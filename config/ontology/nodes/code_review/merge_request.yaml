@@ -505,6 +505,7 @@ etl:
       to: User
       as: CLOSED
       direction: incoming
+      mutable: true
     milestone_id:
       to: Milestone
       as: IN_MILESTONE
