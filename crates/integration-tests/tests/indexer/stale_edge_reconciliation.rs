@@ -5,7 +5,7 @@ use gkg_server_config::StaleEdgeReconciliationConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
 use indexer::scheduler::stale_edge_reconciliation::StaleEdgeReconciliation;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
-use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
+use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, run_subtests, t};
 
 // Edge `_version` is in the past so the reconcile tombstone (now64()) supersedes
 // it under ReplacingMergeTree; the owner `_version` is in the future so it always
@@ -14,6 +14,21 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 const PAST: &str = "2024-01-01 00:00:00.000000";
 const FUTURE: &str = "2099-01-01 00:00:00.000000";
 const TRAVERSAL_PATH: &str = "1/9970/";
+
+#[tokio::test]
+async fn stale_edge_reconciliation() {
+    let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+    run_subtests!(
+        &ctx,
+        reconciles_has_latest_diff,
+        reconciles_has_head_pipeline,
+        reconciles_last_edited_by,
+        reconciles_in_milestone_for_merge_request,
+        reconciles_in_milestone_for_work_item,
+        reconcile_is_idempotent,
+        leaves_unrelated_owner_edges_untouched,
+    );
+}
 
 #[derive(Clone)]
 struct Case {
@@ -117,14 +132,13 @@ async fn live_other_endpoints(context: &TestContext, case: &Case) -> Vec<i64> {
     i64::extract_column(&result, 0).unwrap()
 }
 
-async fn assert_reconciles(case: Case) {
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    seed(&context, &case).await;
+async fn assert_reconciles(ctx: &TestContext, case: Case) {
+    seed(ctx, &case).await;
 
-    task(&context).run().await.unwrap();
+    task(ctx).run().await.unwrap();
 
     assert_eq!(
-        live_other_endpoints(&context, &case).await,
+        live_other_endpoints(ctx, &case).await,
         vec![case.current_fk],
         "{}: stale edge ({}) must be tombstoned and current ({}) kept",
         case.relationship_kind,
@@ -133,93 +147,102 @@ async fn assert_reconciles(case: Case) {
     );
 }
 
-#[tokio::test]
-async fn reconciles_has_latest_diff() {
-    assert_reconciles(Case {
-        relationship_kind: "HAS_LATEST_DIFF",
-        owner_table: "gl_merge_request",
-        owner_id: 10,
-        owner_fk_column: "latest_merge_request_diff_id",
-        edge_table: "gl_edge",
-        source_kind: "MergeRequest",
-        target_kind: "MergeRequestDiff",
-        owner_is_source: true,
-        current_fk: 200,
-        stale_fk: 100,
-    })
+async fn reconciles_has_latest_diff(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "HAS_LATEST_DIFF",
+            owner_table: "gl_merge_request",
+            owner_id: 10,
+            owner_fk_column: "latest_merge_request_diff_id",
+            edge_table: "gl_edge",
+            source_kind: "MergeRequest",
+            target_kind: "MergeRequestDiff",
+            owner_is_source: true,
+            current_fk: 200,
+            stale_fk: 100,
+        },
+    )
     .await;
 }
 
-#[tokio::test]
-async fn reconciles_has_head_pipeline() {
-    assert_reconciles(Case {
-        relationship_kind: "HAS_HEAD_PIPELINE",
-        owner_table: "gl_merge_request",
-        owner_id: 10,
-        owner_fk_column: "head_pipeline_id",
-        edge_table: "gl_ci_edge",
-        source_kind: "MergeRequest",
-        target_kind: "Pipeline",
-        owner_is_source: true,
-        current_fk: 500,
-        stale_fk: 400,
-    })
+async fn reconciles_has_head_pipeline(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "HAS_HEAD_PIPELINE",
+            owner_table: "gl_merge_request",
+            owner_id: 10,
+            owner_fk_column: "head_pipeline_id",
+            edge_table: "gl_ci_edge",
+            source_kind: "MergeRequest",
+            target_kind: "Pipeline",
+            owner_is_source: true,
+            current_fk: 500,
+            stale_fk: 400,
+        },
+    )
     .await;
 }
 
-#[tokio::test]
-async fn reconciles_last_edited_by() {
-    assert_reconciles(Case {
-        relationship_kind: "LAST_EDITED_BY",
-        owner_table: "gl_merge_request",
-        owner_id: 10,
-        owner_fk_column: "last_edited_by_id",
-        edge_table: "gl_edge",
-        source_kind: "User",
-        target_kind: "MergeRequest",
-        owner_is_source: false,
-        current_fk: 7,
-        stale_fk: 6,
-    })
+async fn reconciles_last_edited_by(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "LAST_EDITED_BY",
+            owner_table: "gl_merge_request",
+            owner_id: 10,
+            owner_fk_column: "last_edited_by_id",
+            edge_table: "gl_edge",
+            source_kind: "User",
+            target_kind: "MergeRequest",
+            owner_is_source: false,
+            current_fk: 7,
+            stale_fk: 6,
+        },
+    )
     .await;
 }
 
-#[tokio::test]
-async fn reconciles_in_milestone_for_merge_request() {
-    assert_reconciles(Case {
-        relationship_kind: "IN_MILESTONE",
-        owner_table: "gl_merge_request",
-        owner_id: 10,
-        owner_fk_column: "milestone_id",
-        edge_table: "gl_edge",
-        source_kind: "MergeRequest",
-        target_kind: "Milestone",
-        owner_is_source: true,
-        current_fk: 900,
-        stale_fk: 800,
-    })
+async fn reconciles_in_milestone_for_merge_request(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "IN_MILESTONE",
+            owner_table: "gl_merge_request",
+            owner_id: 10,
+            owner_fk_column: "milestone_id",
+            edge_table: "gl_edge",
+            source_kind: "MergeRequest",
+            target_kind: "Milestone",
+            owner_is_source: true,
+            current_fk: 900,
+            stale_fk: 800,
+        },
+    )
     .await;
 }
 
-#[tokio::test]
-async fn reconciles_in_milestone_for_work_item() {
-    assert_reconciles(Case {
-        relationship_kind: "IN_MILESTONE",
-        owner_table: "gl_work_item",
-        owner_id: 55,
-        owner_fk_column: "milestone_id",
-        edge_table: "gl_edge",
-        source_kind: "WorkItem",
-        target_kind: "Milestone",
-        owner_is_source: true,
-        current_fk: 900,
-        stale_fk: 800,
-    })
+async fn reconciles_in_milestone_for_work_item(ctx: &TestContext) {
+    assert_reconciles(
+        ctx,
+        Case {
+            relationship_kind: "IN_MILESTONE",
+            owner_table: "gl_work_item",
+            owner_id: 55,
+            owner_fk_column: "milestone_id",
+            edge_table: "gl_edge",
+            source_kind: "WorkItem",
+            target_kind: "Milestone",
+            owner_is_source: true,
+            current_fk: 900,
+            stale_fk: 800,
+        },
+    )
     .await;
 }
 
-#[tokio::test]
-async fn reconcile_is_idempotent() {
+async fn reconcile_is_idempotent(ctx: &TestContext) {
     let case = Case {
         relationship_kind: "HAS_LATEST_DIFF",
         owner_table: "gl_merge_request",
@@ -232,22 +255,19 @@ async fn reconcile_is_idempotent() {
         current_fk: 200,
         stale_fk: 100,
     };
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    seed(&context, &case).await;
+    seed(ctx, &case).await;
 
-    task(&context).run().await.unwrap();
-    task(&context).run().await.unwrap();
+    task(ctx).run().await.unwrap();
+    task(ctx).run().await.unwrap();
 
     assert_eq!(
-        live_other_endpoints(&context, &case).await,
+        live_other_endpoints(ctx, &case).await,
         vec![case.current_fk],
         "re-running the sweep must not change an already-reconciled owner",
     );
 }
 
-#[tokio::test]
-async fn leaves_unrelated_owner_edges_untouched() {
-    let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
+async fn leaves_unrelated_owner_edges_untouched(ctx: &TestContext) {
     let reconciled = Case {
         relationship_kind: "HAS_LATEST_DIFF",
         owner_table: "gl_merge_request",
@@ -266,14 +286,14 @@ async fn leaves_unrelated_owner_edges_untouched() {
         stale_fk: 300,
         ..reconciled.clone()
     };
-    seed(&context, &reconciled).await;
-    seed(&context, &healthy).await;
+    seed(ctx, &reconciled).await;
+    seed(ctx, &healthy).await;
 
-    task(&context).run().await.unwrap();
+    task(ctx).run().await.unwrap();
 
-    assert_eq!(live_other_endpoints(&context, &reconciled).await, vec![200]);
+    assert_eq!(live_other_endpoints(ctx, &reconciled).await, vec![200]);
     assert_eq!(
-        live_other_endpoints(&context, &healthy).await,
+        live_other_endpoints(ctx, &healthy).await,
         vec![300],
         "an MR whose edge already matches its FK must be untouched",
     );
