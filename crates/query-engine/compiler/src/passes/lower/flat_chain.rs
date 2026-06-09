@@ -25,7 +25,6 @@ use crate::passes::shared::filter_to_expr;
 fn prev_hop_is_selective(
     prev_hop: &Hop,
     nodes: &std::collections::HashMap<String, NodePlan>,
-    _ctes: &[Cte],
 ) -> bool {
     [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
         nodes
@@ -186,7 +185,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
 
             if hop.cascade_anchor
                 && let Some(ref jc) = hop.join_prev
-                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
+                && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes)
             {
                 let prev_hop = &plan.hops[i - 1];
                 let prev_alias_inner = format!("{}p", jc.prev_alias);
@@ -362,7 +361,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         );
                         if hop.cascade_anchor
                             && let Some(ref jc) = hop.join_prev
-                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes, &ctes)
+                            && prev_hop_is_selective(&plan.hops[i - 1], &plan.nodes)
                         {
                             let prev_hop = &plan.hops[i - 1];
                             let pa = format!("{}np", jc.prev_alias);
