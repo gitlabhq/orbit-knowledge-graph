@@ -7,6 +7,20 @@ ClickHouse from your GDK installation.
 
 1. **[mise](https://mise.jdx.dev/)** for tool version management
 
+1. **[ClickHouse](https://clickhouse.com/docs/install)** installed locally.
+   On macOS, follow the
+   [terminal process instructions](https://clickhouse.com/docs/install/macOS#terminal-process).
+   After downloading, remove the binary from quarantine before running it:
+
+   ```shell
+   xattr -d com.apple.quarantine clickhouse
+   ```
+
+   > **Note:** GDK's ClickHouse listens on port **9001**, not the default 9000.
+   > Always pass `--port 9001` when using `clickhouse client` to connect to the
+   > GDK instance. Running `clickhouse client` without `--port 9001` connects to
+   > a standalone ClickHouse instance if you have one installed.
+
 1. **GDK with required services enabled:**
 
    Add the following to `$GDK_ROOT/gdk.yml`:
@@ -38,10 +52,12 @@ ClickHouse from your GDK installation.
 
 1. **ClickHouse setup:**
 
-   Create the Rails ClickHouse config from the example and run migrations:
+   Create the Rails ClickHouse config from the example, create the database,
+   and run migrations:
 
    ```shell
    cp $GDK_ROOT/gitlab/config/click_house.yml.example $GDK_ROOT/gitlab/config/click_house.yml
+   clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
    cd $GDK_ROOT/gitlab && bundle exec rake gitlab:clickhouse:migrate
    ```
 
@@ -160,9 +176,9 @@ ClickHouse from your GDK installation.
        - siphon/consumer.yml
    ```
 
-   Then restart siphon: `gdk restart siphon-producer-main-db siphon-clickhouse-consumer`
+   Then restart siphon: `gdk restart siphon`
 
-   See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/siphon/orbit-stg.yaml.gotmpl)
+   See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/bases/environments/orbit-stg.yaml.gotmpl)
    for the full list of tables used in production.
 
 1. **Enable Knowledge Graph and JWT auth:**
@@ -192,7 +208,14 @@ ClickHouse from your GDK installation.
 
    This creates `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` which the
    dev script reads automatically to configure the GKG webserver's JWT
-   verifying key.
+   verifying key. Verify the file was created:
+
+   ```shell
+   ls $GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret
+   ```
+
+   If the file does not exist, restart Rails again. It may take a second
+   restart for the secret to be generated.
 
    Enable the feature flags:
 
@@ -205,13 +228,18 @@ ClickHouse from your GDK installation.
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
    ```
 
    The Knowledge Graph UI is available at
    `https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
 
 ## Setup
+
+Clone this repository somewhere accessible (for example, next to your
+`$GDK_ROOT` directory). The `GDK_ROOT` variable in `.env` (see step 2) is how
+GKG locates your GDK installation, so the two directories do not need to be
+adjacent.
 
 1. **Install dependencies:**
 
@@ -322,6 +350,38 @@ Protect the file from being overwritten by adding `siphon/config.yml` to
 
 **No data in graph:**
 
-- Check siphon services: `gdk status siphon-producer-main-db siphon-clickhouse-consumer`
+- Check siphon services: `gdk status siphon`
 - Verify `siphon_*` tables have data: `clickhouse-client --port 9001 -q "SELECT count() FROM siphon_projects"`
 - Check GKG indexer output in the `mise run dev` terminal
+
+**`mise install` crashes with Rust toolchain errors:**
+
+If `mise install` fails with errors related to parallel Rust toolchain installs,
+reinstall the stable toolchain manually:
+
+```shell
+rustup toolchain uninstall stable
+rustup toolchain install stable
+```
+
+Then re-run `mise install`.
+
+**Datalake connection errors in the indexer:**
+
+If the indexer logs errors like `datalake query failed: client error (Connect)`,
+verify that ClickHouse is running and accessible:
+
+```shell
+gdk status clickhouse
+curl "http://localhost:8123/ping"
+```
+
+Also confirm that the `gitlab_clickhouse_development` database exists and the
+Siphon datalake tables have been created:
+
+```shell
+clickhouse client --host localhost --port 9001 --query "SHOW TABLES FROM gitlab_clickhouse_development"
+```
+
+If the tables are missing, check that Siphon is running (`gdk status siphon`)
+and has been configured correctly (see [Configure Siphon tables](#prerequisites)).
