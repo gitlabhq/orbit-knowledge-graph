@@ -1,0 +1,32 @@
+description: Pipeline → stage → job hierarchy indexes with all hierarchy edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, user_id: 1, iid: 1, sha: abc123, ref: main, status: success, source: 1, tag: false, traversal_path: "1/100/1000/" }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: build, status: 3, position: 0, traversal_path: "1/100/1000/" }
+    - { id: 6002, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: test, status: 3, position: 1, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: compile, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+    - { id: 7002, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: docker-build, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+    - { id: 7003, partition_id: 1, stage_id: 6002, project_id: 1000, user_id: 1, name: unit-tests, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+    - { id: 7004, partition_id: 1, stage_id: 6002, project_id: 1000, user_id: 1, name: integration-tests, status: success, ref: main, allow_failure: true, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_pipeline: { count: 1 }
+    gl_stage: { count: 2 }
+    gl_job: { count: 4 }
+  edges:
+    - { kind: IN_PROJECT, from: Pipeline, to: Project, traversal_path: "1/100/1000/", count: 1 }
+    - { kind: HAS_STAGE, from: Pipeline, to: Stage, traversal_path: "1/100/1000/", count: 2 }
+    - { kind: HAS_JOB, from: Stage, to: Job, traversal_path: "1/100/1000/", count: 4 }
+    - { kind: TRIGGERED, from: User, to: Pipeline, traversal_path: "1/100/1000/", count: 1 }
+    - { kind: TRIGGERED, from: User, to: Job, traversal_path: "1/100/1000/", count: 4 }

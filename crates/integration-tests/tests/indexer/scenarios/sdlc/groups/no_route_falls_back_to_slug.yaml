@@ -1,0 +1,12 @@
+description: A group without a route falls back to its path slug for full_path
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/", slug: my-group }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, full_path: my-group }

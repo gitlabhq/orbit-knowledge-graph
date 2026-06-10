@@ -1,0 +1,36 @@
+description: Renaming a parent group updates the child group full_path too
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: parent }
+        - { id: 200, parent_id: 100, traversal_path: "1/100/200/", slug: child }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: parent, namespace_id: 100, traversal_path: "1/100/" }
+        - { id: 200, source_id: 200, source_type: Namespace, path: parent/child, namespace_id: 200, traversal_path: "1/100/200/" }
+    expect:
+      nodes:
+        gl_group:
+          rows:
+            - { id: 100, full_path: parent }
+            - { id: 200, full_path: parent/child }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null" }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: new-parent, namespace_id: 100, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 200, source_id: 200, source_type: Namespace, path: new-parent/child, namespace_id: 200, traversal_path: "1/100/200/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+      siphon_namespaces:
+        - { id: 100, name: new-parent, path: new-parent, type: Group, visibility_level: 0, parent_id: null, traversal_ids: [1, 100], _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { id: 200, name: child, path: child, type: Group, visibility_level: 0, parent_id: 100, traversal_ids: [1, 100, 200], _siphon_replicated_at: "2024-01-20 18:00:00" }
+      siphon_namespace_details:
+        - { namespace_id: 100, _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { namespace_id: 200, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_group:
+          rows:
+            - { id: 100, full_path: new-parent }
+            - { id: 200, full_path: new-parent/child }

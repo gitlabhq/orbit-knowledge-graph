@@ -1,0 +1,26 @@
+# There is no Commit node and the CLOSED edge variant for Commit is
+# undeclared, so the Commit-noteable lifecycle note must drop. totals
+# gl_edge: 1 proves no Commit-targeted edge of any kind was written.
+description: A lifecycle action on a Commit noteable produces no edge
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: closed, noteable_type: Commit, noteable_id: 555, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note: closed, noteable_type: Issue, noteable_id: 777, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: closed, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note_id: 2, action: closed, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: CLOSED
+      count: 1
+      rows:
+        - { target_kind: WorkItem }
+  totals:
+    gl_edge: 1

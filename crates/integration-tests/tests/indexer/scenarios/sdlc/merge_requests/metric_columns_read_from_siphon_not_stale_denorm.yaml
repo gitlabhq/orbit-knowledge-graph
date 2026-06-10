@@ -1,0 +1,19 @@
+# The metrics row replicated after the MR row without a parent re-emit;
+# destination metric columns must come from siphon_merge_request_metrics,
+# not the stale NULL denormalized columns on merge_requests.
+description: Metric columns read from the metrics table, not stale denormalized columns
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 42, iid: 1, title: Stale metrics, description: metrics row updated without parent re-emit, source_branch: branch, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, metric_diff_size: null, metric_commits_count: null, metric_added_lines: null, metric_removed_lines: null, traversal_path: "1/100/" }
+  siphon_merge_request_metrics:
+    - { id: 1, merge_request_id: 42, diff_size: 4242, commits_count: 7, added_lines: 314, removed_lines: 88, target_project_id: 1000, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 12:30:00" }
+
+expect:
+  nodes:
+    gl_merge_request:
+      rows:
+        - { id: 42, diff_size: 4242, commits_count: 7, added_lines: 314, removed_lines: 88 }

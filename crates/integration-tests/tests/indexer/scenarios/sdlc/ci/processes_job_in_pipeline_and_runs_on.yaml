@@ -1,0 +1,28 @@
+# Runners are global-scope entities, so the global handler must run before
+# the namespace handler links jobs to them.
+description: Jobs link to pipelines and runners across global + namespace runs
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_ci_runners:
+    - { id: 9001, runner_type: 1, name: shared, description: test runner, active: true, locked: false, run_untagged: true, access_level: 0, organization_id: null, created_at: "2024-01-15", updated_at: "2024-01-15", contacted_at: "2024-01-15" }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, iid: 1, sha: a, ref: main, status: success, source: 1, tag: false, created_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: build, status: 3, position: 0, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, runner_id: 9001, type: "Ci::Build", name: compile, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+
+run: [global, namespace]
+
+expect:
+  nodes:
+    gl_runner: { count: 1 }
+  edges:
+    - { kind: IN_PIPELINE, from: Job, to: Pipeline, traversal_path: "1/100/1000/", count: 1 }
+    - { kind: HAS_JOB, from: Pipeline, to: Job, traversal_path: "1/100/1000/", count: 1 }
+    - { kind: RUNS_ON, from: Job, to: Runner, traversal_path: "1/100/1000/", count: 1 }

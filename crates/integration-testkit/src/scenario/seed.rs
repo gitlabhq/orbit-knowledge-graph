@@ -292,9 +292,10 @@ async fn insert_rows(
                 format!("({})", rendered.join(", "))
             })
             .collect();
+        let quoted_columns: Vec<String> = column_names.iter().map(|c| format!("`{c}`")).collect();
         ctx.execute(&format!(
             "INSERT INTO {table} ({}) VALUES {}",
-            column_names.join(", "),
+            quoted_columns.join(", "),
             values.join(", ")
         ))
         .await;
