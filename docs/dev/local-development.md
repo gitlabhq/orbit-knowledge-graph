@@ -356,6 +356,11 @@ health checks and REST-style queries.
 - Check HTTP port: `curl "http://localhost:8123/ping"`
 - Check native port: `clickhouse client --host localhost --port 9001 --query "SELECT 1"`
 
+**MEMORY_LIMIT_EXCEEDED errors from ClickHouse:**
+
+- Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml`
+- Restart ClickHouse: `gdk restart clickhouse`
+
 **No data in graph:**
 
 - Check siphon services: `gdk status siphon`
