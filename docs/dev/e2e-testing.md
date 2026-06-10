@@ -72,11 +72,13 @@ other suite runs in a parallel worker pool.
 - `e2e/tests/ordering.txt` defines the barrier: suites listed before `#WAIT`
   run first; everything else is auto-discovered. A new `NN_name.robot` file
   needs no registration — it joins the parallel pool automatically.
-- Suite 01 publishes `GITLAB_PAT`, `E2E_BOT_USER_ID`, and the shared namespace
-  through PabotLib parallel keys; downstream suites adopt them via the
-  `Attach To Shared Fixture` suite setup (`gitlab.resource`). A new suite that
-  needs credentials or the shared namespace must declare that setup (copy the
-  header of any existing suite).
+- Suite 01 publishes the shared namespace through PabotLib parallel keys;
+  downstream suites adopt it via the `Attach To Shared Fixture` suite setup
+  (`gitlab.resource`), which also mints a per-suite admin bot user. The Rails
+  `orbit_query` rate limit (60 req/min) is scoped per user, so suites must not
+  poll through one shared PAT. A new suite that needs credentials or the
+  shared namespace must declare that setup (copy the header of any existing
+  suite).
 - Suites must not depend on state created by other downstream suites, and
   instance-global mutations (feature flags, license) belong in 01 before the
   barrier.
