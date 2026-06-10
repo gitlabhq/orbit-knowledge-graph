@@ -47,6 +47,7 @@ yaml_test!(
     javascript_jsx_and_generated_js_files,
     "javascript/jsx_and_generated_js_files.yaml"
 );
+yaml_test!(javascript_error_recovery, "javascript/error_recovery.yaml");
 yaml_test!(
     typescript_gitlab_monolith_barrels,
     "typescript/gitlab_monolith_barrels.yaml"
