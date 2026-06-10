@@ -148,7 +148,7 @@ The product name is Orbit. The binary and config still use the engineering name 
 - [Indexer crate guide](crates/indexer/AGENTS.md)
 - [Operational runbooks](docs/dev/runbooks/)
 - [Server configuration runbook](docs/dev/runbooks/server_configuration.md)
-- Contributing: open an issue or MR using the templates under [`.gitlab/`](.gitlab/).
+- [Contributing](CONTRIBUTING.md) — quickstart, testing, linting, and MR conventions.
 
 </details>
 
