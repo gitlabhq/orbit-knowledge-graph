@@ -339,6 +339,19 @@ Aggregation queries use `aggregations`.
 | `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
 | `alias` | `string` | Name of the output column. |
 
+Property type support depends on the function:
+
+| Function | Requires `property` | Supported property types |
+|----------|---------------------|--------------------------|
+| `count` | No | N/A |
+| `sum` | Yes | Numeric only |
+| `avg` | Yes | Numeric only |
+| `min` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+| `max` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+
+`sum` and `avg` reject `DateTime` properties with a validation error. To
+aggregate over dates, use `min` or `max`.
+
 Use top-level `group_by` to group aggregation rows. It applies to every
 aggregation in the query. Do not put grouping inside an individual aggregation.
 
