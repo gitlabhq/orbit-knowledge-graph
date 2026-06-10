@@ -47,13 +47,13 @@ properties:
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Creation timestamp."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: true
+    nullable: false
     description: "Last update timestamp."
 
   project_id:
