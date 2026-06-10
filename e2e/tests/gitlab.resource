@@ -57,6 +57,7 @@ Attach To Shared Fixture
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
     Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
+    Wait For Node Indexed    User    ${user_id}    ${username}    label_field=username    timeout=240s
 
 Ensure E2E Bot User
     [Arguments]    ${root_headers}
