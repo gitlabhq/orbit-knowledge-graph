@@ -96,7 +96,7 @@ ClickHouse from your GDK installation.
        queueing:
          driver: "nats"
          url: "localhost:4222"
-         stream_name: "siphon_stream"
+         stream_name: "siphon_stream_main_db"
          temp_stream_name: "siphon_temp_stream_main"
          snapshot_stream_name: "siphon_snapshot_stream_main"
        table_mapping:
@@ -120,7 +120,7 @@ ClickHouse from your GDK installation.
        queueing:
          driver: "nats"
          url: "localhost:4222"
-         stream_name: "siphon_stream"
+         stream_name: "siphon_stream_main_db"
        streams:
          - identifier: namespaces
            subject: namespaces
