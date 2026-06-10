@@ -140,7 +140,19 @@
             }
           },
           "required": ["type", "source", "description"],
-          "additionalProperties": false
+          "additionalProperties": false,
+          "if": {
+            "not": {
+              "properties": { "type": { "const": "enum" } },
+              "required": ["type"]
+            }
+          },
+          "then": {
+            "properties": {
+              "values": false,
+              "enum_type": false
+            }
+          }
         },
         {
           "type": "object",
