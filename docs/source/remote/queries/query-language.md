@@ -162,6 +162,39 @@ Or they can use an operator:
 
 Token operators work only on properties with text indexes.
 
+### Text-indexed properties
+
+The following properties support `token_match`, `all_tokens`, and `any_tokens`.
+Using these operators on other properties falls back to a full string scan, which is slower.
+
+| Entity | Text-indexed properties |
+|--------|------------------------|
+| `Branch` | `name` |
+| `Definition` | `file_path`, `fqn`, `name` |
+| `Deployment` | `ref` |
+| `Directory` | `name`, `path` |
+| `Environment` | `environment_type`, `name` |
+| `File` | `name`, `path` |
+| `Finding` | `name` |
+| `Group` | `description`, `name` |
+| `ImportedSymbol` | `file_path`, `import_path` |
+| `Job` | `name`, `ref` |
+| `Label` | `description`, `title` |
+| `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |
+| `MergeRequestDiffFile` | `new_path`, `old_path` |
+| `Milestone` | `description`, `title` |
+| `Note` | `note` |
+| `Pipeline` | `ref` |
+| `Project` | `description`, `name` |
+| `Runner` | `name` |
+| `Stage` | `name` |
+| `User` | `name`, `username` |
+| `Vulnerability` | `description`, `title` |
+| `VulnerabilityIdentifier` | `external_id`, `external_type`, `name` |
+| `VulnerabilityOccurrence` | `name` |
+| `VulnerabilityScanner` | `external_id`, `name` |
+| `WorkItem` | `description`, `title` |
+
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are
