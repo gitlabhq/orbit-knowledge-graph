@@ -645,14 +645,6 @@ code-indexing-benchmark-build:
   extends:
     - .code-indexing-benchmark-rules
   interruptible: true
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: https://vault.gitlab.net
-  secrets:
-    BENCHMARK_GITLAB_TOKEN:
-      file: false
-      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
-      token: $VAULT_ID_TOKEN
   cache:
     key: "benchmark-repos-${GROUP}"
     paths:
@@ -712,14 +704,8 @@ code-indexing-benchmark-v2-linux:
     - .job-template
     - .code-indexing-benchmark-rules
   interruptible: true
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: https://vault.gitlab.net
-  secrets:
-    BENCHMARK_GITLAB_TOKEN:
-      file: false
-      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
-      token: $VAULT_ID_TOKEN
+  # BENCHMARK_GITLAB_TOKEN sourced from a masked CI/CD variable (not Vault) so
+  # fork MRs no longer fail Vault JWT bound_claims; comment is skipped if absent.
   script:
     - |
       gitlab-xtasks benchmark analyze \
@@ -738,12 +724,14 @@ code-indexing-benchmark-v2-linux:
         --branch "$CI_COMMIT_REF_NAME" \
         --output-file "gkg-benchmark-${SCENARIO}-results.json"
 
-      if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
+      if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
         gitlab-xtasks comment post \
           --type add-or-edit \
           --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
           --token "$BENCHMARK_GITLAB_TOKEN" \
           --file-path "gkg-benchmark-${SCENARIO}-results.md"
+      else
+        echo "Skipping benchmark comment: BENCHMARK_GITLAB_TOKEN unavailable (expected for fork MRs)."
       fi
   artifacts:
     paths:
