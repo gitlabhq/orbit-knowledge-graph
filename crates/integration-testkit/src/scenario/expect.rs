@@ -53,8 +53,7 @@ async fn check_edges(ctx: &TestContext, expect: &EdgeExpect, location: &str) {
     }
     let batches = ctx
         .query(&format!(
-            "SELECT source_id, source_kind, target_id, target_kind, traversal_path \
-             FROM {table} FINAL WHERE {}",
+            "SELECT * FROM {table} FINAL WHERE {}",
             conditions.join(" AND ")
         ))
         .await;
@@ -143,6 +142,18 @@ fn assert_exactly_one_match(
     matcher: &RowMatcher,
     location: &str,
 ) {
+    // An absent column means every row silently fails to match; surface it as a
+    // schema/typo error instead of a misleading "matched 0 rows". Skipped when the
+    // result set is empty, where zero matches is the real failure to report.
+    if !rows.is_empty() {
+        for column in matcher.keys() {
+            assert!(
+                rows.iter().any(|row| row.contains_key(column)),
+                "{location}: matcher references column '{column}' that is absent from every row; \
+                 check the column name against the table schema"
+            );
+        }
+    }
     let matching = rows.iter().filter(|row| row_matches(row, matcher)).count();
     if matching == 1 {
         return;

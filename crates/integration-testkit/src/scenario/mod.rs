@@ -8,6 +8,7 @@ mod expect;
 mod format;
 mod seed;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +42,8 @@ pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHa
         "no scenario files found under {}",
         root.display()
     );
+
+    assert_distinct_database_names(root, &files);
 
     let concurrency: usize = std::env::var("SUBTEST_CONCURRENCY")
         .ok()
@@ -94,7 +97,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
 fn discover(dir: &Path, files: &mut Vec<PathBuf>) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
-        Err(_) => return,
+        Err(e) => panic!("failed to read scenario directory {}: {e}", dir.display()),
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -119,6 +122,23 @@ fn scenario_name(root: &Path, file: &Path) -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     format!("{prefix}/{}", relative.display())
+}
+
+// database_name collapses every non-alphanumeric character to '_', so two scenario
+// paths differing only in such characters would fork the same database and silently
+// interfere. Catch the collision loudly before any task spawns.
+fn assert_distinct_database_names(root: &Path, files: &[PathBuf]) {
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for file in files {
+        let name = scenario_name(root, file);
+        let db = database_name(&name);
+        if let Some(previous) = seen.insert(db.clone(), name.clone()) {
+            panic!(
+                "scenarios '{previous}' and '{name}' map to the same database '{db}'; \
+                 rename one so their sanitised names differ"
+            );
+        }
+    }
 }
 
 fn database_name(scenario_name: &str) -> String {
