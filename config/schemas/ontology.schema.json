@@ -139,7 +139,7 @@
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
-          "required": ["type", "source"],
+          "required": ["type", "source", "description"],
           "additionalProperties": false
         },
         {
@@ -160,7 +160,7 @@
               "description": "Human-readable description of the property."
             }
           },
-          "required": ["type", "virtual"],
+          "required": ["type", "virtual", "description"],
           "additionalProperties": false
         }
       ]
