@@ -61,29 +61,6 @@ Push To Remote
     ...    stderr=STDOUT
     Should Be Equal As Integers    ${result.rc}    0    git push failed: ${result.stdout}
 
-Clone Project Repo
-    [Documentation]    Clone ${project} into a fresh temp work tree over HTTP with the e2e-bot
-    ...                PAT embedded in the origin remote. Returns the work tree path; the
-    ...                caller owns cleanup.
-    [Arguments]    ${project}
-    ${work}=    Evaluate    tempfile.mkdtemp(prefix="e2e-clone-")    modules=tempfile
-    ${url}=    Build Push URL    ${project}
-    Wait Until Keyword Succeeds    60s    5s    Run Git    ${work}    clone    ${url}    .
-    RETURN    ${work}
-
-Commit And Push All
-    [Documentation]    Stage every change in ${work}, commit with ${message}, and push to main
-    ...                via the origin remote left by Clone Project Repo.
-    [Arguments]    ${work}    ${message}
-    Run Git    ${work}    add    -A
-    ${env}=    Create Dictionary
-    ...    GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL}    GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME}
-    ...    GIT_COMMITTER_EMAIL=${GIT_AUTHOR_EMAIL}    GIT_COMMITTER_NAME=${GIT_AUTHOR_NAME}
-    ${result}=    Run Process    git    -C    ${work}    commit    -q    -m    ${message}
-    ...    env=${env}    stderr=STDOUT
-    Should Be Equal As Integers    ${result.rc}    0    git commit failed: ${result.stdout}
-    Wait Until Keyword Succeeds    60s    5s    Push To Remote    ${work}    origin
-
 Run Git
     [Arguments]    ${work}    @{args}
     ${result}=    Run Process    git    -C    ${work}    @{args}    stderr=STDOUT
