@@ -133,7 +133,7 @@ AI agent:
 glab orbit local mcp serve
 ```
 
-It will serve `query_graph` and `get_graph_schema` over the MCP protocol
+It will serve `run_sql` and `get_graph_schema` over the MCP protocol
 against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
 agent integration guide.
 

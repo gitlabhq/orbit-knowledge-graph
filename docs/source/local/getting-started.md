@@ -96,7 +96,7 @@ for details.
 |---|---|---|
 | [The Orbit CLI (`orbit`)](access/cli.md) | Direct CLI use, scripting, indexing tasks | One-line installer or `glab orbit local --install` |
 | [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `glab orbit setup`, or manual MCP config |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | Planned, [not yet available](access/mcp.md) |
 
 The query language is identical across all three. Whatever you learn in one
 transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
@@ -122,8 +122,8 @@ node types: `Definition`, `File`, `Directory`, `ImportedSymbol`.
 Next:
 
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: run `glab orbit setup`, or see
-  [Connect via MCP](access/mcp.md) for the manual config.
+- Wire it into your AI agent: run `glab orbit setup` to install the Orbit
+  skill. An MCP server is [planned](access/mcp.md).
 - Browse the table layout: [Schema reference](schema.md).
 
 ## Billing

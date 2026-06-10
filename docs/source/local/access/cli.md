@@ -119,7 +119,8 @@ Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
-- [Connect via MCP](mcp.md) - expose the local graph to Claude Code or Codex.
+- [Connect via MCP](mcp.md) - planned MCP server for Claude Code, Codex, and
+  other agents.
 - [Use Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.
