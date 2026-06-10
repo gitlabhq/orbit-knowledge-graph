@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
-    print!("{}", query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL));
+    print!(
+        "{}",
+        query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL)
+    );
     Ok(())
 }
 
