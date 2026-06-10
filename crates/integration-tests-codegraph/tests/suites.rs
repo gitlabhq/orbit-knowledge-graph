@@ -145,6 +145,7 @@ yaml_test!(
 );
 yaml_test!(python_wildcard_import, "python/wildcard_import.yaml");
 yaml_test!(python_callable_objects, "python/callable_objects.yaml");
+yaml_test!(python_dataclass, "python/dataclass.yaml");
 yaml_test!(python_instance_attrs, "python/instance_attrs.yaml");
 yaml_test!(
     python_return_type_inference,
