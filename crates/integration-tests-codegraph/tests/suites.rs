@@ -201,6 +201,7 @@ yaml_test!(
     "kotlin/annotation_references.yaml"
 );
 yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
+yaml_test!(kotlin_data_classes, "kotlin/data_classes.yaml");
 yaml_test!(
     kotlin_imported_symbol_fallback_matrix,
     "kotlin/imported_symbol_fallback_matrix.yaml"
