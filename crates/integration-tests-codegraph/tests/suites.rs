@@ -307,6 +307,7 @@ yaml_test!(csharp_aliased_using, "csharp/aliased_using.yaml");
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 yaml_test!(ruby_metaprogramming, "ruby/metaprogramming.yaml");
+yaml_test!(ruby_dynamic_dispatch, "ruby/dynamic_dispatch.yaml");
 yaml_test!(ruby_gitlab_monolith, "ruby/gitlab_monolith.yaml");
 yaml_test!(ruby_e2e_weather_app, "ruby/e2e_weather_app.yaml");
 yaml_test!(ruby_module_imports, "ruby/module_imports.yaml");
