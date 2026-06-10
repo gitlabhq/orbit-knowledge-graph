@@ -10,13 +10,14 @@ title: Orbit Remoteを使ってみる
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: 実験
+- ステータス: ベータ
 
 {{< /details >}}
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
 
 {{< /history >}}
 
@@ -33,7 +34,7 @@ Orbitはトップレベルグループのみをインデックス作成します
 
 ## ステップ1: Orbitを有効にする {#step-1-enable-orbit}
 
-1. 左サイドバーで、**自分の作業**を展開します。
+1. 左サイドバーで**自分の作業**を展開します。
 1. **Orbit** > **設定**を選択します。
 1. **インデックス**リストでトップレベルグループを見つけます。
 1. **有効にする**を切り替えます。
@@ -43,17 +44,16 @@ Orbitはすぐにインデックス作成を開始します。初回のインデ
 インデックス作成のステータスはいつでも確認できます。
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/status"
+glab orbit remote status
 ```
 
 ## ステップ2: 最初のクエリを実行する {#step-2-run-your-first-query}
 
-Orbit Remoteは3つのインターフェースを通じて同じグラフを公開しています。クエリを実行するユーザーに合ったものを選択してください。
+Orbit Remoteは同じグラフを3つのインターフェースで公開しています。クエリを実行するユーザーに合ったものを選択してください。
 
 | 方法 | 最適な用途 | セットアップ | 課金 |
 |---|---|---|---|
-| **GitLab Duo Agent Platform** | GitLab UIのエンドユーザー | 不要 | 無料 |
+| **GitLab Duo Agent Platform** | GitLab UIのエンドユーザー | 不要 | 消費対象外 |
 | **MCP** | Claude Code、Codex、その他のAIエージェント | エージェントの初回設定 | GitLab Credits |
 | **REST API** | スクリプト、ダッシュボード、カスタムツール | APIトークン | GitLab Credits |
 
@@ -63,23 +63,22 @@ OrbitはGitLab Duo Agent Platformに組み込まれています。GitLab Duo Age
 
 たとえば、`deploy_user`メソッドの名前変更を依頼する作業アイテムを登録すると、Developer FlowはOrbitを使用してそのメソッドを呼び出しているすべてのサービスを特定し、それぞれを更新するMRを作成します。
 
-GitLab DuoのクエリはGitLab Creditsを消費しません。
+GitLab Duoのクエリは消費対象外であり、GitLab Creditsを消費しません。
 
 ### MCP（Claude Code、Codex、その他のエージェント） {#mcp-claude-code-codex-other-agents}
 
-セットアップについては、[MCPを使用したOrbitの利用](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
+セットアップについては[MCPを使用してOrbitにアクセスする](access/mcp.md)を参照してください。設定が完了すると、`query_graph`と`get_graph_schema`の2つのツールが使用できます。
 
-### AIエージェント向けOrbitスキルのインストール {#install-the-orbit-skill-for-ai-agents}
+### AIエージェント向けOrbitスキルをインストールする {#install-the-orbit-skill-for-ai-agents}
 
-OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、最初の試みで正しいOrbitクエリを作成できるようにします。
+OrbitスキルはAIエージェントにクエリレシピ、DSLガイダンス、トラブルシューティングを提供し、初回から正しいOrbitクエリを作成できるようにします。
 
 ```shell
 glab skills install --global orbit
 ```
 
-プロジェクトスコープのインストール、更新手順、スキルの内容については、[Orbitスキルを使用したAIコーディングエージェントのセットアップ](../ai_coding_agents.md)を参照してください。
+プロジェクトスコープのインストール、アップデート手順、スキルの内容については、[Orbitスキルを使用してAIコーディングエージェントをセットアップする](../ai_coding_agents.md)を参照してください。
 
-<!-- markdownlint-disable-next-line MD044 -->
 ### REST API {#rest-api}
 
 `your-group`をOrbitを有効にしたトップレベルグループのパスに置き換えてください。`full_path`フィルターはクエリのスコープを絞り込み、Orbitの選択性検証を通過させます。
@@ -108,7 +107,7 @@ curl --request POST \
 
 ## 次に試すこと {#what-to-try-next}
 
-- [Orbitがインデックス作成する内容](indexing.md) - クエリを作成する前にカバレッジを理解する
+- [Orbitのインデックス対象](indexing.md) - クエリを作成する前にカバレッジを理解する
 - [スキーマリファレンス](schema.md) - 24種類のノードタイプとそのプロパティを確認する
 - [Cookbook](cookbook.md) - 一般的なユースケース向けのコピー&ペーストクエリ
 - [Orbit Localを使ってみる](../local/getting-started.md) - ローカルリポジトリをオフラインでクエリする

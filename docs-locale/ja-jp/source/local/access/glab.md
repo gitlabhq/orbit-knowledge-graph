@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: glab orbit localサブコマンドとglab orbit setupは、将来のglabリリースで提供予定です。リリースまでの間は、ソースからビルドしてorbitバイナリを直接使用してください。
+description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。ローカルのmcp serveコマンドは計画中です。
 title: GitLab CLI（`glab`）でOrbit Localを使用する
 ---
 
@@ -10,64 +10,73 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: 実験
+- ステータス: ベータ
 
 {{< /details >}}
 
 {{< history >}}
 
-- GitLab 19.0で[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)されました。
+- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
 
 {{< /history >}}
 
 > [!disclaimer]
 
-[GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、Orbit Localのインストール、実行、およびAIエージェントとの統合に推奨される標準的な方法です。`glab orbit local`は`glab orbit remote`と同じ構造を持つため、GitLabインスタンスまたはローカルマシンのどちらに対してクエリを実行する場合でも、同じパターンを使用できます。
+[GitLab CLI（`glab`）](https://docs.gitlab.com/cli/)は、Orbit Localのインストール、実行、AIエージェントとの統合に推奨される標準的な方法です。`glab orbit local`は`glab orbit remote`と同じ構造を持つため、GitLabインスタンスへのクエリとローカルマシンへのクエリで同じパターンが使用できます。
 
 > [!note]
-> `glab orbit local`と`glab orbit setup`はいずれも将来のglabリリースで提供予定であり、現時点では利用できません。このページに記載されているコマンドは将来の仕様であり、現在の仕様ではありません。リリースまでの間は、ソースからビルドしてください。詳細は[`orbit`を直接使用する](cli.md)を参照してください。
+> `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
+> MCPサーバーのサブコマンド（`glab orbit local mcp serve`）は計画中ですが、
+> まだ利用できません。該当箇所にはその旨を記載しています。
 
-トップレベルコマンドは2つあります（いずれも予定中で、未リリース）:
+トップレベルのコマンドは2つあります。
 
-- `glab orbit setup`: Orbitスキルをインストールし、AIエージェントをローカルグラフに接続します。
-- `glab orbit local`: `orbit`バイナリをラップする型付きサブコマンドです。`glab orbit local mcp serve`を使用してOrbit LocalをMCPサーバーとして実行できます。
+- `glab orbit local`: 管理された`orbit`バイナリをラップし、ローカルグラフのインデックス作成とクエリを実行します。
+- `glab orbit setup`: アクセスの確認、Orbitスキルのインストール、ローカルバイナリのインストールをガイド付きで行うオンボーディングコマンドです。
 
 ## 前提条件 {#prerequisites}
 
-- `glab`がインストールされ、認証済みであること:
+- `glab` 1.94以降がインストールされていること。
+- インデックス作成対象のローカルGitリポジトリがあること。
 
-  ```shell
-  glab auth login
-  ```
+バイナリのインストール後は、`glab orbit local`の使用にGitLabアカウントやネットワーク接続は不要です。
 
-- インデックスを作成するローカルGitリポジトリ。
+## インストール {#install}
 
-バイナリがインストールされていれば、`glab orbit local`の使用にGitLabアカウントやネットワーク接続は不要です。
+管理された`orbit`バイナリをインストールします。
 
-## AIエージェントを設定する {#set-up-your-ai-agent}
+```shell
+glab orbit local --install
+```
 
-> [!note]
-> `glab orbit setup`は予定中であり、まだリリースされていません。リリースまでの間は、[MCPクライアントを手動で設定](mcp.md#manual-config-claude-code)してください。
+`glab`がバイナリをダウンロードし、チェックサムを検証して、最新の状態に保ちます。
+インストールを確認するには、次のコマンドを実行します。
 
-リリース後、`glab orbit setup`は1つのコマンドでOrbitスキルをインストールし、MCP設定を書き込みます。**Local**または**Remote**を選択するプロンプトが表示され、エージェントが自動検出されます。
+```shell
+glab orbit local help
+```
+
+## AIエージェントをセットアップする {#set-up-your-ai-agent}
+
+`glab orbit setup`はガイド付きオンボーディングを実行します。Orbitへの接続確認、AIコーディングエージェントが検出できるようにするOrbitスキルのインストール、ローカル`orbit`バイナリのインストールを行います。
 
 ```shell
 glab orbit setup
-# ローカルグラフにMCP設定を向けるには、プロンプトで「Local」を選択してください。
 ```
-
-対応エージェント: Claude Code、OpenCode、Cursor、Codex、Gemini CLI。
 
 | フラグ | 説明 |
 |------|---------|
-| `--agent=<name>` | 自動検出を上書きします。 |
-| `--skill-only` | スキルファイルのみをインストールし、MCP設定をスキップします。 |
-| `--mcp-only` | MCP設定のみを書き込み、スキルのインストールをスキップします。 |
-| `--dry-run` | 何も書き込まずに変更内容を表示します。 |
+| `--yes` | すべてのプロンプトを承認します（非インタラクティブモード）。 |
+| `--global` | 現在のリポジトリではなく、ユーザースコープ（`~/.agents/skills/`）にスキルをインストールします。 |
+| `--path` | 指定したディレクトリにスキルをインストールします。 |
+| `--skip-skill` | スキルのインストール手順をスキップします。 |
+| `--skip-local` | ローカルバイナリのインストール手順をスキップします。 |
+| `--upgrade` | スキルを再取得し、バイナリをその場で更新します。 |
 
-MCP設定はリモートエンドポイントではなく`orbit mcp serve`を指します。エージェントはローカルのDuckDBグラフに対して`query_graph`と`get_graph_schema`を呼び出せます。
+スキルは`orbit`バイナリを直接駆動します。MCPクライアントをローカルグラフに接続する場合は、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
-また、`glab skills install --global orbit`を使用して、今すぐ[Orbitスキルを手動でインストール](../../ai_coding_agents.md)することもできます。
+`glab skills install --global orbit`を使用して、[Orbitスキルを手動でインストールする](../../ai_coding_agents.md)こともできます。
 
 ## リポジトリのインデックスを作成する {#index-a-repository}
 
@@ -90,40 +99,35 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## スキーマを確認する {#inspect-the-schema}
 
+`glab orbit local schema`には`--ontology`または`--query`のいずれかが必要です。
+
 ```shell
-glab orbit local schema
-glab orbit local schema --raw
+glab orbit local schema --ontology
+glab orbit local schema --query
 ```
+
+- `--ontology`: グラフオントロジー（エンティティ、エッジ、プロパティ）を表示します。
+- `--query`: クエリDSLスキーマ（構造化クエリの記述方法）を表示します。
+
+どちらのフラグにも`--raw`を追加すると、デフォルトのLLM向け出力ではなくJSON形式で出力されます。
 
 ## MCPサーバーとして実行する {#run-as-an-mcp-server}
 
-ローカルグラフをMCP対応のAIエージェントに公開します:
+> [!note]
+> `glab orbit local mcp serve`は計画中であり、まだリリースされていません。
+
+リリース後、このコマンドはローカルグラフをMCP対応のAIエージェントに公開します。
 
 ```shell
 glab orbit local mcp serve
 ```
 
-これにより、`~/.orbit/graph.duckdb`に対してMCPプロトコル経由で`query_graph`と`get_graph_schema`が提供されます。エージェントとの完全な統合ガイドについては、[MCPで接続する](mcp.md)を参照してください。
-
-## インデックス済みリポジトリを一覧表示する {#list-indexed-repositories}
-
-```shell
-glab orbit local status
-```
-
-ローカルグラフに存在するリポジトリ、そのインデックス状態、およびデータベースパスが表示されます。
+MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`query_graph`と`get_graph_schema`を提供します。エージェント統合の詳細については、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
 ## 終了コード {#exit-codes}
 
-`glab orbit local`はエラーを安定した終了コードにマッピングするため、スクリプトやエージェントで分岐処理が可能です。
-
-| ステータス | 終了コード | 意味 |
-|--------|-----------|---------|
-| 成功 | `0` | コマンドが完了しました。 |
-| グラフなし | `2` | `~/.orbit/graph.duckdb`が見つかりません。先に`index`を実行してください。 |
-| クエリエラー | `4` | クエリDSLの検証またはコンパイルに失敗しました。 |
-| その他 | `1` | 非構造化エラー。詳細はstderrを確認してください。 |
+`glab orbit local`は成功時に`0`を返し、失敗時にはゼロ以外の終了コードをstderrの詳細とともに返します。スクリプトやエージェントは成功または失敗に応じて処理を分岐できます。
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLab Creditsを消費しません。すべての処理はローカルで行われます。
+Orbit LocalはGitLabクレジットを消費しません。すべての処理はローカルで行われます。

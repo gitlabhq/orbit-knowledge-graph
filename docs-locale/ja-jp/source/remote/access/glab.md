@@ -10,13 +10,14 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: 実験
+- ステータス: ベータ
 
 {{< /details >}}
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
 
 {{< /history >}}
 
@@ -33,9 +34,8 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 トップレベルコマンドは2つあります。
 
-- `glab orbit remote`: Orbit Remote REST APIを呼び出す型付きサブコマンドです。
-  `glab` 1.94以降で利用可能です。
-- `glab orbit setup`: AIエージェント向けにOrbitスキルとMCP設定を一括インストールするコマンドです。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
+- `glab orbit remote`: Orbit Remote REST APIを呼び出す型付きサブコマンドです。`glab` 1.94以降で利用可能です。
+- `glab orbit setup`: AIエージェント向けにOrbitスキルとMCP設定をワンコマンドでインストールします。将来の`glab`リリースで提供予定です。リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 ## 前提条件 {#prerequisites}
 
@@ -50,13 +50,13 @@ title: GitLab CLI（`glab`）でOrbitを使用する
 
 ## AIエージェントをセットアップする {#set-up-your-ai-agent}
 
-`glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、1つのコマンドでOrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
+`glab orbit setup`は将来の`glab`リリースで提供予定です。リリース後は、ワンコマンドでOrbitスキルのインストールとAIエージェント（Claude Code、OpenCode、Cursor、Codex、Gemini CLI）向けのMCP設定の書き込みが行えるようになります。
 
 リリースまでの間は、[MCPクライアントを手動で設定してください](mcp.md#connect-your-mcp-client)。
 
 ## コマンドラインからOrbitにクエリを実行する {#query-orbit-from-the-command-line}
 
-`glab orbit remote`（または`r`エイリアス）を使用して、Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ探索に役立ちます。`glab` 1.94以降が必要です。
+`glab orbit remote`（またはエイリアス`r`）を使用して、Orbit Remote APIを直接呼び出します。スクリプト作成、デバッグ、クエリ作成前のスキーマ調査に役立ちます。`glab` 1.94以降が必要です。
 
 | サブコマンド | エンドポイント | 目的 |
 |------------|----------|---------|
@@ -77,24 +77,39 @@ glab orbit remote tools
 
 ### クエリを実行する {#run-a-query}
 
+`your-group`を実際のグループパスに置き換えてください。このクエリはそのグループの最初の5つのプロジェクトを返します。
+
 ```shell
-echo '{"query":{"query_type":"traversal","node":{"id":"p","entity":"Project","filters":{"full_path":{"op":"starts_with","value":"your-group/"}}},"limit":5}}' \
-  | glab orbit remote query -
+glab orbit remote query - <<'EOF'
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": { "op": "starts_with", "value": "your-group/" }
+      }
+    },
+    "limit": 5
+  }
+}
+EOF
 ```
 
 `--format`フラグはリクエストボディの`response_format`にマップされます。
 
-- `--format llm` - AIエージェントの利用に最適化されたコンパクトなテキスト形式。
-- `--format raw` - `jq`へのパイプ処理に適した構造化されたJSON形式。
+- `--format llm` - AIエージェントの処理に最適化されたコンパクトなテキスト形式。
+- `--format raw` - `jq`へのパイプに適した構造化されたJSON形式。
 
 `--format`が未設定の場合、ボディの`response_format`が優先され、最終的なフォールバックとして`llm`が使用されます。
 
 ### インデックス作成の進捗状況を確認する {#check-indexing-progress}
 
-スコープフラグを1つだけ指定してください。
+スコープフラグをいずれか1つ指定してください。
 
 ```shell
-glab orbit remote graph-status --full-path gitlab-org/gitlab
+glab orbit remote graph-status --full-path your-group/your-project
 glab orbit remote graph-status --namespace-id 24
 glab orbit remote graph-status --project-id 2
 ```
@@ -110,7 +125,7 @@ glab orbit remote graph-status --project-id 2
 | `401` | `3` | トークンが存在しないか期限切れ。 |
 | `403` | `4` | Knowledge Graphが有効なネームスペースが存在しない。 |
 | `429` | `5` | レート制限。`Retry-After`を確認してバックオフしてください。 |
-| その他 | `1` | 非構造化エラー。レスポンスボディが存在する場合は含まれます。 |
+| その他 | `1` | 非構造化エラー。レスポンスボディがある場合は含まれます。 |
 
 ## 課金 {#billing}
 

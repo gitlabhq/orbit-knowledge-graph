@@ -10,13 +10,14 @@ title: スキーマリファレンス
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: 実験
+- ステータス: ベータ
 
 {{< /details >}}
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
@@ -25,13 +26,12 @@ title: スキーマリファレンス
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitは6つのドメインにわたる24のノードタイプをインデックス化します。クエリでエンティティ名として使用してください。
+Orbitは6つのドメインにわたる24のノードタイプのインデックスを作成します。クエリのエンティティ名としてこれらを使用してください。
 
-ライブスキーマをいつでも取得するには:
+ライブスキーマをいつでもフェッチするには:
 
 ```shell
-curl --header "Authorization: Bearer <your_token>" \
-  "https://gitlab.com/api/v4/orbit/schema"
+glab orbit remote schema
 ```
 
 ## コア {#core}
@@ -59,7 +59,7 @@ curl --header "Authorization: Bearer <your_token>" \
 |-----------|-------------|----------------|
 | `MergeRequest` | マージリクエスト | `id`, `iid`, `title`, `description`, `source_branch`, `target_branch`, `state`, `draft`, `squash` |
 | `MergeRequestDiff` | MR内の変更のスナップショット | `id`, `merge_request_id`, `commits_count`, `files_count` |
-| `MergeRequestDiffFile` | MRの差分で変更されたファイル | `id`, `new_path`, `old_path`, `new_file`, `renamed_file`, `deleted_file` |
+| `MergeRequestDiffFile` | MR差分で変更されたファイル | `id`, `new_path`, `old_path`, `new_file`, `renamed_file`, `deleted_file` |
 
 ## CI/CD {#ci-cd}
 
@@ -88,9 +88,9 @@ curl --header "Authorization: Bearer <your_token>" \
 | `VulnerabilityOccurrence` | 脆弱性の特定の発生箇所（Railsでは`Vulnerabilities::Finding`） | `id`, `uuid`, `severity`, `report_type`, `detection_method`, `cve`, `location` |
 | `VulnerabilityScanner` | セキュリティスキャナー | `id`, `external_id`, `name`, `vendor` |
 
-## 注意事項 {#notes}
+## 注記 {#notes}
 
-- 定義IDは、プロジェクトおよびブランチごとにスコープされたコンテンツハッシュ整数です。異なるプロジェクトに存在する同一シンボルの2つの定義は、関数名とファイルパスが同一であっても異なるIDを持ちます。
-- すべてのエンティティIDは、基となる値が整数であっても、クエリレスポンスでは文字列として返されます。これにより、`Number.MAX_SAFE_INTEGER`を超える値に対するJavaScriptクライアントでの精度損失を防ぎます。
+- 定義IDは、プロジェクトおよびブランチごとにスコープされたコンテンツハッシュ整数です。異なるプロジェクトで同じシンボルを定義した場合、関数名やファイルパスが同一であっても、IDは異なります。
+- すべてのエンティティIDは、基となる値が整数であっても、クエリレスポンスでは文字列として返されます。これにより、`Number.MAX_SAFE_INTEGER`を超える値に対してJavaScriptクライアントでの精度損失を防ぎます。
 - `Definition`および`File`ノードの`content`フィールドには、定義またはファイルの完全なソーステキストが含まれます。これらのフィールドは、GitLabへの個別のAPIコールを行わずにファイルコンテンツをハイドレートする必要があるエージェントツールで利用できます。
-- すべてのノードには、認可フィルタリングに使用される`traversal_path`プロパティが含まれます。クエリ結果は、リクエストを行うユーザーがアクセスできるエンティティに自動的にスコープされます。
+- すべてのノードには、認可フィルタリングに使用される`traversal_path`プロパティが含まれています。クエリ結果は、リクエストを行うユーザーがアクセスできるエンティティに自動的にスコープされます。

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: ブラスト半径分析、オンボーディング、依存関係マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストで利用できます。
+description: ブラスト半径分析、オンボーディング、依存関係マッピング、パイプラインの健全性、脆弱性トレーシングなど、一般的なユースケース向けのOrbitクエリをコピー＆ペーストで使用できます。
 title: Cookbook
 ---
 
@@ -10,13 +10,14 @@ title: Cookbook
 
 - プラン: Premium、Ultimate
 - 提供形態: GitLab.com
-- ステータス: 実験
+- ステータス: ベータ
 
 {{< /details >}}
 
 {{< history >}}
 
-- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験](https://docs.gitlab.com/policy/development_stages_support/#experiment)段階にあります。
+- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
 
 {{< /history >}}
 
@@ -25,7 +26,7 @@ title: Cookbook
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-一般的なOrbitのユースケースに対応した、すぐに使えるクエリ集です。すべての例はREST APIフォーマットを使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
+最も一般的なOrbitのユースケースに対応した、すぐに使えるクエリ集です。すべての例はREST APIフォーマットを使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
 
 ## ブラスト半径分析 {#blast-radius-analysis}
 
@@ -109,7 +110,7 @@ title: Cookbook
 
 ## 依存関係マッピング {#dependency-mapping}
 
-「サービス間はどのように接続されているか？」という問いに答えます。
+「サービス同士はどのように接続されているか？」という問いに答えます。
 
 ### インポートされた定義をマッピングする {#map-imported-definitions}
 
