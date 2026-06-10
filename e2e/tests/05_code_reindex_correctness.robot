@@ -11,6 +11,8 @@ Resource            gitlab.resource
 Resource            orbit.resource
 Resource            git.resource
 
+Suite Teardown      Remove Work Tree
+
 
 *** Variables ***
 ${RUBY_FIXTURE_DIR}     /fixtures/ruby/weather-app
@@ -75,6 +77,12 @@ Deleting A File Removes Its Entities And Preserves The Rest
 
 
 *** Keywords ***
+Remove Work Tree
+    ${work}=    Get Variable Value    ${WORK}    ${None}
+    IF    $work is not None
+        Remove Directory    ${work}    recursive=True
+    END
+
 Code Graph Is Fully Retrievable
     [Documentation]    Assert the canonical entities of every original fixture file are
     ...                queryable: definitions by fqn, plus the File -[DEFINES]-> Definition

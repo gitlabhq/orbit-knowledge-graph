@@ -69,8 +69,8 @@ tar -xzf "$ARCHIVE" --strip-components=4 -C "$TABLES_RAW"
 # `database:` value. Coalescing every non-main YAML into main works but more
 # than doubles the indexer's per-namespace pipeline_count, which slows the
 # code-backfill suite past its 1-minute wait budget. Keep the producer narrow:
-# allow `main` plus the vulnerability domain (six tables) which 05_role_scoped_authz
-# requires.
+# allow `main` plus the vulnerability domain (six tables) which the authz and
+# security suites require (temporarily removed, kept here for their return).
 ALLOW_NON_MAIN=(
   vulnerabilities
   vulnerability_identifiers
