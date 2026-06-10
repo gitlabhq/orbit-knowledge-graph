@@ -13,7 +13,7 @@ Documentation       A project- or group-id-scoped query rewrites the scope filte
 Resource            gitlab.resource
 Resource            orbit.resource
 
-Suite Setup         Seed Cross Namespace Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Cross Namespace Fixture
 
 
 *** Test Cases ***

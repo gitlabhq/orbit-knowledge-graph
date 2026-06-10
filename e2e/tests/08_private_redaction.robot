@@ -15,7 +15,7 @@ Documentation       Verify per-resource redaction on a normal traversal. A priva
 Resource            gitlab.resource
 Resource            orbit.resource
 
-Suite Setup         Build Private Redaction Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Build Private Redaction Fixture
 
 
 *** Test Cases ***

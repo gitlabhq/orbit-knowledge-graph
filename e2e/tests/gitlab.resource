@@ -6,6 +6,7 @@ Library             RequestsLibrary
 Library             Collections
 Library             String
 Library             DateTime
+Library             pabot.PabotLib
 
 
 *** Variables ***
@@ -31,7 +32,27 @@ Bootstrap E2E Credentials
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
     Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
+    Set Parallel Value For Key    GITLAB_PAT    ${pat}
+    Set Parallel Value For Key    E2E_BOT_USER_ID    ${user_id}
     Log    E2E credentials bootstrapped (user_id=${user_id})
+
+Attach To Shared Fixture
+    [Documentation]    Adopt the credentials and shared namespace provisioned by 01_setup_and_smoke.
+    ...                Under pabot every suite runs in its own process, so globals set in 01 are not
+    ...                visible here; the values travel through PabotLib parallel keys instead. Fails
+    ...                fast (instead of timing out per test) when 01 did not run or did not pass.
+    ${pat}=    Get Parallel Value For Key    GITLAB_PAT
+    Should Not Be Equal As Strings    ${pat}    ${EMPTY}
+    ...    01_setup_and_smoke published no credentials — did it run and pass?    values=False
+    ${bot_id}=    Get Parallel Value For Key    E2E_BOT_USER_ID
+    ${ns_id}=    Get Parallel Value For Key    SHARED_NAMESPACE_ID
+    Should Not Be Equal As Strings    ${ns_id}    ${EMPTY}
+    ...    01_setup_and_smoke published no shared namespace — did it run and pass?    values=False
+    ${ns_name}=    Get Parallel Value For Key    SHARED_NAMESPACE_NAME
+    Set Global Variable    ${GITLAB_PAT}    ${pat}
+    Set Global Variable    ${E2E_BOT_USER_ID}    ${{int($bot_id)}}
+    Set Global Variable    ${SHARED_NAMESPACE_ID}    ${{int($ns_id)}}
+    Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${ns_name}
 
 Ensure E2E Bot User
     [Arguments]    ${root_headers}
