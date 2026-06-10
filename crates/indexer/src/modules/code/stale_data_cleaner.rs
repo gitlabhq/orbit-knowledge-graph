@@ -71,12 +71,13 @@ impl ClickHouseStaleDataCleaner {
     fn build_node_delete_query(table: &str) -> String {
         format!(
             r#"
-            INSERT INTO {table} (traversal_path, project_id, branch, id, _deleted)
+            INSERT INTO {table} (traversal_path, project_id, branch, id, _version, _deleted)
             SELECT
                 traversal_path,
                 project_id,
                 branch,
                 id,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
             FROM {table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
@@ -94,7 +95,7 @@ impl ClickHouseStaleDataCleaner {
             return format!(
                 r#"
                 INSERT INTO {edge_table}
-                    (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted)
+                    (traversal_path, project_id, branch, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
                 SELECT
                     traversal_path,
                     project_id,
@@ -104,6 +105,7 @@ impl ClickHouseStaleDataCleaner {
                     relationship_kind,
                     target_id,
                     target_kind,
+                    {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                     true AS _deleted
                 FROM {edge_table} FINAL
                 WHERE traversal_path = {{traversal_path:String}}
@@ -137,7 +139,7 @@ impl ClickHouseStaleDataCleaner {
         format!(
             r#"
             INSERT INTO {edge_table}
-                (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted)
+                (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version, _deleted)
             SELECT
                 traversal_path,
                 source_id,
@@ -145,6 +147,7 @@ impl ClickHouseStaleDataCleaner {
                 relationship_kind,
                 target_id,
                 target_kind,
+                {{watermark_time:DateTime64(6, 'UTC')}} - toIntervalMicrosecond(1) AS _version,
                 true AS _deleted
             FROM {edge_table} FINAL
             WHERE traversal_path = {{traversal_path:String}}
