@@ -6,6 +6,7 @@ Library             RequestsLibrary
 Library             Collections
 Library             String
 Library             DateTime
+Library             pabot.PabotLib
 
 
 *** Variables ***
@@ -33,22 +34,52 @@ Bootstrap E2E Credentials
     Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
     Log    E2E credentials bootstrapped (user_id=${user_id})
 
+Attach To Shared Fixture
+    [Documentation]    Per-suite stand-in for the globals 01_setup_and_smoke provides in a
+    ...                sequential run. Under pabot every suite runs in its own process, so the
+    ...                shared namespace travels through PabotLib parallel keys (failing fast when
+    ...                01 did not run or did not pass), and each suite mints its own admin bot:
+    ...                the Rails orbit_query rate limit (60 req/min) is scoped per user, so suites
+    ...                polling through one shared PAT throttle each other.
+    ${ns_id}=    Get Parallel Value For Key    SHARED_NAMESPACE_ID
+    Should Not Be Equal As Strings    ${ns_id}    ${EMPTY}
+    ...    01_setup_and_smoke published no shared namespace — did it run and pass?    values=False
+    ${ns_name}=    Get Parallel Value For Key    SHARED_NAMESPACE_NAME
+    Set Global Variable    ${SHARED_NAMESPACE_ID}    ${{int($ns_id)}}
+    Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${ns_name}
+
+    ${suffix}=    Random Suffix
+    ${username}=    Set Variable    e2e-bot-${suffix}
+    ${root_headers}=    Create Dictionary
+    ...    PRIVATE-TOKEN=${GITLAB_ROOT_PAT}    Content-Type=application/json
+    ${user_id}=    Wait Until Keyword Succeeds    120s    5s
+    ...    Ensure Bot User    ${root_headers}    ${username}    ${username}@example.com    E2E Bot ${suffix}
+    ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
+    Set Global Variable    ${GITLAB_PAT}    ${pat}
+    Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
+    Wait For Node Indexed    User    ${user_id}    ${username}    label_field=username    timeout=240s
+
 Ensure E2E Bot User
     [Arguments]    ${root_headers}
+    ${user_id}=    Ensure Bot User    ${root_headers}    ${E2E_BOT_USERNAME}    ${E2E_BOT_EMAIL}    ${E2E_BOT_NAME}
+    RETURN    ${user_id}
+
+Ensure Bot User
+    [Arguments]    ${root_headers}    ${username}    ${email}    ${name}
     ${user_data}=    Create Dictionary
-    ...    username=${E2E_BOT_USERNAME}    email=${E2E_BOT_EMAIL}    name=${E2E_BOT_NAME}
+    ...    username=${username}    email=${email}    name=${name}
     ...    password=${E2E_BOT_PASSWORD}    skip_confirmation=true    admin=true
     ${resp}=    POST    ${GITLAB_URL}/api/v4/users
     ...    headers=${root_headers}    json=${user_data}    expected_status=any
     IF    ${resp.status_code} == 201
         RETURN    ${resp.json()["id"]}
     ELSE IF    ${resp.status_code} == 409
-        ${params}=    Create Dictionary    username=${E2E_BOT_USERNAME}
+        ${params}=    Create Dictionary    username=${username}
         ${resp}=    GET    url=${GITLAB_URL}/api/v4/users
         ...    headers=${root_headers}    params=${params}    expected_status=200
         RETURN    ${resp.json()[0]["id"]}
     END
-    Fail    Failed to create ${E2E_BOT_USERNAME}: ${resp.status_code} ${resp.text}
+    Fail    Failed to create ${username}: ${resp.status_code} ${resp.text}
 
 Issue PAT For User
     [Arguments]    ${root_headers}    ${user_id}

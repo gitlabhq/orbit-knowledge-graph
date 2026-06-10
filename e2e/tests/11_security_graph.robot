@@ -9,6 +9,8 @@ Documentation       Verify the security subgraph flows end-to-end. Creates one V
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Vulnerability And Its Core Edges Are Indexed

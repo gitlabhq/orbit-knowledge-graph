@@ -18,6 +18,8 @@ Documentation       Smoke the read-only Orbit API surface beyond /query and /sta
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Schema Lists Domains And Nodes
