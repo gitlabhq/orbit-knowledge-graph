@@ -272,7 +272,7 @@ Find merged merge requests in a project:
     {
       "id": "project",
       "entity": "Project",
-      "filters": {"full_path": "gitlab-org/gitlab"},
+      "filters": {"full_path": "your-group/your-project"},
       "columns": ["name", "full_path"]
     },
     {
@@ -367,7 +367,7 @@ Count merged merge requests per project:
     {
       "id": "project",
       "entity": "Project",
-      "filters": {"full_path": "gitlab-org/gitlab"}
+      "filters": {"full_path": "your-group/your-project"}
     },
     {
       "id": "mr",

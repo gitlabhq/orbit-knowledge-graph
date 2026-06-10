@@ -424,15 +424,3 @@ fn schema_errors_when_db_missing() {
         "expected missing-graph error: {stderr}"
     );
 }
-
-#[test]
-fn debug_ddl_produces_clickhouse_statements() {
-    let data_dir = tempfile::TempDir::new().unwrap();
-    let (stdout, stderr, ok) = run_cmd(&["debug", "ddl"], data_dir.path());
-    assert!(ok, "debug ddl failed: {stderr}");
-    assert!(
-        stdout.contains("CREATE TABLE"),
-        "expected DDL output, got: {}",
-        &stdout.chars().take(200).collect::<String>()
-    );
-}

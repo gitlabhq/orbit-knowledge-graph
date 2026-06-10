@@ -67,6 +67,7 @@ pub use passes::codegen::{
     ddl::clickhouse::emit_create_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    ddl::duckdb::generate_local_ddl,
     ddl::generate_graph_dictionaries,
     ddl::generate_graph_dictionaries_with_prefix,
     ddl::generate_graph_materialized_views,
