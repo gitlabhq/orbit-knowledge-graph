@@ -5,14 +5,10 @@
 //! cross-test contamination while eliminating per-test container startup overhead.
 
 mod ci;
-mod deployments;
-mod environments;
 mod global;
 mod groups;
-mod labels;
 mod merge_request_diffs;
 mod merge_requests;
-mod milestones;
 mod notes;
 mod partitioning;
 mod projects;
@@ -21,8 +17,22 @@ mod system_notes;
 mod watermarking;
 mod work_items;
 
+use std::sync::Arc;
+
+use super::common::scenarios::SdlcScenarioHandlers;
 use super::common::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext};
 use integration_testkit::run_subtests;
+
+#[tokio::test]
+async fn scenario_indexing() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    integration_testkit::scenario::run_dir(
+        &ctx,
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/indexer/scenarios/sdlc"),
+        Arc::new(SdlcScenarioHandlers),
+    )
+    .await;
+}
 
 #[tokio::test]
 async fn global_indexing() {
@@ -77,8 +87,6 @@ async fn namespace_indexing() {
         groups::child_route_reflects_parent_rename,
         groups::no_route_falls_back_to_slug,
         groups::creates_member_of_edges_for_groups,
-        labels::processes_labels_with_edges,
-        milestones::processes_milestones_with_edges,
         merge_requests::processes_merge_requests_with_edges,
         merge_requests::metric_columns_read_from_siphon_not_stale_denorm,
         merge_requests::processes_merge_requests_closing_issues,
@@ -114,11 +122,6 @@ async fn namespace_indexing() {
         ci::processes_runs_for_group_and_project,
         ci::processes_ci_sources_pipelines,
         ci::processes_job_metadata,
-        deployments::processes_deployments,
-        deployments::processes_deployment_environment_link,
-        deployments::processes_deployment_merge_request_links,
-        environments::processes_environments,
-        environments::processes_mr_pipeline_created_environments,
         security::processes_vulnerabilities,
         security::processes_scanners,
         security::processes_vulnerability_identifiers,

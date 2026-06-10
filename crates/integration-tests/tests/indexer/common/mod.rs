@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod handlers;
+pub mod scenarios;
 pub mod siphon;
 
 pub use handlers::{

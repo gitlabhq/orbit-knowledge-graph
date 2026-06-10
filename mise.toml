@@ -341,6 +341,10 @@ description = "Verify pinned Iglu schemas exist locally and match live Iglu"
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
+[tasks."scenarios:validate"]
+run = "find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json"
+description = "Validate indexer test scenario YAML files against JSON schema"
+
 [tasks."schema:generate"]
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
