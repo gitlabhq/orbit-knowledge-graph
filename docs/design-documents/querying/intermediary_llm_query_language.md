@@ -238,10 +238,11 @@ group key; property groups put the scalar bucket value there.
 | `avg` | Average of property values | Yes | Numeric only |
 | `min` | Minimum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
 | `max` | Maximum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
-| `collect` | Collect values into array | Yes | N/A |
 
 `sum` and `avg` reject `DateTime` properties with a validation error. To
 aggregate over dates, use `min` or `max`.
+
+> **Note:** `collect` (collect property values into an array) is planned but not yet implemented and will return an error if used.
 
 ### Path Finding Queries
 
