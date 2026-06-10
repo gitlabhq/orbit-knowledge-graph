@@ -704,8 +704,6 @@ code-indexing-benchmark-v2-linux:
     - .job-template
     - .code-indexing-benchmark-rules
   interruptible: true
-  # BENCHMARK_GITLAB_TOKEN sourced from a masked CI/CD variable (not Vault) so
-  # fork MRs no longer fail Vault JWT bound_claims; comment is skipped if absent.
   script:
     - |
       gitlab-xtasks benchmark analyze \
