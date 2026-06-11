@@ -58,6 +58,12 @@ claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
 The first `query_graph` or `get_graph_schema` call opens your browser to
 authenticate with GitLab. No JSON config edit required.
 
+> [!note]
+> Claude Code connects directly over HTTP. Do not use `npx mcp-remote` with
+> Claude Code — it wraps the endpoint in a stdio process that conflicts with
+> the built-in transport and causes "Failed to connect" errors. Use the
+> `claude mcp add --transport http` command shown above instead.
+
 Some clients only support local stdio MCP servers. For those,
 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
 as a local command.
@@ -160,4 +166,46 @@ You can also pass raw JSON queries directly if you want precise control over res
   "aggregation_sort": {"column": "open_mrs", "direction": "DESC"},
   "limit": 10
 }
+```
+
+## Troubleshooting
+
+### "Failed to connect" in Claude Code
+
+Claude Code has built-in HTTP MCP support. If you registered Orbit with
+`npx mcp-remote` instead of `--transport http`, the `mcp-remote` wrapper
+creates a local stdio process that conflicts with the native transport.
+
+To fix, remove the broken registration and re-add with HTTP transport:
+
+```shell
+claude mcp remove gitlab-orbit
+claude mcp add --transport http gitlab-orbit https://gitlab.com/api/v4/orbit/mcp
+```
+
+### "Needs authentication" on first use
+
+This is expected. The first `query_graph` or `get_graph_schema` call opens
+your browser to complete OAuth with GitLab. If the browser flow does not
+trigger, verify your session:
+
+```shell
+glab auth status
+```
+
+If your session is expired, re-authenticate:
+
+```shell
+glab auth login
+```
+
+### Query errors after connecting
+
+For query-time errors (validation failures, empty results, rate limits), see the
+[Orbit skill documentation](../../ai_coding_agents.md), which includes DSL
+guidance, query recipes, and exit-code diagnostics. Install the skill for
+inline guidance:
+
+```shell
+glab skills install --global orbit
 ```
