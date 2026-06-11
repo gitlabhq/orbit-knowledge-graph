@@ -164,6 +164,10 @@ yaml_test!(
 );
 yaml_test!(python_relative_imports, "python/relative_imports.yaml");
 yaml_test!(
+    python_dataclass_references,
+    "python/dataclass_references.yaml"
+);
+yaml_test!(
     python_v1_interfile_resolution,
     "python/v1_interfile_resolution.yaml"
 );

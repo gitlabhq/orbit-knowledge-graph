@@ -158,6 +158,11 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
+            // Instance field access: obj.email
+            reference("attribute")
+                .name_from(field("attribute"))
+                .receiver_chain(&["object"])
+                .when(!parent_is("call")),
             // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
         ]
@@ -220,6 +225,12 @@ impl DslLanguage for PythonDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
+            binding("typed_parameter", BindingKind::Assignment)
+                .name_from_extract(child_of_kind("identifier"))
+                .typed(vec![field("type")], &[]),
+            binding("typed_default_parameter", BindingKind::Assignment)
+                .name_from(&["name"])
+                .typed(vec![field("type")], &[]),
             binding("assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right")
