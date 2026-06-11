@@ -501,18 +501,21 @@ impl MigrationCompletionChecker {
         let current = keep.iter().max().copied().unwrap_or(0);
 
         for entry in &versions {
-            if keep.contains(&entry.version) {
+            if keep.contains(&entry.version) || entry.status == "dropped" {
                 continue;
             }
 
             info!(version = entry.version, ?keep, "GC: dropping dead version");
-            self.drop_version_objects(entry.version).await;
+            let ok = self.drop_version_objects(entry.version).await;
 
             if let Err(e) = mark_version_dropped(&self.graph, entry.version).await {
                 warn!(version = entry.version, error = %e, "GC: failed to mark dropped");
             }
-            self.metrics
-                .record_cleanup(entry.version, current, "success");
+            self.metrics.record_cleanup(
+                entry.version,
+                current,
+                if ok { "success" } else { "failure" },
+            );
         }
 
         Ok(())
@@ -520,37 +523,55 @@ impl MigrationCompletionChecker {
 
     /// Best-effort drop of all ontology-derived objects for a version.
     /// Views first (they reference source tables), then dictionaries, then tables.
-    async fn drop_version_objects(&self, version: u32) {
+    /// Returns `true` if every drop succeeded.
+    async fn drop_version_objects(&self, version: u32) -> bool {
         let prefix = table_prefix(version);
+        let mut ok = true;
 
         for mv in &generate_graph_materialized_views(&self.ontology) {
             let name = format!("{prefix}{}", mv.name);
-            let _ = self
+            if self
                 .graph
                 .execute(&format!("DROP VIEW IF EXISTS {name}"))
                 .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
+                .is_err()
+            {
+                ok = false;
+            }
         }
         for d in &generate_graph_dictionaries(&self.ontology) {
             let name = format!("{prefix}{}", d.name);
-            let _ = self
+            if self
                 .graph
                 .execute(&format!("DROP DICTIONARY IF EXISTS {name}"))
                 .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
+                .is_err()
+            {
+                ok = false;
+            }
         }
         for t in &generate_graph_tables(&self.ontology) {
             let name = format!("{prefix}{}", t.name);
-            let _ = self
+            if self
                 .graph
                 .execute(&format!("DROP TABLE IF EXISTS {name}"))
                 .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
+                .is_err()
+            {
+                ok = false;
+            }
         }
+        ok
     }
 }
 
 /// Versions to keep. Everything else is safe to drop.
+///
+/// Expects `versions` sorted by version descending (as `read_all_versions`
+/// returns) so that `.take()` on the retired iterator retains the newest.
 ///
 /// Returns empty if no active version exists (caller must abort).
 fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> HashSet<u32> {
