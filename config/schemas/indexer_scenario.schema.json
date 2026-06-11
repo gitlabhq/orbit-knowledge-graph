@@ -9,6 +9,7 @@
     "description": { "type": "string" },
     "scope": { "$ref": "#/definitions/scope" },
     "seed": { "$ref": "#/definitions/seed" },
+    "seed_settings": { "$ref": "#/definitions/seedSettings" },
     "run": { "$ref": "#/definitions/run" },
     "expect": { "$ref": "#/definitions/expect" },
     "steps": {
@@ -35,6 +36,12 @@
         "minItems": 1,
         "items": { "$ref": "#/definitions/seedRow" }
       }
+    },
+    "seedSettings": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "ClickHouse INSERT settings applied to every seed insert in the step, e.g. date_time_overflow_behavior: ignore. Their presence switches the step's seed inserts from VALUES to JSONEachRow, where such settings take effect (a VALUES insert saturates an out-of-range Date32 regardless). The { sql: ... } seed-value escape is unavailable in these steps.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
     },
     "seedRow": {
       "type": "object",
@@ -76,6 +83,7 @@
       "additionalProperties": false,
       "properties": {
         "seed": { "$ref": "#/definitions/seed" },
+        "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },
         "expect": { "$ref": "#/definitions/expect" }
       }

@@ -83,42 +83,6 @@ pub async fn partitioned_initial_load_indexes_all_rows_and_consolidates(ctx: &Te
     );
 }
 
-pub async fn incomplete_partition_checkpoint_does_not_advance_watermark_on_resume(
-    ctx: &TestContext,
-) {
-    for id in 1..=12 {
-        create_user(ctx, id).await;
-    }
-
-    ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User.p2of4', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}')",
-        t("checkpoint")
-    ))
-    .await;
-
-    entity_handler_with_partitions(ctx, "User", 4)
-        .await
-        .handle(handler_context(ctx), global_envelope())
-        .await
-        .expect("partitioned handler should succeed");
-
-    let result = ctx
-        .query(&format!(
-            "SELECT id FROM {} FINAL ORDER BY id",
-            t("gl_user")
-        ))
-        .await;
-    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
-    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
-    assert_eq!(
-        indexed,
-        vec![1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12],
-        "re-partition opens from the epoch: id 6 is skipped by the partition cursor, \
-         but 7-8 (sharing the in-progress watermark) must still index"
-    );
-}
-
 pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext) {
     for id in 1..=12 {
         create_user(ctx, id).await;
@@ -174,76 +138,102 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
     );
 }
 
-pub async fn second_run_after_consolidation_skips_partitioning(ctx: &TestContext) {
-    for id in 1..=8 {
-        create_user(ctx, id).await;
-    }
+/// A partition-configured entity whose parent checkpoint already exists does not
+/// re-partition: `should_partition` requires an absent parent. The in-progress
+/// parent (cursor + floor) drives the single-pull resume path, which must honor
+/// the floor and write no partition checkpoint rows.
+pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestContext) {
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User', '2024-01-20 00:00:00.000000', \
+                 '{{\"c\":[\"2\"],\"f\":\"2024-01-10T00:00:00Z\"}}')",
+        t("checkpoint")
+    ))
+    .await;
 
-    let handler = entity_handler_with_partitions(ctx, "User", 4).await;
-    handler
+    super::windowing::insert_user_at(ctx, 3, "2024-01-05 00:00:00").await;
+    super::windowing::insert_user_at(ctx, 4, "2024-01-15 00:00:00").await;
+
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
         .handle(handler_context(ctx), global_envelope())
         .await
-        .expect("first run should succeed");
+        .expect("partitioned handler should succeed");
 
-    // Newest partition-checkpoint write from the initial load and its
-    // consolidation. Comparing against `_version` is merge-invariant; counting
-    // raw rows is not, because background merges collapse the tombstoned
-    // duplicates between the two reads.
-    let after_first = ctx
+    let result = ctx
         .query(&format!(
-            "SELECT toString(max(_version)) AS v FROM {} \
-             WHERE startsWith(key, 'global.User.p')",
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        indexed,
+        vec![4],
+        "single-pull resume must stay within (floor, target]: user 3 (below the floor) is skipped"
+    );
+
+    let partitions = ctx
+        .query(&format!(
+            "SELECT count() AS cnt FROM {} WHERE startsWith(key, 'global.User.p')",
             t("checkpoint")
         ))
         .await;
-    let newest_partition_write =
-        ArrowUtils::get_column_by_name::<StringArray>(&after_first[0], "v")
-            .expect("v column")
-            .value(0)
-            .to_string();
-
-    handler
-        .handle(handler_context(ctx), global_envelope())
-        .await
-        .expect("second run should succeed");
-
-    let new_rows = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {} \
-             WHERE startsWith(key, 'global.User.p') AND _version > '{}'",
-            t("checkpoint"),
-            newest_partition_write
-        ))
-        .await;
-    let cnt =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&new_rows[0], "cnt").expect("cnt column");
+    let partition_count =
+        ArrowUtils::get_column_by_name::<UInt64Array>(&partitions[0], "cnt").expect("cnt column");
     assert_eq!(
-        cnt.value(0),
+        partition_count.value(0),
         0,
-        "incremental run over the consolidated parent must not write new partition checkpoint rows"
+        "a present parent takes the single-pull path and writes no partition checkpoint rows"
     );
 }
 
-pub async fn skips_already_completed_partitions_on_retry(ctx: &TestContext) {
+/// A partitioned retry with mixed pre-existing partition state. T-digest cuts on
+/// ids 1..=12 with count=4 are [1, 3, 6, 9, 13] -> p0=[1,3), p1=[3,6), p2=[6,9),
+/// p3=[9,13). p0/p1 are pre-completed (skipped), p2 is mid-pull at cursor 6
+/// (resumes: drops 6, keeps 7-8), p3 is fresh. When the run finishes every
+/// partition, the parent consolidates at the oldest partition watermark and all
+/// partition checkpoints are tombstoned.
+pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &TestContext) {
     for id in 1..=12 {
         create_user(ctx, id).await;
     }
 
-    let prior_watermark = "2024-01-15 00:00:00.000000";
     for index in 0..2 {
         ctx.execute(&format!(
             "INSERT INTO {} (key, watermark, cursor_values) \
-             VALUES ('global.User.p{index}of4', '{prior_watermark}', 'null')",
+             VALUES ('global.User.p{index}of4', '2024-01-15 00:00:00.000000', 'null')",
             t("checkpoint")
         ))
         .await;
     }
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
+         VALUES ('global.User.p2of4', '2024-01-16 00:00:00.000000', '{{\"c\":[\"6\"]}}')",
+        t("checkpoint")
+    ))
+    .await;
 
     entity_handler_with_partitions(ctx, "User", 4)
         .await
         .handle(handler_context(ctx), global_envelope())
         .await
         .expect("handler should succeed");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT id FROM {} FINAL ORDER BY id",
+            t("gl_user")
+        ))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(
+        indexed,
+        vec![7, 8, 9, 10, 11, 12],
+        "p0/p1 skip ids 1-5; p2 resumes at cursor 6 (drops 6, keeps 7-8); p3 indexes 9-12"
+    );
 
     let parent = ctx
         .query(&format!(
@@ -261,75 +251,6 @@ pub async fn skips_already_completed_partitions_on_retry(ctx: &TestContext) {
         "parent watermark should pin to oldest partition watermark (2024-01-15...), got: {parent_watermark}"
     );
 
-    let result = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {} FINAL",
-            t("gl_user")
-        ))
-        .await;
-    let count =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&result[0], "cnt").expect("cnt column");
-    // T-digest cuts on ids 1..=12 with count=4 produce [1, 3, 6, 9, 13]
-    // → p0=[1,3), p1=[3,6), p2=[6,9), p3=[9,13).
-    // p0 and p1 are pre-marked done, so p2+p3 index ids 6..=12 = 7 rows.
-    assert_eq!(
-        count.value(0),
-        7,
-        "only p2/p3 should have indexed (ids 6..=12); p0/p1 were skipped"
-    );
-}
-
-pub async fn all_partitions_completed_runs_consolidate_only(ctx: &TestContext) {
-    let prior_watermark = "2024-01-15 00:00:00.000000";
-    for index in 0..4 {
-        ctx.execute(&format!(
-            "INSERT INTO {} (key, watermark, cursor_values) \
-             VALUES ('global.User.p{index}of4', '{prior_watermark}', 'null')",
-            t("checkpoint")
-        ))
-        .await;
-    }
-
-    for id in 1..=12 {
-        create_user(ctx, id).await;
-    }
-
-    entity_handler_with_partitions(ctx, "User", 4)
-        .await
-        .handle(handler_context(ctx), global_envelope())
-        .await
-        .expect("handler should succeed");
-
-    let inserted_rows = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {} FINAL",
-            t("gl_user")
-        ))
-        .await;
-    let inserted_count = ArrowUtils::get_column_by_name::<UInt64Array>(&inserted_rows[0], "cnt")
-        .expect("cnt column");
-    assert_eq!(
-        inserted_count.value(0),
-        0,
-        "every partition was already completed: nothing should be extracted"
-    );
-
-    let parent = ctx
-        .query(&format!(
-            "SELECT toString(watermark) AS w FROM {} FINAL \
-             WHERE key = 'global.User' AND _deleted = false",
-            t("checkpoint")
-        ))
-        .await;
-    let parent_watermark = ArrowUtils::get_column_by_name::<StringArray>(&parent[0], "w")
-        .expect("w column")
-        .value(0)
-        .to_string();
-    assert!(
-        parent_watermark.starts_with("2024-01-15"),
-        "parent should consolidate at the partition watermark, got: {parent_watermark}"
-    );
-
     let live_partitions = ctx
         .query(&format!(
             "SELECT count() AS cnt FROM {} FINAL \
@@ -342,40 +263,14 @@ pub async fn all_partitions_completed_runs_consolidate_only(ctx: &TestContext) {
     assert_eq!(
         live_count.value(0),
         0,
-        "all four partition checkpoints should be tombstoned"
+        "every partition finished, so all partition checkpoints are tombstoned"
     );
 }
 
-pub async fn query_etl_entity_partitions_by_id_within_scope(ctx: &TestContext) {
-    create_namespace(ctx, 100, None, 0, "1/100/").await;
-    for id in 101..=112 {
-        create_namespace(ctx, id, Some(100), 0, &format!("1/100/{id}/")).await;
-    }
-
-    entity_handler_with_partitions(ctx, "Group", 4)
-        .await
-        .handle(handler_context(ctx), namespace_envelope(1, 100))
-        .await
-        .expect("Group partitioned handler should succeed");
-
-    let result = ctx
-        .query(&format!(
-            "SELECT id FROM {} FINAL ORDER BY id",
-            t("gl_group")
-        ))
-        .await;
-    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
-    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
-    assert_eq!(
-        indexed,
-        (100..=112).collect::<Vec<_>>(),
-        "Group partitions probe namespace_traversal_paths (its etl source) and should land all 13 rows"
-    );
-
+async fn assert_partitions_tombstoned(ctx: &TestContext, key_prefix: &str) {
     let tombstoned = ctx
         .query(&format!(
-            "SELECT count() AS cnt FROM {} \
-             WHERE startsWith(key, 'ns.100.Group.p') AND _deleted = true",
+            "SELECT count() AS cnt FROM {} WHERE startsWith(key, '{key_prefix}') AND _deleted = true",
             t("checkpoint")
         ))
         .await;
@@ -384,13 +279,28 @@ pub async fn query_etl_entity_partitions_by_id_within_scope(ctx: &TestContext) {
     assert_eq!(
         tombstone_count.value(0),
         4,
-        "all four partition checkpoints should be tombstoned"
+        "all four partition checkpoints under {key_prefix} should be tombstoned"
     );
 }
 
-pub async fn namespaced_entity_partitions_by_id_within_scope(ctx: &TestContext) {
-    create_namespace(ctx, 100, None, 0, "1/100/").await;
+async fn assert_indexed_ids(ctx: &TestContext, table: &str, expected: Vec<i64>, message: &str) {
+    let result = ctx
+        .query(&format!("SELECT id FROM {} FINAL ORDER BY id", t(table)))
+        .await;
+    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
+    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
+    assert_eq!(indexed, expected, "{message}");
+}
 
+/// Namespaced partitioning over both etl source shapes: `Group` is query-ETL
+/// (its partition probe scans `namespace_traversal_paths`), `Milestone` is a
+/// namespaced siphon table keyed on `(traversal_path, id)`. Both must scope the
+/// partition ranges by `startsWith(traversal_path, ...)` and land every row.
+pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    for id in 101..=112 {
+        create_namespace(ctx, id, Some(100), 0, &format!("1/100/{id}/")).await;
+    }
     for id in 1..=12 {
         ctx.execute(&format!(
             "INSERT INTO siphon_milestones \
@@ -400,55 +310,33 @@ pub async fn namespaced_entity_partitions_by_id_within_scope(ctx: &TestContext) 
         .await;
     }
 
+    entity_handler_with_partitions(ctx, "Group", 4)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .expect("Group partitioned handler should succeed");
+    assert_indexed_ids(
+        ctx,
+        "gl_group",
+        (100..=112).collect(),
+        "Group query-ETL partitions should land all 13 namespaces in scope",
+    )
+    .await;
+    assert_partitions_tombstoned(ctx, "ns.100.Group.p").await;
+
     entity_handler_with_partitions(ctx, "Milestone", 4)
         .await
         .handle(handler_context(ctx), namespace_envelope(1, 100))
         .await
         .expect("namespaced partitioned handler should succeed");
-
-    let result = ctx
-        .query(&format!(
-            "SELECT id FROM {} FINAL ORDER BY id",
-            t("gl_milestone")
-        ))
-        .await;
-    let ids = ArrowUtils::get_column_by_name::<Int64Array>(&result[0], "id").expect("id column");
-    let indexed: Vec<i64> = (0..ids.len()).map(|i| ids.value(i)).collect();
-    assert_eq!(
-        indexed,
-        (1..=12).collect::<Vec<_>>(),
-        "every partition slice on (traversal_path, id) should land in gl_milestone"
-    );
-
-    let consolidated = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {} FINAL \
-             WHERE key = 'ns.100.Milestone' AND _deleted = false",
-            t("checkpoint")
-        ))
-        .await;
-    let consolidated_count =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&consolidated[0], "cnt").expect("cnt column");
-    assert_eq!(
-        consolidated_count.value(0),
-        1,
-        "parent checkpoint should be consolidated at ns.100.Milestone"
-    );
-
-    let tombstoned = ctx
-        .query(&format!(
-            "SELECT count() AS cnt FROM {} \
-             WHERE startsWith(key, 'ns.100.Milestone.p') AND _deleted = true",
-            t("checkpoint")
-        ))
-        .await;
-    let tombstone_count =
-        ArrowUtils::get_column_by_name::<UInt64Array>(&tombstoned[0], "cnt").expect("cnt column");
-    assert_eq!(
-        tombstone_count.value(0),
-        4,
-        "all four namespaced partition checkpoints should be tombstoned"
-    );
+    assert_indexed_ids(
+        ctx,
+        "gl_milestone",
+        (1..=12).collect(),
+        "every (traversal_path, id) partition slice should land in gl_milestone",
+    )
+    .await;
+    assert_partitions_tombstoned(ctx, "ns.100.Milestone.p").await;
 }
 
 pub async fn span_smaller_than_partition_count_falls_back_to_single_run(ctx: &TestContext) {

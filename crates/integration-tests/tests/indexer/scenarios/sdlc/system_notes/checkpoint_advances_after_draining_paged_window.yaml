@@ -1,0 +1,39 @@
+# With datalake_batch_size=1 (the test default) the handler pages one note at a
+# time, so three cross_reference notes span three pages plus a final empty one.
+# A full drain materializes all three MENTIONS edges (no row skipped or
+# double-counted by the keyset cursor) and advances the ns.100.SystemNote
+# checkpoint to the run watermark. Note rows carry _siphon_replicated_at ==
+# created_at so the watermark window selects them.
+description: Draining a keyset-paged window materializes every edge and advances the SystemNote checkpoint
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  work_items:
+    - { id: 10, iid: 1, title: WI 1, description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+    - { id: 11, iid: 2, title: WI 2, description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+    - { id: 12, iid: 3, title: WI 3, description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: "mentioned in #1", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note: "mentioned in #2", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note: "mentioned in #3", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note_id: 2, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note_id: 3, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MENTIONS
+      count: 3
+      rows:
+        - { source_id: 1000, target_id: 10, target_kind: WorkItem }
+        - { source_id: 1000, target_id: 11, target_kind: WorkItem }
+        - { source_id: 1000, target_id: 12, target_kind: WorkItem }
+  nodes:
+    checkpoint:
+      rows:
+        - { key: ns.100.SystemNote, watermark: { contains: "2024-01-21" } }
