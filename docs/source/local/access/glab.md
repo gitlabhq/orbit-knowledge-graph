@@ -109,17 +109,17 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## Inspect the schema
 
-`glab orbit local schema` requires either `--ontology` or `--query`:
+`glab orbit local schema` lists every table and column in the local DuckDB
+graph:
 
 ```shell
-glab orbit local schema --ontology
-glab orbit local schema --query
+glab orbit local schema
 ```
 
-- `--ontology` shows the graph ontology: entities, edges, and properties.
-- `--query` shows the query DSL schema: how to write structured queries.
-
-Add `--raw` to either for JSON instead of the default LLM-friendly output.
+| Flag | Purpose |
+|------|---------|
+| `--raw` | Emit JSON instead of the default table view. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
 ## Run as an MCP server
 

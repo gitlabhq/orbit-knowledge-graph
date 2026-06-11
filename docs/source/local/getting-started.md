@@ -98,8 +98,8 @@ for details.
 | [The GitLab CLI (`glab`)](access/glab.md) | Anyone already using `glab` | `glab orbit local --install` |
 | [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | Planned, [not yet available](access/mcp.md) |
 
-The query language is identical across all three. Whatever you learn in one
-transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
+All three read the same local graph. Orbit Local is queried with DuckDB SQL;
+the structured JSON query DSL is [Orbit Remote](../remote/_index.md) only.
 
 ## 60-second quickstart
 
@@ -113,11 +113,12 @@ Index a repository and inspect what Orbit found:
 
 ```shell
 glab orbit local index /path/to/your/repo
-glab orbit local schema --ontology
+glab orbit local schema
 ```
 
-That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints the
-node types: `Definition`, `File`, `Directory`, `ImportedSymbol`.
+That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints every
+table and column in it: `gl_definition`, `gl_file`, `gl_directory`,
+`gl_imported_symbol`, `gl_edge`, and the `_orbit_manifest` bookkeeping table.
 
 Next:
 
