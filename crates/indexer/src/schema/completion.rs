@@ -96,13 +96,7 @@ WHERE _deleted = false \
 const LIST_DEAD_VERSION_OBJECTS: &str = "\
 SELECT \
   name, engine, \
-  toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) AS dead_version, \
-  concat(\
-    multiIf(\
-      engine = 'Dictionary', 'DROP DICTIONARY IF EXISTS ', \
-      engine IN ('View','MaterializedView','LiveView','WindowView'), 'DROP VIEW IF EXISTS ', \
-      'DROP TABLE IF EXISTS '), \
-    {db:String}, '.', name) AS drop_sql \
+  toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) AS dead_version \
 FROM system.tables \
 WHERE database = {db:String} \
   AND match(name, '^v[0-9]+_') \
@@ -514,8 +508,8 @@ impl MigrationCompletionChecker {
             for i in 0..batch.num_rows() {
                 let name = ArrowUtils::get_column_string(batch, "name", i)
                     .ok_or_else(|| TaskError::new("missing name".to_string()))?;
-                let drop_sql = ArrowUtils::get_column_string(batch, "drop_sql", i)
-                    .ok_or_else(|| TaskError::new("missing drop_sql".to_string()))?;
+                let engine = ArrowUtils::get_column_string(batch, "engine", i)
+                    .ok_or_else(|| TaskError::new("missing engine".to_string()))?;
                 let version = ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(
                     batch,
                     "dead_version",
@@ -532,6 +526,15 @@ impl MigrationCompletionChecker {
                     );
                     continue;
                 }
+
+                let drop_verb = match engine.as_str() {
+                    "Dictionary" => "DROP DICTIONARY IF EXISTS",
+                    "MaterializedView" | "View" | "LiveView" | "WindowView" => {
+                        "DROP VIEW IF EXISTS"
+                    }
+                    _ => "DROP TABLE IF EXISTS",
+                };
+                let drop_sql = format!("{drop_verb} {db}.{name}");
 
                 if let Err(e) = self.graph.execute(&drop_sql).await {
                     warn!(version, object = %name, error = %e, "GC: drop failed");
