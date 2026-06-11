@@ -527,14 +527,12 @@ impl MigrationCompletionChecker {
                     continue;
                 }
 
-                let drop_verb = match engine.as_str() {
-                    "Dictionary" => "DROP DICTIONARY IF EXISTS",
-                    "MaterializedView" | "View" | "LiveView" | "WindowView" => {
-                        "DROP VIEW IF EXISTS"
-                    }
-                    _ => "DROP TABLE IF EXISTS",
+                let kind = match engine.as_str() {
+                    "Dictionary" => "DICTIONARY",
+                    "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
+                    _ => "TABLE",
                 };
-                let drop_sql = format!("{drop_verb} {db}.{name}");
+                let drop_sql = format!("DROP {kind} IF EXISTS {name}");
 
                 if let Err(e) = self.graph.execute(&drop_sql).await {
                     warn!(version, object = %name, error = %e, "GC: drop failed");
