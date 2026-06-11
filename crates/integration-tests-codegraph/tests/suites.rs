@@ -223,6 +223,7 @@ yaml_test!(go_scope_and_branching, "go/scope_and_branching.yaml");
 yaml_test!(go_multiple_embedding, "go/multiple_embedding.yaml");
 yaml_test!(go_higher_order, "go/higher_order.yaml");
 yaml_test!(go_var_reassignment, "go/var_reassignment.yaml");
+yaml_test!(go_var_const, "go/var_const.yaml");
 yaml_test!(
     go_imported_symbol_fallback_matrix,
     "go/imported_symbol_fallback_matrix.yaml"
