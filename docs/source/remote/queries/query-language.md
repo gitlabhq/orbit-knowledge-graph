@@ -30,6 +30,35 @@ Use the Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 
+## Request envelope
+
+When submitting a query via the REST API or `glab orbit remote query`, wrap the
+query object in a top-level `query` field:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "node_ids": [12345],
+      "columns": ["iid", "title", "state"]
+    },
+    "limit": 1
+  },
+  "response_format": "raw"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `query` | Yes | The query object documented below. |
+| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+
+The `orbit query` CLI (for local graphs) takes the raw query body **without**
+the envelope.
+
 ## Query shape
 
 Every query has a `query_type` and either `node` or `nodes`.
