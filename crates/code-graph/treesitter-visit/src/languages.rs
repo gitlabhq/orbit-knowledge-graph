@@ -9,6 +9,7 @@ use std::fmt;
 /// Variants are always available, but tree-sitter parsing requires the corresponding feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SupportLang {
+    Bash,
     C,
     Cpp,
     Python,
@@ -46,6 +47,11 @@ impl Language for SupportLang {
 impl LanguageExt for SupportLang {
     fn get_ts_language(&self) -> TSLanguage {
         match self {
+            #[cfg(feature = "tree-sitter-bash")]
+            Self::Bash => tree_sitter_bash::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-bash"))]
+            Self::Bash => panic!("tree-sitter-bash feature not enabled"),
+
             #[cfg(feature = "tree-sitter-c")]
             Self::C => tree_sitter_c::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-c"))]

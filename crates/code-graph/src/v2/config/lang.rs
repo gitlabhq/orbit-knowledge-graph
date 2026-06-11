@@ -106,6 +106,13 @@ macro_rules! define_languages {
 }
 
 define_languages! {
+    Bash => {
+        support_lang: Bash,
+        extensions: ["sh", "bash", "zsh"],
+        exclude: [],
+        separator: ".",
+        names: ["bash", "shell", "sh"],
+    },
     C => {
         support_lang: C,
         extensions: ["c", "h"],

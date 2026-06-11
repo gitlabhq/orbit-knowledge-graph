@@ -14,6 +14,11 @@ yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
 yaml_test!(range_contract, "range_contract.yaml");
 
+// Bash / Shell
+yaml_test!(bash_function_definitions, "bash/function_definitions.yaml");
+yaml_test!(bash_source_imports, "bash/source_imports.yaml");
+yaml_test!(bash_extension_routing, "bash/extension_routing.yaml");
+
 // JavaScript / TypeScript
 yaml_test!(
     typescript_js_module_resolution,
