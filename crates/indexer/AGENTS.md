@@ -56,12 +56,13 @@ table-set.
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
 mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
 comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
-`active`, retires the old active version, and runs a GC sweep that drops ontology-derived objects
-for every version outside a keep-set. The keep-set is: the active version, the newest
-`max_retained_versions - 1` retired versions, and any `migrating` version above active (the
-in-flight migration). Zombie migrating versions (below active) and dropped-with-residue versions
-are swept. On promotion it also clears the re-index campaign, so subsequent steady-state
-dispatches carry `campaign_id = null`.
+`active`, and retires the old active version. After promotion it clears the re-index campaign.
+
+A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
+outside a keep-set computed in the same query (active + newest retired within
+`max_retained_versions` + migrating above active). Each candidate is validated against the
+ontology before being dropped; unrecognized objects (e.g. rename-orphans) are logged and left
+alone for a future migration framework to handle.
 
 ### Stale FK-edge reconciliation
 

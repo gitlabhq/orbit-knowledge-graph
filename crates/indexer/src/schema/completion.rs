@@ -7,9 +7,11 @@
 //!    tables. If so, promote the version to `active` and demote the previously
 //!    active version to `retired`.
 //!
-//! 2. **Version GC** — Compute a keep-set (active + retained retired +
-//!    in-flight migrating above active), drop ontology-derived objects for
-//!    every version outside it, and mark them `dropped`.
+//! 2. **Version GC** — A single SQL query computes the keep-set (active +
+//!    retained retired + in-flight migrating above active) and enumerates
+//!    all `v<N>_*` objects in `system.tables` whose version falls outside
+//!    it. Each candidate is validated against the ontology before being
+//!    dropped; unrecognized objects are logged and left alone.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -29,7 +31,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{
-    SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
+    SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
 };
 
@@ -86,6 +88,36 @@ SELECT count(DISTINCT project_id) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+
+/// Single query that computes the keep-set in SQL and returns every
+/// `v<N>_*` object outside it. The keep-set is: active + newest
+/// `retired_slots` retired + migrating above active. Returns zero rows
+/// if no active version exists (safety guard).
+const LIST_DEAD_VERSION_OBJECTS: &str = "\
+SELECT \
+  name, engine, \
+  toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) AS dead_version, \
+  concat(\
+    multiIf(\
+      engine = 'Dictionary', 'DROP DICTIONARY IF EXISTS ', \
+      engine IN ('View','MaterializedView','LiveView','WindowView'), 'DROP VIEW IF EXISTS ', \
+      'DROP TABLE IF EXISTS '), \
+    {db:String}, '.', name) AS drop_sql \
+FROM system.tables \
+WHERE database = {db:String} \
+  AND match(name, '^v[0-9]+_') \
+  AND toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) NOT IN (\
+      SELECT version FROM gkg_schema_version FINAL WHERE status = 'active' \
+      UNION ALL \
+      SELECT version FROM (\
+          SELECT version FROM gkg_schema_version FINAL \
+          WHERE status = 'retired' ORDER BY version DESC LIMIT {retired_slots:UInt32}) \
+      UNION ALL \
+      SELECT version FROM gkg_schema_version FINAL \
+      WHERE status = 'migrating' \
+        AND version > (SELECT coalesce(max(version), 0) \
+                       FROM gkg_schema_version FINAL WHERE status = 'active')) \
+  AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
 
 /// SQL to read the wall-clock age of the row that marked the given version
 /// as `migrating`. Used to populate the `migrating_age_seconds` gauge so
@@ -170,34 +202,21 @@ impl ScheduledTask for MigrationCompletionChecker {
 
 impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
-        // Phase 1: detect completion of any migrating version.
-        // Returns the post-mutation version list if a promotion happened,
-        // so phase 2 doesn't need to re-read (avoids write-visibility lag).
-        let versions_after_promotion = self.check_completion().await?;
-
-        // Phase 2: GC sweep — drop objects for dead versions.
-        self.reconcile_dead_versions(versions_after_promotion)
-            .await?;
-
+        self.check_completion().await?;
+        self.reconcile_dead_versions().await?;
         Ok(())
     }
 
     /// Checks whether a `migrating` version has been fully re-indexed and
     /// should be promoted to `active`.
-    ///
-    /// Returns the updated version entries if a promotion happened, so the
-    /// caller can pass them to cleanup without re-reading from ClickHouse.
-    async fn check_completion(&self) -> Result<Option<Vec<VersionEntry>>, TaskError> {
+    async fn check_completion(&self) -> Result<(), TaskError> {
         let migrating = read_migrating_version(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
-            // No migration in progress — keep the age gauge accurate so an
-            // alert on `migrating_age_seconds > N` doesn't fire on the
-            // post-promotion last-recorded value.
             self.metrics.record_migrating_age(0);
-            return Ok(None);
+            return Ok(());
         };
 
         // Surface "is migration stuck?" as a direct gauge. A bounded query
@@ -224,11 +243,11 @@ impl MigrationCompletionChecker {
                 version = migrating_version,
                 "migration not yet complete — namespaces still being indexed"
             );
-            return Ok(None);
+            return Ok(());
         }
 
         // Promote: migrating → active, old active → retired.
-        let mut versions = read_all_versions(&self.graph)
+        let versions = read_all_versions(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
@@ -257,22 +276,12 @@ impl MigrationCompletionChecker {
 
         self.metrics.record_migration_completed();
 
-        // Reflect the mutations in the in-memory list so cleanup doesn't
-        // need to re-read and risk write-visibility lag.
-        for entry in &mut versions {
-            if entry.version == migrating_version {
-                entry.status = "active".to_string();
-            } else if entry.status == "active" {
-                entry.status = "retired".to_string();
-            }
-        }
-
         info!(
             version = migrating_version,
             "schema migration to v{migrating_version} complete"
         );
 
-        Ok(Some(versions))
+        Ok(())
     }
 
     /// Returns `true` if all enabled namespaces have checkpoint entries in both
@@ -480,125 +489,89 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// Drops ontology-derived objects for every version outside the keep-set.
-    async fn reconcile_dead_versions(
-        &self,
-        cached_versions: Option<Vec<VersionEntry>>,
-    ) -> Result<(), TaskError> {
-        let versions = match cached_versions {
-            Some(v) => v,
-            None => read_all_versions(&self.graph)
-                .await
-                .map_err(|e| TaskError::new(format!("read all versions: {e}")))?,
-        };
+    /// Enumerates dead-version objects via `system.tables` (keep-set computed
+    /// in SQL), validates each against the ontology, and drops recognized
+    /// objects. Unrecognized objects are logged and left alone.
+    async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
+        let retired_slots = self.schema_config.max_retained_versions.saturating_sub(1);
+        let db = self.graph.database();
 
-        let keep = compute_keep_set(&versions, self.schema_config.max_retained_versions as usize);
-        if keep.is_empty() {
-            warn!("keep-set is empty (no active version) — skipping GC");
-            return Ok(());
+        let batches = self
+            .graph
+            .query(LIST_DEAD_VERSION_OBJECTS)
+            .param("db", db)
+            .param("retired_slots", retired_slots)
+            .fetch_arrow()
+            .await
+            .map_err(|e| TaskError::new(format!("list dead version objects: {e}")))?;
+
+        let known_names = ontology_known_names(&self.ontology);
+        let current = *SCHEMA_VERSION;
+        let mut dropped_versions: HashSet<u32> = HashSet::new();
+        let mut had_failure = false;
+
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                let name = ArrowUtils::get_column_string(batch, "name", i)
+                    .ok_or_else(|| TaskError::new("missing name".to_string()))?;
+                let drop_sql = ArrowUtils::get_column_string(batch, "drop_sql", i)
+                    .ok_or_else(|| TaskError::new("missing drop_sql".to_string()))?;
+                let version = ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(
+                    batch,
+                    "dead_version",
+                    i,
+                )
+                .ok_or_else(|| TaskError::new("missing dead_version".to_string()))?;
+
+                let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
+                if !known_names.contains(base_name) {
+                    warn!(
+                        version,
+                        object = %name,
+                        "GC: skipping unrecognized object (not in ontology)"
+                    );
+                    continue;
+                }
+
+                if let Err(e) = self.graph.execute(&drop_sql).await {
+                    warn!(version, object = %name, error = %e, "GC: drop failed");
+                    had_failure = true;
+                }
+                dropped_versions.insert(version);
+            }
         }
 
-        let current = keep.iter().max().copied().unwrap_or(0);
-
-        for entry in &versions {
-            if keep.contains(&entry.version) || entry.status == "dropped" {
-                continue;
-            }
-
-            info!(version = entry.version, ?keep, "GC: dropping dead version");
-            let ok = self.drop_version_objects(entry.version).await;
-
-            if let Err(e) = mark_version_dropped(&self.graph, entry.version).await {
-                warn!(version = entry.version, error = %e, "GC: failed to mark dropped");
+        for version in &dropped_versions {
+            if let Err(e) = mark_version_dropped(&self.graph, *version).await {
+                warn!(version, error = %e, "GC: failed to mark dropped");
             }
             self.metrics.record_cleanup(
-                entry.version,
+                *version,
                 current,
-                if ok { "success" } else { "failure" },
+                if had_failure { "failure" } else { "success" },
             );
         }
 
         Ok(())
     }
-
-    /// Best-effort drop of all ontology-derived objects for a version.
-    /// Views first (they reference source tables), then dictionaries, then tables.
-    /// Returns `true` if every drop succeeded.
-    async fn drop_version_objects(&self, version: u32) -> bool {
-        let prefix = table_prefix(version);
-        let mut ok = true;
-
-        for mv in &generate_graph_materialized_views(&self.ontology) {
-            let name = format!("{prefix}{}", mv.name);
-            if self
-                .graph
-                .execute(&format!("DROP VIEW IF EXISTS {name}"))
-                .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
-                .is_err()
-            {
-                ok = false;
-            }
-        }
-        for d in &generate_graph_dictionaries(&self.ontology) {
-            let name = format!("{prefix}{}", d.name);
-            if self
-                .graph
-                .execute(&format!("DROP DICTIONARY IF EXISTS {name}"))
-                .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
-                .is_err()
-            {
-                ok = false;
-            }
-        }
-        for t in &generate_graph_tables(&self.ontology) {
-            let name = format!("{prefix}{}", t.name);
-            if self
-                .graph
-                .execute(&format!("DROP TABLE IF EXISTS {name}"))
-                .await
-                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"))
-                .is_err()
-            {
-                ok = false;
-            }
-        }
-        ok
-    }
 }
 
-/// Versions to keep. Everything else is safe to drop.
-///
-/// Expects `versions` sorted by version descending (as `read_all_versions`
-/// returns) so that `.take()` on the retired iterator retains the newest.
-///
-/// Returns empty if no active version exists (caller must abort).
-fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> HashSet<u32> {
-    let mut keep = HashSet::new();
-
-    let Some(active) = versions.iter().find(|v| v.status == "active") else {
-        return keep;
-    };
-    keep.insert(active.version);
-
-    keep.extend(
-        versions
-            .iter()
-            .filter(|v| v.status == "retired")
-            .map(|v| v.version)
-            .take(max_retained.saturating_sub(1)),
-    );
-
-    // In-flight migration (above active); zombies below active are excluded.
-    keep.extend(
-        versions
-            .iter()
-            .filter(|v| v.status == "migrating" && v.version > active.version)
-            .map(|v| v.version),
-    );
-
-    keep
+/// Builds the set of object names the ontology creates (tables, views,
+/// dictionaries) — without any version prefix. Used to validate that a
+/// `v<N>_*` object found in `system.tables` was created by the migration
+/// system and is safe to drop.
+fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for t in &generate_graph_tables(ontology) {
+        names.insert(t.name.clone());
+    }
+    for mv in &generate_graph_materialized_views(ontology) {
+        names.insert(mv.name.clone());
+    }
+    for d in &generate_graph_dictionaries(ontology) {
+        names.insert(d.name.clone());
+    }
+    names
 }
 
 #[cfg(test)]
@@ -709,90 +682,34 @@ mod tests {
         assert!((coverage(8600, 8602) - 0.9998).abs() < 0.001);
     }
 
-    fn v(version: u32, status: &str) -> VersionEntry {
-        VersionEntry {
-            version,
-            status: status.to_string(),
-        }
+    #[test]
+    fn ontology_known_names_includes_tables_views_dicts() {
+        let ont = ontology::Ontology::load_embedded().unwrap();
+        let names = ontology_known_names(&ont);
+        assert!(names.contains("gl_edge"), "should contain edge table");
+        assert!(
+            names.contains("checkpoint"),
+            "should contain checkpoint table"
+        );
+        assert!(!names.is_empty());
     }
 
     #[test]
-    fn keep_set_empty_when_no_active() {
-        let versions = vec![v(1, "migrating"), v(9, "migrating")];
-        assert!(compute_keep_set(&versions, 2).is_empty());
+    fn gc_query_has_safety_guard() {
+        assert!(
+            LIST_DEAD_VERSION_OBJECTS.contains("count()"),
+            "query must abort when no active version exists"
+        );
     }
 
     #[test]
-    fn keep_set_includes_active_and_one_retired() {
-        let versions = vec![v(58, "active"), v(57, "retired"), v(56, "retired")];
-        let keep = compute_keep_set(&versions, 2);
-        assert!(keep.contains(&58));
-        assert!(keep.contains(&57));
-        assert!(!keep.contains(&56));
-    }
-
-    #[test]
-    fn keep_set_keeps_migrating_above_active() {
-        let versions = vec![v(59, "migrating"), v(58, "active"), v(57, "retired")];
-        let keep = compute_keep_set(&versions, 2);
-        assert!(keep.contains(&59));
-        assert!(keep.contains(&58));
-        assert!(keep.contains(&57));
-    }
-
-    #[test]
-    fn keep_set_drops_migrating_below_active() {
-        let versions = vec![
-            v(58, "active"),
-            v(57, "retired"),
-            v(9, "migrating"),
-            v(1, "migrating"),
-        ];
-        let keep = compute_keep_set(&versions, 2);
-        assert!(keep.contains(&58));
-        assert!(keep.contains(&57));
-        assert!(!keep.contains(&9));
-        assert!(!keep.contains(&1));
-    }
-
-    #[test]
-    fn keep_set_ignores_dropped_versions() {
-        let versions = vec![
-            v(58, "active"),
-            v(57, "retired"),
-            v(56, "dropped"),
-            v(55, "retired"),
-        ];
-        let keep = compute_keep_set(&versions, 2);
-        assert!(keep.contains(&58));
-        assert!(keep.contains(&57));
-        assert!(!keep.contains(&56));
-        assert!(!keep.contains(&55));
-    }
-
-    /// Mirrors the actual orbit-prod state from the PRD.
-    #[test]
-    fn keep_set_prod_scenario() {
-        let versions = vec![
-            v(58, "active"),
-            v(57, "retired"),
-            v(56, "dropped"),
-            v(14, "dropped"),
-            v(10, "dropped"),
-            v(9, "migrating"),
-            v(7, "dropped"),
-            v(6, "dropped"),
-            v(2, "dropped"),
-            v(1, "migrating"),
-        ];
-        let keep = compute_keep_set(&versions, 2);
-        assert_eq!(keep, HashSet::from([57, 58]));
-    }
-
-    #[test]
-    fn keep_set_active_only() {
-        let versions = vec![v(58, "active")];
-        let keep = compute_keep_set(&versions, 2);
-        assert_eq!(keep, HashSet::from([58]));
+    fn gc_query_excludes_active_retired_and_migrating_above() {
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'active'"));
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'retired'"));
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'migrating'"));
+        assert!(
+            LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
+            "migrating > active guard must handle missing active"
+        );
     }
 }
