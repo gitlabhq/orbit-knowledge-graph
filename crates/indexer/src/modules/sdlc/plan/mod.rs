@@ -136,10 +136,9 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-/// Half-open partition window `[lower, upper)` over the leading sort-key prefix,
-/// each bound emitted as index-friendly DNF (see [`sort_key_prefix_compare`]). A
-/// bare `id` range can only filter rows and rescans the namespace per page; this
-/// prunes by the primary index instead.
+/// Half-open partition window `[lower, upper)` over the leading sort-key prefix.
+/// A bare `id` range (the 2nd sort key) rescans the namespace on every page;
+/// bounding the full prefix prunes by the primary index instead.
 pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
     pub columns: &'a [String],
     pub lower: Option<&'a [String]>,
@@ -148,32 +147,21 @@ pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
 
 impl Filter for CompositeRangeFilter<'_> {
     fn condition(&self) -> String {
-        let mut edges = Vec::new();
-        if let Some(lower) = self.lower {
-            edges.push(sort_key_prefix_compare(
-                self.columns,
-                lower,
-                KeyComparison::AtLeast,
-            ));
-        }
-        if let Some(upper) = self.upper {
-            edges.push(sort_key_prefix_compare(
-                self.columns,
-                upper,
-                KeyComparison::Below,
-            ));
-        }
-        edges
+        let lower_edge = self
+            .lower
+            .map(|values| sort_key_prefix_compare(self.columns, values, KeyComparison::AtLeast));
+        let upper_edge = self
+            .upper
+            .map(|values| sort_key_prefix_compare(self.columns, values, KeyComparison::Below));
+        [lower_edge, upper_edge]
             .into_iter()
+            .flatten()
             .map(|edge| format!("({edge})"))
             .collect::<Vec<_>>()
             .join(" AND ")
     }
 }
 
-/// How a row's leading sort-key prefix is compared against a tuple of values.
-/// `Greater` paginates past the last row of a page (the cursor); `AtLeast` and
-/// `Below` are the inclusive-lower and exclusive-upper edges of a partition.
 enum KeyComparison {
     Greater,
     AtLeast,
@@ -181,47 +169,41 @@ enum KeyComparison {
 }
 
 impl KeyComparison {
-    // Every prefix depth narrows by direction; only the final pivot column
-    // carries the inclusive edge, where `>` becomes `>=`.
-    fn operator(&self, at_pivot: bool) -> &'static str {
+    // Lexicographic `>=` is `>` at every depth except the last column.
+    fn operator(&self, at_last_column: bool) -> &'static str {
         match self {
             KeyComparison::Greater => ">",
-            KeyComparison::AtLeast if at_pivot => ">=",
+            KeyComparison::AtLeast if at_last_column => ">=",
             KeyComparison::AtLeast => ">",
             KeyComparison::Below => "<",
         }
     }
 }
 
-/// Compares the sort-key prefix `columns` against `values` as a flat OR-of-ANDs
-/// (DNF): `(c0 > v0) OR (c0 = v0 AND c1 > v1) OR …`. ClickHouse matches this
-/// shape against the primary index and prunes granules; a packed
-/// `(c0, c1) > (v0, v1)` reads as an opaque expression and forces a full scan.
+/// Compares the sort-key prefix against a tuple of values as a flat OR-of-ANDs:
+/// `(c0 > v0) OR (c0 = v0 AND c1 > v1) OR …`. ClickHouse prunes granules for
+/// this shape; a packed `(c0, c1) > (v0, v1)` tuple forces a full scan.
 fn sort_key_prefix_compare(
     columns: &[String],
     values: &[String],
     comparison: KeyComparison,
 ) -> String {
-    (0..columns.len())
+    let disjuncts: Vec<String> = (0..columns.len())
         .map(|pivot| {
-            let equal_prefix = columns[..pivot]
+            let mut clauses: Vec<String> = columns[..pivot]
                 .iter()
                 .zip(values)
-                .map(|(col, val)| format!("({col} = '{val}')"));
-            let pivot_clause = format!(
-                "({} {} '{}')",
-                columns[pivot],
-                comparison.operator(pivot == columns.len() - 1),
-                values[pivot],
-            );
-            equal_prefix
-                .chain(std::iter::once(pivot_clause))
-                .collect::<Vec<_>>()
-                .join(" AND ")
+                .map(|(column, value)| format!("({column} = '{value}')"))
+                .collect();
+            let operator = comparison.operator(pivot == columns.len() - 1);
+            clauses.push(format!(
+                "({} {operator} '{}')",
+                columns[pivot], values[pivot]
+            ));
+            format!("({})", clauses.join(" AND "))
         })
-        .map(|conjunction| format!("({conjunction})"))
-        .collect::<Vec<_>>()
-        .join(" OR ")
+        .collect();
+    disjuncts.join(" OR ")
 }
 
 pub(in crate::modules::sdlc) struct CursorFilter<'a> {
