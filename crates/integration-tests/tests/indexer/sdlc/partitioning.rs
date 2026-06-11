@@ -186,12 +186,12 @@ pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestCo
     );
 }
 
-/// A partitioned retry with mixed pre-existing partition state. T-digest cuts on
-/// ids 1..=12 with count=4 are [1, 3, 6, 9, 13] -> p0=[1,3), p1=[3,6), p2=[6,9),
-/// p3=[9,13). p0/p1 are pre-completed (skipped), p2 is mid-pull at cursor 6
-/// (resumes: drops 6, keeps 7-8), p3 is fresh. When the run finishes every
-/// partition, the parent consolidates at the oldest partition watermark and all
-/// partition checkpoints are tombstoned.
+/// A partitioned retry with mixed pre-existing partition state. Bucket cuts on
+/// ids 1..=12 with count=4 are [1, 4, 7, 10] -> p0=[1,4), p1=[4,7), p2=[7,10),
+/// p3=[10,). p0/p1 are pre-completed (skipped), p2 is mid-pull at cursor 6
+/// (below its range, so it pulls 7-9 in full), p3 is fresh. When the run
+/// finishes every partition, the parent consolidates at the oldest partition
+/// watermark and all partition checkpoints are tombstoned.
 pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &TestContext) {
     for id in 1..=12 {
         create_user(ctx, id).await;
@@ -225,7 +225,7 @@ pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &
     assert_eq!(
         indexed,
         vec![7, 8, 9, 10, 11, 12],
-        "p0/p1 skip ids 1-5; p2 resumes at cursor 6 (drops 6, keeps 7-8); p3 indexes 9-12"
+        "p0/p1 skip ids 1-6; p2 pulls 7-9 (cursor 6 sits below its range); p3 indexes 10-12"
     );
 
     let parent = ctx
