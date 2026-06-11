@@ -51,14 +51,17 @@ non-zero (→ restart) if the budget is exhausted or the binary is outdated. All
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
 
-### Migration completion and cleanup
+### Migration completion and dead-version GC
 
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
 mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
 comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
-`active`, retires the old active version, and drops tables for retired versions outside the
-`max_retained_versions` retention window. On promotion it also clears the re-index campaign, so
-subsequent steady-state dispatches carry `campaign_id = null`.
+`active`, retires the old active version, and runs a GC sweep that drops ontology-derived objects
+for every version outside a keep-set. The keep-set is: the active version, the newest
+`max_retained_versions - 1` retired versions, and any `migrating` version above active (the
+in-flight migration). Zombie migrating versions (below active) and dropped-with-residue versions
+are swept. On promotion it also clears the re-index campaign, so subsequent steady-state
+dispatches carry `campaign_id = null`.
 
 ### Stale FK-edge reconciliation
 

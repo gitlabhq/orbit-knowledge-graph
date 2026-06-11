@@ -1,4 +1,4 @@
-//! Migration completion detection and old table cleanup.
+//! Migration completion detection and dead-version GC.
 //!
 //! Runs as a scheduled task in the DispatchIndexing mode. On each tick:
 //!
@@ -7,10 +7,13 @@
 //!    tables. If so, promote the version to `active` and demote the previously
 //!    active version to `retired`.
 //!
-//! 2. **Retention cleanup** — Drop tables for versions outside the
-//!    `max_retained_versions` window that have status `retired`, then mark
-//!    them `dropped`.
+//! 2. **Reconcile GC** — Enumerate physical `v<N>_*` objects from
+//!    `system.tables`, compute a keep-set (active + retained retired +
+//!    in-flight migrating), and drop everything else. This catches
+//!    rename-orphans, zombie migrating versions, and dropped-with-residue
+//!    versions that the old ontology-name-based cleanup missed.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::datatypes::UInt64Type;
@@ -174,8 +177,9 @@ impl MigrationCompletionChecker {
         // so phase 2 doesn't need to re-read (avoids write-visibility lag).
         let versions_after_promotion = self.check_completion().await?;
 
-        // Phase 2: clean up old retired versions outside retention window.
-        self.cleanup_old_versions(versions_after_promotion).await?;
+        // Phase 2: GC sweep — drop objects for dead versions.
+        self.reconcile_dead_versions(versions_after_promotion)
+            .await?;
 
         Ok(())
     }
@@ -478,9 +482,15 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// Drops tables for retired versions outside the retention window, then
-    /// marks them `dropped`.
-    async fn cleanup_old_versions(
+    /// GC sweep: computes a keep-set from version entries, then drops all
+    /// ontology-derived objects for every version outside that set.
+    ///
+    /// This replaces the old status-gated cleanup that only processed
+    /// `retired` versions and derived drop targets from the current ontology.
+    /// The new approach handles zombie migrating versions (`version < active`)
+    /// and dropped-with-residue versions (status `dropped` but tables still
+    /// present) because it is not gated on status.
+    async fn reconcile_dead_versions(
         &self,
         cached_versions: Option<Vec<VersionEntry>>,
     ) -> Result<(), TaskError> {
@@ -491,131 +501,140 @@ impl MigrationCompletionChecker {
                 .map_err(|e| TaskError::new(format!("read all versions: {e}")))?,
         };
 
-        // Keep the top `max_retained_versions` non-dropped entries.
-        let retained: Vec<&VersionEntry> =
-            versions.iter().filter(|v| v.status != "dropped").collect();
+        let keep = compute_keep_set(&versions, self.schema_config.max_retained_versions as usize);
 
-        let max = self.schema_config.max_retained_versions as usize;
-        if retained.len() <= max {
+        if keep.is_empty() {
+            warn!("keep-set is empty (no active version found) — aborting GC sweep");
             return Ok(());
         }
 
-        let current_version = retained.first().map(|v| v.version).unwrap_or(0);
-        let to_cleanup: Vec<&VersionEntry> = retained[max..].to_vec();
+        let to_drop: Vec<u32> = versions
+            .iter()
+            .map(|v| v.version)
+            .filter(|v| !keep.contains(v))
+            .collect();
 
-        for entry in to_cleanup {
-            if entry.status != "retired" {
-                // Only drop tables for retired versions.
-                continue;
-            }
+        if to_drop.is_empty() {
+            return Ok(());
+        }
 
-            info!(
-                version = entry.version,
-                "dropping tables for retired version outside retention window"
-            );
+        let current_version = versions
+            .iter()
+            .find(|v| v.status == "active")
+            .map(|v| v.version)
+            .unwrap_or(0);
 
-            match self.drop_version_tables(entry.version).await {
+        info!(
+            versions_to_gc = ?to_drop,
+            keep_set = ?keep,
+            "GC sweep: dropping objects for dead versions"
+        );
+
+        for version in &to_drop {
+            match self.drop_version_objects(*version).await {
                 Ok(()) => {
-                    mark_version_dropped(&self.graph, entry.version)
-                        .await
-                        .map_err(|e| {
-                            TaskError::new(format!("mark v{} dropped: {e}", entry.version))
-                        })?;
                     self.metrics
-                        .record_cleanup(entry.version, current_version, "success");
-                    info!(
-                        version = entry.version,
-                        "version tables dropped and marked as dropped"
-                    );
+                        .record_cleanup(*version, current_version, "success");
+                    info!(version, "GC: version objects dropped");
                 }
                 Err(e) => {
                     self.metrics
-                        .record_cleanup(entry.version, current_version, "failure");
-                    warn!(
-                        version = entry.version,
-                        error = %e,
-                        "failed to drop tables for retired version"
-                    );
+                        .record_cleanup(*version, current_version, "failure");
+                    warn!(version, error = %e, "GC: failed to drop version objects");
                 }
+            }
+
+            if let Err(e) = mark_version_dropped(&self.graph, *version).await {
+                warn!(version, error = %e, "GC: failed to mark version dropped");
             }
         }
 
         Ok(())
     }
 
-    /// Drops all materialized views and graph tables for a given schema version.
+    /// Drops all ontology-derived objects for a schema version.
     ///
-    /// Materialized views are dropped first because they reference the source
-    /// tables; dropping a table while a view still selects from it would leave
-    /// an orphaned view definition.
-    ///
-    /// TO-table targets are not dropped here separately -- the ontology loader
-    /// validates that every `to_table` references an ontology-tracked table
-    /// (auxiliary, node, or edge), so the table-cleanup loop below handles them.
-    async fn drop_version_tables(&self, version: u32) -> Result<(), String> {
+    /// Drop order: materialized views → dictionaries → tables. Views
+    /// reference source tables, so they must go first.
+    async fn drop_version_objects(&self, version: u32) -> Result<(), String> {
         let prefix = table_prefix(version);
 
-        // Drop materialized views before their source tables.
-        let views: Vec<String> = generate_graph_materialized_views(&self.ontology)
-            .into_iter()
-            .map(|mv| mv.name)
-            .collect();
-
-        for view_name in &views {
-            let prefixed = format!("{prefix}{view_name}");
-            let ddl = format!("DROP VIEW IF EXISTS {prefixed}");
-
-            info!(
-                version,
-                view = %prefixed,
-                "dropping materialized view"
-            );
-
-            self.graph
-                .execute(&ddl)
+        let views = generate_graph_materialized_views(&self.ontology);
+        for mv in &views {
+            let name = format!("{prefix}{}", mv.name);
+            if let Err(e) = self
+                .graph
+                .execute(&format!("DROP VIEW IF EXISTS {name}"))
                 .await
-                .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
+            {
+                warn!(version, object = %name, error = %e, "GC: failed to drop view");
+            }
         }
 
-        let dicts: Vec<String> = generate_graph_dictionaries(&self.ontology)
-            .into_iter()
-            .map(|d| d.name)
-            .collect();
-        for dict_name in &dicts {
-            let prefixed = format!("{prefix}{dict_name}");
-            let ddl = format!("DROP DICTIONARY IF EXISTS {prefixed}");
-
-            info!(version, dictionary = %prefixed, "dropping dictionary");
-
-            self.graph
-                .execute(&ddl)
+        let dicts = generate_graph_dictionaries(&self.ontology);
+        for d in &dicts {
+            let name = format!("{prefix}{}", d.name);
+            if let Err(e) = self
+                .graph
+                .execute(&format!("DROP DICTIONARY IF EXISTS {name}"))
                 .await
-                .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
+            {
+                warn!(version, object = %name, error = %e, "GC: failed to drop dictionary");
+            }
         }
 
-        let tables: Vec<String> = generate_graph_tables(&self.ontology)
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
-
-        for table_name in &tables {
-            let prefixed = format!("{prefix}{table_name}");
-            let ddl = format!("DROP TABLE IF EXISTS {prefixed}");
-
-            info!(
-                version,
-                table = %prefixed,
-                "dropping table"
-            );
-
-            self.graph
-                .execute(&ddl)
+        let tables = generate_graph_tables(&self.ontology);
+        for t in &tables {
+            let name = format!("{prefix}{}", t.name);
+            if let Err(e) = self
+                .graph
+                .execute(&format!("DROP TABLE IF EXISTS {name}"))
                 .await
-                .map_err(|e| format!("DROP TABLE {prefixed}: {e}"))?;
+            {
+                warn!(version, object = %name, error = %e, "GC: failed to drop table");
+            }
         }
 
         Ok(())
     }
+}
+
+/// Computes the set of schema versions to keep. Everything else is safe to drop.
+///
+/// Keep-set = active ∪ newest `max_retained` retired ∪ migrating > active.
+/// A `migrating` version below active is a zombie (superseded/crashed migration)
+/// and is excluded so the GC sweep reclaims its tables.
+///
+/// Returns an empty set if no active version is found; the caller must abort the
+/// sweep in that case (ambiguity guard).
+fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> BTreeSet<u32> {
+    let mut keep = BTreeSet::new();
+
+    let active = versions.iter().find(|v| v.status == "active");
+    let Some(active) = active else {
+        return keep;
+    };
+    keep.insert(active.version);
+
+    // Retain the newest `max_retained - 1` retired versions (the active
+    // version already counts toward the retention window).
+    let slots = max_retained.saturating_sub(1);
+    for v in versions
+        .iter()
+        .filter(|v| v.status == "retired")
+        .take(slots)
+    {
+        keep.insert(v.version);
+    }
+
+    // A migrating version above active is the in-flight migration; keep it.
+    for v in versions.iter().filter(|v| v.status == "migrating") {
+        if v.version > active.version {
+            keep.insert(v.version);
+        }
+    }
+
+    keep
 }
 
 #[cfg(test)]
@@ -724,5 +743,92 @@ mod tests {
 
         // Saturated coverage approaches 1.0 once the backfill catches up.
         assert!((coverage(8600, 8602) - 0.9998).abs() < 0.001);
+    }
+
+    fn v(version: u32, status: &str) -> VersionEntry {
+        VersionEntry {
+            version,
+            status: status.to_string(),
+        }
+    }
+
+    #[test]
+    fn keep_set_empty_when_no_active() {
+        let versions = vec![v(1, "migrating"), v(9, "migrating")];
+        assert!(compute_keep_set(&versions, 2).is_empty());
+    }
+
+    #[test]
+    fn keep_set_includes_active_and_one_retired() {
+        let versions = vec![v(58, "active"), v(57, "retired"), v(56, "retired")];
+        let keep = compute_keep_set(&versions, 2);
+        assert!(keep.contains(&58));
+        assert!(keep.contains(&57));
+        assert!(!keep.contains(&56));
+    }
+
+    #[test]
+    fn keep_set_keeps_migrating_above_active() {
+        let versions = vec![v(59, "migrating"), v(58, "active"), v(57, "retired")];
+        let keep = compute_keep_set(&versions, 2);
+        assert!(keep.contains(&59));
+        assert!(keep.contains(&58));
+        assert!(keep.contains(&57));
+    }
+
+    #[test]
+    fn keep_set_drops_migrating_below_active() {
+        let versions = vec![
+            v(58, "active"),
+            v(57, "retired"),
+            v(9, "migrating"),
+            v(1, "migrating"),
+        ];
+        let keep = compute_keep_set(&versions, 2);
+        assert!(keep.contains(&58));
+        assert!(keep.contains(&57));
+        assert!(!keep.contains(&9));
+        assert!(!keep.contains(&1));
+    }
+
+    #[test]
+    fn keep_set_ignores_dropped_versions() {
+        let versions = vec![
+            v(58, "active"),
+            v(57, "retired"),
+            v(56, "dropped"),
+            v(55, "retired"),
+        ];
+        let keep = compute_keep_set(&versions, 2);
+        assert!(keep.contains(&58));
+        assert!(keep.contains(&57));
+        assert!(!keep.contains(&56));
+        assert!(!keep.contains(&55));
+    }
+
+    /// Mirrors the actual orbit-prod state from the PRD.
+    #[test]
+    fn keep_set_prod_scenario() {
+        let versions = vec![
+            v(58, "active"),
+            v(57, "retired"),
+            v(56, "dropped"),
+            v(14, "dropped"),
+            v(10, "dropped"),
+            v(9, "migrating"),
+            v(7, "dropped"),
+            v(6, "dropped"),
+            v(2, "dropped"),
+            v(1, "migrating"),
+        ];
+        let keep = compute_keep_set(&versions, 2);
+        assert_eq!(keep, BTreeSet::from([57, 58]));
+    }
+
+    #[test]
+    fn keep_set_active_only() {
+        let versions = vec![v(58, "active")];
+        let keep = compute_keep_set(&versions, 2);
+        assert_eq!(keep, BTreeSet::from([58]));
     }
 }
