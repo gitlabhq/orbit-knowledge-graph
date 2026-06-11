@@ -267,7 +267,7 @@
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
@@ -313,19 +313,19 @@
             },
             "select": {
               "type": "string",
-              "description": "Column expressions for the SELECT clause."
+              "description": "Column expressions for the SELECT clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "from": {
               "type": "string",
-              "description": "Table or JOIN expression for the FROM clause."
+              "description": "Table or JOIN expression for the FROM clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "where": {
               "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters)."
+              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters). Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
@@ -373,7 +373,7 @@
                 },
                 "watermark": {
                   "type": "string",
-                  "description": "Watermark column for argMax deduplication. Defaults to _siphon_replicated_at."
+                  "description": "Watermark column for argMax deduplication. Defaults to schema.yaml's default_watermark. Use {{watermark_column}} placeholder instead of hardcoding the column name."
                 },
                 "traversal_path_column": {
                   "type": "string",

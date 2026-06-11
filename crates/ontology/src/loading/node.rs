@@ -437,7 +437,10 @@ impl NodeYaml {
             _ => {}
         }
 
-        let etl = self.etl.map(|e| e.into_config(etl_settings)).transpose()?;
+        let etl = self
+            .etl
+            .map(|e| e.into_config(&name, etl_settings))
+            .transpose()?;
 
         let has_traversal_path = fields
             .iter()
@@ -540,11 +543,46 @@ fn convert_edge_mappings(
         .collect()
 }
 
+/// Replaces `{{watermark_column}}` placeholders with the configured watermark
+/// column name, rejecting ETL SQL that hardcodes the default watermark literal.
+pub(crate) fn render_watermark_placeholder(
+    entity: &str,
+    field: &str,
+    raw: &str,
+    watermark: &str,
+) -> Result<String, OntologyError> {
+    if raw.contains(watermark) {
+        return Err(OntologyError::Validation(format!(
+            "entity '{entity}' field '{field}' hardcodes watermark column \
+             '{watermark}'; use {{{{watermark_column}}}} placeholder instead"
+        )));
+    }
+    let rendered = raw.replace("{{watermark_column}}", watermark);
+    if rendered.contains("{{") {
+        return Err(OntologyError::Validation(format!(
+            "entity '{entity}' field '{field}' contains unresolved placeholder '{{{{..}}}}'",
+        )));
+    }
+    Ok(rendered)
+}
+
+fn render_optional(
+    entity: &str,
+    field: &str,
+    raw: Option<String>,
+    watermark: &str,
+) -> Result<Option<String>, OntologyError> {
+    raw.map(|s| render_watermark_placeholder(entity, field, &s, watermark))
+        .transpose()
+}
+
 impl EtlYaml {
     pub(crate) fn into_config(
         self,
+        entity_name: &str,
         etl_settings: &EtlSettings,
     ) -> Result<EtlConfig, OntologyError> {
+        let wm = &etl_settings.watermark;
         match self {
             EtlYaml::Table {
                 scope,
@@ -554,14 +592,20 @@ impl EtlYaml {
                 order_by,
                 transform: _,
                 edges,
-            } => Ok(EtlConfig::Table {
-                scope,
-                source,
-                watermark: watermark.unwrap_or_else(|| etl_settings.watermark.clone()),
-                deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
-                order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                edges: convert_edge_mappings(edges)?,
-            }),
+            } => {
+                let watermark = match watermark {
+                    Some(w) => render_watermark_placeholder(entity_name, "watermark", &w, wm)?,
+                    None => wm.clone(),
+                };
+                Ok(EtlConfig::Table {
+                    scope,
+                    source,
+                    watermark,
+                    deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
+                    order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
+                    edges: convert_edge_mappings(edges)?,
+                })
+            }
             EtlYaml::Query {
                 scope,
                 source,
@@ -576,31 +620,62 @@ impl EtlYaml {
                 page_join,
                 transform: _,
                 edges,
-            } => Ok(EtlConfig::Query {
-                scope,
-                source,
-                select,
-                from,
-                where_clause,
-                watermark: watermark.unwrap_or_else(|| etl_settings.watermark.clone()),
-                deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
-                order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
-                traversal_path_filter,
-                table_alias,
-                page_join: page_join.map(|pj| {
-                    let pj = *pj;
-                    Box::new(crate::etl::PageJoin {
-                        table: pj.table,
-                        alias: pj.alias,
-                        fk_column: pj.fk_column,
-                        select: pj.select,
-                        where_clause: pj.where_clause,
-                        watermark: pj.watermark,
-                        traversal_path_column: pj.traversal_path_column,
+            } => {
+                let select = render_watermark_placeholder(entity_name, "select", &select, wm)?;
+                let from = render_watermark_placeholder(entity_name, "from", &from, wm)?;
+                let where_clause = render_optional(entity_name, "where", where_clause, wm)?;
+                let watermark = match watermark {
+                    Some(w) => render_watermark_placeholder(entity_name, "watermark", &w, wm)?,
+                    None => wm.clone(),
+                };
+                let traversal_path_filter = render_optional(
+                    entity_name,
+                    "traversal_path_filter",
+                    traversal_path_filter,
+                    wm,
+                )?;
+
+                let page_join = page_join
+                    .map(|pj| {
+                        let pj = *pj;
+                        let pj_where =
+                            render_optional(entity_name, "page_join.where", pj.where_clause, wm)?;
+                        let pj_watermark = match pj.watermark {
+                            Some(w) => render_watermark_placeholder(
+                                entity_name,
+                                "page_join.watermark",
+                                &w,
+                                wm,
+                            )?,
+                            None => wm.clone(),
+                        };
+                        Ok(Box::new(crate::etl::PageJoin {
+                            table: pj.table,
+                            alias: pj.alias,
+                            fk_column: pj.fk_column,
+                            select: pj.select,
+                            where_clause: pj_where,
+                            watermark: pj_watermark,
+                            traversal_path_column: pj.traversal_path_column,
+                        }))
                     })
-                }),
-                edges: convert_edge_mappings(edges)?,
-            }),
+                    .transpose()?;
+
+                Ok(EtlConfig::Query {
+                    scope,
+                    source,
+                    select,
+                    from,
+                    where_clause,
+                    watermark,
+                    deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
+                    order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
+                    traversal_path_filter,
+                    table_alias,
+                    page_join,
+                    edges: convert_edge_mappings(edges)?,
+                })
+            }
         }
     }
 }
@@ -694,7 +769,7 @@ mod tests {
 
     fn test_etl_settings() -> EtlSettings {
         EtlSettings {
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
         }
@@ -1101,5 +1176,152 @@ mod tests {
             &sort_key,
         );
         assert!(matches!(agg, StorageProjection::Aggregate { .. }));
+    }
+
+    #[test]
+    fn hardcoded_watermark_in_select_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "argMax(col, _siphon_replicated_at) AS col"
+              from: source_table
+            "#,
+        );
+        let err = result.expect_err("hardcoded watermark should be rejected");
+        assert!(
+            err.to_string().contains("hardcodes watermark column"),
+            "got: {err}"
+        );
+        assert!(
+            err.to_string().contains("{{watermark_column}}"),
+            "error should mention the placeholder, got: {err}"
+        );
+    }
+
+    #[test]
+    fn watermark_placeholder_in_aliased_watermark_renders_correctly() {
+        let node = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "id"
+              from: source_table AS t
+              watermark: "t.{{watermark_column}}"
+              table_alias: t
+            "#,
+        )
+        .expect("placeholder should be accepted");
+        let etl = node.etl.unwrap();
+        assert_eq!(etl.watermark(), "t._siphon_replicated_at");
+    }
+
+    #[test]
+    fn watermark_placeholder_in_from_renders_correctly() {
+        let node = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "id"
+              from: "source_table AS t JOIN (SELECT argMax(x, {{watermark_column}}) FROM y GROUP BY id) z ON t.id = z.id"
+            "#,
+        )
+        .expect("placeholder in from should be accepted");
+        let EtlConfig::Query { from, .. } = node.etl.unwrap() else {
+            panic!("expected Query");
+        };
+        assert!(
+            from.contains("_siphon_replicated_at"),
+            "placeholder should be rendered: {from}"
+        );
+        assert!(
+            !from.contains("{{watermark_column}}"),
+            "placeholder should not remain: {from}"
+        );
+    }
+
+    #[test]
+    fn unresolved_placeholder_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "argMax(col, {{typo_column}}) AS col"
+              from: source_table
+            "#,
+        );
+        let err = result.expect_err("unresolved placeholder should be rejected");
+        assert!(
+            err.to_string().contains("unresolved placeholder"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn page_join_watermark_defaults_to_etl_settings() {
+        let node = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "id"
+              from: source_table
+              page_join:
+                table: joined_table
+                alias: jt
+                fk_column: source_id
+                select: [extra_col]
+            "#,
+        )
+        .expect("page_join without watermark should use default");
+        let EtlConfig::Query { page_join, .. } = node.etl.unwrap() else {
+            panic!("expected Query");
+        };
+        let pj = page_join.expect("page_join should be present");
+        assert_eq!(pj.watermark, "_siphon_replicated_at");
     }
 }

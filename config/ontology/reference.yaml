@@ -8,9 +8,14 @@ destination_table: users
 # Source definition for ETL
 # source:
 #   table: siphon_users
-#   watermark_column: _siphon_replicated_at
+#   watermark_column: _siphon_replicated_at  (use {{watermark_column}} in ETL SQL)
 #   deleted_column: _siphon_deleted
 #   primary_key: id
+#
+# ETL SQL fields (select, from, where, watermark, traversal_path_filter,
+# page_join.where, page_join.watermark) must use the {{watermark_column}}
+# placeholder instead of hardcoding the watermark column name. The loader
+# substitutes it with schema.yaml's default_watermark at load time.
 
 # Output destination
 # destination:

@@ -131,6 +131,9 @@ preventable feedback (see #2772, !1416). Check each of these first:
   (e.g. `tokio::try_join!`), not sequentially.
 - **Constants:** prefer deriving values from the ontology or a typed config field over hardcoding
   magic numbers; if a value is environment-dependent, make it a `HandlersConfiguration` field.
+- **Watermark column:** hand-written datalake SQL must splice
+  `ontology::constants::SIPHON_WATERMARK_COLUMN` (via `const_format::concatcp!`), never the
+  literal `_siphon_replicated_at`. Ontology YAML uses the `{{watermark_column}}` placeholder.
 
 If none of the above fits and you genuinely need new infrastructure, prefer generalizing into a
 shared place (`crates/utils/`, `modules/.../pipeline.rs`) over duplicating logic per handler.

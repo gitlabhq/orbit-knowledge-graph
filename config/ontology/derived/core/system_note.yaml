@@ -18,7 +18,7 @@ etl:
     sn.traversal_path AS traversal_path
   where: "sn.system = true AND sn._siphon_deleted = false"
   traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
-  watermark: sn._siphon_replicated_at
+  watermark: sn.{{watermark_column}}
   deleted: sn._siphon_deleted
   table_alias: sn
   order_by: [traversal_path, id]

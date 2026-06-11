@@ -52,6 +52,13 @@ pub const DELETED_COLUMN: &str = "_deleted";
 /// Traversal path column name for namespace scoping.
 pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 
+/// Siphon datalake watermark column used for `argMax` deduplication and
+/// incremental-pull windowing. This const and `schema.yaml`'s
+/// `default_watermark` are the only two declarations of this value;
+/// [`validate_ontology_constants`] asserts they agree. To switch from
+/// `_siphon_replicated_at` to `_siphon_watermark`, update both.
+pub const SIPHON_WATERMARK_COLUMN: &str = "_siphon_replicated_at";
+
 /// Panics if compile-time constants diverge from the embedded ontology YAML.
 ///
 /// Call this at startup and in a `#[test]` so CI catches stale constants.
@@ -86,6 +93,15 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
         "edge_columns count {} doesn't match EDGE_RESERVED_COLUMNS length {}",
         ontology.edge_columns().len(),
         EDGE_RESERVED_COLUMNS.len(),
+    );
+
+    assert_eq!(
+        ontology.default_watermark_column(),
+        SIPHON_WATERMARK_COLUMN,
+        "SIPHON_WATERMARK_COLUMN const (\"{SIPHON_WATERMARK_COLUMN}\") doesn't match \
+         embedded ontology (\"{}\") — update the const in constants.rs or \
+         default_watermark in schema.yaml",
+        ontology.default_watermark_column(),
     );
 }
 

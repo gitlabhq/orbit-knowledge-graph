@@ -33,8 +33,9 @@ pub struct PageJoin {
     pub select: Vec<String>,
     /// Extra WHERE predicate on the joined table (e.g. `_siphon_deleted = false`).
     pub where_clause: Option<String>,
-    /// Watermark column for `argMax` deduplication. Defaults to `_siphon_replicated_at`.
-    pub watermark: Option<String>,
+    /// Watermark column for `argMax` deduplication. Always filled by the
+    /// ontology loader; defaults to the ontology's `default_watermark`.
+    pub watermark: String,
     /// `traversal_path` column on the joined table. When set on a namespaced
     /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
     /// prune by the joined table's leading PK column. A superset of the matched

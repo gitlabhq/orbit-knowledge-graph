@@ -10,15 +10,23 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
 
+use const_format::concatcp;
+
 use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
+const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
+
 // Datalake tables (siphon_*) are never prefixed — only graph tables are.
-const IS_NAMESPACE_STILL_DELETED: &str = r#"
-SELECT argMax(_siphon_deleted, _siphon_replicated_at) AS is_deleted
+const IS_NAMESPACE_STILL_DELETED: &str = concatcp!(
+    r#"
+SELECT argMax(_siphon_deleted, "#,
+    WM,
+    r#") AS is_deleted
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE root_namespace_id = {namespace_id:Int64}
-"#;
+"#
+);
 
 const ENABLED_NAMESPACE_ROOTS_QUERY: &str = r#"
 SELECT traversal_path
@@ -38,17 +46,25 @@ WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 // Reads `traversal_path` directly from the enabled-namespaces table
 // (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
 // reconstructing the path with CONCAT.
-const DELETED_NAMESPACES_QUERY: &str = r#"
+const DELETED_NAMESPACES_QUERY: &str = concatcp!(
+    r#"
 SELECT
     root_namespace_id AS namespace_id,
     traversal_path,
-    toString(_siphon_replicated_at) AS deleted_at
+    toString("#,
+    WM,
+    r#") AS deleted_at
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = true
   AND traversal_path != ''
-  AND _siphon_replicated_at > {last_watermark:String}
-  AND _siphon_replicated_at <= {watermark:String}
-"#;
+  AND "#,
+    WM,
+    r#" > {last_watermark:String}
+  AND "#,
+    WM,
+    r#" <= {watermark:String}
+"#
+);
 
 fn mark_deletion_complete_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
