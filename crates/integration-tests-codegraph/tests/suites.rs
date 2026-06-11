@@ -313,6 +313,11 @@ yaml_test!(
     "php/cross_file_class_const_singleton.yaml"
 );
 
+// Elixir
+yaml_test!(elixir_definitions, "elixir/definitions.yaml");
+yaml_test!(elixir_imports, "elixir/imports.yaml");
+yaml_test!(elixir_cross_file_calls, "elixir/cross_file_calls.yaml");
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(

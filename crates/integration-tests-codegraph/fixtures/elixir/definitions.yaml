@@ -1,0 +1,110 @@
+name: "Elixir definitions — modules, functions, nesting, dotted names, def variants, .ex/.exs routing"
+
+fixtures:
+  - path: lib/greeter.ex
+    content: |
+      defmodule Greeter do
+        def hello(name) do
+          name
+        end
+
+        def hello_short(name), do: name
+
+        def zero do
+          :ok
+        end
+
+        defp helper(x) do
+          x
+        end
+
+        defmodule Inner do
+          def run do
+            :ok
+          end
+        end
+      end
+
+  - path: lib/foo/bar.ex
+    content: |
+      defmodule Foo.Bar do
+        def baz(x), do: x
+      end
+
+  - path: scripts/calc.exs
+    content: |
+      defmodule Calc do
+        def add(a, b) when is_integer(a) do
+          a + b
+        end
+
+        def add(a, b, c) do
+          a + b + c
+        end
+      end
+
+tests:
+  - name: "Modules are indexed as Module definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Module'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "Greeter", fqn: "Greeter" } }
+      - { row: { name: "Inner", fqn: "Greeter.Inner" } }
+      - { row: { name: "Foo.Bar", fqn: "Foo.Bar" } }
+      - { row: { name: "Calc", fqn: "Calc" } }
+
+  - name: "def and defp produce Function definitions with dotted FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 8 }
+      - { row: { name: "hello", fqn: "Greeter.hello" } }
+      - { row: { name: "hello_short", fqn: "Greeter.hello_short" } }
+      - { row: { name: "zero", fqn: "Greeter.zero" } }
+      - { row: { name: "helper", fqn: "Greeter.helper" } }
+      - { row: { name: "run", fqn: "Greeter.Inner.run" } }
+      - { row: { name: "baz", fqn: "Foo.Bar.baz" } }
+
+  - name: ".exs scripts route to the Elixir pipeline and arity overloads collapse to one FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Calc.add'
+        AND d.file_path = 'scripts/calc.exs'
+      RETURN count(d) AS n
+    assert:
+      - { count_equals: { field: n, value: 2 } }
+
+  - name: "Functions nest inside their module via containment"
+    query: |
+      MATCH (m:Definition)-[e:DefinitionToDefinition]->(f:Definition)
+      WHERE m.fqn = 'Greeter'
+        AND f.fqn = 'Greeter.hello'
+        AND e.edge_kind = 'Defines'
+      RETURN f.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Nested module is contained by its parent module"
+    query: |
+      MATCH (m:Definition)-[e:DefinitionToDefinition]->(f:Definition)
+      WHERE m.fqn = 'Greeter'
+        AND f.fqn = 'Greeter.Inner'
+        AND e.edge_kind = 'Defines'
+      RETURN f.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Functions in a nested module are contained by the nested module"
+    query: |
+      MATCH (m:Definition)-[e:DefinitionToDefinition]->(f:Definition)
+      WHERE m.fqn = 'Greeter.Inner'
+        AND f.fqn = 'Greeter.Inner.run'
+        AND e.edge_kind = 'Defines'
+      RETURN f.fqn AS fqn
+    assert:
+      - { row_count: 1 }
