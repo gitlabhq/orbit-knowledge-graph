@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 pub type Row = BTreeMap<String, serde_yaml::Value>;
 pub type Seed = BTreeMap<String, Vec<Row>>;
+pub type SeedSettings = BTreeMap<String, serde_yaml::Value>;
 pub type RowMatcher = BTreeMap<String, Matcher>;
 
 #[derive(Debug, Deserialize)]
@@ -16,7 +17,7 @@ pub struct Scenario {
     #[serde(default)]
     pub seed: Option<Seed>,
     #[serde(default)]
-    pub raw_sql: Vec<String>,
+    pub seed_settings: SeedSettings,
     #[serde(default)]
     pub run: Option<RunSpec>,
     #[serde(default)]
@@ -30,19 +31,23 @@ impl Scenario {
     /// explicit `steps:` form into one list of steps.
     pub fn into_steps(self) -> Vec<Step> {
         let has_inline = self.seed.is_some()
-            || !self.raw_sql.is_empty()
+            || !self.seed_settings.is_empty()
             || self.run.is_some()
             || self.expect.is_some();
         match (has_inline, self.steps.is_empty()) {
             (true, true) => vec![Step {
                 seed: self.seed.unwrap_or_default(),
-                raw_sql: self.raw_sql,
+                seed_settings: self.seed_settings,
                 run: self.run,
                 expect: self.expect,
             }],
             (false, false) => self.steps,
-            (true, false) => panic!("scenario declares both top-level seed/run/expect and steps:"),
-            (false, true) => panic!("scenario declares neither seed/run/expect nor steps:"),
+            (true, false) => {
+                panic!("scenario declares both top-level seed/seed_settings/run/expect and steps:")
+            }
+            (false, true) => {
+                panic!("scenario declares neither seed/seed_settings/run/expect nor steps:")
+            }
         }
     }
 }
@@ -64,8 +69,11 @@ fn default_organization() -> i64 {
 pub struct Step {
     #[serde(default)]
     pub seed: Seed,
+    /// ClickHouse INSERT settings applied to every seed insert in this step,
+    /// e.g. `date_time_overflow_behavior: ignore`. Their presence switches the
+    /// inserts from VALUES to JSONEachRow, where such settings take effect.
     #[serde(default)]
-    pub raw_sql: Vec<String>,
+    pub seed_settings: SeedSettings,
     #[serde(default)]
     pub run: Option<RunSpec>,
     #[serde(default)]

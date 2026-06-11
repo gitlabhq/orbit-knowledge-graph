@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
 
-use super::format::{Row, Seed};
+use super::format::{Row, Seed, SeedSettings};
 use crate::context::TestContext;
 use crate::t;
 
@@ -40,41 +40,25 @@ pub async fn fetch_table_columns(ctx: &TestContext) -> TableColumns {
     columns
 }
 
-pub async fn apply_seed(ctx: &TestContext, seed: &Seed, columns: &TableColumns, location: &str) {
+pub async fn apply_seed(
+    ctx: &TestContext,
+    seed: &Seed,
+    settings: &SeedSettings,
+    columns: &TableColumns,
+    location: &str,
+) {
     for (table, rows) in seed {
         for (physical_table, physical_rows) in expand_table(table, rows, location) {
-            insert_rows(ctx, &physical_table, physical_rows, columns, location).await;
+            insert_rows(
+                ctx,
+                &physical_table,
+                physical_rows,
+                settings,
+                columns,
+                location,
+            )
+            .await;
         }
-    }
-}
-
-/// Execute raw SQL statements verbatim over the HTTP interface. Break-glass for
-/// source rows the declarative seed cannot express, e.g. an out-of-range
-/// `Date32` that only survives an `INSERT ... SETTINGS
-/// date_time_overflow_behavior='ignore' FORMAT JSONEachRow` whose inline data
-/// the typed insert path would saturate. Each statement is one POST body, so a
-/// `FORMAT`-bearing insert (which consumes the rest of the request as data) must
-/// be its own array entry.
-pub async fn apply_raw_sql(ctx: &TestContext, statements: &[String], location: &str) {
-    if statements.is_empty() {
-        return;
-    }
-    let client = reqwest::Client::new();
-    let url = format!("{}/?database={}", ctx.config.url, ctx.config.database);
-    for sql in statements {
-        let response = client
-            .post(&url)
-            .basic_auth(&ctx.config.username, ctx.config.password.as_deref())
-            .body(sql.clone())
-            .send()
-            .await
-            .unwrap_or_else(|e| panic!("{location}: raw_sql request failed: {e}"));
-        let status = response.status();
-        assert!(
-            status.is_success(),
-            "{location}: raw_sql failed: {status} {}",
-            response.text().await.unwrap_or_default()
-        );
     }
 }
 
@@ -282,6 +266,7 @@ async fn insert_rows(
     ctx: &TestContext,
     table: &str,
     rows: Vec<Row>,
+    settings: &SeedSettings,
     columns: &TableColumns,
     location: &str,
 ) {
@@ -312,23 +297,109 @@ async fn insert_rows(
     }
 
     for (column_names, group_rows) in groups {
-        let values: Vec<String> = group_rows
-            .iter()
-            .map(|row| {
-                let rendered: Vec<String> = column_names
-                    .iter()
-                    .map(|c| render_value(&row[c], location))
-                    .collect();
-                format!("({})", rendered.join(", "))
-            })
-            .collect();
         let quoted_columns: Vec<String> = column_names.iter().map(|c| format!("`{c}`")).collect();
-        ctx.execute(&format!(
-            "INSERT INTO {table} ({}) VALUES {}",
-            quoted_columns.join(", "),
-            values.join(", ")
-        ))
-        .await;
+        if settings.is_empty() {
+            let values: Vec<String> = group_rows
+                .iter()
+                .map(|row| {
+                    let rendered: Vec<String> = column_names
+                        .iter()
+                        .map(|c| render_value(&row[c], location))
+                        .collect();
+                    format!("({})", rendered.join(", "))
+                })
+                .collect();
+            ctx.execute(&format!(
+                "INSERT INTO {table} ({}) VALUES {}",
+                quoted_columns.join(", "),
+                values.join(", ")
+            ))
+            .await;
+        } else {
+            insert_json_rows(
+                ctx,
+                table,
+                &quoted_columns,
+                &column_names,
+                &group_rows,
+                settings,
+                location,
+            )
+            .await;
+        }
+    }
+}
+
+/// `seed_settings` inserts go through JSONEachRow because some settings only
+/// take effect there: a textual VALUES insert saturates an out-of-range
+/// `Date32` to the type boundary even with `date_time_overflow_behavior` set,
+/// while JSONEachRow honours it and keeps the raw day count.
+async fn insert_json_rows(
+    ctx: &TestContext,
+    table: &str,
+    quoted_columns: &[String],
+    column_names: &[String],
+    rows: &[Row],
+    settings: &SeedSettings,
+    location: &str,
+) {
+    let rendered_settings: Vec<String> = settings
+        .iter()
+        .map(|(name, value)| format!("{name}={}", render_setting_value(value, name, location)))
+        .collect();
+    let lines: Vec<String> = rows
+        .iter()
+        .map(|row| {
+            let object: serde_json::Map<String, serde_json::Value> = column_names
+                .iter()
+                .map(|c| (c.clone(), json_value(&row[c], location)))
+                .collect();
+            serde_json::Value::Object(object).to_string()
+        })
+        .collect();
+    let sql = format!(
+        "INSERT INTO {table} ({}) SETTINGS {} FORMAT JSONEachRow\n{}",
+        quoted_columns.join(", "),
+        rendered_settings.join(", "),
+        lines.join("\n")
+    );
+
+    // A FORMAT-bearing insert consumes the rest of the request body as data,
+    // so it must go over the raw HTTP interface rather than the typed client.
+    let client = reqwest::Client::new();
+    let url = format!("{}/?database={}", ctx.config.url, ctx.config.database);
+    let response = client
+        .post(&url)
+        .basic_auth(&ctx.config.username, ctx.config.password.as_deref())
+        .body(sql)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{location}: seed insert request failed: {e}"));
+    let status = response.status();
+    assert!(
+        status.is_success(),
+        "{location}: seed insert into '{table}' failed: {status} {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+fn render_setting_value(value: &serde_yaml::Value, name: &str, location: &str) -> String {
+    match value {
+        serde_yaml::Value::Bool(b) => b.to_string(),
+        serde_yaml::Value::Number(n) => n.to_string(),
+        serde_yaml::Value::String(s) => quote(s),
+        _ => panic!("{location}: seed_settings '{name}' must be a scalar, got {value:?}"),
+    }
+}
+
+fn json_value(value: &serde_yaml::Value, location: &str) -> serde_json::Value {
+    match value {
+        serde_yaml::Value::Mapping(_) | serde_yaml::Value::Tagged(_) => panic!(
+            "{location}: the {{ sql: ... }} seed-value escape is not supported in steps \
+             with seed_settings (JSONEachRow inserts), got {value:?}"
+        ),
+        _ => serde_json::to_value(value)
+            .unwrap_or_else(|e| panic!("{location}: seed value is not valid JSON: {e}")),
     }
 }
 

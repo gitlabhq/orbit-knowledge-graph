@@ -9,7 +9,7 @@
     "description": { "type": "string" },
     "scope": { "$ref": "#/definitions/scope" },
     "seed": { "$ref": "#/definitions/seed" },
-    "raw_sql": { "$ref": "#/definitions/rawSql" },
+    "seed_settings": { "$ref": "#/definitions/seedSettings" },
     "run": { "$ref": "#/definitions/run" },
     "expect": { "$ref": "#/definitions/expect" },
     "steps": {
@@ -37,11 +37,11 @@
         "items": { "$ref": "#/definitions/seedRow" }
       }
     },
-    "rawSql": {
-      "type": "array",
-      "minItems": 1,
-      "description": "Raw SQL statements executed verbatim over HTTP before the run, for source rows the declarative seed cannot express (e.g. an out-of-range Date32 that only survives an INSERT ... SETTINGS date_time_overflow_behavior='ignore' FORMAT JSONEachRow). Break-glass: prefer seed: for everything else. A FORMAT-bearing insert consumes the rest of its request as data, so it must be its own array entry.",
-      "items": { "type": "string" }
+    "seedSettings": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "ClickHouse INSERT settings applied to every seed insert in the step, e.g. date_time_overflow_behavior: ignore. Their presence switches the step's seed inserts from VALUES to JSONEachRow, where such settings take effect (a VALUES insert saturates an out-of-range Date32 regardless). The { sql: ... } seed-value escape is unavailable in these steps.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
     },
     "seedRow": {
       "type": "object",
@@ -83,7 +83,7 @@
       "additionalProperties": false,
       "properties": {
         "seed": { "$ref": "#/definitions/seed" },
-        "raw_sql": { "$ref": "#/definitions/rawSql" },
+        "seed_settings": { "$ref": "#/definitions/seedSettings" },
         "run": { "$ref": "#/definitions/run" },
         "expect": { "$ref": "#/definitions/expect" }
       }

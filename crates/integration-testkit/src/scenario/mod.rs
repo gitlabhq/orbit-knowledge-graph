@@ -18,7 +18,8 @@ use crate::collect_subtest_results;
 use crate::context::TestContext;
 
 pub use format::{
-    ContainsMatcher, EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed, Step,
+    ContainsMatcher, EdgeExpect, Expect, Matcher, NodeExpect, RunSpec, Scenario, Scope, Seed,
+    SeedSettings, Step,
 };
 
 /// Maps a scenario `run:` handler name to an actual indexer handler
@@ -84,8 +85,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
 
     for (index, step) in steps.iter().enumerate() {
         let location = format!("{name} (step {})", index + 1);
-        seed::apply_seed(ctx, &step.seed, &columns, &location).await;
-        seed::apply_raw_sql(ctx, &step.raw_sql, &location).await;
+        seed::apply_seed(ctx, &step.seed, &step.seed_settings, &columns, &location).await;
         for handler in step.handlers() {
             handlers.run(ctx, handler, scope).await;
         }

@@ -7,8 +7,8 @@
 //!
 //! Each subtest is written as seed -> run -> assert so it maps onto a future
 //! YAML scenario. The scenario format already seeds the `checkpoint` table,
-//! sequences multiple runs via `steps:`, and (via the `raw_sql` escape) plants
-//! source rows the typed seed cannot express. What still keeps these in Rust is
+//! sequences multiple runs via `steps:`, and (via `seed_settings:`) plants
+//! source rows the default insert path cannot express. What still keeps these in Rust is
 //! per-run config (partition count, `datalake_batch_size`) and filtered
 //! checkpoint assertions (live vs tombstoned rows by key prefix), both needed by
 //! the partitioning subtests.
