@@ -501,9 +501,9 @@ impl MigrationCompletionChecker {
 
         let known_names = ontology_known_names(&self.ontology);
         let current = *SCHEMA_VERSION;
-        let mut succeeded: HashSet<u32> = HashSet::new();
-        let mut failed: HashSet<u32> = HashSet::new();
 
+        // Collect and sort: views first, then dictionaries, then tables.
+        let mut drops: Vec<(u32, String, &'static str)> = Vec::new();
         for batch in &batches {
             for i in 0..batch.num_rows() {
                 let name = ArrowUtils::get_column_string(batch, "name", i)
@@ -519,31 +519,42 @@ impl MigrationCompletionChecker {
 
                 let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
                 if !known_names.contains(base_name) {
-                    warn!(
-                        version,
-                        object = %name,
-                        "GC: skipping unrecognized object (not in ontology)"
-                    );
+                    warn!(version, object = %name, "GC: skipping unrecognized object");
                     continue;
                 }
 
                 let kind = match engine.as_str() {
-                    "Dictionary" => "DICTIONARY",
                     "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
+                    "Dictionary" => "DICTIONARY",
                     _ => "TABLE",
                 };
-                let drop_sql = format!("DROP {kind} IF EXISTS {name}");
-
-                if let Err(e) = self.graph.execute(&drop_sql).await {
-                    warn!(version, object = %name, error = %e, "GC: drop failed");
-                    failed.insert(version);
-                } else {
-                    succeeded.insert(version);
-                }
+                drops.push((version, name, kind));
             }
         }
 
-        // Only mark a version dropped if all its objects succeeded.
+        // Views before dictionaries before tables.
+        drops.sort_by_key(|(_, _, kind)| match *kind {
+            "VIEW" => 0,
+            "DICTIONARY" => 1,
+            _ => 2,
+        });
+
+        let mut succeeded: HashSet<u32> = HashSet::new();
+        let mut failed: HashSet<u32> = HashSet::new();
+
+        for (version, name, kind) in &drops {
+            if let Err(e) = self
+                .graph
+                .execute(&format!("DROP {kind} IF EXISTS {name}"))
+                .await
+            {
+                warn!(version, object = %name, error = %e, "GC: drop failed");
+                failed.insert(*version);
+            } else {
+                succeeded.insert(*version);
+            }
+        }
+
         for version in &succeeded {
             if failed.contains(version) {
                 self.metrics.record_cleanup(*version, current, "failure");
