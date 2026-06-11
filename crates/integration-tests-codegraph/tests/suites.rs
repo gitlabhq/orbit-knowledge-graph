@@ -366,6 +366,10 @@ yaml_test!(
 );
 yaml_test!(rust_structural_entities, "rust/structural_entities.yaml");
 yaml_test!(rust_precision_resolution, "rust/precision_resolution.yaml");
+yaml_test!(
+    rust_closure_non_extraction,
+    "rust/closure_non_extraction.yaml"
+);
 yaml_test!(rust_local_items, "rust/local_items.yaml");
 yaml_test!(rust_local_flow_ssa, "rust/local_flow_ssa.yaml");
 yaml_test!(rust_mod_rs_resolution, "rust/mod_rs_resolution.yaml");
