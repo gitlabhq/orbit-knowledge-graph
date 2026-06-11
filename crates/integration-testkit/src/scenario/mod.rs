@@ -85,6 +85,7 @@ async fn run_scenario(ctx: &TestContext, file: &Path, name: &str, handlers: &dyn
     for (index, step) in steps.iter().enumerate() {
         let location = format!("{name} (step {})", index + 1);
         seed::apply_seed(ctx, &step.seed, &columns, &location).await;
+        seed::apply_raw_sql(ctx, &step.raw_sql, &location).await;
         for handler in step.handlers() {
             handlers.run(ctx, handler, scope).await;
         }

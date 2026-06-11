@@ -9,6 +9,7 @@
     "description": { "type": "string" },
     "scope": { "$ref": "#/definitions/scope" },
     "seed": { "$ref": "#/definitions/seed" },
+    "raw_sql": { "$ref": "#/definitions/rawSql" },
     "run": { "$ref": "#/definitions/run" },
     "expect": { "$ref": "#/definitions/expect" },
     "steps": {
@@ -35,6 +36,12 @@
         "minItems": 1,
         "items": { "$ref": "#/definitions/seedRow" }
       }
+    },
+    "rawSql": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Raw SQL statements executed verbatim over HTTP before the run, for source rows the declarative seed cannot express (e.g. an out-of-range Date32 that only survives an INSERT ... SETTINGS date_time_overflow_behavior='ignore' FORMAT JSONEachRow). Break-glass: prefer seed: for everything else. A FORMAT-bearing insert consumes the rest of its request as data, so it must be its own array entry.",
+      "items": { "type": "string" }
     },
     "seedRow": {
       "type": "object",
@@ -76,6 +83,7 @@
       "additionalProperties": false,
       "properties": {
         "seed": { "$ref": "#/definitions/seed" },
+        "raw_sql": { "$ref": "#/definitions/rawSql" },
         "run": { "$ref": "#/definitions/run" },
         "expect": { "$ref": "#/definitions/expect" }
       }

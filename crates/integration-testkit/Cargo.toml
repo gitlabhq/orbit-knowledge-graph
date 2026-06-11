@@ -14,6 +14,7 @@ futures = { workspace = true }
 gkg-server = { path = "../gkg-server" }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine", features = ["testutils"] }
+reqwest = { workspace = true }
 rustls = { workspace = true }
 sqlparser = { workspace = true }
 serde = { workspace = true }

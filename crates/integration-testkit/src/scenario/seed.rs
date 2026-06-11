@@ -48,6 +48,36 @@ pub async fn apply_seed(ctx: &TestContext, seed: &Seed, columns: &TableColumns, 
     }
 }
 
+/// Execute raw SQL statements verbatim over the HTTP interface. Break-glass for
+/// source rows the declarative seed cannot express, e.g. an out-of-range
+/// `Date32` that only survives an `INSERT ... SETTINGS
+/// date_time_overflow_behavior='ignore' FORMAT JSONEachRow` whose inline data
+/// the typed insert path would saturate. Each statement is one POST body, so a
+/// `FORMAT`-bearing insert (which consumes the rest of the request as data) must
+/// be its own array entry.
+pub async fn apply_raw_sql(ctx: &TestContext, statements: &[String], location: &str) {
+    if statements.is_empty() {
+        return;
+    }
+    let client = reqwest::Client::new();
+    let url = format!("{}/?database={}", ctx.config.url, ctx.config.database);
+    for sql in statements {
+        let response = client
+            .post(&url)
+            .basic_auth(&ctx.config.username, ctx.config.password.as_deref())
+            .body(sql.clone())
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{location}: raw_sql request failed: {e}"));
+        let status = response.status();
+        assert!(
+            status.is_success(),
+            "{location}: raw_sql failed: {status} {}",
+            response.text().await.unwrap_or_default()
+        );
+    }
+}
+
 fn expand_table(table: &str, rows: &[Row], location: &str) -> Vec<(String, Vec<Row>)> {
     match table {
         "namespaces" => expand_pseudo_rows(rows, location, expand_namespace),

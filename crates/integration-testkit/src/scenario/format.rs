@@ -16,6 +16,8 @@ pub struct Scenario {
     #[serde(default)]
     pub seed: Option<Seed>,
     #[serde(default)]
+    pub raw_sql: Vec<String>,
+    #[serde(default)]
     pub run: Option<RunSpec>,
     #[serde(default)]
     pub expect: Option<Expect>,
@@ -27,10 +29,14 @@ impl Scenario {
     /// Normalize the single-step sugar (top-level seed/run/expect) and the
     /// explicit `steps:` form into one list of steps.
     pub fn into_steps(self) -> Vec<Step> {
-        let has_inline = self.seed.is_some() || self.run.is_some() || self.expect.is_some();
+        let has_inline = self.seed.is_some()
+            || !self.raw_sql.is_empty()
+            || self.run.is_some()
+            || self.expect.is_some();
         match (has_inline, self.steps.is_empty()) {
             (true, true) => vec![Step {
                 seed: self.seed.unwrap_or_default(),
+                raw_sql: self.raw_sql,
                 run: self.run,
                 expect: self.expect,
             }],
@@ -58,6 +64,8 @@ fn default_organization() -> i64 {
 pub struct Step {
     #[serde(default)]
     pub seed: Seed,
+    #[serde(default)]
+    pub raw_sql: Vec<String>,
     #[serde(default)]
     pub run: Option<RunSpec>,
     #[serde(default)]

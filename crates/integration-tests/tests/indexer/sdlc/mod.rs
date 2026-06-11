@@ -1,19 +1,24 @@
 //! Consolidated SDLC integration tests.
 //!
 //! Entity-ETL coverage lives in the YAML scenarios under
-//! `tests/indexer/scenarios/sdlc/`, executed by `scenario_indexing`. The
-//! Rust subtests below cover behavioral mechanics the scenario format does
-//! not model: watermarks, cursors, partitioning, and checkpoint paging.
+//! `tests/indexer/scenarios/sdlc/`, executed by `scenario_indexing`. The Rust
+//! subtests below cover behavioral mechanics the scenario format does not yet
+//! model: watermarks, cursors, partitioning, and checkpoint paging.
+//!
+//! Each subtest is written as seed -> run -> assert so it maps onto a future
+//! YAML scenario. The scenario format already seeds the `checkpoint` table,
+//! sequences multiple runs via `steps:`, and (via the `raw_sql` escape) plants
+//! source rows the typed seed cannot express. What still keeps these in Rust is
+//! per-run config (partition count, `datalake_batch_size`) and filtered
+//! checkpoint assertions (live vs tombstoned rows by key prefix), both needed by
+//! the partitioning subtests.
 //!
 //! Each `#[tokio::test]` starts a single ClickHouse container and runs all
 //! subtests in parallel, forking an isolated database per subtest to avoid
 //! cross-test contamination while eliminating per-test container startup overhead.
 
-mod global;
 mod partitioning;
-mod system_notes;
-mod watermarking;
-mod work_items;
+mod windowing;
 
 use std::sync::Arc;
 
@@ -37,17 +42,12 @@ async fn global_indexing() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
-        global::uses_watermark_for_incremental_processing,
-        global::resumes_from_saved_cursor_skipping_processed_users,
-        global::incomplete_checkpoint_does_not_advance_watermark_on_resume,
-        global::resume_is_bounded_by_window_floor,
-        global::resume_is_bounded_by_window_floor_for_partitioned_entity,
+        windowing::incremental_watermark_filters_old_rows,
+        windowing::resume_honors_cursor_floor_and_watermark_boundary,
         partitioning::partitioned_initial_load_indexes_all_rows_and_consolidates,
-        partitioning::incomplete_partition_checkpoint_does_not_advance_watermark_on_resume,
+        partitioning::retry_skips_completed_resumes_in_progress_and_pins_watermark,
         partitioning::unfinished_partition_blocks_parent_consolidation,
-        partitioning::second_run_after_consolidation_skips_partitioning,
-        partitioning::skips_already_completed_partitions_on_retry,
-        partitioning::all_partitions_completed_runs_consolidate_only,
+        partitioning::present_parent_takes_single_pull_path_and_honors_floor,
         partitioning::span_smaller_than_partition_count_falls_back_to_single_run,
     );
 }
@@ -57,12 +57,7 @@ async fn namespace_indexing() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
-        system_notes::checkpoint_advances_after_draining_paged_window,
-        system_notes::incremental_run_skips_already_processed_notes,
-        work_items::clamps_out_of_range_due_date_to_null,
-        watermarking::uses_watermark_for_incremental_processing,
-        watermarking::resumes_from_saved_cursor_skipping_processed_groups,
-        partitioning::namespaced_entity_partitions_by_id_within_scope,
-        partitioning::query_etl_entity_partitions_by_id_within_scope,
+        windowing::composite_keyset_resume_skips_processed_groups,
+        partitioning::namespaced_entities_partition_by_id_within_scope,
     );
 }
