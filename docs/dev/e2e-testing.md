@@ -100,7 +100,7 @@ other suite runs in a parallel worker pool.
 
 ## Data-driven CDC tables
 
-`e2e/config/cdc-tables.yaml` is the single source of truth for CDC table
+`e2e/config/siphon-layout.yaml` is the single source of truth for CDC table
 definitions. It drives the PostgreSQL publication table list and the Siphon Helm values
 (table mapping, streams, dedup config). Add a table once there and all
 consumers update automatically.
