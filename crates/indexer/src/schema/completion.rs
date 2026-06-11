@@ -532,10 +532,13 @@ impl MigrationCompletionChecker {
             }
         }
 
-        // Views before dictionaries before tables.
+        // Fixed drop order: dictionaries, views, tables. Works for the
+        // current ontology shape (dicts source from tables, no cross-type
+        // cycles). A general migration framework should topo-sort using
+        // system.tables loading_dependencies columns instead.
         drops.sort_by_key(|(_, _, kind)| match *kind {
-            "VIEW" => 0,
-            "DICTIONARY" => 1,
+            "DICTIONARY" => 0,
+            "VIEW" => 1,
             _ => 2,
         });
 
