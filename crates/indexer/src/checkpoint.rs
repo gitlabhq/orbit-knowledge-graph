@@ -86,7 +86,7 @@ impl ClickHouseCheckpointStore {
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
 
-        self.insert(&format!(
+        self.async_insert(&format!(
             "INSERT INTO {table} (key, watermark, cursor_values) \
              VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}})"
         ))
@@ -104,20 +104,21 @@ impl ClickHouseCheckpointStore {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
-        self.insert(&format!(
-            "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
-             VALUES ({{key:String}}, {{watermark:String}}, '', true)"
-        ))
-        .param("key", key)
-        .param("watermark", formatted_watermark)
-        .execute()
-        .await
-        .map_err(checkpoint_store_error)?;
+        self.client
+            .insert_query(&format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
+                 VALUES ({{key:String}}, {{watermark:String}}, '', true)"
+            ))
+            .param("key", key)
+            .param("watermark", formatted_watermark)
+            .execute()
+            .await
+            .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
 
-    fn insert(&self, sql: &str) -> ArrowQuery {
+    fn async_insert(&self, sql: &str) -> ArrowQuery {
         self.client
             .query(sql)
             .with_setting("async_insert", "1")
