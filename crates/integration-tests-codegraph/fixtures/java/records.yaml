@@ -1,0 +1,191 @@
+name: "Java 14+ records — definitions, constructors, methods, interface implementation, nesting"
+
+# Gaps confirmed by this fixture — tracked in #846, do not expand this issue to fix them:
+#   - compact_constructor_declaration has no scope rule → compact constructors not indexed.
+#     Follow-up: add scope("compact_constructor_declaration", "Constructor") to java.rs.
+#   - Implicit accessor methods generated from record components (e.g. x(), y()) are
+#     compiler-synthesised and absent from the source AST → not indexed.
+
+fixtures:
+  - path: com/example/records/Measurable.java
+    content: |
+      package com.example.records;
+
+      public interface Measurable {
+          double magnitude();
+      }
+
+  - path: com/example/records/Point.java
+    content: |
+      package com.example.records;
+
+      /** Simple record — no explicit constructor or methods. */
+      public record Point(int x, int y) {}
+
+  - path: com/example/records/Range.java
+    content: |
+      package com.example.records;
+
+      /** Record with explicit canonical constructor and a custom method. */
+      public record Range(int start, int end) {
+          public Range(int start, int end) {
+              if (end < start) {
+                  throw new IllegalArgumentException("end < start");
+              }
+              this.start = start;
+              this.end = end;
+          }
+
+          public int length() {
+              return end - start;
+          }
+      }
+
+  - path: com/example/records/Vector.java
+    content: |
+      package com.example.records;
+
+      /** Record that implements an interface. */
+      public record Vector(double dx, double dy) implements Measurable {
+          @Override
+          public double magnitude() {
+              return Math.sqrt(dx * dx + dy * dy);
+          }
+      }
+
+  - path: com/example/records/Pair.java
+    content: |
+      package com.example.records;
+
+      /** Generic record with a nested record. */
+      public record Pair<A, B>(A first, B second) {
+          public record Swap<A, B>(B first, A second) {}
+      }
+
+tests:
+  # ── Record definitions ────────────────────────────────────────────
+
+  - name: "Simple record is extracted as definition_type Record"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Point'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point", type: "Record" } }
+
+  - name: "Record with constructor and method is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Range'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "Record implementing interface is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Vector'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "All five records (four top-level plus nested Swap) are indexed"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Record'
+        AND d.fqn STARTS WITH 'com.example.records.'
+      RETURN d.fqn AS fqn
+      ORDER BY d.fqn
+    assert:
+      - { row_count: 5 }
+      - { match: { field: fqn, pattern: "com.example.records.*" } }
+
+  # ── Constructor ───────────────────────────────────────────────────
+
+  - name: "Explicit canonical constructor in Range is extracted"
+    query: |
+      MATCH (r:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      WHERE r.fqn = 'com.example.records.Range'
+        AND c.definition_type = 'Constructor'
+      RETURN c.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Range" } }
+
+  # ── Methods ───────────────────────────────────────────────────────
+
+  - name: "Custom method length() in Range is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Range.length'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "Interface method override magnitude() in Vector is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Vector.magnitude'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  # ── Containment edges ─────────────────────────────────────────────
+
+  - name: "Range record defines its canonical constructor"
+    query: |
+      MATCH (r:Definition)-[e:DefinitionToDefinition]->(c:Definition)
+      WHERE r.fqn = 'com.example.records.Range'
+        AND c.definition_type = 'Constructor'
+        AND e.edge_kind = 'Defines'
+      RETURN c.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Range record defines its custom method"
+    query: |
+      MATCH (r:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE r.fqn = 'com.example.records.Range'
+        AND m.fqn = 'com.example.records.Range.length'
+        AND e.edge_kind = 'Defines'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Nested record ────────────────────────────────────────────────
+
+  - name: "Nested record Swap inside Pair is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.records.Pair.Swap'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "Pair record defines nested Swap record"
+    query: |
+      MATCH (p:Definition)-[e:DefinitionToDefinition]->(s:Definition)
+      WHERE p.fqn = 'com.example.records.Pair'
+        AND s.fqn = 'com.example.records.Pair.Swap'
+        AND e.edge_kind = 'Defines'
+      RETURN s.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── File containment ─────────────────────────────────────────────
+
+  - name: "File defines top-level record"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'com/example/records/Point.java'
+        AND d.fqn = 'com.example.records.Point'
+        AND e.edge_kind = 'Defines'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
