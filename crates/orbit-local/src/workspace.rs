@@ -59,6 +59,15 @@ impl Workspace {
     }
 }
 
+/// Resolve the DuckDB path for a command: an explicit `--db` override wins,
+/// otherwise the default workspace's `graph.duckdb`.
+pub fn resolve_db_path(db: Option<PathBuf>) -> Result<PathBuf> {
+    match db {
+        Some(p) => Ok(p),
+        None => Ok(Workspace::open_default()?.db_path()),
+    }
+}
+
 /// Update manifest status on the given client connection.
 pub fn set_status(
     client: &DuckDbClient,

@@ -108,6 +108,37 @@ orbit sql --file query.sql
 | `-f`, `--file` | Read the SQL from a file. |
 | `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
+## List indexed repositories
+
+The graph can hold more than one repository. To see what it contains, run:
+
+```shell
+orbit list
+orbit list -F json
+```
+
+Each row reports the repository path, branch, commit, indexing status, and
+when it was last indexed:
+
+```plaintext
++------------------------+--------+------------+---------+---------------------+
+| repo_path              | branch | commit_sha | status  | last_indexed_at     |
++------------------------+--------+------------+---------+---------------------+
+| /home/dev/workspace/kg | main   | 9606ae8... | indexed | 2026-05-18 10:14:02 |
+| /tmp/cli-test          | main   | 654f3a6... | indexed | 2026-05-18 10:13:55 |
++------------------------+--------+------------+---------+---------------------+
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+
+If nothing has been indexed yet, `orbit list` exits `0`. The table view
+prints nothing; structured formats emit valid empty output (`[]` for `json`,
+no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
+working.
+
 ## Storage
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
