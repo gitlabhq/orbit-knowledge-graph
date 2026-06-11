@@ -192,6 +192,7 @@ yaml_test!(
     "java/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(java_sealed_classes, "java/sealed_classes.yaml");
+yaml_test!(java_enums, "java/enums.yaml");
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
