@@ -173,6 +173,7 @@ yaml_test!(
 );
 
 // Java
+yaml_test!(java_records, "java/records.yaml");
 yaml_test!(java_call_resolution, "java_resolution.yaml");
 yaml_test!(java_intrafile_resolution, "java/intrafile_resolution.yaml");
 yaml_test!(java_interfile_resolution, "java/interfile_resolution.yaml");
