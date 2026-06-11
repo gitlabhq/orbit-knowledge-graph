@@ -127,6 +127,13 @@ define_languages! {
         separator: "::",
         names: ["cpp", "c++"],
     },
+    Elixir => {
+        support_lang: Elixir,
+        extensions: ["ex", "exs"],
+        exclude: [],
+        separator: ".",
+        names: ["elixir"],
+    },
     Ruby => {
         support_lang: Ruby,
         extensions: ["rb", "rbw", "rake", "gemspec"],

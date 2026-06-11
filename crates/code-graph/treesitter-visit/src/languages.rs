@@ -12,6 +12,7 @@ pub enum SupportLang {
     Bash,
     C,
     Cpp,
+    Elixir,
     Python,
     Ruby,
     TypeScript,
@@ -61,6 +62,11 @@ impl LanguageExt for SupportLang {
             Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-cpp"))]
             Self::Cpp => panic!("tree-sitter-cpp feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-elixir")]
+            Self::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-elixir"))]
+            Self::Elixir => panic!("tree-sitter-elixir feature not enabled"),
 
             #[cfg(feature = "tree-sitter-python")]
             Self::Python => tree_sitter_python::LANGUAGE.into(),
@@ -163,6 +169,13 @@ mod tests {
     #[cfg(feature = "tree-sitter-php")]
     fn test_php_parsing() {
         let root = SupportLang::Php.ast_grep("<?php function hello() {}");
+        assert!(!root.source().is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-elixir")]
+    fn test_elixir_parsing() {
+        let root = SupportLang::Elixir.ast_grep("defmodule Foo do\nend");
         assert!(!root.source().is_empty());
     }
 }
