@@ -1,0 +1,19 @@
+description: Security findings link to their scan via HAS_FINDING
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_vulnerability_scanners:
+    - { id: 1, external_id: gemnasium, name: Gemnasium, vendor: GitLab, project_id: 1000, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+  siphon_security_scans:
+    - { id: 100, build_id: 600, scan_type: 1, status: 1, latest: true, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+  siphon_security_findings:
+    - { id: 1, uuid: 00000000-0000-0000-0000-000000000f01, scan_id: 100, scanner_id: 1, severity: 5, deduplicated: true, finding_data: '{"name": "SQL Injection"}', project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, uuid: 00000000-0000-0000-0000-000000000f02, scan_id: 100, scanner_id: 1, severity: 4, deduplicated: false, finding_data: '{"name": "XSS"}', project_id: 1000, traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - { kind: HAS_FINDING, from: SecurityScan, to: Finding, traversal_path: "1/100/", count: 2 }

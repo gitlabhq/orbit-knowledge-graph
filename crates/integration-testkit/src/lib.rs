@@ -2,6 +2,7 @@ mod assertions;
 pub mod cli;
 mod context;
 pub mod mock_redaction;
+pub mod scenario;
 mod seed;
 pub mod visitor;
 
@@ -84,7 +85,7 @@ pub static GRAPH_SCHEMA_SQL: std::sync::LazyLock<&'static str> = std::sync::Lazy
 });
 
 /// Collect spawned task results and panic with a summary of failures.
-pub async fn collect_subtest_results(handles: Vec<(&str, tokio::task::JoinHandle<()>)>) {
+pub async fn collect_subtest_results(handles: Vec<(String, tokio::task::JoinHandle<()>)>) {
     let mut failed: Vec<String> = Vec::new();
     for (name, handle) in handles {
         match handle.await {
@@ -137,7 +138,7 @@ macro_rules! run_subtests {
 
         let _sem = std::sync::Arc::new(tokio::sync::Semaphore::new(_concurrency));
         let _ctx: std::sync::Arc<_> = std::sync::Arc::new(Clone::clone($ctx));
-        let mut _handles: Vec<(&str, tokio::task::JoinHandle<()>)> = Vec::new();
+        let mut _handles: Vec<(String, tokio::task::JoinHandle<()>)> = Vec::new();
 
         $(
             {
@@ -153,7 +154,7 @@ macro_rules! run_subtests {
                     $test_fn(&db).await;
                     eprintln!("    {} {:.2?}", _name, _t.elapsed());
                 });
-                _handles.push((_name, _handle));
+                _handles.push((_name.to_string(), _handle));
             }
         )+
 
@@ -179,7 +180,7 @@ macro_rules! run_subtests_shared {
 
         let _sem = std::sync::Arc::new(tokio::sync::Semaphore::new(_concurrency));
         let _ctx: std::sync::Arc<_> = std::sync::Arc::new(Clone::clone($ctx));
-        let mut _handles: Vec<(&str, tokio::task::JoinHandle<()>)> = Vec::new();
+        let mut _handles: Vec<(String, tokio::task::JoinHandle<()>)> = Vec::new();
 
         $(
             {
@@ -193,7 +194,7 @@ macro_rules! run_subtests_shared {
                     $test_fn(&_ctx).await;
                     eprintln!("    {} {:.2?}", _name, _t.elapsed());
                 });
-                _handles.push((_name, _handle));
+                _handles.push((_name.to_string(), _handle));
             }
         )+
 

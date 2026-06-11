@@ -192,6 +192,17 @@ ontology-schema-validate:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
+indexer-scenario-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
+
 generate-config-schema:
   stage: lint
   extends:

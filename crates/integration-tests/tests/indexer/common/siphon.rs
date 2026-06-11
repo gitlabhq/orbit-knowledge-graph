@@ -63,29 +63,7 @@ pub async fn create_project(
     visibility_level: i32,
     traversal_path: &str,
 ) {
-    create_project_with_path(
-        ctx,
-        id,
-        namespace_id,
-        creator_id,
-        visibility_level,
-        traversal_path,
-        None,
-    )
-    .await;
-}
-
-pub async fn create_project_with_path(
-    ctx: &TestContext,
-    id: i64,
-    namespace_id: i64,
-    creator_id: i64,
-    visibility_level: i32,
-    traversal_path: &str,
-    slug: Option<&str>,
-) {
-    let default_slug = format!("project-{id}");
-    let path_slug = sql_escape(slug.unwrap_or(&default_slug));
+    let path_slug = format!("project-{id}");
     ctx.execute(&format!(
         "INSERT INTO siphon_projects \
          (id, name, description, visibility_level, path, namespace_id, creator_id, \
@@ -124,70 +102,6 @@ pub async fn create_user(ctx: &TestContext, id: i64) {
         "INSERT INTO siphon_users \
          (id, email, username, name, state, organization_id, _siphon_replicated_at) \
          VALUES ({id}, 'user{id}@example.com', 'user{id}', 'User {id}', 'active', 1, '2024-01-20 12:00:00')"
-    ))
-    .await;
-}
-
-pub async fn create_runner(
-    ctx: &TestContext,
-    id: i64,
-    runner_type: i16,
-    name: &str,
-    organization_id: Option<i64>,
-) {
-    let org = organization_id
-        .map(|o| o.to_string())
-        .unwrap_or_else(|| "NULL".to_string());
-    ctx.execute(&format!(
-        "INSERT INTO siphon_ci_runners \
-         (id, runner_type, name, description, active, locked, run_untagged, access_level, organization_id, created_at, updated_at, contacted_at, _siphon_replicated_at) \
-         VALUES ({id}, {runner_type}, '{name}', 'test runner', true, false, true, 0, {org}, '2024-01-15', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00')"
-    ))
-    .await;
-}
-
-pub async fn create_runner_namespace(
-    ctx: &TestContext,
-    id: i64,
-    runner_id: i64,
-    namespace_id: i64,
-    traversal_path: &str,
-) {
-    ctx.execute(&format!(
-        "INSERT INTO siphon_ci_runner_namespaces \
-         (id, runner_id, namespace_id, traversal_path, _siphon_replicated_at) \
-         VALUES ({id}, {runner_id}, {namespace_id}, '{traversal_path}', '2024-01-20 12:00:00')"
-    ))
-    .await;
-}
-
-pub async fn create_runner_project(
-    ctx: &TestContext,
-    id: i64,
-    runner_id: i64,
-    project_id: i64,
-    traversal_path: &str,
-) {
-    ctx.execute(&format!(
-        "INSERT INTO siphon_ci_runner_projects \
-         (id, runner_id, project_id, created_at, updated_at, traversal_path, _siphon_replicated_at) \
-         VALUES ({id}, {runner_id}, {project_id}, '2024-01-15', '2024-01-15', '{traversal_path}', '2024-01-20 12:00:00')"
-    ))
-    .await;
-}
-
-pub async fn create_member(
-    ctx: &TestContext,
-    user_id: i64,
-    source_id: i64,
-    source_type: &str,
-    traversal_path: &str,
-) {
-    let id = user_id * 10_000 + source_id;
-    ctx.execute(&format!(
-        "INSERT INTO siphon_members \
-         (id, access_level, source_id, source_type, user_id, state, traversal_path, _siphon_replicated_at) \
-         VALUES ({id}, 40, {source_id}, '{source_type}', {user_id}, 0, '{traversal_path}', '2024-01-20 12:00:00')"
     ))
     .await;
 }

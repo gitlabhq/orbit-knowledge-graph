@@ -6106,6 +6106,7 @@ name = "integration-testkit"
 version = "0.1.0"
 dependencies = [
  "arrow 58.3.0",
+ "async-trait",
  "clickhouse-client",
  "futures",
  "gitalisk-core",
@@ -6115,7 +6116,9 @@ dependencies = [
  "ontology",
  "query-engine",
  "rustls",
+ "serde",
  "serde_json",
+ "serde_yaml",
  "sqlparser 0.62.0",
  "testcontainers",
  "tokio",

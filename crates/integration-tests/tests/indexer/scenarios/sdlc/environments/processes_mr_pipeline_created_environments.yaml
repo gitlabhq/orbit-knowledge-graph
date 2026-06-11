@@ -1,0 +1,19 @@
+# Two review apps created by MR pipelines plus one independent production
+# environment. Only the review apps carry merge_request_id, so only they
+# produce CREATED_FOR_MR edges.
+description: MR-pipeline-created environments link back to their merge request
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_environments:
+    - { id: 7101, project_id: 1000, name: review/feature-a, slug: review-feature-a, state: available, tier: 4, environment_type: review, merge_request_id: 5001, traversal_path: "1/100/1000/" }
+    - { id: 7102, project_id: 1000, name: review/feature-b, slug: review-feature-b, state: available, tier: 4, environment_type: review, merge_request_id: 5002, traversal_path: "1/100/1000/" }
+    - { id: 7103, project_id: 1000, name: production, slug: production, state: available, tier: 0, traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - { kind: CREATED_FOR_MR, from: Environment, to: MergeRequest, traversal_path: "1/100/1000/", count: 2 }

@@ -1,0 +1,20 @@
+description: Nested subgroup full_paths resolve from their routes
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/", slug: gitlab-org }
+    - { id: 200, parent_id: 100, traversal_path: "1/100/200/", slug: orbit }
+    - { id: 300, parent_id: 200, traversal_path: "1/100/200/300/", slug: knowledge-graph }
+  siphon_routes:
+    - { id: 100, source_id: 100, source_type: Namespace, path: gitlab-org, namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 200, source_id: 200, source_type: Namespace, path: gitlab-org/orbit, namespace_id: 200, traversal_path: "1/100/200/" }
+    - { id: 300, source_id: 300, source_type: Namespace, path: gitlab-org/orbit/knowledge-graph, namespace_id: 300, traversal_path: "1/100/200/300/" }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, full_path: gitlab-org }
+        - { id: 200, full_path: gitlab-org/orbit }
+        - { id: 300, full_path: gitlab-org/orbit/knowledge-graph }

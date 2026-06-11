@@ -1,0 +1,24 @@
+# The type=Project namespace row must not become a Group node — only the
+# three type=Group namespaces index.
+description: Group namespaces index with transformed visibility; project namespaces drop
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 101, parent_id: 100, visibility_level: 10, traversal_path: "1/100/101/" }
+    - { id: 102, parent_id: 100, visibility_level: 20, traversal_path: "1/100/102/" }
+  siphon_namespaces:
+    - { id: 1000, name: project-namespace, path: project-namespace, type: Project, visibility_level: 0, parent_id: 100, owner_id: 1, traversal_ids: [1, 100, 1000], created_at: "2023-01-01", updated_at: "2024-01-15" }
+  siphon_namespace_details:
+    - { namespace_id: 1000 }
+  namespace_traversal_paths:
+    - { id: 1000, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, visibility_level: private }
+        - { id: 101, visibility_level: internal }
+        - { id: 102, visibility_level: public }

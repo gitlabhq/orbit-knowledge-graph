@@ -1,0 +1,21 @@
+description: Vulnerabilities index with transformed state/severity/report_type plus IN_PROJECT / AUTHORED edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_vulnerabilities:
+    - { id: 1, title: SQL Injection in login, description: Critical SQL injection vulnerability, project_id: 1000, author_id: 1, state: 4, severity: 7, report_type: 0, resolved_on_default_branch: false, present_on_default_branch: true, uuid: uuid-001, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 2, title: XSS in comments, description: Cross-site scripting vulnerability, project_id: 1000, author_id: 2, state: 1, severity: 5, report_type: 9, resolved_on_default_branch: false, present_on_default_branch: true, uuid: uuid-002, traversal_path: "1/100/", created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00" }
+
+expect:
+  nodes:
+    gl_vulnerability:
+      rows:
+        - { id: 1, title: SQL Injection in login, state: confirmed, severity: critical, report_type: sast }
+        - { id: 2, title: XSS in comments, state: detected, severity: medium, report_type: sarif }
+  edges:
+    - { kind: IN_PROJECT, from: Vulnerability, to: Project, traversal_path: "1/100/", count: 2 }
+    - { kind: AUTHORED, from: User, to: Vulnerability, traversal_path: "1/100/", count: 2 }

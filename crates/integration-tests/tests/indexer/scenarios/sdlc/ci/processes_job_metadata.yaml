@@ -1,0 +1,20 @@
+description: Job metadata indexes with HAS_METADATA edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: build, status: 3, position: 0, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, stage_id: 6001, project_id: 1000, type: "Ci::Build", name: compile, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds_metadata:
+    - { id: 9001, build_id: 7001, project_id: 1000, partition_id: 1, timeout: 3600, timeout_source: 2, interruptible: true, expanded_environment_name: production, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_job_metadata: { count: 1 }
+  edges:
+    - { kind: HAS_METADATA, from: Job, to: JobMetadata, traversal_path: "1/100/1000/", count: 1 }
