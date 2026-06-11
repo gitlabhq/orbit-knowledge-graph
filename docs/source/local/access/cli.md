@@ -81,17 +81,16 @@ in the manifest table.
 
 ## Inspect the schema
 
-`orbit schema` requires either `--ontology` or `--query`:
+`orbit schema` lists every table and column in the local DuckDB graph:
 
 ```shell
-orbit schema --ontology
-orbit schema --query
+orbit schema
 ```
 
-- `--ontology` shows the graph ontology: entities, edges, and properties.
-- `--query` shows the query DSL schema: how to write structured queries.
-
-Add `--raw` to either for JSON instead of the default LLM-friendly output.
+| Flag | Purpose |
+|------|---------|
+| `--raw` | Emit JSON instead of the default table view. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
 ## Run SQL against the local graph
 
