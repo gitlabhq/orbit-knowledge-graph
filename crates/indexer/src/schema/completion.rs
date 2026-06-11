@@ -7,11 +7,9 @@
 //!    tables. If so, promote the version to `active` and demote the previously
 //!    active version to `retired`.
 //!
-//! 2. **Reconcile GC** — Enumerate physical `v<N>_*` objects from
-//!    `system.tables`, compute a keep-set (active + retained retired +
-//!    in-flight migrating), and drop everything else. This catches
-//!    rename-orphans, zombie migrating versions, and dropped-with-residue
-//!    versions that the old ontology-name-based cleanup missed.
+//! 2. **Version GC** — Compute a keep-set (active + retained retired +
+//!    in-flight migrating above active), drop ontology-derived objects for
+//!    every version outside it, and mark them `dropped`.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -482,14 +480,7 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// GC sweep: computes a keep-set from version entries, then drops all
-    /// ontology-derived objects for every version outside that set.
-    ///
-    /// This replaces the old status-gated cleanup that only processed
-    /// `retired` versions and derived drop targets from the current ontology.
-    /// The new approach handles zombie migrating versions (`version < active`)
-    /// and dropped-with-residue versions (status `dropped` but tables still
-    /// present) because it is not gated on status.
+    /// Drops ontology-derived objects for every version outside the keep-set.
     async fn reconcile_dead_versions(
         &self,
         cached_versions: Option<Vec<VersionEntry>>,
@@ -502,100 +493,60 @@ impl MigrationCompletionChecker {
         };
 
         let keep = compute_keep_set(&versions, self.schema_config.max_retained_versions as usize);
-
         if keep.is_empty() {
-            warn!("keep-set is empty (no active version found) — aborting GC sweep");
+            warn!("keep-set is empty (no active version) — skipping GC");
             return Ok(());
         }
 
-        let to_drop: Vec<u32> = versions
-            .iter()
-            .map(|v| v.version)
-            .filter(|v| !keep.contains(v))
-            .collect();
+        let current = keep.iter().max().copied().unwrap_or(0);
 
-        if to_drop.is_empty() {
-            return Ok(());
-        }
-
-        let current_version = versions
-            .iter()
-            .find(|v| v.status == "active")
-            .map(|v| v.version)
-            .unwrap_or(0);
-
-        info!(
-            versions_to_gc = ?to_drop,
-            keep_set = ?keep,
-            "GC sweep: dropping objects for dead versions"
-        );
-
-        for version in &to_drop {
-            match self.drop_version_objects(*version).await {
-                Ok(()) => {
-                    self.metrics
-                        .record_cleanup(*version, current_version, "success");
-                    info!(version, "GC: version objects dropped");
-                }
-                Err(e) => {
-                    self.metrics
-                        .record_cleanup(*version, current_version, "failure");
-                    warn!(version, error = %e, "GC: failed to drop version objects");
-                }
+        for entry in &versions {
+            if keep.contains(&entry.version) {
+                continue;
             }
 
-            if let Err(e) = mark_version_dropped(&self.graph, *version).await {
-                warn!(version, error = %e, "GC: failed to mark version dropped");
+            info!(version = entry.version, ?keep, "GC: dropping dead version");
+            self.drop_version_objects(entry.version).await;
+
+            if let Err(e) = mark_version_dropped(&self.graph, entry.version).await {
+                warn!(version = entry.version, error = %e, "GC: failed to mark dropped");
             }
+            self.metrics
+                .record_cleanup(entry.version, current, "success");
         }
 
         Ok(())
     }
 
-    /// Drops all ontology-derived objects for a schema version.
-    ///
-    /// Drop order: materialized views → dictionaries → tables. Views
-    /// reference source tables, so they must go first.
-    async fn drop_version_objects(&self, version: u32) -> Result<(), String> {
+    /// Best-effort drop of all ontology-derived objects for a version.
+    /// Views first (they reference source tables), then dictionaries, then tables.
+    async fn drop_version_objects(&self, version: u32) {
         let prefix = table_prefix(version);
 
-        let views = generate_graph_materialized_views(&self.ontology);
-        for mv in &views {
+        for mv in &generate_graph_materialized_views(&self.ontology) {
             let name = format!("{prefix}{}", mv.name);
-            if let Err(e) = self
+            let _ = self
                 .graph
                 .execute(&format!("DROP VIEW IF EXISTS {name}"))
                 .await
-            {
-                warn!(version, object = %name, error = %e, "GC: failed to drop view");
-            }
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
         }
-
-        let dicts = generate_graph_dictionaries(&self.ontology);
-        for d in &dicts {
+        for d in &generate_graph_dictionaries(&self.ontology) {
             let name = format!("{prefix}{}", d.name);
-            if let Err(e) = self
+            let _ = self
                 .graph
                 .execute(&format!("DROP DICTIONARY IF EXISTS {name}"))
                 .await
-            {
-                warn!(version, object = %name, error = %e, "GC: failed to drop dictionary");
-            }
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
         }
-
-        let tables = generate_graph_tables(&self.ontology);
-        for t in &tables {
+        for t in &generate_graph_tables(&self.ontology) {
             let name = format!("{prefix}{}", t.name);
-            if let Err(e) = self
+            let _ = self
                 .graph
                 .execute(&format!("DROP TABLE IF EXISTS {name}"))
                 .await
-            {
-                warn!(version, object = %name, error = %e, "GC: failed to drop table");
-            }
+                .inspect_err(|e| warn!(version, object = %name, error = %e, "drop failed"));
         }
-
-        Ok(())
     }
 }
 
