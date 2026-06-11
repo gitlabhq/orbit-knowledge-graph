@@ -361,6 +361,11 @@ health checks and REST-style queries.
 - Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml`
 - Restart ClickHouse: `gdk restart clickhouse`
 
+**403 Forbidden on the /dashboard/orbit/explore page but JWT auth works:**
+
+- The Knowledge Graph UI on the GDK ('/dashboard/orbit') requires a Premium or Ultimate license. 
+- View instructions for configuring a license for the GDK: [License Docs](https://gitlab-org.gitlab.io/gitlab-development-kit/#configure-developer-license-in-gdk)
+
 **No data in graph:**
 
 - Check siphon services: `gdk status siphon`
