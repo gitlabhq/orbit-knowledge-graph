@@ -59,6 +59,11 @@ pub const TRAVERSAL_PATH_COLUMN: &str = "traversal_path";
 /// `_siphon_replicated_at` to `_siphon_watermark`, update both.
 pub const SIPHON_WATERMARK_COLUMN: &str = "_siphon_replicated_at";
 
+/// Siphon datalake soft-delete flag column. This const and `schema.yaml`'s
+/// `default_deleted` are the only two declarations of this value;
+/// [`validate_ontology_constants`] asserts they agree.
+pub const SIPHON_DELETED_COLUMN: &str = "_siphon_deleted";
+
 /// Panics if compile-time constants diverge from the embedded ontology YAML.
 ///
 /// Call this at startup and in a `#[test]` so CI catches stale constants.
@@ -102,6 +107,15 @@ pub fn validate_ontology_constants(ontology: &crate::Ontology) {
          embedded ontology (\"{}\") — update the const in constants.rs or \
          default_watermark in schema.yaml",
         ontology.default_watermark_column(),
+    );
+
+    assert_eq!(
+        ontology.default_deleted_column(),
+        SIPHON_DELETED_COLUMN,
+        "SIPHON_DELETED_COLUMN const (\"{SIPHON_DELETED_COLUMN}\") doesn't match \
+         embedded ontology (\"{}\") — update the const in constants.rs or \
+         default_deleted in schema.yaml",
+        ontology.default_deleted_column(),
     );
 }
 

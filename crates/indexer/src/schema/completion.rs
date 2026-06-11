@@ -25,6 +25,8 @@ use query_engine::compiler::{
 };
 use tracing::{info, warn};
 
+use const_format::concatcp;
+
 use super::metrics::CompletionMetrics;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
@@ -48,32 +50,43 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+
 /// SQL to count enabled namespaces from the datalake.
-const COUNT_ENABLED_NAMESPACES: &str = "\
-SELECT count(DISTINCT root_namespace_id) AS ns_count \
+const COUNT_ENABLED_NAMESPACES: &str = concatcp!(
+    "SELECT count(DISTINCT root_namespace_id) AS ns_count \
 FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// SQL to count code-eligible projects in the datalake: projects belonging
 /// to any enabled namespace. The denominator of the code-coverage telemetry
 /// emitted from `is_migration_complete` (the predicate doesn't gate on
 /// coverage; see the doc comment there).
-const COUNT_CODE_ELIGIBLE_PROJECTS: &str = "\
-SELECT count(DISTINCT p.id) AS ns_count \
+const COUNT_CODE_ELIGIBLE_PROJECTS: &str = concatcp!(
+    "SELECT count(DISTINCT p.id) AS ns_count \
 FROM project_namespace_traversal_paths AS p \
 INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
   ON startsWith(p.traversal_path, enabled.traversal_path) \
 WHERE p.deleted = false \
-  AND enabled._siphon_deleted = false";
+  AND enabled.",
+    DEL,
+    " = false"
+);
 
 /// SQL to fetch enabled namespaces' traversal paths from the datalake. Used
 /// to bridge the cluster boundary: the checkpoint table lives in the graph
 /// DB and cannot join to the datalake, so we pull the small enabled-path set
 /// first and pass it as an Array(String) parameter to the graph-side count.
-const FETCH_ENABLED_TRAVERSAL_PATHS: &str = "\
-SELECT DISTINCT traversal_path \
+const FETCH_ENABLED_TRAVERSAL_PATHS: &str = concatcp!(
+    "SELECT DISTINCT traversal_path \
 FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// SQL to count distinct projects in the new-prefix code indexing
 /// checkpoint table that fall under at least one currently-enabled

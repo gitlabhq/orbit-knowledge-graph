@@ -391,7 +391,7 @@ etl:
         argMax(removed_lines, {{watermark_column}}) AS metric_removed_lines,
         argMax(first_contribution, {{watermark_column}}) AS metric_first_contribution,
         argMax(reviewer_first_assigned_at, {{watermark_column}}) AS metric_reviewer_first_assigned_at,
-        argMax(_siphon_deleted, {{watermark_column}}) AS deleted
+        argMax({{deleted_column}}, {{watermark_column}}) AS deleted
       FROM siphon_merge_request_metrics
       WHERE startsWith(traversal_path, {traversal_path:String})
         AND merge_request_id IN (
@@ -419,7 +419,7 @@ etl:
           argMax(user_id, {{watermark_column}}) AS user_id,
           argMax(state, {{watermark_column}}) AS state,
           argMax(created_at, {{watermark_column}}) AS created_at,
-          argMax(_siphon_deleted, {{watermark_column}}) AS deleted
+          argMax({{deleted_column}}, {{watermark_column}}) AS deleted
         FROM siphon_merge_request_reviewers
         WHERE startsWith(traversal_path, {traversal_path:String})
           AND merge_request_id IN (
@@ -447,7 +447,7 @@ etl:
           id,
           argMax(user_id, {{watermark_column}}) AS user_id,
           argMax(created_at, {{watermark_column}}) AS created_at,
-          argMax(_siphon_deleted, {{watermark_column}}) AS deleted
+          argMax({{deleted_column}}, {{watermark_column}}) AS deleted
         FROM siphon_approvals
         WHERE startsWith(traversal_path, {traversal_path:String})
           AND merge_request_id IN (
@@ -462,7 +462,7 @@ etl:
     ) AS approvals ON m.traversal_path = approvals._ap_tp AND m.id = approvals._ap_mr
   watermark: m.{{watermark_column}}
   table_alias: m
-  deleted: m._siphon_deleted
+  deleted: m.{{deleted_column}}
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
   edges:

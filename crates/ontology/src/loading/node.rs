@@ -543,13 +543,18 @@ fn convert_edge_mappings(
         .collect()
 }
 
-/// Replaces `{{watermark_column}}` placeholders with the configured watermark
-/// column name, rejecting ETL SQL that hardcodes the default watermark literal.
-pub(crate) fn render_watermark_placeholder(
+/// Replaces `{{watermark_column}}` and `{{deleted_column}}` placeholders with
+/// the configured column names, rejecting ETL SQL that hardcodes either literal.
+///
+/// Both literals are checked on the raw input *before* any substitution so that
+/// the check doesn't false-positive on the rendered output (substitution
+/// reintroduces the literal).
+pub(crate) fn render_etl_placeholders(
     entity: &str,
     field: &str,
     raw: &str,
     watermark: &str,
+    deleted: &str,
 ) -> Result<String, OntologyError> {
     if raw.contains(watermark) {
         return Err(OntologyError::Validation(format!(
@@ -557,7 +562,15 @@ pub(crate) fn render_watermark_placeholder(
              '{watermark}'; use {{{{watermark_column}}}} placeholder instead"
         )));
     }
-    let rendered = raw.replace("{{watermark_column}}", watermark);
+    if raw.contains(deleted) {
+        return Err(OntologyError::Validation(format!(
+            "entity '{entity}' field '{field}' hardcodes deleted column \
+             '{deleted}'; use {{{{deleted_column}}}} placeholder instead"
+        )));
+    }
+    let rendered = raw
+        .replace("{{watermark_column}}", watermark)
+        .replace("{{deleted_column}}", deleted);
     if rendered.contains("{{") {
         return Err(OntologyError::Validation(format!(
             "entity '{entity}' field '{field}' contains unresolved placeholder '{{{{..}}}}'",
@@ -571,8 +584,9 @@ fn render_optional(
     field: &str,
     raw: Option<String>,
     watermark: &str,
+    deleted: &str,
 ) -> Result<Option<String>, OntologyError> {
-    raw.map(|s| render_watermark_placeholder(entity, field, &s, watermark))
+    raw.map(|s| render_etl_placeholders(entity, field, &s, watermark, deleted))
         .transpose()
 }
 
@@ -583,6 +597,7 @@ impl EtlYaml {
         etl_settings: &EtlSettings,
     ) -> Result<EtlConfig, OntologyError> {
         let wm = &etl_settings.watermark;
+        let del = &etl_settings.deleted;
         match self {
             EtlYaml::Table {
                 scope,
@@ -594,14 +609,18 @@ impl EtlYaml {
                 edges,
             } => {
                 let watermark = match watermark {
-                    Some(w) => render_watermark_placeholder(entity_name, "watermark", &w, wm)?,
+                    Some(w) => render_etl_placeholders(entity_name, "watermark", &w, wm, del)?,
                     None => wm.clone(),
+                };
+                let deleted = match deleted {
+                    Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
+                    None => del.clone(),
                 };
                 Ok(EtlConfig::Table {
                     scope,
                     source,
                     watermark,
-                    deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
+                    deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
                     edges: convert_edge_mappings(edges)?,
                 })
@@ -621,31 +640,42 @@ impl EtlYaml {
                 transform: _,
                 edges,
             } => {
-                let select = render_watermark_placeholder(entity_name, "select", &select, wm)?;
-                let from = render_watermark_placeholder(entity_name, "from", &from, wm)?;
-                let where_clause = render_optional(entity_name, "where", where_clause, wm)?;
+                let select = render_etl_placeholders(entity_name, "select", &select, wm, del)?;
+                let from = render_etl_placeholders(entity_name, "from", &from, wm, del)?;
+                let where_clause = render_optional(entity_name, "where", where_clause, wm, del)?;
                 let watermark = match watermark {
-                    Some(w) => render_watermark_placeholder(entity_name, "watermark", &w, wm)?,
+                    Some(w) => render_etl_placeholders(entity_name, "watermark", &w, wm, del)?,
                     None => wm.clone(),
+                };
+                let deleted = match deleted {
+                    Some(d) => render_etl_placeholders(entity_name, "deleted", &d, wm, del)?,
+                    None => del.clone(),
                 };
                 let traversal_path_filter = render_optional(
                     entity_name,
                     "traversal_path_filter",
                     traversal_path_filter,
                     wm,
+                    del,
                 )?;
 
                 let page_join = page_join
                     .map(|pj| {
                         let pj = *pj;
-                        let pj_where =
-                            render_optional(entity_name, "page_join.where", pj.where_clause, wm)?;
+                        let pj_where = render_optional(
+                            entity_name,
+                            "page_join.where",
+                            pj.where_clause,
+                            wm,
+                            del,
+                        )?;
                         let pj_watermark = match pj.watermark {
-                            Some(w) => render_watermark_placeholder(
+                            Some(w) => render_etl_placeholders(
                                 entity_name,
                                 "page_join.watermark",
                                 &w,
                                 wm,
+                                del,
                             )?,
                             None => wm.clone(),
                         };
@@ -668,7 +698,7 @@ impl EtlYaml {
                     from,
                     where_clause,
                     watermark,
-                    deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
+                    deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
                     traversal_path_filter,
                     table_alias,
@@ -770,7 +800,7 @@ mod tests {
     fn test_etl_settings() -> EtlSettings {
         EtlSettings {
             watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["id".to_string()],
         }
     }
@@ -1290,6 +1320,100 @@ mod tests {
         assert!(
             err.to_string().contains("unresolved placeholder"),
             "got: {err}"
+        );
+    }
+
+    #[test]
+    fn hardcoded_deleted_in_where_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "id"
+              from: source_table
+              where: "_siphon_deleted = false"
+            "#,
+        );
+        let err = result.expect_err("hardcoded deleted should be rejected");
+        assert!(
+            err.to_string().contains("hardcodes deleted column"),
+            "got: {err}"
+        );
+        assert!(
+            err.to_string().contains("{{deleted_column}}"),
+            "error should mention the placeholder, got: {err}"
+        );
+    }
+
+    #[test]
+    fn deleted_placeholder_renders_correctly() {
+        let node = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "id"
+              from: source_table AS t
+              where: "t.{{deleted_column}} = false"
+              deleted: "t.{{deleted_column}}"
+            "#,
+        )
+        .expect("deleted placeholder should be accepted");
+        let EtlConfig::Query {
+            where_clause,
+            deleted,
+            ..
+        } = node.etl.unwrap()
+        else {
+            panic!("expected Query");
+        };
+        assert_eq!(where_clause.unwrap(), "t._siphon_deleted = false");
+        assert_eq!(deleted, "t._siphon_deleted");
+    }
+
+    #[test]
+    fn both_placeholders_render_in_same_field() {
+        let node = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: query
+              scope: namespaced
+              source: source_table
+              select: "argMax({{deleted_column}}, {{watermark_column}}) AS deleted"
+              from: source_table
+            "#,
+        )
+        .expect("both placeholders in one field should be accepted");
+        let EtlConfig::Query { select, .. } = node.etl.unwrap() else {
+            panic!("expected Query");
+        };
+        assert_eq!(
+            select,
+            "argMax(_siphon_deleted, _siphon_replicated_at) AS deleted"
         );
     }
 

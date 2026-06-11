@@ -16,24 +16,29 @@ use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
 const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
 // Datalake tables (siphon_*) are never prefixed — only graph tables are.
 const IS_NAMESPACE_STILL_DELETED: &str = concatcp!(
-    r#"
-SELECT argMax(_siphon_deleted, "#,
+    "\
+\nSELECT argMax(",
+    DEL,
+    ", ",
     WM,
-    r#") AS is_deleted
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE root_namespace_id = {namespace_id:Int64}
-"#
+    ") AS is_deleted\n\
+FROM siphon_knowledge_graph_enabled_namespaces\n\
+WHERE root_namespace_id = {namespace_id:Int64}\n"
 );
 
-const ENABLED_NAMESPACE_ROOTS_QUERY: &str = r#"
-SELECT traversal_path
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = false
-  AND traversal_path != ''
-"#;
+const ENABLED_NAMESPACE_ROOTS_QUERY: &str = concatcp!(
+    "\
+\nSELECT traversal_path\n\
+FROM siphon_knowledge_graph_enabled_namespaces\n\
+WHERE ",
+    DEL,
+    " = false\n\
+  AND traversal_path != ''\n"
+);
 
 const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
 SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
@@ -47,23 +52,24 @@ WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 // (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
 // reconstructing the path with CONCAT.
 const DELETED_NAMESPACES_QUERY: &str = concatcp!(
-    r#"
-SELECT
-    root_namespace_id AS namespace_id,
-    traversal_path,
-    toString("#,
+    "\
+\nSELECT\n\
+    root_namespace_id AS namespace_id,\n\
+    traversal_path,\n\
+    toString(",
     WM,
-    r#") AS deleted_at
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = true
-  AND traversal_path != ''
-  AND "#,
+    ") AS deleted_at\n\
+FROM siphon_knowledge_graph_enabled_namespaces\n\
+WHERE ",
+    DEL,
+    " = true\n\
+  AND traversal_path != ''\n\
+  AND ",
     WM,
-    r#" > {last_watermark:String}
-  AND "#,
+    " > {last_watermark:String}\n\
+  AND ",
     WM,
-    r#" <= {watermark:String}
-"#
+    " <= {watermark:String}\n"
 );
 
 fn mark_deletion_complete_sql() -> String {

@@ -8,7 +8,7 @@ use crate::entities::{
 use crate::etl::EtlScope;
 
 use super::EtlSettings;
-use super::node::render_watermark_placeholder;
+use super::node::render_etl_placeholders;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct EdgeYaml {
@@ -96,6 +96,7 @@ impl EdgeYaml {
         etl_settings: &EtlSettings,
     ) -> Result<Vec<EdgeSourceEtlConfig>, OntologyError> {
         let wm = &etl_settings.watermark;
+        let del = &etl_settings.deleted;
         self.etl
             .into_iter()
             .map(|etl| {
@@ -104,11 +105,16 @@ impl EdgeYaml {
 
                 let watermark = match etl.watermark {
                     Some(w) => {
-                        render_watermark_placeholder(relationship_kind, "etl.watermark", &w, wm)?
+                        render_etl_placeholders(relationship_kind, "etl.watermark", &w, wm, del)?
                     }
                     None => wm.clone(),
                 };
-                let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
+                let deleted = match etl.deleted {
+                    Some(d) => {
+                        render_etl_placeholders(relationship_kind, "etl.deleted", &d, wm, del)?
+                    }
+                    None => del.clone(),
+                };
 
                 Ok(EdgeSourceEtlConfig {
                     scope: etl.scope,

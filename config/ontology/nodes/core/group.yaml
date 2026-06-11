@@ -112,14 +112,14 @@ etl:
       SELECT toNullable(source_id) AS source_id, argMax(path, {{watermark_column}}) AS path
       FROM siphon_routes
       WHERE startsWith(traversal_path, {traversal_path:String})
-        AND source_type = 'Namespace' AND NOT _siphon_deleted
+        AND source_type = 'Namespace' AND NOT {{deleted_column}}
       GROUP BY source_id
     ) routes ON namespace.id = routes.source_id
   where: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace.{{watermark_column}}
   table_alias: namespace
-  deleted: "(namespace._siphon_deleted OR namespace.type != 'Group')"
+  deleted: "(namespace.{{deleted_column}} OR namespace.type != 'Group')"
   edges:
     owner_id:
       to: User

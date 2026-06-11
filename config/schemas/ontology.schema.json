@@ -271,7 +271,7 @@
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -329,7 +329,7 @@
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -369,7 +369,7 @@
                 },
                 "where": {
                   "type": "string",
-                  "description": "Extra WHERE predicate on the joined table (e.g. _siphon_deleted = false)."
+                  "description": "Extra WHERE predicate on the joined table (e.g. {{deleted_column}} = false). Use {{watermark_column}} and {{deleted_column}} placeholders instead of hardcoding column names."
                 },
                 "watermark": {
                   "type": "string",

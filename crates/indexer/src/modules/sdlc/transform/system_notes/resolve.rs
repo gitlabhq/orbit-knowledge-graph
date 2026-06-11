@@ -22,6 +22,7 @@ use const_format::concatcp;
 use super::parse::{RefKind, Reference};
 
 const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
 /// The clickhouse crate serializes params into the URL query string, so these
 /// lookup arrays must stay bounded independently of Arrow block size.
@@ -57,16 +58,22 @@ FROM ( \
         argMax(traversal_path, ",
     WM,
     ") AS traversal_path, \
-        argMax(_siphon_deleted, ",
+        argMax(",
+    DEL,
+    ", ",
     WM,
-    ") AS _siphon_deleted \
+    ") AS ",
+    DEL,
+    " \
     FROM siphon_routes \
     WHERE startsWith(siphon_routes.traversal_path, {root_prefix:String}) \
       AND path IN {paths:Array(String)} \
       AND source_type = 'Project' \
     GROUP BY id, source_id, path \
 ) \
-WHERE _siphon_deleted = false"
+WHERE ",
+    DEL,
+    " = false"
 );
 
 /// Reverse routes lookup (project `source_id` -> path), to give each note a
@@ -84,16 +91,22 @@ FROM ( \
         id, \
         source_id, \
         path, \
-        argMax(_siphon_deleted, ",
+        argMax(",
+    DEL,
+    ", ",
     WM,
-    ") AS _siphon_deleted \
+    ") AS ",
+    DEL,
+    " \
     FROM siphon_routes \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND source_type = 'Project' \
       AND source_id IN {source_ids:Array(Int64)} \
     GROUP BY id, source_id, path \
 ) \
-WHERE _siphon_deleted = false"
+WHERE ",
+    DEL,
+    " = false"
 );
 
 /// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
@@ -114,15 +127,21 @@ FROM ( \
         id, \
         target_project_id, \
         iid, \
-        argMax(_siphon_deleted, ",
+        argMax(",
+    DEL,
+    ", ",
     WM,
-    ") AS _siphon_deleted \
+    ") AS ",
+    DEL,
+    " \
     FROM merge_requests \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, target_project_id, iid \
 ) \
-WHERE _siphon_deleted = false"
+WHERE ",
+    DEL,
+    " = false"
 );
 
 /// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
@@ -138,15 +157,21 @@ FROM ( \
         id, \
         project_id, \
         iid, \
-        argMax(_siphon_deleted, ",
+        argMax(",
+    DEL,
+    ", ",
     WM,
-    ") AS _siphon_deleted \
+    ") AS ",
+    DEL,
+    " \
     FROM work_items \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, project_id, iid \
 ) \
-WHERE _siphon_deleted = false"
+WHERE ",
+    DEL,
+    " = false"
 );
 
 /// A row from the `siphon_routes` lookup, keyed by `path`. Decoded from the

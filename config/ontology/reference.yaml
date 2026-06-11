@@ -9,13 +9,14 @@ destination_table: users
 # source:
 #   table: siphon_users
 #   watermark_column: _siphon_replicated_at  (use {{watermark_column}} in ETL SQL)
-#   deleted_column: _siphon_deleted
+#   deleted_column: _siphon_deleted           (use {{deleted_column}} in ETL SQL)
 #   primary_key: id
 #
-# ETL SQL fields (select, from, where, watermark, traversal_path_filter,
-# page_join.where, page_join.watermark) must use the {{watermark_column}}
-# placeholder instead of hardcoding the watermark column name. The loader
-# substitutes it with schema.yaml's default_watermark at load time.
+# ETL SQL fields (select, from, where, watermark, deleted, traversal_path_filter,
+# page_join.where, page_join.watermark) must use the {{watermark_column}} and
+# {{deleted_column}} placeholders instead of hardcoding column names. The loader
+# substitutes them with schema.yaml's default_watermark / default_deleted at
+# load time.
 
 # Output destination
 # destination:
