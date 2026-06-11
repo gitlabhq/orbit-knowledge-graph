@@ -561,14 +561,13 @@ fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> HashSet<u
     };
     keep.insert(active.version);
 
-    // Newest N-1 retired (active already counts toward the window).
-    let mut retired: Vec<u32> = versions
-        .iter()
-        .filter(|v| v.status == "retired")
-        .map(|v| v.version)
-        .collect();
-    retired.sort_unstable_by(|a, b| b.cmp(a));
-    keep.extend(retired.into_iter().take(max_retained.saturating_sub(1)));
+    keep.extend(
+        versions
+            .iter()
+            .filter(|v| v.status == "retired")
+            .map(|v| v.version)
+            .take(max_retained.saturating_sub(1)),
+    );
 
     // In-flight migration (above active); zombies below active are excluded.
     keep.extend(
