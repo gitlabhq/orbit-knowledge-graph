@@ -78,25 +78,6 @@ pub async fn create_project(
     .await;
 }
 
-pub async fn create_route(
-    ctx: &TestContext,
-    id: i64,
-    source_id: i64,
-    source_type: &str,
-    path: &str,
-    namespace_id: i64,
-    traversal_path: &str,
-) {
-    let escaped_path = sql_escape(path);
-    ctx.execute(&format!(
-        "INSERT INTO siphon_routes \
-         (id, source_id, source_type, path, namespace_id, traversal_path, created_at, updated_at, _siphon_replicated_at) \
-         VALUES ({id}, {source_id}, '{source_type}', '{escaped_path}', {namespace_id}, '{traversal_path}', \
-                 '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')"
-    ))
-    .await;
-}
-
 pub async fn create_user(ctx: &TestContext, id: i64) {
     ctx.execute(&format!(
         "INSERT INTO siphon_users \

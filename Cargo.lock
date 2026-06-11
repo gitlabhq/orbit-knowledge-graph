@@ -6115,6 +6115,7 @@ dependencies = [
  "gkg-utils",
  "ontology",
  "query-engine",
+ "reqwest 0.13.4",
  "rustls",
  "serde",
  "serde_json",
