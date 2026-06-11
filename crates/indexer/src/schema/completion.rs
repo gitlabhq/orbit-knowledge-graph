@@ -501,8 +501,8 @@ impl MigrationCompletionChecker {
 
         let known_names = ontology_known_names(&self.ontology);
         let current = *SCHEMA_VERSION;
-        let mut dropped_versions: HashSet<u32> = HashSet::new();
-        let mut had_failure = false;
+        let mut succeeded: HashSet<u32> = HashSet::new();
+        let mut failed: HashSet<u32> = HashSet::new();
 
         for batch in &batches {
             for i in 0..batch.num_rows() {
@@ -536,21 +536,23 @@ impl MigrationCompletionChecker {
 
                 if let Err(e) = self.graph.execute(&drop_sql).await {
                     warn!(version, object = %name, error = %e, "GC: drop failed");
-                    had_failure = true;
+                    failed.insert(version);
+                } else {
+                    succeeded.insert(version);
                 }
-                dropped_versions.insert(version);
             }
         }
 
-        for version in &dropped_versions {
+        // Only mark a version dropped if all its objects succeeded.
+        for version in &succeeded {
+            if failed.contains(version) {
+                self.metrics.record_cleanup(*version, current, "failure");
+                continue;
+            }
             if let Err(e) = mark_version_dropped(&self.graph, *version).await {
                 warn!(version, error = %e, "GC: failed to mark dropped");
             }
-            self.metrics.record_cleanup(
-                *version,
-                current,
-                if had_failure { "failure" } else { "success" },
-            );
+            self.metrics.record_cleanup(*version, current, "success");
         }
 
         Ok(())
