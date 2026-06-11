@@ -190,6 +190,7 @@ yaml_test!(
     java_imported_symbol_fallback_matrix,
     "java/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(java_sealed_classes, "java/sealed_classes.yaml");
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
