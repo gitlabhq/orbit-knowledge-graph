@@ -358,13 +358,21 @@ health checks and REST-style queries.
 
 **MEMORY_LIMIT_EXCEEDED errors from ClickHouse:**
 
-- Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml`
+- Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml` e.g. `4294967296` for 4 GB:
+
+```xml
+<clickhouse>
+  <!-- other existing settings ... -->
+  <max_server_memory_usage>4294967296</max_server_memory_usage>
+</clickhouse>
+```
+
 - Restart ClickHouse: `gdk restart clickhouse`
 
-**403 Forbidden on the /dashboard/orbit/explore page but JWT auth works:**
+**403 Forbidden on the /dashboard/orbit page but JWT auth works:**
 
-- The Knowledge Graph UI on the GDK ('/dashboard/orbit') requires a Premium or Ultimate license. 
-- View instructions for configuring a license for the GDK: [License Docs](https://gitlab-org.gitlab.io/gitlab-development-kit/#configure-developer-license-in-gdk)
+- The Knowledge Graph UI on the GDK (`/dashboard/orbit`) requires a Premium or Ultimate license.
+- View instructions for configuring a license for the GDK: [Configure a developer license in GDK](https://gitlab-org.gitlab.io/gitlab-development-kit/#configure-developer-license-in-gdk)
 
 **No data in graph:**
 
