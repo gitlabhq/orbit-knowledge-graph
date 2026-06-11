@@ -11,7 +11,7 @@
 //!    in-flight migrating above active), drop ontology-derived objects for
 //!    every version outside it, and mark them `dropped`.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use arrow::datatypes::UInt64Type;
@@ -550,40 +550,33 @@ impl MigrationCompletionChecker {
     }
 }
 
-/// Computes the set of schema versions to keep. Everything else is safe to drop.
+/// Versions to keep. Everything else is safe to drop.
 ///
-/// Keep-set = active ∪ newest `max_retained` retired ∪ migrating > active.
-/// A `migrating` version below active is a zombie (superseded/crashed migration)
-/// and is excluded so the GC sweep reclaims its tables.
-///
-/// Returns an empty set if no active version is found; the caller must abort the
-/// sweep in that case (ambiguity guard).
-fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> BTreeSet<u32> {
-    let mut keep = BTreeSet::new();
+/// Returns empty if no active version exists (caller must abort).
+fn compute_keep_set(versions: &[VersionEntry], max_retained: usize) -> HashSet<u32> {
+    let mut keep = HashSet::new();
 
-    let active = versions.iter().find(|v| v.status == "active");
-    let Some(active) = active else {
+    let Some(active) = versions.iter().find(|v| v.status == "active") else {
         return keep;
     };
     keep.insert(active.version);
 
-    // Retain the newest `max_retained - 1` retired versions (the active
-    // version already counts toward the retention window).
-    let slots = max_retained.saturating_sub(1);
-    for v in versions
+    // Newest N-1 retired (active already counts toward the window).
+    let mut retired: Vec<u32> = versions
         .iter()
         .filter(|v| v.status == "retired")
-        .take(slots)
-    {
-        keep.insert(v.version);
-    }
+        .map(|v| v.version)
+        .collect();
+    retired.sort_unstable_by(|a, b| b.cmp(a));
+    keep.extend(retired.into_iter().take(max_retained.saturating_sub(1)));
 
-    // A migrating version above active is the in-flight migration; keep it.
-    for v in versions.iter().filter(|v| v.status == "migrating") {
-        if v.version > active.version {
-            keep.insert(v.version);
-        }
-    }
+    // In-flight migration (above active); zombies below active are excluded.
+    keep.extend(
+        versions
+            .iter()
+            .filter(|v| v.status == "migrating" && v.version > active.version)
+            .map(|v| v.version),
+    );
 
     keep
 }
@@ -773,13 +766,13 @@ mod tests {
             v(1, "migrating"),
         ];
         let keep = compute_keep_set(&versions, 2);
-        assert_eq!(keep, BTreeSet::from([57, 58]));
+        assert_eq!(keep, HashSet::from([57, 58]));
     }
 
     #[test]
     fn keep_set_active_only() {
         let versions = vec![v(58, "active")];
         let keep = compute_keep_set(&versions, 2);
-        assert_eq!(keep, BTreeSet::from([58]));
+        assert_eq!(keep, HashSet::from([58]));
     }
 }
