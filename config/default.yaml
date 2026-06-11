@@ -164,7 +164,7 @@ billing:
     customers_dot_url: "http://localhost:5000"
     request_timeout_ms: 1000
     fallback_cache_ttl_secs: 3600
-    # api_user: ""
+    api_user: "gl_com_api+orbit@gitlab.com"
     # api_token: ""
 
 features:
