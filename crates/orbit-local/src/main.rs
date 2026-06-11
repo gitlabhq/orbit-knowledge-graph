@@ -1,6 +1,7 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod list;
 mod sql;
 mod sql_format;
 mod workspace;
@@ -168,7 +169,7 @@ enum Commands {
 
         /// Output format.
         #[arg(long, short = 'F', default_value = "table")]
-        format: sql::Format,
+        format: sql_format::Format,
 
         /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
         #[arg(long, value_name = "PATH")]
@@ -183,6 +184,16 @@ enum Commands {
         /// Emit JSON instead of the default table view.
         #[arg(long)]
         raw: bool,
+    },
+    /// List the repositories indexed in the local DuckDB graph.
+    List {
+        /// Output format.
+        #[arg(long, short = 'F', default_value = "table")]
+        format: sql_format::Format,
+
+        /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
+        #[arg(long, value_name = "PATH")]
+        db: Option<PathBuf>,
     },
 }
 
@@ -223,16 +234,14 @@ async fn main() -> Result<()> {
             db,
         } => sql::run(query, file, format, db),
         Commands::Schema { db, raw } => run_schema(db, raw),
+        Commands::List { format, db } => list::run(format, db),
     }
 }
 
 /// Describe the local DuckDB schema by reading `information_schema` from the
 /// graph database. Skips DuckDB's own `*_schema` namespaces.
 fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
-    let db_path = match db {
-        Some(p) => p,
-        None => workspace::Workspace::open_default()?.db_path(),
-    };
+    let db_path = workspace::resolve_db_path(db)?;
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Run `orbit index` first.",

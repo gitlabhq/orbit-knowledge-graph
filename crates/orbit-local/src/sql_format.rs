@@ -2,6 +2,25 @@ use anyhow::{Context, Result};
 use arrow::array::RecordBatch;
 use std::io::Write;
 
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum Format {
+    #[default]
+    Table,
+    Json,
+    Ndjson,
+    Csv,
+}
+
+/// Write `batches` to `out` in the requested format.
+pub fn write<W: Write>(out: W, format: Format, batches: &[RecordBatch]) -> Result<()> {
+    match format {
+        Format::Table => write_table(out, batches),
+        Format::Json => write_json(out, batches),
+        Format::Ndjson => write_ndjson(out, batches),
+        Format::Csv => write_csv(out, batches),
+    }
+}
+
 pub fn write_table<W: Write>(mut out: W, batches: &[RecordBatch]) -> Result<()> {
     if batches.is_empty() {
         return Ok(());
@@ -114,5 +133,15 @@ mod tests {
         let mut out = Vec::new();
         write_table(&mut out, &[]).unwrap();
         assert!(out.is_empty());
+    }
+
+    // `orbit list` depends on this for parseable empty output.
+    #[test]
+    fn json_empty_batches_emit_empty_array() {
+        let mut out = Vec::new();
+        write_json(&mut out, &[]).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        let v: serde_json::Value = serde_json::from_str(s.trim()).unwrap();
+        assert_eq!(v.as_array().map(Vec::len), Some(0));
     }
 }
