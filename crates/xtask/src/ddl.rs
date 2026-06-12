@@ -67,6 +67,32 @@ pub fn run_remote(
         ));
     }
 
+    let stats = if prefix.is_empty() {
+        query_engine::compiler::generate_statistics_ddl(&ont)
+    } else {
+        query_engine::compiler::generate_statistics_ddl_with_prefix(&ont, &prefix)
+    };
+    if let Some(stats) = stats {
+        for t in &stats.tables {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_table(t)
+            ));
+        }
+        for mv in &stats.views {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_materialized_view(mv)
+            ));
+        }
+        for d in &stats.dictionaries {
+            generated.push(format!(
+                "{};\n",
+                query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
+            ));
+        }
+    }
+
     let schema_version = include_str!(concat!(env!("CONFIG_DIR"), "/SCHEMA_VERSION")).trim();
 
     match diff {
