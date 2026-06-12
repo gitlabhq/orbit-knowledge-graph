@@ -708,7 +708,7 @@ fn build_extract_plan(
             let enrichment = page_join.as_ref().map(|pj| {
                 let alias = &pj.alias;
                 let fk = &pj.fk_column;
-                let wm = pj.watermark.as_deref().unwrap_or("_siphon_replicated_at");
+                let wm = &pj.watermark;
                 let agg_cols: Vec<String> = pj
                     .select
                     .iter()
@@ -862,7 +862,7 @@ mod tests {
         let etl = EtlConfig::Table {
             scope: EtlScope::Namespaced,
             source: "siphon_p_ci_builds".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
             edges: edges_map,
@@ -996,7 +996,7 @@ mod tests {
         let etl = EtlConfig::Table {
             scope: EtlScope::Namespaced,
             source: "siphon_p_ci_builds".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             edges: edges_map,

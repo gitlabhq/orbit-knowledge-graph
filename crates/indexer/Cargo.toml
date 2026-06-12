@@ -17,6 +17,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
+const_format = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
 gkg-analytics = { path = "../gkg-analytics" }

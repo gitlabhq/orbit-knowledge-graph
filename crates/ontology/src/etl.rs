@@ -31,10 +31,11 @@ pub struct PageJoin {
     pub fk_column: String,
     /// Columns to select from the joined table (e.g. `["action"]`).
     pub select: Vec<String>,
-    /// Extra WHERE predicate on the joined table (e.g. `_siphon_deleted = false`).
+    /// Extra WHERE predicate on the joined table (e.g. `{{deleted_column}} = false`).
     pub where_clause: Option<String>,
-    /// Watermark column for `argMax` deduplication. Defaults to `_siphon_replicated_at`.
-    pub watermark: Option<String>,
+    /// Watermark column for `argMax` deduplication. Always filled by the
+    /// ontology loader; defaults to the ontology's `default_watermark`.
+    pub watermark: String,
     /// `traversal_path` column on the joined table. When set on a namespaced
     /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
     /// prune by the joined table's leading PK column. A superset of the matched
@@ -218,8 +219,8 @@ mod tests {
             select: "id, name".to_string(),
             from: "source_table".to_string(),
             where_clause: where_clause.map(String::from),
-            watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
+            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
@@ -286,14 +287,14 @@ mod tests {
             scope: EtlScope::Global,
             source: "t".to_string(),
             watermark: "w".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.deleted(), "_siphon_deleted");
+        assert_eq!(table.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.deleted(), "_siphon_deleted");
+        assert_eq!(query.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
     }
 
     #[test]
@@ -301,14 +302,14 @@ mod tests {
         let table = EtlConfig::Table {
             scope: EtlScope::Global,
             source: "t".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.watermark(), "_siphon_replicated_at");
+        assert_eq!(table.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.watermark(), "_siphon_replicated_at");
+        assert_eq!(query.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
     }
 }
