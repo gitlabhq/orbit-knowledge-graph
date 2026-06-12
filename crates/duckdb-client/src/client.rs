@@ -212,6 +212,19 @@ impl DuckDbClient {
             .conn
             .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
     }
+
+    /// Execute a SQL query with JSON parameters and return Arrow RecordBatches.
+    ///
+    /// Params are `serde_json::Value`s converted to DuckDB types:
+    /// strings, integers, floats, bools, and nulls.
+    pub fn query_arrow_json(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<Vec<RecordBatch>> {
+        let boxed = json_params_to_sql(params);
+        self.query_arrow_params(sql, &boxed)
+    }
 }
 
 fn json_params_to_sql(params: &[serde_json::Value]) -> Vec<Box<dyn duckdb::ToSql>> {
