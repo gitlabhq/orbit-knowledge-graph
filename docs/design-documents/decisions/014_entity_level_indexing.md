@@ -127,7 +127,6 @@ Examples from the current ontology:
 |---|---|---|
 | MergeRequest | `[traversal_path, id]` | `id` |
 | User (global) | `[id]` | `id` |
-| JobMetadata | `[traversal_path, build_id]` | `build_id` |
 
 Entities where the first non-scope column has low cardinality (e.g., Note's
 `noteable_type` with ~10 enum values) are poor partitioning candidates and

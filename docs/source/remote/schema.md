@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Full reference for all 28 Orbit node types across 6 domains, including properties and their types.
+description: Full reference for all 27 Orbit node types across 6 domains, including properties and their types.
 title: Schema reference
 ---
 
@@ -26,7 +26,7 @@ title: Schema reference
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit indexes 28 node types across 6 domains. Use these as entity names in your queries.
+Orbit indexes 27 node types across 6 domains. Use these as entity names in your queries.
 
 To fetch the live schema at any time:
 
@@ -70,7 +70,6 @@ glab orbit remote schema
 | `Job` | CI/CD job | `id`, `name`, `status`, `ref`, `allow_failure`, `environment`, `failure_reason` |
 | `Deployment` | CI/CD deployment of a commit | `id`, `iid`, `status`, `ref`, `sha`, `environment_id` |
 | `Environment` | CI/CD deployment target | `id`, `name`, `state`, `tier`, `external_url` |
-| `JobMetadata` | Per-job runtime metadata | `id`, `build_id`, `interruptible`, `timeout`, `exit_code` |
 | `Runner` | CI/CD runner | `id`, `runner_type`, `name`, `active`, `locked` |
 
 ## Planning
