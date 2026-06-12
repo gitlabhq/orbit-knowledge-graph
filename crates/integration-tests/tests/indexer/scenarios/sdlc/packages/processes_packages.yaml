@@ -1,0 +1,24 @@
+description: Packages index with transformed package_type / status enums plus IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_packages_packages:
+    - { id: 8001, project_id: 1000, name: left-pad, version: "1.3.0", package_type: 2, status: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 8002, project_id: 1000, name: requests, version: "2.31.0", package_type: 5, status: 5, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_package:
+      rows:
+        - { id: 8001, name: left-pad, version: "1.3.0", package_type: npm, status: default }
+        - { id: 8002, name: requests, version: "2.31.0", package_type: pypi, status: deprecated }
+  edges:
+    - kind: IN_PROJECT
+      from: Package
+      to: Project
+      traversal_path: "1/100/1000/"
+      count: 2

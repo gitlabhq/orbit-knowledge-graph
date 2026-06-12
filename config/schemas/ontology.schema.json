@@ -14,7 +14,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
       "description": "Domain classification for organizing entities."
     },
 
