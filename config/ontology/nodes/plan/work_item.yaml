@@ -55,7 +55,6 @@ properties:
     type: enum
     source: work_item_type_id
     nullable: false
-    mutable: false
     description: "Work item type."
     values:
       1: issue
