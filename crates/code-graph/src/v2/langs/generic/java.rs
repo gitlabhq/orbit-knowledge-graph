@@ -59,6 +59,69 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     result
 }
 
+/// Extract implicit accessor definitions for record components, only when
+/// the body does not explicitly define a no-arg method that shares a name
+/// with that component.
+fn java_record_accessors(
+    node: &N<'_>,
+    defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
+    scope_stack: &[std::sync::Arc<str>],
+    sep: &'static str,
+) -> bool {
+    if node.kind() != "record_declaration" {
+        return false;
+    }
+    let Some(params) = node.field("parameters") else {
+        return false;
+    };
+    let no_arg_body_methods: Vec<String> = node
+        .field("body")
+        .map(|body| {
+            body.children()
+                .filter(|c| c.kind() == "method_declaration")
+                .filter(|m| {
+                    m.field("parameters").is_none_or(|p| {
+                        !p.children().any(|c| {
+                            matches!(c.kind().as_ref(), "formal_parameter" | "spread_parameter")
+                        })
+                    })
+                })
+                .filter_map(|m| m.field("name").map(|n| n.text().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    for param in params.children() {
+        if param.kind() != "formal_parameter" {
+            continue;
+        }
+        let Some(name) = param.field("name").map(|n| n.text().to_string()) else {
+            continue;
+        };
+        if no_arg_body_methods.contains(&name) {
+            continue;
+        }
+        let return_type = field("type")
+            .inner("type_arguments", "type_identifier")
+            .apply(&param);
+        let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+        defs.push(crate::v2::types::CanonicalDefinition {
+            definition_type: "Method",
+            kind: DefKind::Method,
+            name,
+            fqn,
+            range: crate::v2::dsl::utils::canonical_range(&crate::utils::node_to_range(&param)),
+            is_top_level: false,
+            metadata: return_type.map(|rt| {
+                Box::new(crate::v2::types::DefinitionMetadata {
+                    return_type: Some(rt),
+                    ..Default::default()
+                })
+            }),
+        });
+    }
+    false
+}
+
 impl DslLanguage for JavaDsl {
     fn name() -> &'static str {
         "java"
@@ -72,6 +135,7 @@ impl DslLanguage for JavaDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["marker_annotation", "annotation"],
+            on_scope: Some(java_record_accessors),
             ..LanguageHooks::default()
         }
     }
@@ -106,6 +170,7 @@ impl DslLanguage for JavaDsl {
                         .type_annotation(field("type").inner("type_arguments", "type_identifier")),
                 ),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
+            scope("compact_constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
                 .metadata(
@@ -441,6 +506,87 @@ mod tests {
                 "{name} should appear as a reference"
             );
         }
+    }
+
+    #[test]
+    fn record_compact_constructor() {
+        let result = parse(
+            "public record Bounds(int lo, int hi) {\n    public Bounds {\n        if (lo > hi) throw new IllegalArgumentException(\"lo > hi\");\n    }\n}\n",
+        )
+        .unwrap();
+        let ctor = result
+            .definitions
+            .iter()
+            .find(|d| d.kind == DefKind::Constructor)
+            .expect("compact constructor should be extracted");
+        assert_eq!(ctor.name, "Bounds");
+        assert_eq!(ctor.fqn.to_string(), "Bounds.Bounds");
+    }
+
+    #[test]
+    fn record_implicit_accessors() {
+        let result = parse("public record Point(int x, int y) {}\n").unwrap();
+        let accessors: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.kind == DefKind::Method)
+            .collect();
+        assert_eq!(accessors.len(), 2);
+        assert_eq!(accessors[0].fqn.to_string(), "Point.x");
+        assert_eq!(accessors[1].fqn.to_string(), "Point.y");
+        assert_eq!(
+            accessors[0].metadata.as_ref().unwrap().return_type,
+            Some("int".to_string())
+        );
+    }
+
+    #[test]
+    fn record_parameterized_overload_does_not_suppress_accessor() {
+        let result = parse(
+            "public record Circle(int radius) {\n    public int radius(int base) {\n        return this.radius() + base;\n    }\n}\n",
+        )
+        .unwrap();
+        let mut lines: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.name == "radius" && d.kind == DefKind::Method)
+            .map(|d| d.range.start.line)
+            .collect();
+        lines.sort_unstable();
+        // Line 0 is the synthetic accessor anchored to the component; line 1
+        // is the explicit radius(int) overload, which must not suppress it.
+        assert_eq!(lines, [0, 1]);
+    }
+
+    #[test]
+    fn record_zero_arg_override_beside_overload_suppresses_accessor() {
+        let result = parse(
+            "public record Circle(int radius) {\n    public int radius() {\n        return 0;\n    }\n    public int radius(int base) {\n        return this.radius() + base;\n    }\n}\n",
+        )
+        .unwrap();
+        let mut lines: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.name == "radius" && d.kind == DefKind::Method)
+            .map(|d| d.range.start.line)
+            .collect();
+        lines.sort_unstable();
+        assert_eq!(lines, [1, 4], "both defs must be the explicit declarations");
+    }
+
+    #[test]
+    fn record_explicit_accessor_override_not_duplicated() {
+        let result = parse(
+            "public record Wrapped(int raw) {\n    public int raw() {\n        return raw < 0 ? 0 : raw;\n    }\n}\n",
+        )
+        .unwrap();
+        let raws: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.name == "raw" && d.kind == DefKind::Method)
+            .collect();
+        assert_eq!(raws.len(), 1);
+        assert_ne!(raws[0].range.start.line, 0, "must be the explicit override");
     }
 
     #[test]

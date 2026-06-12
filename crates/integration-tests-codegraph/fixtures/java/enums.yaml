@@ -9,8 +9,9 @@ name: "Java enums — constants, constructor, fields, methods, interface impleme
 #
 # Known gap (not asserted here): the compiler-synthesised enum members values(),
 # valueOf(), and ordinal() are not present in the source AST, so they are not
-# indexed — only members written in source are extracted. This mirrors the
-# synthesised-accessor gap documented in fixtures/java/records.yaml (#846).
+# indexed — only members written in source are extracted. Record component
+# accessors get synthetic definitions from the java.rs on_scope hook; enum
+# members have no equivalent yet.
 
 fixtures:
   - path: com/example/enums/Describable.java

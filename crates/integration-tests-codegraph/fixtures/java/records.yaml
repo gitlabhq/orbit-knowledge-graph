@@ -1,15 +1,12 @@
 name: "Java 14+ records — definitions, members, call resolution, and pattern matching"
 
-# Gaps confirmed by this fixture — tracked in #846, do not expand this issue to fix them:
-#   - compact_constructor_declaration has no scope rule → compact constructors not indexed.
-#     Follow-up: add scope("compact_constructor_declaration", "Constructor") to java.rs.
-#   - Implicit accessor methods generated from record components (e.g. x(), y()) are
-#     compiler-synthesised and absent from the source AST → not indexed.
-# Additional gap tracked in #851:
+# Remaining gaps confirmed by this fixture:
+#   - Implicit equals/hashCode/toString on records are compiler-synthesised and
+#     not indexed; the java.rs on_scope hook only synthesises component accessors.
+# Gap tracked in #851:
 #   - Java 21 record patterns (record_pattern nodes) produce no edges at all:
 #     neither the type reference (instanceof Point(int x, int y)) nor accessor
-#     calls for destructured components. Accessor-call emission for destructured
-#     components additionally depends on implicit accessors existing (#846).
+#     calls for destructured components.
 
 fixtures:
   - path: com/example/records/Measurable.java
@@ -276,6 +273,15 @@ tests:
       - { row_count: 1 }
       - { row: { name: "Range" } }
 
+  - name: "Bounds compact constructor is extracted"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
+        AND m.definition_type = 'Constructor'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
   # ── Methods ───────────────────────────────────────────────────────
 
   - name: "Custom method length() in Range is extracted"
@@ -295,6 +301,20 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { type: "Method" } }
+
+  - name: "Implicit accessors x() and y() are synthesised for Point components"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Point'
+        AND m.definition_type = 'Method'
+      RETURN m.name AS name, m.start_line AS line
+      ORDER BY name
+    assert:
+      # Line 4 is the record declaration: synthetic accessors anchor to
+      # their component's range.
+      - { row_count: 2 }
+      - { row: { name: "x", line: 4 } }
+      - { row: { name: "y", line: 4 } }
 
   # ── Containment edges ─────────────────────────────────────────────
 
@@ -428,6 +448,33 @@ tests:
     assert:
       - { row_count: 1 }
 
+  - name: "PointUser.describe() calls implicit accessors Point.x and Point.y"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PointUser.describe'
+        AND e.edge_kind = 'Calls'
+        AND callee.name IN ['x', 'y']
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "com.example.records.Point.x" } }
+      - { row: { callee: "com.example.records.Point.y" } }
+
+  - name: "ShapeUser.area() implicit accessor calls on instanceof-bound variables"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.ShapeUser.area'
+        AND e.edge_kind = 'Calls'
+        AND callee.name IN ['radius', 'width', 'height']
+      RETURN DISTINCT callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: "com.example.records.Circle.radius" } }
+      - { row: { callee: "com.example.records.Rectangle.height" } }
+      - { row: { callee: "com.example.records.Rectangle.width" } }
+
   # ── Explicit overrides of implicit members ────────────────────────
 
   - name: "Explicit accessor override is a single Method definition"
@@ -491,18 +538,6 @@ tests:
 
   # ── Gaps (severity: warning — see header comment) ─────────────────
 
-  - name: "GAP: Point accessor methods defined"
-    severity: warning
-    query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.fqn = 'com.example.records.Point'
-        AND m.definition_type = 'Method'
-      RETURN m.name AS name
-      ORDER BY name
-    assert:
-      - { row: { name: "x" } }
-      - { row: { name: "y" } }
-
   - name: "GAP: implicit equals/hashCode/toString defined on Point"
     severity: warning
     query: |
@@ -515,42 +550,6 @@ tests:
       - { row: { name: "equals" } }
       - { row: { name: "hashCode" } }
       - { row: { name: "toString" } }
-
-  - name: "GAP: PointUser.describe() calls Point.x and Point.y accessors"
-    severity: warning
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.records.PointUser.describe'
-        AND e.edge_kind = 'Calls'
-      RETURN callee.name AS callee
-      ORDER BY callee
-    assert:
-      - { row: { callee: "x" } }
-      - { row: { callee: "y" } }
-
-  - name: "GAP: ShapeUser.area() accessor calls on instanceof-bound variables"
-    severity: warning
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'com.example.records.ShapeUser.area'
-        AND e.edge_kind = 'Calls'
-        AND callee.name IN ['radius', 'width', 'height']
-      RETURN callee.name AS callee
-      ORDER BY callee
-    assert:
-      - { row: { callee: "height" } }
-      - { row: { callee: "radius" } }
-      - { row: { callee: "width" } }
-
-  - name: "GAP: Bounds compact constructor is extracted"
-    severity: warning
-    query: |
-      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
-      WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
-        AND m.definition_type IN ['Constructor', 'Method']
-      RETURN m.fqn AS fqn
-    assert:
-      - { row_count: 1 }
 
   - name: "GAP: instanceof record pattern emits Point type reference"
     severity: warning
