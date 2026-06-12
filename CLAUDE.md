@@ -13,7 +13,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
 ## Ignored directories
 
-- **`docs-locale/`** contains machine-translated documentation. Never read, edit, or reference files under this directory. Treat it as build output.
+- `docs-locale/` contains machine-translated documentation. Never read, edit, or reference files under this directory. Treat it as build output.
 
 ## How the system works
 
