@@ -47,6 +47,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | What | Where |
 |---|---|
 | **Domain glossary** | **`CONTEXT.md`** |
+| Onboarding guide (new team members) | `docs/dev/onboarding.md` |
 | Indexer crate guide (handlers, reuse-infra checklist) | **`crates/indexer/AGENTS.md`** |
 | Architecture and data model | `docs/design-documents/data_model.md` |
 | Security / AuthZ design | `docs/design-documents/security.md` |

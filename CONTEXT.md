@@ -84,7 +84,7 @@ _Avoid_: replication (too broad)
 
 **Dispatch ID**:
 A UUID stamped on each indexing request message, identifying one dispatch unit — per (namespace × cycle) for SDLC namespace dispatch, per cycle for the global and code dispatchers. Propagated to the `IndexingObserver` and tracing spans for correlation.
-_Avoid_: request ID, trace ID (dispatch_id groups many requests, not a single one)
+_Avoid_: request ID, trace ID (`dispatch_id` groups many requests, not a single one)
 
 **Campaign**:
 The parent correlation above **Dispatch ID**: one campaign per "re-index everything" decision, `null` in steady state. Today a campaign is a schema migration — opened (`migration-v<N>`) when the dispatcher marks a version `migrating`, attached to every dispatch while the migration runs, and closed when the migration completes (promotion to `active`). Held in process memory (`CampaignState`), not persisted. Lets analysts aggregate the cost of one re-index across pipelines without time-based joins.
@@ -97,6 +97,14 @@ _Avoid_: CDC bridge, producer
 **Datalake**:
 The ClickHouse database containing raw CDC rows replicated from GitLab PostgreSQL via **Siphon**. Tables are prefixed `siphon_`. The source data for ETL into graph tables.
 _Avoid_: data lake, raw data tables, lake
+
+**Watermark**:
+The upper time bound of an indexing window, fixed at dispatch time. Each indexing request covers source changes replicated after the previous watermark and up to its own; on successful completion the watermark is persisted in the **Checkpoint** as the lower bound for the next cycle. Fixed at dispatch rather than evaluated during extraction so a window is deterministic across pages and retries.
+_Avoid_: cursor (the pagination position within a window), timestamp (too generic)
+
+**Checkpoint**:
+The persisted progress state for one indexing scope: the last completed **Watermark** plus, mid-run, a cursor marking the last completed page within the current window. Lets an interrupted run resume from its last page instead of replaying the whole window.
+_Avoid_: position (too generic), watermark (the time bound stored inside the checkpoint, not the progress record itself)
 
 ### Query system
 
