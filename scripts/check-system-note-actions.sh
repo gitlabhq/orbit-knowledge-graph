@@ -28,11 +28,18 @@ fi
 echo "Checking $ACTIONS_FILE against ${GITLAB_PROJECT} @ ${pinned_sha:0:12}..."
 
 raw_url="https://gitlab.com/${GITLAB_PROJECT}/-/raw/${pinned_sha}/${RAILS_PATH}"
-rails_src=$(curl -sf --max-time 30 "$raw_url") || {
-    echo "Failed to fetch $raw_url"
-    echo "   (network unavailable, rate-limited, or commit SHA no longer accessible)"
-    exit 1
-}
+
+# Retry transient failures with backoff. Plain --retry skips DNS/connection-
+# refused/timeouts, hence --retry-all-errors + --retry-connrefused.
+if ! rails_src=$(curl -sf --max-time 30 \
+        --retry 4 --retry-all-errors --retry-connrefused --retry-max-time 120 \
+        "$raw_url"); then
+    # Transient fetch failure must not fail unrelated MRs; real drift still hard-fails below.
+    echo "WARNING: could not fetch $raw_url after retries (non-fatal)"
+    echo "         Network unavailable, rate-limited, or commit SHA no longer accessible."
+    echo "         If this persists, verify the '# Pinned:' SHA in $ACTIONS_FILE is reachable."
+    exit 0
+fi
 
 upstream_actions=$(printf '%s' "$rails_src" | python3 -c "
 import sys, re
