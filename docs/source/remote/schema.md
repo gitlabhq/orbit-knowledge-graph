@@ -70,7 +70,6 @@ glab orbit remote schema
 | `Job` | CI/CD job | `id`, `name`, `status`, `ref`, `allow_failure`, `environment`, `failure_reason` |
 | `Deployment` | CI/CD deployment of a commit | `id`, `iid`, `status`, `ref`, `sha`, `environment_id` |
 | `Environment` | CI/CD deployment target | `id`, `name`, `state`, `tier`, `external_url` |
-| `JobMetadata` | Per-job runtime metadata | `id`, `build_id`, `interruptible`, `timeout`, `exit_code` |
 | `Runner` | CI/CD runner | `id`, `runner_type`, `name`, `active`, `locked` |
 
 ## Planning

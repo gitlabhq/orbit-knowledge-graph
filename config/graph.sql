@@ -428,35 +428,6 @@ CREATE TABLE IF NOT EXISTS gl_job (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
-CREATE TABLE IF NOT EXISTS gl_job_metadata (
-    id Int64 CODEC(Delta(8), LZ4),
-    build_id Int64 CODEC(Delta(8), LZ4),
-    interruptible Nullable(Bool),
-    timeout Nullable(Int64) CODEC(Delta(8), LZ4),
-    timeout_source LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    exit_code Nullable(Int64) CODEC(Delta(8), LZ4),
-    has_exposed_artifacts Nullable(Bool),
-    expanded_environment_name String DEFAULT '' CODEC(ZSTD(1)),
-    environment_auto_stop_in String DEFAULT '' CODEC(ZSTD(1)),
-    debug_trace_enabled Bool DEFAULT false,
-    project_id Int64 CODEC(Delta(8), LZ4),
-    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
-    _deleted Bool DEFAULT false,
-    INDEX idx_id id TYPE bloom_filter(0.001) GRANULARITY 1,
-    INDEX idx_build_id build_id TYPE bloom_filter(0.001) GRANULARITY 1,
-    INDEX idx_project_id project_id TYPE bloom_filter(0.001) GRANULARITY 1,
-    PROJECTION by_id (SELECT _part_offset ORDER BY (id, traversal_path, build_id, _version)),
-    PROJECTION by_build_id (SELECT _part_offset ORDER BY (build_id, traversal_path, _version)),
-    PROJECTION by_project_id (SELECT _part_offset ORDER BY (project_id, traversal_path, build_id, _version)),
-    PROJECTION tp_count (
-      SELECT traversal_path, uniq(id)
-      GROUP BY traversal_path
-    )
-) ENGINE = ReplacingMergeTree(_version, _deleted)
-ORDER BY (traversal_path, build_id) PRIMARY KEY (traversal_path, build_id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
-
 CREATE TABLE IF NOT EXISTS gl_label (
     id Int64 CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),

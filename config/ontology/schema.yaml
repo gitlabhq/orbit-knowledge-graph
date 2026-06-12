@@ -161,11 +161,6 @@ settings:
     - {node: Job, property: type}
     - {node: Job, property: timeout_source}
     - {node: Job, property: scheduling_type}
-    # --- JobMetadata ---
-    - {node: JobMetadata, property: interruptible}
-    - {node: JobMetadata, property: timeout_source}
-    - {node: JobMetadata, property: has_exposed_artifacts}
-    - {node: JobMetadata, property: debug_trace_enabled}
     # --- MergeRequest ---
     - {node: MergeRequest, property: state}
     - {node: MergeRequest, property: merge_status}
@@ -349,7 +344,6 @@ domains:
       Pipeline: nodes/ci/pipeline.yaml
       Stage: nodes/ci/stage.yaml
       Job: nodes/ci/job.yaml
-      JobMetadata: nodes/ci/job_metadata.yaml
       Deployment: nodes/ci/deployment.yaml
       Environment: nodes/ci/environment.yaml
       Runner: nodes/ci/runner.yaml
@@ -442,5 +436,4 @@ edges:
   RUNS_FOR_PROJECT: edges/runs_for_project.yaml
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
-  HAS_METADATA: edges/has_metadata.yaml
   BUILT_BY: edges/built_by.yaml
