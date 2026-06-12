@@ -24,6 +24,7 @@ pub enum SupportLang {
     Kotlin,
     Rust,
     Php,
+    Hcl,
 }
 
 impl fmt::Display for SupportLang {
@@ -117,6 +118,11 @@ impl LanguageExt for SupportLang {
             Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
             #[cfg(not(feature = "tree-sitter-php"))]
             Self::Php => panic!("tree-sitter-php feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-hcl")]
+            Self::Hcl => tree_sitter_hcl::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-hcl"))]
+            Self::Hcl => panic!("tree-sitter-hcl feature not enabled"),
         }
     }
 
