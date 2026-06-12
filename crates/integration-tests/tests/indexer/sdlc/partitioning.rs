@@ -1,6 +1,5 @@
 use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
 use gkg_utils::arrow::ArrowUtils;
-use indexer::types::Envelope;
 use integration_testkit::t;
 
 use crate::indexer::common::{
@@ -13,7 +12,11 @@ pub async fn partitioned_initial_load_indexes_all_rows_and_consolidates(ctx: &Te
         create_user(ctx, id).await;
     }
 
-    handle_until_consolidated(ctx, "User", 4, global_envelope).await;
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("partitioned handler should succeed");
 
     let result = ctx
         .query(&format!(
@@ -86,8 +89,9 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
     }
 
     ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User.p5of6', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}')",
+        "INSERT INTO {} (key, watermark, cursor_values, _version) \
+         VALUES ('global.User.p5of6', '2024-01-20 12:00:00.000000', '{{\"c\":[\"6\"]}}', \
+                 '2024-01-20 12:00:00.000000')",
         t("checkpoint")
     ))
     .await;
@@ -141,9 +145,10 @@ pub async fn unfinished_partition_blocks_parent_consolidation(ctx: &TestContext)
 /// the floor and write no partition checkpoint rows.
 pub async fn present_parent_takes_single_pull_path_and_honors_floor(ctx: &TestContext) {
     ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values) \
+        "INSERT INTO {} (key, watermark, cursor_values, _version) \
          VALUES ('global.User', '2024-01-20 00:00:00.000000', \
-                 '{{\"c\":[\"2\"],\"f\":\"2024-01-10T00:00:00Z\"}}')",
+                 '{{\"c\":[\"2\"],\"f\":\"2024-01-10T00:00:00Z\"}}', \
+                 '2024-01-20 00:00:00.000000')",
         t("checkpoint")
     ))
     .await;
@@ -199,20 +204,26 @@ pub async fn retry_skips_completed_resumes_in_progress_and_pins_watermark(ctx: &
 
     for index in 0..2 {
         ctx.execute(&format!(
-            "INSERT INTO {} (key, watermark, cursor_values) \
-             VALUES ('global.User.p{index}of4', '2024-01-15 00:00:00.000000', 'null')",
+            "INSERT INTO {} (key, watermark, cursor_values, _version) \
+             VALUES ('global.User.p{index}of4', '2024-01-15 00:00:00.000000', 'null', \
+                     '2024-01-15 00:00:00.000000')",
             t("checkpoint")
         ))
         .await;
     }
     ctx.execute(&format!(
-        "INSERT INTO {} (key, watermark, cursor_values) \
-         VALUES ('global.User.p2of4', '2024-01-16 00:00:00.000000', '{{\"c\":[\"6\"]}}')",
+        "INSERT INTO {} (key, watermark, cursor_values, _version) \
+         VALUES ('global.User.p2of4', '2024-01-16 00:00:00.000000', '{{\"c\":[\"6\"]}}', \
+                 '2024-01-16 00:00:00.000000')",
         t("checkpoint")
     ))
     .await;
 
-    handle_until_consolidated(ctx, "User", 4, global_envelope).await;
+    entity_handler_with_partitions(ctx, "User", 4)
+        .await
+        .handle(handler_context(ctx), global_envelope())
+        .await
+        .expect("partitioned handler should succeed");
 
     let result = ctx
         .query(&format!(
@@ -276,22 +287,6 @@ async fn assert_partitions_tombstoned(ctx: &TestContext, key_prefix: &str) {
     );
 }
 
-async fn handle_until_consolidated(
-    ctx: &TestContext,
-    entity: &str,
-    partitions: u32,
-    envelope: impl Fn() -> Envelope,
-) {
-    for _ in 0..2 {
-        entity_handler_with_partitions(ctx, entity, partitions)
-            .await
-            .handle(handler_context(ctx), envelope())
-            .await
-            .expect("partitioned handler should succeed");
-        ctx.execute("SYSTEM FLUSH ASYNC INSERT QUEUE").await;
-    }
-}
-
 async fn assert_indexed_ids(ctx: &TestContext, table: &str, expected: Vec<i64>, message: &str) {
     let result = ctx
         .query(&format!("SELECT id FROM {} FINAL ORDER BY id", t(table)))
@@ -319,7 +314,11 @@ pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext)
         .await;
     }
 
-    handle_until_consolidated(ctx, "Group", 4, || namespace_envelope(1, 100)).await;
+    entity_handler_with_partitions(ctx, "Group", 4)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .expect("Group partitioned handler should succeed");
     assert_indexed_ids(
         ctx,
         "gl_group",
@@ -329,7 +328,11 @@ pub async fn namespaced_entities_partition_by_id_within_scope(ctx: &TestContext)
     .await;
     assert_partitions_tombstoned(ctx, "ns.100.Group.p").await;
 
-    handle_until_consolidated(ctx, "Milestone", 4, || namespace_envelope(1, 100)).await;
+    entity_handler_with_partitions(ctx, "Milestone", 4)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .expect("namespaced partitioned handler should succeed");
     assert_indexed_ids(
         ctx,
         "gl_milestone",
