@@ -397,3 +397,28 @@ impl<'a> ImportResolver<'a> {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::dir_of;
+
+    #[test]
+    fn dir_of_nested_path() {
+        assert_eq!(dir_of("modules/vpc/main.tf"), "modules/vpc");
+    }
+
+    #[test]
+    fn dir_of_root_file() {
+        assert_eq!(dir_of("main.tf"), "");
+    }
+
+    #[test]
+    fn dir_of_empty() {
+        assert_eq!(dir_of(""), "");
+    }
+
+    #[test]
+    fn dir_of_trailing_slash() {
+        assert_eq!(dir_of("a/b/"), "a/b");
+    }
+}
