@@ -23,6 +23,12 @@ pub struct ResolveSettings {
     /// Maximum number of results from `global_name` before discarding
     /// as too ambiguous. Prevents fan-out on common names.
     pub global_name_max_results: usize,
+    /// When set, restrict the qualified-name fast path (resolver.rs) to
+    /// definitions in the SAME DIRECTORY as the referencing file. For
+    /// languages whose module scope is a directory (Terraform/HCL), this
+    /// stops a `local.x` / `type.name` reference from resolving to a
+    /// same-named definition in an unrelated module directory.
+    pub same_directory_scope: bool,
 }
 
 impl Default for ResolveSettings {
@@ -34,7 +40,17 @@ impl Default for ResolveSettings {
             compound_key_recovery: true,
             implicit_scope_on_base: true,
             global_name_max_results: 5,
+            same_directory_scope: false,
         }
+    }
+}
+
+/// The directory portion of a file path (everything before the last `/`),
+/// or `""` for a repo-root file. Used for directory-scoped resolution.
+pub(crate) fn dir_of(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(i) => &path[..i],
+        None => "",
     }
 }
 
@@ -379,5 +395,30 @@ impl<'a> ImportResolver<'a> {
             .into_iter()
             .filter(|&idx| self.graph.def_in_file(idx, file_path))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dir_of;
+
+    #[test]
+    fn dir_of_nested_path() {
+        assert_eq!(dir_of("modules/vpc/main.tf"), "modules/vpc");
+    }
+
+    #[test]
+    fn dir_of_root_file() {
+        assert_eq!(dir_of("main.tf"), "");
+    }
+
+    #[test]
+    fn dir_of_empty() {
+        assert_eq!(dir_of(""), "");
+    }
+
+    #[test]
+    fn dir_of_trailing_slash() {
+        assert_eq!(dir_of("a/b/"), "a/b");
     }
 }
