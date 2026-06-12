@@ -1,0 +1,152 @@
+name: "C# 9+ records — positional records, record structs, inheritance, nesting"
+
+# Gaps confirmed by this fixture, mirroring the Java records coverage in
+# fixtures/java/records.yaml:
+#   - Implicit positional-parameter properties and the compiler-synthesised
+#     copy/Deconstruct/Equals members are not present in the source AST → not
+#     indexed. Only members written in source are extracted.
+#   - The `record` keyword is mapped by csharp.rs to definition_type "Record"
+#     (scope("record_declaration", "Record")); `record struct` uses the same
+#     record_declaration node and so is also reported as "Record".
+
+fixtures:
+  - path: Shapes/IShape.cs
+    content: |
+      namespace Shapes
+      {
+          public interface IShape
+          {
+              double Area();
+          }
+      }
+
+  - path: Shapes/Point.cs
+    content: |
+      namespace Shapes
+      {
+          public record Point(int X, int Y);
+      }
+
+  - path: Shapes/Circle.cs
+    content: |
+      namespace Shapes
+      {
+          public record Circle(Point Center, double Radius) : IShape
+          {
+              public double Area() => System.Math.PI * Radius * Radius;
+          }
+      }
+
+  - path: Shapes/Range.cs
+    content: |
+      namespace Shapes
+      {
+          public record struct Range(int Start, int End)
+          {
+              public int Length() => End - Start;
+          }
+      }
+
+  - path: Shapes/Outer.cs
+    content: |
+      namespace Shapes
+      {
+          public record Outer(int Id)
+          {
+              public record Inner(string Label);
+          }
+      }
+
+tests:
+  - name: "Positional record Point is extracted as definition_type Record"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Point'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point", type: "Record" } }
+
+  - name: "Record implementing interface is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Circle'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "record struct Range is extracted as Record"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Range'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "Method on a record is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Circle.Area'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "Method on a record struct is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Range.Length'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "Record defines its method via a Defines edge"
+    query: |
+      MATCH (r:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE r.fqn = 'Shapes.Circle'
+        AND m.fqn = 'Shapes.Circle.Area'
+        AND e.edge_kind = 'Defines'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Outer record is extracted as Record"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Outer'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "Nested record Inner inside Outer is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shapes.Outer.Inner'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Record" } }
+
+  - name: "Outer record defines nested Inner record"
+    query: |
+      MATCH (o:Definition)-[e:DefinitionToDefinition]->(i:Definition)
+      WHERE o.fqn = 'Shapes.Outer'
+        AND i.fqn = 'Shapes.Outer.Inner'
+        AND e.edge_kind = 'Defines'
+      RETURN i.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines top-level record"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'Shapes/Point.cs'
+        AND d.fqn = 'Shapes.Point'
+        AND e.edge_kind = 'Defines'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
