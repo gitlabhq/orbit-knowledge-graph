@@ -39,7 +39,7 @@ pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
     RepositoryService, RepositoryServiceError,
 };
-pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
+pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
 pub fn register_handlers(
     registry: &HandlerRegistry,

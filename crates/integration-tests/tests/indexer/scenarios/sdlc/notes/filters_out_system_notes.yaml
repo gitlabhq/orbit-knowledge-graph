@@ -1,0 +1,16 @@
+description: System notes are excluded from the regular note pipeline
+scope: { namespace: 100 }
+
+seed:
+  siphon_notes:
+    - { id: 1, note: User comment, noteable_type: MergeRequest, noteable_id: 100, author_id: 1, system: false, internal: false, traversal_path: "1/100/", created_at: "2024-01-15", updated_at: "2024-01-15" }
+    - { id: 2, note: added 1 commit, noteable_type: MergeRequest, noteable_id: 100, author_id: 2, system: true, internal: false, traversal_path: "1/100/", created_at: "2024-01-16", updated_at: "2024-01-16" }
+    - { id: 3, note: "mentioned in issue #123", noteable_type: MergeRequest, noteable_id: 100, author_id: 2, system: true, internal: false, traversal_path: "1/100/", created_at: "2024-01-17", updated_at: "2024-01-17" }
+    - { id: 4, note: Another user comment, noteable_type: Issue, noteable_id: 200, author_id: 1, system: false, internal: false, traversal_path: "1/100/", created_at: "2024-01-18", updated_at: "2024-01-18" }
+
+expect:
+  nodes:
+    gl_note: { count: 2 }
+  edges:
+    - { kind: AUTHORED, from: User, to: Note, traversal_path: "1/100/", count: 2 }
+    - { kind: HAS_NOTE, count: 2 }

@@ -22,7 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   traversal_path:
@@ -36,35 +36,35 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
-    immutable: true
+    mutable: false
     description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Indexed commit SHA."
 
   file_path:
     type: string
     source: file_path
     nullable: false
-    immutable: true
+    mutable: false
     description: "Containing file path."
 
   import_type:
     type: string
     source: import_type
     nullable: false
-    immutable: true
+    mutable: false
     description: "Import kind (e.g., module, symbol, wildcard)."
     selectivity: low
 
@@ -72,63 +72,63 @@ properties:
     type: string
     source: import_path
     nullable: false
-    immutable: true
+    mutable: false
     description: "Source module or path of the import."
 
   identifier_name:
     type: string
     source: identifier_name
     nullable: false
-    immutable: true
+    mutable: false
     description: "Imported symbol name."
 
   identifier_alias:
     type: string
     source: identifier_alias
     nullable: false
-    immutable: true
+    mutable: false
     description: "Import alias (e.g., 'import numpy as np')."
 
   start_line:
     type: int64
     source: start_line
     nullable: false
-    immutable: true
+    mutable: false
     description: "Start line."
 
   end_line:
     type: int64
     source: end_line
     nullable: false
-    immutable: true
+    mutable: false
     description: "End line."
 
   start_byte:
     type: int64
     source: start_byte
     nullable: false
-    immutable: true
+    mutable: false
     description: "Start byte offset."
 
   end_byte:
     type: int64
     source: end_byte
     nullable: false
-    immutable: true
+    mutable: false
     description: "End byte offset."
 
   start_char:
     type: int64
     source: start_char
     nullable: false
-    immutable: true
+    mutable: false
     description: "Start column."
 
   end_char:
     type: int64
     source: end_char
     nullable: false
-    immutable: true
+    mutable: false
     description: "End column."
 
 storage:

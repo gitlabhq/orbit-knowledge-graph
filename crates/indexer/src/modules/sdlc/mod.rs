@@ -47,8 +47,11 @@ pub async fn register_handlers(
     let metrics = SdlcMetrics::new();
 
     let inputs = plan::input::from_ontology(ontology);
-    let partition_strategies =
-        partitioning::build_strategies(&inputs, &entity_handler_config.partition_overrides);
+    let partition_strategies = partitioning::build_strategies(
+        &inputs,
+        &entity_handler_config.partition_overrides,
+        entity_handler_config.partition_min_rows,
+    );
     let plans = plan::build_plans(
         ontology,
         entity_handler_config.datalake_batch_size,
@@ -211,6 +214,6 @@ mod tests {
             "enrichment CTE must prune by traversal_path: {template}"
         );
         assert!(template.contains("ORDER BY traversal_path, id"));
-        assert_eq!(system_note.watermark_column, "sn._siphon_replicated_at");
+        assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
     }
 }

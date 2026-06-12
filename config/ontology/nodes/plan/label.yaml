@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   title:
@@ -46,7 +46,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -59,14 +59,14 @@ properties:
     type: int64
     source: project_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Owning project ID. Null for group-scoped."
 
   group_id:
     type: int64
     source: group_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Owning group ID. Null for project-scoped."
 
   traversal_path:

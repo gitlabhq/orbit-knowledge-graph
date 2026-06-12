@@ -112,7 +112,10 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     // and init panics if called twice, so guard it for the subtests sharing a run.
     static ENABLE_SYSTEM_NOTES: Once = Once::new();
     ENABLE_SYSTEM_NOTES.call_once(|| {
-        gkg_server_config::features::init(gkg_server_config::FeaturesConfig { system_notes: true });
+        gkg_server_config::features::init(gkg_server_config::FeaturesConfig {
+            system_notes: true,
+            ..Default::default()
+        });
     });
 
     let config = create_test_indexer_config(&ctx.config);
@@ -139,6 +142,7 @@ pub async fn entity_handler_with_partitions(
     let mut config: IndexerConfig = create_test_indexer_config(&ctx.config);
     config.engine.handlers.entity_handler.partition_overrides =
         HashMap::from([(entity_name.to_string(), partitions)]);
+    config.engine.handlers.entity_handler.partition_min_rows = 0;
 
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();

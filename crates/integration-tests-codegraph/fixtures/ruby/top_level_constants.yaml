@@ -201,23 +201,36 @@ tests:
       - { row: { name: "Registry::FEATURES" } }
 
   # ══════════════════════════════════════════════════════════════
-  # MIXED RHS TYPES — every literal kind must produce a Constant
+  # MIXED RHS TYPES — every value-literal kind produces a Constant
   # ══════════════════════════════════════════════════════════════
+  #
+  # A lambda/proc RHS (`PROC_CONST = ->(x) {…}`) is the exception: it
+  # is emitted as a `Lambda`, not a `Constant`, so callers can find
+  # callable constants. See the Lambda assertion below and the
+  # dedicated `ruby/lambda_defs.yaml` suite.
 
-  - name: "constants of every RHS kind are indexed"
+  - name: "constants of every value-literal RHS kind are indexed"
     query: |
       MATCH (d:Definition)
       WHERE d.file_path = 'lib/mixed_kinds.rb'
         AND d.definition_type = 'Constant'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 6 }
+      - { row_count: 5 }
       - { row: { fqn: "Mixed::TYPED_CONST" } }
       - { row: { fqn: "Mixed::STRING_CONST" } }
       - { row: { fqn: "Mixed::ARRAY_CONST" } }
       - { row: { fqn: "Mixed::HASH_CONST" } }
       - { row: { fqn: "Mixed::CLASS_CONST" } }
-      - { row: { fqn: "Mixed::PROC_CONST" } }
+
+  - name: "a stabby-lambda constant is emitted as a Lambda, not a Constant"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Mixed::PROC_CONST'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
 
   # ══════════════════════════════════════════════════════════════
   # SINGLETON CLASS — constants do not pick up a synthetic segment
@@ -291,7 +304,7 @@ tests:
       RETURN count(*) AS n
     assert:
       - { row_count: 1 }
-      - { row: { n: 18 } }
+      - { row: { n: 17 } }
 
   # ══════════════════════════════════════════════════════════════
   # REFERENCE RESOLUTION — qualified refs resolve to Constants

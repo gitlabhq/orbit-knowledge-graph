@@ -21,14 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: false
-    immutable: true
+    mutable: false
     description: "Scoped work item number."
 
   title:
@@ -47,18 +47,15 @@ properties:
     type: enum
     source: state_id
     nullable: false
-    description: "Current state. Only opened (1) and closed (2) apply to work items."
+    description: "Current state."
     values:
       1: opened
       2: closed
-      3: merged
-      4: locked
-
   work_item_type:
     type: enum
     source: work_item_type_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Work item type."
     values:
       1: issue
@@ -99,7 +96,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -118,14 +115,14 @@ properties:
     type: int64
     source: project_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Owning project ID. Null for group-scoped."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Author user ID."
 
   milestone_id:
@@ -138,7 +135,7 @@ properties:
     type: int64
     source: namespace_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning namespace (group) ID."
 
   closed_by_id:
@@ -167,6 +164,7 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
+      mutable: true
     namespace_id:
       to: Group
       as: IN_GROUP

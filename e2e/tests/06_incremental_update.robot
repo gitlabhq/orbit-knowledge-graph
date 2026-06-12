@@ -21,6 +21,8 @@ Documentation       Verify incremental SDLC reconciliation: a Rails-side delete 
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Note Delete Tombstones The Graph Node

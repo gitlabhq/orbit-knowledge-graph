@@ -22,7 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   traversal_path:
@@ -36,42 +36,42 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
-    immutable: true
+    mutable: false
     description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Indexed commit SHA."
 
   path:
     type: string
     source: path
     nullable: false
-    immutable: true
+    mutable: false
     description: "Relative path within the repository."
 
   name:
     type: string
     source: name
     nullable: false
-    immutable: true
+    mutable: false
     description: "File name including extension."
 
   extension:
     type: string
     source: extension
     nullable: false
-    immutable: true
+    mutable: false
     description: "Extension (e.g., rb, py, java)."
     selectivity: low
 
@@ -79,7 +79,7 @@ properties:
     type: string
     source: language
     nullable: false
-    immutable: true
+    mutable: false
     description: "Programming language (e.g., ruby, python, java)."
     selectivity: low
 

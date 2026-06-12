@@ -79,7 +79,7 @@ _Avoid_: filtering (too generic), content masking (misleading — entire rows ar
 ### Data pipeline
 
 **CDC (Change Data Capture)**:
-The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from GitLab's PostgreSQL through **Siphon** into the **Datalake**.
+The pattern of capturing row-level changes from a source database as a stream of events. In Orbit, CDC flows from the GitLab PostgreSQL database through **Siphon** into the **Datalake**.
 _Avoid_: replication (too broad)
 
 **Dispatch ID**:
@@ -91,11 +91,11 @@ The parent correlation above **Dispatch ID**: one campaign per "re-index everyth
 _Avoid_: batch, job (a campaign spans many dispatches and both pipelines)
 
 **Siphon**:
-GitLab's CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
+The GitLab CDC service. Captures PostgreSQL logical replication events and publishes them to NATS JetStream. External to Orbit — owned by the Analytics team.
 _Avoid_: CDC bridge, producer
 
 **Datalake**:
-The ClickHouse database containing raw CDC rows replicated from GitLab's PostgreSQL via **Siphon**. Tables are prefixed `siphon_`. The source data for ETL into graph tables.
+The ClickHouse database containing raw CDC rows replicated from GitLab PostgreSQL via **Siphon**. Tables are prefixed `siphon_`. The source data for ETL into graph tables.
 _Avoid_: data lake, raw data tables, lake
 
 ### Query system

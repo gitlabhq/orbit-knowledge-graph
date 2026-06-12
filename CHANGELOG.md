@@ -1,3 +1,15 @@
+## [0.74.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.73.2...v0.74.0) (2026-06-09)
+
+### Features
+
+* **compiler:** pathfinding safety limits and mandatory rel_types ([da7a4bc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da7a4bcf971bc54df35a10006ed41c8ed8ddf65f)) by Michael Usachenko
+* **indexer:** log per-phase and per-page timing in SDLC pipeline ([79cf5d8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79cf5d8af3dd1eea71a85d4eb0026d1abfffd4e8)) by Jean-Gabriel Doyon
+* **indexer:** reconcile stale FK-derived graph edges ([8dea5aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8dea5aaed896baf09e93c3c1649b45f3630bf7c8)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** promote billing logs to info level and fix Option display in JWT log ([f6ef69f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f6ef69f075fd5bfc5d3182ceeb53f9fa9b7de3c0)) by Sharmad Nachnolkar
+
 ## [0.73.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.73.1...v0.73.2) (2026-06-09)
 
 ### Performance

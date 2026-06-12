@@ -14,7 +14,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
       "description": "Domain classification for organizing entities."
     },
 
@@ -134,10 +134,10 @@
               "enum": ["low", "high"],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             },
-            "immutable": {
+            "mutable": {
               "type": "boolean",
-              "description": "Whether this field never changes after creation. Enables the compiler to skip FINAL dedup when the query only touches immutable fields.",
-              "default": false
+              "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",
+              "default": true
             },
             "terminal_values": {
               "type": "array",
@@ -149,8 +149,20 @@
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
-          "required": ["type", "source"],
-          "additionalProperties": false
+          "required": ["type", "source", "description"],
+          "additionalProperties": false,
+          "if": {
+            "not": {
+              "properties": { "type": { "const": "enum" } },
+              "required": ["type"]
+            }
+          },
+          "then": {
+            "properties": {
+              "values": false,
+              "enum_type": false
+            }
+          }
         },
         {
           "type": "object",
@@ -170,7 +182,7 @@
               "description": "Human-readable description of the property."
             }
           },
-          "required": ["type", "virtual"],
+          "required": ["type", "virtual", "description"],
           "additionalProperties": false
         }
       ]
@@ -239,6 +251,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when the FK can change over the entity's lifetime (a 'latest'/'current' pointer); such edges are reconciled by the stale-edge sweep. Immutable FKs leave this false."
         }
       },
       "required": ["as"],
@@ -260,11 +277,11 @@
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -306,23 +323,23 @@
             },
             "select": {
               "type": "string",
-              "description": "Column expressions for the SELECT clause."
+              "description": "Column expressions for the SELECT clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "from": {
               "type": "string",
-              "description": "Table or JOIN expression for the FROM clause."
+              "description": "Table or JOIN expression for the FROM clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "where": {
               "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters)."
+              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters). Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -362,11 +379,11 @@
                 },
                 "where": {
                   "type": "string",
-                  "description": "Extra WHERE predicate on the joined table (e.g. _siphon_deleted = false)."
+                  "description": "Extra WHERE predicate on the joined table (e.g. {{deleted_column}} = false). Use {{watermark_column}} and {{deleted_column}} placeholders instead of hardcoding column names."
                 },
                 "watermark": {
                   "type": "string",
-                  "description": "Watermark column for argMax deduplication. Defaults to _siphon_replicated_at."
+                  "description": "Watermark column for argMax deduplication. Defaults to schema.yaml's default_watermark. Use {{watermark_column}} placeholder instead of hardcoding the column name."
                 },
                 "traversal_path_column": {
                   "type": "string",

@@ -136,21 +136,74 @@ impl Filter for TraversalPathFilter<'_> {
     }
 }
 
-pub(in crate::modules::sdlc) struct RangeFilter<'a> {
-    pub column: &'a str,
-    pub lower_bound: &'a str,
-    pub upper_bound: &'a str,
+/// Half-open partition window `[lower, upper)` over the leading sort-key prefix.
+/// A bare `id` range (the 2nd sort key) rescans the namespace on every page;
+/// bounding the full prefix prunes by the primary index instead.
+pub(in crate::modules::sdlc) struct CompositeRangeFilter<'a> {
+    pub columns: &'a [String],
+    pub lower: Option<&'a [String]>,
+    pub upper: Option<&'a [String]>,
 }
 
-impl Filter for RangeFilter<'_> {
+impl Filter for CompositeRangeFilter<'_> {
     fn condition(&self) -> String {
-        format!(
-            "{col} >= '{lo}' AND {col} < '{hi}'",
-            col = self.column,
-            lo = self.lower_bound,
-            hi = self.upper_bound,
-        )
+        let lower_edge = self
+            .lower
+            .map(|values| sort_key_prefix_compare(self.columns, values, KeyComparison::AtLeast));
+        let upper_edge = self
+            .upper
+            .map(|values| sort_key_prefix_compare(self.columns, values, KeyComparison::Below));
+        [lower_edge, upper_edge]
+            .into_iter()
+            .flatten()
+            .map(|edge| format!("({edge})"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
     }
+}
+
+enum KeyComparison {
+    Greater,
+    AtLeast,
+    Below,
+}
+
+impl KeyComparison {
+    // Lexicographic `>=` is `>` at every depth except the last column.
+    fn operator(&self, at_last_column: bool) -> &'static str {
+        match self {
+            KeyComparison::Greater => ">",
+            KeyComparison::AtLeast if at_last_column => ">=",
+            KeyComparison::AtLeast => ">",
+            KeyComparison::Below => "<",
+        }
+    }
+}
+
+/// Compares the sort-key prefix against a tuple of values as a flat OR-of-ANDs:
+/// `(c0 > v0) OR (c0 = v0 AND c1 > v1) OR …`. ClickHouse prunes granules for
+/// this shape; a packed `(c0, c1) > (v0, v1)` tuple forces a full scan.
+fn sort_key_prefix_compare(
+    columns: &[String],
+    values: &[String],
+    comparison: KeyComparison,
+) -> String {
+    let disjuncts: Vec<String> = (0..columns.len())
+        .map(|pivot| {
+            let mut clauses: Vec<String> = columns[..pivot]
+                .iter()
+                .zip(values)
+                .map(|(column, value)| format!("({column} = '{value}')"))
+                .collect();
+            let operator = comparison.operator(pivot == columns.len() - 1);
+            clauses.push(format!(
+                "({} {operator} '{}')",
+                columns[pivot], values[pivot]
+            ));
+            format!("({})", clauses.join(" AND "))
+        })
+        .collect();
+    disjuncts.join(" OR ")
 }
 
 pub(in crate::modules::sdlc) struct CursorFilter<'a> {
@@ -159,35 +212,13 @@ pub(in crate::modules::sdlc) struct CursorFilter<'a> {
 }
 
 impl Filter for CursorFilter<'_> {
-    // Emits a DNF tuple comparison: `(c1 > v1) OR (c1 = v1 AND c2 > v2) OR ...`.
-    // The flat OR form lets ClickHouse use the sort key index; a single
-    // `(c1, c2) > (v1, v2)` would not. Empty values → no-op (first page).
+    // Empty values → no-op (first page).
     fn condition(&self) -> String {
         if self.values.is_empty() {
             return String::new();
         }
         debug_assert_eq!(self.sort_key.len(), self.values.len());
-        let disjuncts: Vec<String> = (0..self.sort_key.len())
-            .map(|depth| {
-                let mut conjuncts: Vec<String> = self
-                    .sort_key
-                    .iter()
-                    .zip(self.values)
-                    .take(depth)
-                    .map(|(k, v)| format!("({k} = '{v}')"))
-                    .collect();
-                conjuncts.push(format!(
-                    "({} > '{}')",
-                    self.sort_key[depth], self.values[depth]
-                ));
-                conjuncts.join(" AND ")
-            })
-            .collect();
-        disjuncts
-            .into_iter()
-            .map(|d| format!("({d})"))
-            .collect::<Vec<_>>()
-            .join(" OR ")
+        sort_key_prefix_compare(self.sort_key, self.values, KeyComparison::Greater)
     }
 }
 
@@ -290,10 +321,10 @@ impl PreparedQuery {
         partitions
             .into_iter()
             .map(|p| {
-                let query = self.clone().with(RangeFilter {
-                    column: &p.column,
-                    lower_bound: &p.lower_bound,
-                    upper_bound: &p.upper_bound,
+                let query = self.clone().with(CompositeRangeFilter {
+                    columns: &p.key_columns,
+                    lower: p.lower_bound.as_deref(),
+                    upper: p.upper_bound.as_deref(),
                 });
                 (p, query)
             })
@@ -334,14 +365,14 @@ mod tests {
         Plan {
             name: "Test".to_string(),
             extract_template: format!(
-                "SELECT id, name, _siphon_replicated_at AS _version, \
+                "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \
                  ORDER BY {sort_key_sql} \
                  LIMIT {{{{batch_size}}}}"
             ),
-            watermark_column: "_siphon_replicated_at".to_string(),
+            watermark_column: "_siphon_watermark".to_string(),
             sort_key,
             batch_size,
             transform: TransformSpec::DataFusion(vec![]),
@@ -454,6 +485,43 @@ mod tests {
         );
     }
 
+    // ── CompositeRangeFilter tests ──────────────────────────────────
+
+    #[test]
+    fn composite_range_filter_emits_both_edges_as_dnf() {
+        let columns = vec!["traversal_path".to_string(), "id".to_string()];
+        let lower = vec!["1/9970/".to_string(), "100".to_string()];
+        let upper = vec!["1/9970/".to_string(), "500".to_string()];
+        let sql = CompositeRangeFilter {
+            columns: &columns,
+            lower: Some(&lower),
+            upper: Some(&upper),
+        }
+        .condition();
+        assert!(
+            sql.contains("(traversal_path = '1/9970/') AND (id >= '100')"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("(traversal_path = '1/9970/') AND (id < '500')"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains(") AND ("), "sql: {sql}");
+    }
+
+    #[test]
+    fn composite_range_filter_open_lower_emits_only_upper() {
+        let columns = vec!["id".to_string()];
+        let upper = vec!["500".to_string()];
+        let sql = CompositeRangeFilter {
+            columns: &columns,
+            lower: None,
+            upper: Some(&upper),
+        }
+        .condition();
+        assert_eq!(sql, "(((id < '500')))");
+    }
+
     // ── PreparedQuery tests ─────────────────────────────────────────
 
     #[test]
@@ -478,11 +546,11 @@ mod tests {
         });
         let sql = prepared.to_sql();
         assert!(
-            sql.contains("_siphon_replicated_at > {last_watermark:String}"),
+            sql.contains("_siphon_watermark > {last_watermark:String}"),
             "sql: {sql}"
         );
         assert!(
-            sql.contains("_siphon_replicated_at <= {watermark:String}"),
+            sql.contains("_siphon_watermark <= {watermark:String}"),
             "sql: {sql}"
         );
         let params = prepared.params();
@@ -541,6 +609,6 @@ mod tests {
         // Both filter conditions appear, wrapped in parens and AND-joined.
         assert!(sql.contains(" AND ("), "sql: {sql}");
         assert!(sql.contains("startsWith(traversal_path,"), "sql: {sql}");
-        assert!(sql.contains("_siphon_replicated_at >"), "sql: {sql}");
+        assert!(sql.contains("_siphon_watermark >"), "sql: {sql}");
     }
 }

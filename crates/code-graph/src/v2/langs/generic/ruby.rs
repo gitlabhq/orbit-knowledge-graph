@@ -69,6 +69,20 @@ impl DslLanguage for RubyDsl {
                 .when(field_kind("left", &["constant", "scope_resolution"]))
                 .name_from(field("left"))
                 .no_scope(),
+            // `NAME = <callable>`: a lambda or Proc bound to a constant or
+            // variable (`TRIPLE = ->(x) {…}`, `DOUBLE = lambda {…}`,
+            // `VALIDATE = proc {…}`, `MAKER = Proc.new {…}`). Emitted as a
+            // named `Lambda` so callers can ask "what callable constants
+            // exist?" and resolve references to them, rather than seeing an
+            // opaque `Constant`. Declared after the `Constant` rule so it
+            // wins for callable RHSes — scope dispatch tries the
+            // last-declared matching rule first — while a plain `MAX = 2`
+            // still falls through to `Constant`.
+            scope("assignment", "Lambda")
+                .def_kind(DefKind::Lambda)
+                .when(ruby_lambda_assignment())
+                .name_from(field("left"))
+                .no_scope(),
         ]
     }
 
@@ -199,6 +213,31 @@ impl DslLanguage for RubyDsl {
             constructor_methods: CONSTRUCTOR_METHODS,
         }
     }
+}
+
+/// Predicate for the `assignment → Lambda` scope rule: true when the RHS
+/// of an assignment constructs a callable. Covers the four Ruby forms —
+/// `-> {…}` (stabby lambda, a `lambda` node), and the `call`-shaped
+/// `lambda {…}`, `proc {…}`, and `Proc.new {…}`.
+fn ruby_lambda_assignment() -> Pred {
+    // A bare `lambda`/`proc` call has no receiver; `foo.lambda {…}` is a
+    // method named `lambda` on some object, not a Proc constructor.
+    let bare_call_to = |method: &'static str| {
+        Pred::Exists(Box::new(
+            field("right").field("method").where_(Text(method)),
+        ))
+        .and(!Pred::Exists(Box::new(field("right").field("receiver"))))
+    };
+    let proc_new = Pred::Exists(Box::new(field("right").field("method").where_(Text("new")))).and(
+        Pred::Exists(Box::new(
+            field("right").field("receiver").where_(Text("Proc")),
+        )),
+    );
+
+    field_kind("right", &["lambda"])
+        .or(bare_call_to("lambda"))
+        .or(bare_call_to("proc"))
+        .or(proc_new)
 }
 
 /// Extract synthetic definitions from attr_accessor/attr_reader/attr_writer
@@ -833,6 +872,59 @@ mod tests {
             !consts.iter().any(|(name, _)| *name == "counter"),
             "lowercase local variable must not be indexed as a Constant: {consts:?}"
         );
+    }
+
+    #[test]
+    fn lambda_and_proc_assignments_emit_lambda_definitions() {
+        let code = "TRIPLE = ->(x) { x * 3 }\n\
+                    DOUBLE = lambda { |x| x * 2 }\n\
+                    VALIDATE = proc { |e| e }\n\
+                    MAKER = Proc.new { |x| x }\n\
+                    class Box\n  \
+                      HALVE = ->(x) { x / 2 }\n\
+                    end\n\
+                    triple = ->(x) { x * 3 }\n\
+                    MAX = 2\n\
+                    BUILDER = Widget.new\n";
+        let result = parse(code).unwrap();
+
+        let lambdas: Vec<(&str, &str)> = result
+            .definitions
+            .iter()
+            .filter(|d| d.definition_type == "Lambda")
+            .map(|d| (d.name.as_str(), d.fqn.as_str()))
+            .collect();
+
+        for name in ["TRIPLE", "DOUBLE", "VALIDATE", "MAKER", "triple"] {
+            assert!(
+                lambdas.iter().any(|(n, _)| *n == name),
+                "{name} should be emitted as a Lambda: {lambdas:?}"
+            );
+        }
+        assert!(
+            lambdas.contains(&("HALVE", "Box::HALVE")),
+            "a nested callable constant carries its enclosing FQN: {lambdas:?}"
+        );
+
+        let kinds = |name: &str| -> Vec<&str> {
+            result
+                .definitions
+                .iter()
+                .filter(|d| d.name == name)
+                .map(|d| d.definition_type)
+                .collect()
+        };
+        // The callable RHS rule wins over the Constant rule, so a lambda
+        // constant is a Lambda only — never double-emitted as a Constant.
+        assert_eq!(
+            kinds("TRIPLE"),
+            ["Lambda"],
+            "TRIPLE must not also be a Constant"
+        );
+        // A plain value constant still falls through to the Constant rule.
+        assert_eq!(kinds("MAX"), ["Constant"]);
+        // `Widget.new` is an ordinary constructor, not `Proc.new`.
+        assert_eq!(kinds("BUILDER"), ["Constant"]);
     }
 
     #[test]

@@ -860,7 +860,7 @@ mod tests {
             columns: vec![ExtractColumn::Bare("id".to_string())],
             source: ExtractSource::Table("siphon_user".to_string()),
             base_table: "siphon_user".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             namespaced: false,
@@ -870,7 +870,7 @@ mod tests {
         };
 
         let plan = lower_extract_plan(extract, 1000);
-        assert_eq!(plan.watermark_column, "_siphon_replicated_at");
+        assert_eq!(plan.watermark_column, "_siphon_watermark");
         assert_eq!(plan.sort_key, vec!["id"]);
         assert_eq!(plan.batch_size, 1000);
         assert!(plan.extract_template.contains("{{filters}}"));
@@ -887,7 +887,7 @@ mod tests {
             ],
             source: ExtractSource::Table("siphon_user".to_string()),
             base_table: "siphon_user".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             namespaced: false,
@@ -899,10 +899,7 @@ mod tests {
         let plan = lower_extract_plan(extract, 1000);
         let sql = render_global_extract(&plan);
         assert!(sql.contains("SELECT id, name,"), "sql: {sql}");
-        assert!(
-            sql.contains("_siphon_replicated_at AS _version"),
-            "sql: {sql}"
-        );
+        assert!(sql.contains("_siphon_watermark AS _version"), "sql: {sql}");
         assert!(sql.contains("_siphon_deleted AS _deleted"), "sql: {sql}");
         assert!(sql.contains("FROM siphon_user"), "sql: {sql}");
         assert!(sql.contains("ORDER BY id"), "sql: {sql}");
@@ -916,7 +913,7 @@ mod tests {
             columns: vec![ExtractColumn::DateClamp("due_date".to_string())],
             source: ExtractSource::Table("siphon_work_items".to_string()),
             base_table: "siphon_work_items".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             namespaced: false,
@@ -948,7 +945,7 @@ mod tests {
                     .to_string(),
             ),
             base_table: "siphon_projects".to_string(),
-            watermark: "project._siphon_replicated_at".to_string(),
+            watermark: "project._siphon_watermark".to_string(),
             deleted: "project._siphon_deleted".to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
             namespaced: true,
@@ -979,7 +976,7 @@ mod tests {
             columns: vec![ExtractColumn::Bare("id".to_string())],
             source: ExtractSource::Table("siphon_user".to_string()),
             base_table: "siphon_user".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: "_siphon_watermark".to_string(),
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             namespaced: false,
@@ -1010,7 +1007,7 @@ mod tests {
 
         assert!(sql.contains("(id > '42')"), "sql: {sql}");
         assert!(
-            sql.contains("_siphon_replicated_at > {last_watermark:String}"),
+            sql.contains("_siphon_watermark > {last_watermark:String}"),
             "sql: {sql}"
         );
     }

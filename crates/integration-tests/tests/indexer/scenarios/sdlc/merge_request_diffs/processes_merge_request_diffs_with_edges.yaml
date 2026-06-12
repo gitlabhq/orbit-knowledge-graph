@@ -1,0 +1,19 @@
+description: Merge request diffs index with transformed diff_type plus HAS_DIFF / IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  merge_requests:
+    - { id: 1, iid: 101, title: Add feature X, source_branch: feature-x, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: true, target_project_id: 1000, traversal_path: "1/100/" }
+  siphon_merge_request_diffs:
+    - { id: 10, merge_request_id: 1, project_id: 1000, state: collected, base_commit_sha: abc123, head_commit_sha: def456, start_commit_sha: ghi789, commits_count: 3, files_count: 5, diff_type: 1, real_size: "12345", stored_externally: false, traversal_path: "1/100/" }
+    - { id: 11, merge_request_id: 1, project_id: 1000, state: collected, base_commit_sha: abc123, head_commit_sha: jkl012, start_commit_sha: ghi789, commits_count: 4, files_count: 6, diff_type: 2, real_size: "45678", stored_externally: true, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_merge_request_diff:
+      rows:
+        - { id: 10, state: collected, project_id: 1000, diff_type: regular, real_size: "12345", stored_externally: false }
+        - { id: 11, state: collected, project_id: 1000, diff_type: merge_head, real_size: "45678", stored_externally: true }
+  edges:
+    - { kind: HAS_DIFF, from: MergeRequest, to: MergeRequestDiff, traversal_path: "1/100/", count: 2 }
+    - { kind: IN_PROJECT, from: MergeRequestDiff, to: Project, traversal_path: "1/100/", count: 2 }

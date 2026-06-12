@@ -22,21 +22,21 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Derived ID (hash of project_id + branch name)."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   name:
     type: string
     source: name
     nullable: false
-    immutable: true
+    mutable: false
     description: "Branch name (e.g., main, feature/new-login)."
 
   is_default:

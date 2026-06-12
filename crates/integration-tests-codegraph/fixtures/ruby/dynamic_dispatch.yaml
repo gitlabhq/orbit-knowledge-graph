@@ -1,0 +1,52 @@
+name: "Ruby: method_missing and respond_to_missing? extraction"
+
+fixtures:
+  - path: proxy.rb
+    content: |
+      class DynamicProxy
+        def initialize(target)
+          @target = target
+        end
+
+        def method_missing(name, *args, &block)
+          if @target.respond_to?(name)
+            @target.send(name, *args, &block)
+          else
+            super
+          end
+        end
+
+        def respond_to_missing?(name, include_private = false)
+          @target.respond_to?(name, include_private) || super
+        end
+      end
+
+tests:
+  - name: "method_missing extracted as Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'method_missing' AND d.definition_type = 'Method'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "method_missing", fqn: "DynamicProxy::method_missing" } }
+
+  - name: "respond_to_missing? extracted as Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'respond_to_missing?' AND d.definition_type = 'Method'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "respond_to_missing?", fqn: "DynamicProxy::respond_to_missing?" } }
+
+  - name: "Both are methods on DynamicProxy"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'DynamicProxy' AND m.name IN ['method_missing', 'respond_to_missing?']
+      RETURN m.name AS name
+    assert:
+      - { row_count: 2 }
+      - { unique: name }
+      - { row: { name: "method_missing" } }
+      - { row: { name: "respond_to_missing?" } }

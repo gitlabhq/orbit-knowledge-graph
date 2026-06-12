@@ -21,9 +21,12 @@ spec:
           tar xzf /fixtures-archive/fixtures.tar.gz -C /fixtures
           pip install --quiet --disable-pip-version-check --root-user-action=ignore \
             robotframework=={{ .Values.robotframework.version }} \
-            robotframework-requests=={{ .Values.robotframework.requestsVersion }}
+            robotframework-requests=={{ .Values.robotframework.requestsVersion }} \
+            robotframework-pabot=={{ .Values.robotframework.pabotVersion }}
           set +e
-          robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
+          pabot --processes {{ .Values.robotframework.processes }} --pabotlib \
+            --ordering /tests/ordering.txt \
+            --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
             --consolecolors off --exitonfailure /tests/
           RC=$?
           echo "---XUNIT_REPORT_START---"

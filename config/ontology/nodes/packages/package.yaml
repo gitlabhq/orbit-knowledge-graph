@@ -1,0 +1,136 @@
+# config/ontology/nodes/packages/package.yaml
+
+node_type: Package
+domain: packages
+description: A package published to the GitLab package registry (npm, Maven, PyPI, NuGet, and other formats)
+label: name
+destination_table: gl_package
+default_columns: [id, name, version, package_type, status]
+
+style:
+  size: 30
+  color: "#FB923C"
+
+redaction:
+  resource_type: package
+  id_column: id
+  ability: read_package
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Unique ID."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Package name."
+
+  version:
+    type: string
+    source: version
+    nullable: true
+    description: "Package version."
+
+  package_type:
+    type: enum
+    source: package_type
+    nullable: false
+    description: "Package format."
+    values:
+      1: maven
+      2: npm
+      3: conan
+      4: nuget
+      5: pypi
+      6: composer
+      7: generic
+      8: golang
+      9: debian
+      10: rubygems
+      11: helm
+      12: terraform_module
+      13: rpm
+      14: ml_model
+      15: cargo
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Package lifecycle status."
+    values:
+      0: default
+      1: hidden
+      2: processing
+      3: error
+      4: pending_destruction
+      5: deprecated
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Creation timestamp."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Last update timestamp."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Owning project ID."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_packages_packages
+  order_by: [traversal_path, package_type, id]
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+
+storage:
+  primary_key: [traversal_path, id]
+  settings:
+    allow_part_offset_column_in_projections: "1"
+    add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: version, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: package_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_name, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_package_type, column: package_type, type: "set(16)", granularity: 2}
+    - {name: idx_status, column: status, type: "set(8)", granularity: 2}
+    - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
+    - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+  projections:
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

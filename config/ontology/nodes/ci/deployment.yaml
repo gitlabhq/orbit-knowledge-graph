@@ -21,42 +21,42 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: false
-    immutable: true
+    mutable: false
     description: "Project-scoped deployment number."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   ref:
     type: string
     source: ref
     nullable: false
-    immutable: true
+    mutable: false
     description: "Git ref (branch or tag) deployed."
 
   tag:
     type: boolean
     source: tag
     nullable: false
-    immutable: true
+    mutable: false
     description: "Whether the ref is a tag."
 
   sha:
     type: string
     source: sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Deployed commit SHA."
 
   status:
@@ -78,7 +78,7 @@ properties:
     type: string
     source: deployable_type
     nullable: false
-    immutable: true
+    mutable: false
     description: "Polymorphic type (typically CommitStatus, the STI base class for Ci::Build)."
     selectivity: low
 
@@ -86,7 +86,7 @@ properties:
     type: int64
     source: deployable_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Deployable ID."
 
   on_stop:
@@ -105,7 +105,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   finished_at:
@@ -124,14 +124,14 @@ properties:
     type: int64
     source: environment_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Target environment ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Deploying user ID."
 
   traversal_path:

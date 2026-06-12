@@ -1,0 +1,73 @@
+name: "Kotlin: suspend functions and coroutine patterns"
+fixtures:
+  - path: com/example/repo.kt
+    content: |
+      package com.example
+
+      import kotlinx.coroutines.*
+
+      interface UserRepository {
+          suspend fun findById(id: String): String
+      }
+
+      class UserService(private val repo: UserRepository) {
+          suspend fun fetchUser(id: String): String {
+              return repo.findById(id)
+          }
+
+          fun startLoading(id: String) {
+              CoroutineScope(Dispatchers.IO).launch {
+                  val user = fetchUser(id)
+                  println(user)
+              }
+          }
+      }
+
+tests:
+  - name: "suspend fun fetchUser extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'fetchUser' AND d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row: { name: "fetchUser", fqn: "com.example.UserService.fetchUser" } }
+
+  - name: "suspend interface method findById extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'findById' AND d.definition_type = 'Function'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row: { name: "findById", fqn: "com.example.UserRepository.findById" } }
+
+  - name: "non-suspend fun startLoading extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'startLoading' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "startLoading" } }
+
+  - name: "UserService class extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'UserService' AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "com.example.UserService" } }
+
+  - name: "UserRepository interface extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'UserRepository' AND d.definition_type = 'Interface'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "com.example.UserRepository" } }
+
+  - name: "fetchUser calls findById"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fetchUser' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.UserRepository.findById" } }

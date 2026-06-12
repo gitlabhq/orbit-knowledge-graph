@@ -1,0 +1,20 @@
+# config/ontology/edges/built_by.yaml
+
+description: Package was built by a CI/CD pipeline
+
+variants:
+  - from_node: { type: Package, id: id }
+    to_node: { type: Pipeline, id: id }
+    scope: same_namespace
+    description: "Package was built by pipeline."
+
+etl:
+  - scope: namespaced
+    source: siphon_packages_build_infos
+    order_by: [traversal_path, id]
+    from:
+      id: package_id
+      type: Package
+    to:
+      id: pipeline_id
+      type: Pipeline

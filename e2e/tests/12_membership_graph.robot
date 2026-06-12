@@ -7,6 +7,8 @@ Documentation       Verify the core membership/ownership edges that no other sui
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Group Membership Produces A MEMBER_OF Edge

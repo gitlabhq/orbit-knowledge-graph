@@ -67,8 +67,9 @@ The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple
 
 ## Supported languages
 
-All 12 languages supported by Orbit Remote are also supported locally:
-Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP.
+All 13 languages supported by Orbit Remote are also supported locally:
+Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
+and Bash/Shell.
 
 See [What Orbit indexes](../remote/indexing.md#supported-languages) for the full language support table.
 

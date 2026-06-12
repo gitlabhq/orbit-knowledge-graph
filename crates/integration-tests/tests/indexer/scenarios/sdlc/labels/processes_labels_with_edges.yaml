@@ -1,0 +1,23 @@
+description: Labels produce nodes plus IN_PROJECT / IN_GROUP edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_labels:
+    - { id: 1, title: bug, color: "#ff0000", description: Bug reports, project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, title: feature, color: "#00ff00", description: New features, project_id: 1000, traversal_path: "1/100/" }
+    - { id: 3, title: priority, color: "#0000ff", description: Priority items, group_id: 100, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_label:
+      rows:
+        - { id: 1, title: bug, color: "#ff0000" }
+        - { id: 2, title: feature, color: "#00ff00" }
+        - { id: 3, title: priority, color: "#0000ff" }
+  edges:
+    - { kind: IN_PROJECT, from: Label, to: Project, traversal_path: "1/100/", count: 2 }
+    - { kind: IN_GROUP, from: Label, to: Group, traversal_path: "1/100/", count: 1 }

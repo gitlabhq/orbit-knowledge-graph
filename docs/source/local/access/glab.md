@@ -109,17 +109,24 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## Inspect the schema
 
-`glab orbit local schema` requires either `--ontology` or `--query`:
+`glab orbit local schema` lists every table and column in the local DuckDB
+graph:
 
 ```shell
-glab orbit local schema --ontology
-glab orbit local schema --query
+glab orbit local schema
 ```
 
-- `--ontology` shows the graph ontology: entities, edges, and properties.
-- `--query` shows the query DSL schema: how to write structured queries.
+Pass table names as positional arguments to scope the output:
 
-Add `--raw` to either for JSON instead of the default LLM-friendly output.
+```shell
+glab orbit local schema gl_definition              # scoped to one table
+glab orbit local schema gl_definition gl_edge      # scoped to two tables
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--raw` | Emit JSON instead of the default table view. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
 ## Run as an MCP server
 
@@ -133,7 +140,7 @@ AI agent:
 glab orbit local mcp serve
 ```
 
-It will serve `query_graph` and `get_graph_schema` over the MCP protocol
+It will serve `run_sql` and `get_graph_schema` over the MCP protocol
 against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
 agent integration guide.
 

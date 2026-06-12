@@ -293,7 +293,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let etl_configs = edge_def.into_etl_configs(&etl_settings)?;
+        let etl_configs = edge_def.into_etl_configs(edge_name, &etl_settings)?;
         if !etl_configs.is_empty() {
             ontology
                 .edge_etl_configs

@@ -21,28 +21,28 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: true
-    immutable: true
+    mutable: false
     description: "Project-scoped pipeline number."
 
   sha:
     type: string
     source: sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Commit SHA the pipeline runs against."
 
   ref:
     type: string
     source: ref
     nullable: false
-    immutable: true
+    mutable: false
     description: "Branch or tag name."
 
   status:
@@ -71,7 +71,7 @@ properties:
     type: enum
     source: source
     nullable: false
-    immutable: true
+    mutable: false
     description: "Trigger source."
     values:
       0: unknown
@@ -99,7 +99,7 @@ properties:
     type: boolean
     source: tag
     nullable: false
-    immutable: true
+    mutable: false
     description: "Whether running on a git tag."
 
   duration:
@@ -132,7 +132,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   started_at:
@@ -151,7 +151,7 @@ properties:
     type: timestamp
     source: committed_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Commit timestamp."
 
   updated_at:
@@ -164,7 +164,7 @@ properties:
     type: string
     source: before_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Previous commit SHA before the triggering push."
 
   yaml_errors:
@@ -183,21 +183,21 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Triggering user ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Triggering MR ID."
 
   auto_canceled_by_id:

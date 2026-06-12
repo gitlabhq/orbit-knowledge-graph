@@ -1,0 +1,51 @@
+name: "Elixir imports — alias, alias as:, multi-alias, import, use, require"
+
+fixtures:
+  - path: lib/consumer.ex
+    content: |
+      defmodule Consumer do
+        alias Helpers.Format
+        alias Helpers.Text, as: T
+        alias Helpers.{Json, Csv}
+        import Enum
+        use GenServer
+        require Logger
+
+        def run(x) do
+          x
+        end
+      end
+
+tests:
+  - name: "alias emits one ImportedSymbol with the last segment as the name"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'lib/consumer.ex'
+        AND s.import_type = 'Alias'
+      RETURN s.path AS path, s.name AS name, s.alias AS alias
+    assert:
+      - { row_count: 4 }
+      - { row: { path: "Helpers", name: "Format", alias: null } }
+      - { row: { path: "Helpers", name: "Text", alias: "T" } }
+      - { row: { path: "Helpers", name: "Json", alias: null } }
+      - { row: { path: "Helpers", name: "Csv", alias: null } }
+
+  - name: "import, use, and require each emit their own ImportedSymbol"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'lib/consumer.ex'
+        AND s.import_type IN ['Import', 'Use', 'Require']
+      RETURN s.import_type AS import_type, s.path AS path, s.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { import_type: "Import", path: "Enum", name: "Enum" } }
+      - { row: { import_type: "Use", path: "", name: "GenServer" } }
+      - { row: { import_type: "Require", path: "", name: "Logger" } }
+
+  - name: "Ordinary function definitions do not produce imports"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'lib/consumer.ex'
+      RETURN count(s) AS n
+    assert:
+      - { count_equals: { field: n, value: 7 } }

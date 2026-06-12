@@ -593,8 +593,8 @@ pub struct Field {
     /// Human-readable description of this field from the ontology YAML.
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
-    /// Whether this field never changes after creation.
-    pub immutable: bool,
+    /// Whether this field can change after creation.
+    pub mutable: bool,
     /// For enum fields, values that once reached never change (absorbing states).
     pub terminal_values: Option<Vec<String>>,
 }
@@ -614,7 +614,7 @@ impl Default for Field {
             selectivity: FieldSelectivity::High,
             description: None,
             traversal_path_lookup: None,
-            immutable: false,
+            mutable: true,
             terminal_values: None,
         }
     }

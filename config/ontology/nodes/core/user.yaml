@@ -22,7 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   username:
@@ -63,7 +63,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -145,7 +145,7 @@ properties:
     type: enum
     source: user_type
     nullable: false
-    immutable: true
+    mutable: false
     description: "Account type."
     values:
       0: human

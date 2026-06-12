@@ -81,17 +81,23 @@ in the manifest table.
 
 ## Inspect the schema
 
-`orbit schema` requires either `--ontology` or `--query`:
+`orbit schema` lists every table and column in the local DuckDB graph:
 
 ```shell
-orbit schema --ontology
-orbit schema --query
+orbit schema
 ```
 
-- `--ontology` shows the graph ontology: entities, edges, and properties.
-- `--query` shows the query DSL schema: how to write structured queries.
+Pass table names as positional arguments to scope the output:
 
-Add `--raw` to either for JSON instead of the default LLM-friendly output.
+```shell
+orbit schema gl_definition              # scoped to one table
+orbit schema gl_definition gl_edge      # scoped to two tables
+```
+
+| Flag | Purpose |
+|------|---------|
+| `--raw` | Emit JSON instead of the default table view. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
 ## Run SQL against the local graph
 
@@ -108,6 +114,37 @@ orbit sql --file query.sql
 | `-f`, `--file` | Read the SQL from a file. |
 | `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
 
+## List indexed repositories
+
+The graph can hold more than one repository. To see what it contains, run:
+
+```shell
+orbit list
+orbit list -F json
+```
+
+Each row reports the repository path, branch, commit, indexing status, and
+when it was last indexed:
+
+```plaintext
++------------------------+--------+------------+---------+---------------------+
+| repo_path              | branch | commit_sha | status  | last_indexed_at     |
++------------------------+--------+------------+---------+---------------------+
+| /home/dev/workspace/kg | main   | 9606ae8... | indexed | 2026-05-18 10:14:02 |
+| /tmp/cli-test          | main   | 654f3a6... | indexed | 2026-05-18 10:13:55 |
++------------------------+--------+------------+---------+---------------------+
+```
+
+| Flag | Purpose |
+|------|---------|
+| `-F`, `--format` | `table` (default), `json`, `ndjson`, or `csv`. |
+| `--db` | Override the DuckDB path. Defaults to `~/.orbit/graph.duckdb`. |
+
+If nothing has been indexed yet, `orbit list` exits `0`. The table view
+prints nothing; structured formats emit valid empty output (`[]` for `json`,
+no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
+working.
+
 ## Storage
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
@@ -119,7 +156,8 @@ Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
-- [Connect via MCP](mcp.md) - expose the local graph to Claude Code or Codex.
+- [Connect via MCP](mcp.md) - planned MCP server for Claude Code, Codex, and
+  other agents.
 - [Use Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.

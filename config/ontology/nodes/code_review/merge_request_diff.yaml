@@ -21,14 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Parent merge request ID."
 
   state:
@@ -42,21 +42,21 @@ properties:
     type: string
     source: base_commit_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Base commit SHA (common ancestor)."
 
   head_commit_sha:
     type: string
     source: head_commit_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Head commit SHA (latest on source branch)."
 
   start_commit_sha:
     type: string
     source: start_commit_sha
     nullable: false
-    immutable: true
+    mutable: false
     description: "Start commit SHA (target branch tip at diff creation)."
 
   commits_count:
@@ -75,14 +75,14 @@ properties:
     type: int64
     source: project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID."
 
   diff_type:
     type: enum
     source: diff_type
     nullable: false
-    immutable: true
+    mutable: false
     description: "Source branch (regular) or merge-head state."
     values:
       1: regular
@@ -104,7 +104,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:

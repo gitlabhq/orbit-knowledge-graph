@@ -26,8 +26,8 @@ FROM siphon_knowledge_graph_enabled_namespaces AS enabled
 INNER JOIN siphon_namespaces AS namespaces
     ON enabled.root_namespace_id = namespaces.id
 WHERE enabled._siphon_deleted = true
-  AND enabled._siphon_replicated_at > {last_watermark}
-  AND enabled._siphon_replicated_at <= {watermark}
+  AND enabled._siphon_watermark > {last_watermark}
+  AND enabled._siphon_watermark <= {watermark}
 ```
 
 ## How deletion works

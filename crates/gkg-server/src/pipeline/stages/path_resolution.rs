@@ -444,7 +444,7 @@ mod tests {
             r#"{"query_type": "neighbors", "node": {"id": "p", "entity": "Project", "node_ids": [1]}, "neighbors": {"node": "p", "direction": "both"}}"#
         )));
         assert!(!scopes_query_type(qt(
-            r#"{"query_type": "path_finding", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}, {"id": "wi", "entity": "WorkItem", "node_ids": [9]}], "path": {"type": "shortest", "from": "p", "to": "wi", "max_depth": 3}}"#
+            r#"{"query_type": "path_finding", "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}, {"id": "wi", "entity": "WorkItem", "node_ids": [9]}], "path": {"type": "shortest", "from": "p", "to": "wi", "max_depth": 3, "rel_types": ["CONTAINS"]}}"#
         )));
     }
 

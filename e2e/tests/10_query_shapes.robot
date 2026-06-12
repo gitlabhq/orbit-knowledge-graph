@@ -7,7 +7,7 @@ Documentation       Exercise the query_type variants and response formats beyond
 Resource            gitlab.resource
 Resource            orbit.resource
 
-Suite Setup         Seed Query Shape Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Query Shape Fixture
 
 
 *** Test Cases ***

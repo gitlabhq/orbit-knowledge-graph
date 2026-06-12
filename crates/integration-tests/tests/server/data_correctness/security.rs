@@ -226,7 +226,7 @@ pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
@@ -261,7 +261,7 @@ pub(super) async fn path_finding_multi_path_scope_finds_both(ctx: &TestContext) 
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap(),
@@ -293,7 +293,7 @@ pub(super) async fn path_finding_narrow_scope_excludes_all_targets(ctx: &TestCon
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/101/".into()]).unwrap(),

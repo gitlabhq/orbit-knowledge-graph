@@ -1,11 +1,13 @@
 variables:
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
-  DEP_PROXY: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
+  DEP_PROXY: 
   DEV_PREFIX: "dev"
   GCLOUD_PROJECT: gitlab-ci-runners-signing
   SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
   WI_POOL_PROVIDER: //iam.googleapis.com/projects/8522242139/locations/global/workloadIdentityPools/gitlab-pool-oidc-$CI_PROJECT_ID/providers/gitlab-jwt-$CI_PROJECT_ID
+  RUNNER_LARGE: saas-linux-large-amd64
+  RUNNER_LARGE_ARM: saas-linux-large-arm64
 
 workflow:
   rules:
@@ -28,14 +30,20 @@ workflow:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG
       variables:
         DEP_PROXY: ""
+        RUNNER_LARGE: saas-linux-medium-amd64
+        RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
       variables:
         DEP_PROXY: ""
+        RUNNER_LARGE: saas-linux-medium-amd64
+        RUNNER_LARGE_ARM: saas-linux-medium-arm64
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
       when: never
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       variables:
         DEP_PROXY: ""
+        RUNNER_LARGE: saas-linux-medium-amd64
+        RUNNER_LARGE_ARM: saas-linux-medium-arm64
     # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
@@ -151,7 +159,7 @@ stages:
 
 agent-file-sync-check:
   stage: lint
-  image: ${DEP_PROXY}alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -162,7 +170,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: ${DEP_PROXY}oven/bun:1.3-alpine
+  image: oven/bun:1.3-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -183,6 +191,17 @@ ontology-schema-validate:
   script:
     - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
+
+indexer-scenario-schema-validate:
+  stage: lint
+  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - find crates/integration-tests/tests/indexer/scenarios -name '*.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/indexer_scenario.schema.json
 
 generate-config-schema:
   stage: lint
@@ -241,7 +260,7 @@ ddl-freshness-check:
 
 schema-version-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -254,7 +273,7 @@ schema-version-check:
 
 response-schema-version-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -267,7 +286,7 @@ response-schema-version-check:
 
 goon-format-version-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -280,7 +299,7 @@ goon-format-version-check:
 
 query-dsl-version-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -293,7 +312,7 @@ query-dsl-version-check:
 
 skill-version-bump-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/python:3.12-alpine
+  image: python:3.12-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -310,7 +329,7 @@ skill-version-bump-check:
 
 iglu-schema-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -322,6 +341,20 @@ iglu-schema-check:
   script:
     - apk add --no-cache bash curl python3
     - bash ./scripts/iglu/check.sh
+
+system-note-actions-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  # Verifies config/vendored/system_note_metadata.actions matches Rails
+  # SystemNoteMetadata::ICON_TYPES at the pinned commit SHA.
+  script:
+    - apk add --no-cache bash curl python3
+    - bash ./scripts/check-system-note-actions.sh
 
 fmt-check:
   stage: lint
@@ -488,7 +521,7 @@ unit-test:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   needs: []
   script:
     - ./scripts/run-unit-tests.sh --profile ci
@@ -541,9 +574,9 @@ integration-test:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   services:
-    - name: ${DEP_PROXY}docker:dind
+    - name: docker:dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -553,17 +586,17 @@ integration-test:
   before_script:
     - !reference [.sccache-template, before_script]
     - |
-      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "${DEP_PROXY}" ]; then
+      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "" ]; then
         echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
       fi
     - |
-      docker pull ${DEP_PROXY}clickhouse/clickhouse-server:25.12 &
-      docker pull ${DEP_PROXY}nats:2.11-alpine &
+      docker pull clickhouse/clickhouse-server:25.12 &
+      docker pull nats:2.11-alpine &
       wait
     - |
-      if [ -n "${DEP_PROXY}" ]; then
-        docker tag ${DEP_PROXY}clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
-        docker tag ${DEP_PROXY}nats:2.11-alpine nats:2.11-alpine
+      if [ -n "" ]; then
+        docker tag clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
+        docker tag nats:2.11-alpine nats:2.11-alpine
       fi
   script:
     # corpus-smoke runs as its own parallel job below.
@@ -576,9 +609,9 @@ corpus-smoke-test:
     - .test-template
     - .mr-and-main-rules
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   services:
-    - name: ${DEP_PROXY}docker:dind
+    - name: docker:dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -588,13 +621,13 @@ corpus-smoke-test:
   before_script:
     - !reference [.sccache-template, before_script]
     - |
-      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "${DEP_PROXY}" ]; then
+      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "" ]; then
         echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
       fi
-    - docker pull ${DEP_PROXY}clickhouse/clickhouse-server:26.2
+    - docker pull clickhouse/clickhouse-server:26.2
     - |
-      if [ -n "${DEP_PROXY}" ]; then
-        docker tag ${DEP_PROXY}clickhouse/clickhouse-server:26.2 clickhouse/clickhouse-server:26.2
+      if [ -n "" ]; then
+        docker tag clickhouse/clickhouse-server:26.2 clickhouse/clickhouse-server:26.2
       fi
   script:
     # Smoke test: every query in fixtures/queries/corpus/ compiles + runs
@@ -630,7 +663,7 @@ code-indexing-benchmark-build:
     - .code-indexing-benchmark-rules
   interruptible: true
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   script:
     - cargo build --bin orbit --release --features duckdb-client/bundled
   artifacts:
@@ -645,14 +678,6 @@ code-indexing-benchmark-build:
   extends:
     - .code-indexing-benchmark-rules
   interruptible: true
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: https://vault.gitlab.net
-  secrets:
-    BENCHMARK_GITLAB_TOKEN:
-      file: false
-      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
-      token: $VAULT_ID_TOKEN
   cache:
     key: "benchmark-repos-${GROUP}"
     paths:
@@ -698,7 +723,7 @@ code-indexing-benchmark-v2-linux:
     - .job-template
     - .code-indexing-benchmark-template
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   variables:
     ARCH: "linux-x86_64"
     SCENARIO: v2
@@ -712,14 +737,6 @@ code-indexing-benchmark-v2-linux:
     - .job-template
     - .code-indexing-benchmark-rules
   interruptible: true
-  id_tokens:
-    VAULT_ID_TOKEN:
-      aud: https://vault.gitlab.net
-  secrets:
-    BENCHMARK_GITLAB_TOKEN:
-      file: false
-      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
-      token: $VAULT_ID_TOKEN
   script:
     - |
       gitlab-xtasks benchmark analyze \
@@ -738,12 +755,14 @@ code-indexing-benchmark-v2-linux:
         --branch "$CI_COMMIT_REF_NAME" \
         --output-file "gkg-benchmark-${SCENARIO}-results.json"
 
-      if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
+      if [[ -n "$CI_MERGE_REQUEST_IID" && -n "$BENCHMARK_GITLAB_TOKEN" ]]; then
         gitlab-xtasks comment post \
           --type add-or-edit \
           --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
           --token "$BENCHMARK_GITLAB_TOKEN" \
           --file-path "gkg-benchmark-${SCENARIO}-results.md"
+      else
+        echo "Skipping benchmark comment: BENCHMARK_GITLAB_TOKEN unavailable (expected for fork MRs)."
       fi
   artifacts:
     paths:
@@ -763,10 +782,10 @@ code-indexing-benchmark-v2-analyze:
 
 .docker-build:
   stage: build
-  image: ${DEP_PROXY}docker:29
+  image: docker:29
   needs: []
   services:
-    - name: ${DEP_PROXY}docker:29-dind
+    - name: docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -784,20 +803,20 @@ code-indexing-benchmark-v2-analyze:
 docker-build-amd64:
   extends: .docker-build
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   variables:
     ARCH: amd64
 
 docker-build-arm64:
   extends: .docker-build
   tags:
-    - saas-linux-large-arm64
+    - ${RUNNER_LARGE_ARM}
   variables:
     ARCH: arm64
 
 docker-manifest:
   stage: build
-  image: ${DEP_PROXY}docker:29
+  image: docker:29
   tags:
     - saas-linux-medium-amd64
   needs:
@@ -818,12 +837,12 @@ docker-manifest:
 
 docker-build-mr:
   stage: build
-  image: ${DEP_PROXY}docker:29
+  image: docker:29
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   needs: []
   services:
-    - name: ${DEP_PROXY}docker:29-dind
+    - name: docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -906,7 +925,7 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: ${DEP_PROXY}node:22
+  image: node:22
   tags:
     - saas-linux-medium-amd64
   id_tokens:
@@ -955,14 +974,14 @@ semantic-release:
 release-build-amd64:
   extends: .docker-release
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   variables:
     ARCH: amd64
 
 release-build-arm64:
   extends: .docker-release
   tags:
-    - saas-linux-large-arm64
+    - ${RUNNER_LARGE_ARM}
   variables:
     ARCH: arm64
 
@@ -1113,10 +1132,10 @@ e2e:
     - .job-template
     - .sccache-template
   tags:
-    - saas-linux-large-amd64
+    - ${RUNNER_LARGE}
   timeout: 60 minutes
   services:
-    - name: ${DEP_PROXY}docker:29-dind
+    - name: docker:29-dind
       alias: docker
   variables:
     KCTX: gitlab-org/orbit/gkg-e2e-harness:e2e-harness-agent

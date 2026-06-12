@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -52,6 +52,7 @@ pub trait CheckpointStore: Send + Sync {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError>;
 
     async fn load_by_prefix(
@@ -81,22 +82,26 @@ impl ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
         cursor_values: &Option<Vec<String>>,
         resume_floor: &Option<DateTime<Utc>>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
         let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
 
-        self.client
-            .insert_query(&format!(
-                "INSERT INTO {table} (key, watermark, cursor_values) \
-                 VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}})"
-            ))
-            .param("key", key)
-            .param("watermark", formatted_watermark)
-            .param("cursor_values", cursor_json)
-            .execute()
-            .await
-            .map_err(checkpoint_store_error)?;
+        self.insert(
+            &format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+                 VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}}, {{version:String}})"
+            ),
+            durability,
+        )
+        .param("key", key)
+        .param("watermark", formatted_watermark)
+        .param("cursor_values", cursor_json)
+        .param("version", client_version())
+        .execute()
+        .await
+        .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
@@ -105,19 +110,46 @@ impl ClickHouseCheckpointStore {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
-        self.client
-            .insert_query(&format!(
-                "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
-                 VALUES ({{key:String}}, {{watermark:String}}, '', true)"
-            ))
-            .param("key", key)
-            .param("watermark", formatted_watermark)
-            .execute()
-            .await
-            .map_err(checkpoint_store_error)?;
+        self.insert(
+            &format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version, _deleted) \
+                 VALUES ({{key:String}}, {{watermark:String}}, '', {{version:String}}, true)"
+            ),
+            WriteDurability::Durable,
+        )
+        .param("key", key)
+        .param("watermark", formatted_watermark)
+        .param("version", client_version())
+        .execute()
+        .await
+        .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
+
+    // Pinned settings: config `insert_settings` tuning must not downgrade Durable writes.
+    fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
+        let wait_for_flush = match durability {
+            WriteDurability::FireAndForget => "0",
+            WriteDurability::Durable => "1",
+        };
+        self.client
+            .query(sql)
+            .with_setting("async_insert", "1")
+            .with_setting("wait_for_async_insert", wait_for_flush)
+    }
+}
+
+/// Durable only where a dropped write forces a re-pull from the start: full-load completions and tombstones.
+#[derive(Clone, Copy)]
+pub enum WriteDurability {
+    FireAndForget,
+    Durable,
+}
+
+/// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.
+fn client_version() -> String {
+    Utc::now().format(TIMESTAMP_FORMAT).to_string()
 }
 
 /// The `cursor_values` column as JSON: the sort-key cursor plus the window floor.
@@ -217,6 +249,7 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             &checkpoint.watermark,
             &checkpoint.cursor_values,
             &checkpoint.resume_floor,
+            WriteDurability::FireAndForget,
         )
         .await
     }
@@ -225,8 +258,9 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        self.upsert(key, watermark, &None, &None).await
+        self.upsert(key, watermark, &None, &None, durability).await
     }
 
     async fn load_by_prefix(
@@ -291,7 +325,8 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .map(|(key, _)| key)
             .collect();
 
-        self.save_completed(parent_key, watermark).await?;
+        self.save_completed(parent_key, watermark, WriteDurability::Durable)
+            .await?;
 
         for key in partition_keys {
             self.tombstone(&key, watermark).await?;

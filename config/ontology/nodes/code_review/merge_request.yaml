@@ -21,7 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
@@ -32,7 +32,7 @@ properties:
     type: int64
     source: iid
     nullable: true
-    immutable: true
+    mutable: false
     description: "Project-scoped merge request number."
 
   title:
@@ -94,7 +94,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
-    immutable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -125,7 +125,7 @@ properties:
     type: int64
     source: target_project_id
     nullable: false
-    immutable: true
+    mutable: false
     description: "Owning project ID. Stored on the node for redaction without an edge lookup."
 
   merged_commit_sha:
@@ -246,7 +246,7 @@ properties:
     type: int64
     source: author_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Author user ID."
 
   merge_user_id:
@@ -283,7 +283,7 @@ properties:
     type: int64
     source: source_project_id
     nullable: true
-    immutable: true
+    mutable: false
     description: "Source project ID (may differ from target for cross-project MRs)."
 
   head_pipeline_id:
@@ -371,7 +371,7 @@ etl:
     ifNull(approvals.approvals, CAST([], 'Array(Tuple(user_id UInt64, created_at DateTime64(6, ''UTC'')))')) AS approvals
   # The siphon JOIN subqueries narrow themselves to merge_request_ids in the
   # current watermark window via the inner `IN (SELECT id FROM merge_requests
-  # WHERE _siphon_replicated_at > ...)` filter, so per-batch memory stays
+  # WHERE {{watermark_column}} > ...)` filter, so per-batch memory stays
   # bounded by batch size rather than namespace size. Without this, ClickHouse
   # aggregates over every metrics/reviewers/approvals row in the namespace on
   # every batch (~2 GB peak on 1/9970/ for what should be a 30-row batch).
@@ -380,32 +380,32 @@ etl:
       SELECT
         traversal_path AS _mt_tp,
         merge_request_id AS _mt_mr,
-        argMax(latest_build_started_at, _siphon_replicated_at) AS metric_latest_build_started_at,
-        argMax(latest_build_finished_at, _siphon_replicated_at) AS metric_latest_build_finished_at,
-        argMax(first_deployed_to_production_at, _siphon_replicated_at) AS metric_first_deployed_to_production_at,
-        argMax(merged_at, _siphon_replicated_at) AS metric_merged_at,
-        argMax(latest_closed_at, _siphon_replicated_at) AS metric_latest_closed_at,
-        argMax(latest_closed_by_id, _siphon_replicated_at) AS metric_latest_closed_by_id,
-        argMax(first_comment_at, _siphon_replicated_at) AS metric_first_comment_at,
-        argMax(first_commit_at, _siphon_replicated_at) AS metric_first_commit_at,
-        argMax(last_commit_at, _siphon_replicated_at) AS metric_last_commit_at,
-        argMax(diff_size, _siphon_replicated_at) AS metric_diff_size,
-        argMax(modified_paths_size, _siphon_replicated_at) AS metric_modified_paths_size,
-        argMax(commits_count, _siphon_replicated_at) AS metric_commits_count,
-        argMax(first_approved_at, _siphon_replicated_at) AS metric_first_approved_at,
-        argMax(first_reassigned_at, _siphon_replicated_at) AS metric_first_reassigned_at,
-        argMax(added_lines, _siphon_replicated_at) AS metric_added_lines,
-        argMax(removed_lines, _siphon_replicated_at) AS metric_removed_lines,
-        argMax(first_contribution, _siphon_replicated_at) AS metric_first_contribution,
-        argMax(reviewer_first_assigned_at, _siphon_replicated_at) AS metric_reviewer_first_assigned_at,
-        argMax(_siphon_deleted, _siphon_replicated_at) AS deleted
+        argMax(latest_build_started_at, {{watermark_column}}) AS metric_latest_build_started_at,
+        argMax(latest_build_finished_at, {{watermark_column}}) AS metric_latest_build_finished_at,
+        argMax(first_deployed_to_production_at, {{watermark_column}}) AS metric_first_deployed_to_production_at,
+        argMax(merged_at, {{watermark_column}}) AS metric_merged_at,
+        argMax(latest_closed_at, {{watermark_column}}) AS metric_latest_closed_at,
+        argMax(latest_closed_by_id, {{watermark_column}}) AS metric_latest_closed_by_id,
+        argMax(first_comment_at, {{watermark_column}}) AS metric_first_comment_at,
+        argMax(first_commit_at, {{watermark_column}}) AS metric_first_commit_at,
+        argMax(last_commit_at, {{watermark_column}}) AS metric_last_commit_at,
+        argMax(diff_size, {{watermark_column}}) AS metric_diff_size,
+        argMax(modified_paths_size, {{watermark_column}}) AS metric_modified_paths_size,
+        argMax(commits_count, {{watermark_column}}) AS metric_commits_count,
+        argMax(first_approved_at, {{watermark_column}}) AS metric_first_approved_at,
+        argMax(first_reassigned_at, {{watermark_column}}) AS metric_first_reassigned_at,
+        argMax(added_lines, {{watermark_column}}) AS metric_added_lines,
+        argMax(removed_lines, {{watermark_column}}) AS metric_removed_lines,
+        argMax(first_contribution, {{watermark_column}}) AS metric_first_contribution,
+        argMax(reviewer_first_assigned_at, {{watermark_column}}) AS metric_reviewer_first_assigned_at,
+        argMax({{deleted_column}}, {{watermark_column}}) AS deleted
       FROM siphon_merge_request_metrics
       WHERE startsWith(traversal_path, {traversal_path:String})
         AND merge_request_id IN (
           SELECT id FROM merge_requests
           WHERE startsWith(traversal_path, {traversal_path:String})
-            AND _siphon_replicated_at > {last_watermark:String}
-            AND _siphon_replicated_at <= {watermark:String}
+            AND {{watermark_column}} > {last_watermark:String}
+            AND {{watermark_column}} <= {watermark:String}
         )
       GROUP BY traversal_path, merge_request_id
       HAVING deleted = false
@@ -423,17 +423,17 @@ etl:
           traversal_path,
           merge_request_id,
           id,
-          argMax(user_id, _siphon_replicated_at) AS user_id,
-          argMax(state, _siphon_replicated_at) AS state,
-          argMax(created_at, _siphon_replicated_at) AS created_at,
-          argMax(_siphon_deleted, _siphon_replicated_at) AS deleted
+          argMax(user_id, {{watermark_column}}) AS user_id,
+          argMax(state, {{watermark_column}}) AS state,
+          argMax(created_at, {{watermark_column}}) AS created_at,
+          argMax({{deleted_column}}, {{watermark_column}}) AS deleted
         FROM siphon_merge_request_reviewers
         WHERE startsWith(traversal_path, {traversal_path:String})
           AND merge_request_id IN (
             SELECT id FROM merge_requests
             WHERE startsWith(traversal_path, {traversal_path:String})
-              AND _siphon_replicated_at > {last_watermark:String}
-              AND _siphon_replicated_at <= {watermark:String}
+              AND {{watermark_column}} > {last_watermark:String}
+              AND {{watermark_column}} <= {watermark:String}
           )
         GROUP BY traversal_path, merge_request_id, id
       )
@@ -452,24 +452,24 @@ etl:
           traversal_path,
           merge_request_id,
           id,
-          argMax(user_id, _siphon_replicated_at) AS user_id,
-          argMax(created_at, _siphon_replicated_at) AS created_at,
-          argMax(_siphon_deleted, _siphon_replicated_at) AS deleted
+          argMax(user_id, {{watermark_column}}) AS user_id,
+          argMax(created_at, {{watermark_column}}) AS created_at,
+          argMax({{deleted_column}}, {{watermark_column}}) AS deleted
         FROM siphon_approvals
         WHERE startsWith(traversal_path, {traversal_path:String})
           AND merge_request_id IN (
             SELECT id FROM merge_requests
             WHERE startsWith(traversal_path, {traversal_path:String})
-              AND _siphon_replicated_at > {last_watermark:String}
-              AND _siphon_replicated_at <= {watermark:String}
+              AND {{watermark_column}} > {last_watermark:String}
+              AND {{watermark_column}} <= {watermark:String}
           )
         GROUP BY traversal_path, merge_request_id, id
       )
       GROUP BY traversal_path, merge_request_id
     ) AS approvals ON m.traversal_path = approvals._ap_tp AND m.id = approvals._ap_mr
-  watermark: m._siphon_replicated_at
+  watermark: m.{{watermark_column}}
   table_alias: m
-  deleted: m._siphon_deleted
+  deleted: m.{{deleted_column}}
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
   edges:
@@ -485,10 +485,12 @@ etl:
       to: Pipeline
       as: HAS_HEAD_PIPELINE
       direction: outgoing
+      mutable: true
     latest_merge_request_diff_id:
       to: MergeRequestDiff
       as: HAS_LATEST_DIFF
       direction: outgoing
+      mutable: true
     author_id:
       to: User
       as: AUTHORED
@@ -501,10 +503,12 @@ etl:
       to: User
       as: UPDATED_BY
       direction: incoming
+      mutable: true
     last_edited_by_id:
       to: User
       as: LAST_EDITED_BY
       direction: incoming
+      mutable: true
     metric_latest_closed_by_id:
       to: User
       as: CLOSED
@@ -513,6 +517,7 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
+      mutable: true
     reviewers:
       to: User
       as: REVIEWER

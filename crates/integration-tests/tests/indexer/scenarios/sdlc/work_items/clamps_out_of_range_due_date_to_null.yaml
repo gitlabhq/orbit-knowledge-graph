@@ -1,0 +1,34 @@
+# Postgres `date` is wider than ClickHouse Date32 (1900..2299), so Siphon can
+# replicate an out-of-range due_date. The destination INSERT goes through
+# ArrowBlockInputFormat, which rejects the whole batch with Code 321 unless the
+# extract projection clamps the value to NULL first. Textual VALUES, CAST, and
+# toDate32 all saturate the poisoned day counts to the type boundary; only a
+# JSONEachRow insert with date_time_overflow_behavior='ignore' keeps them, hence
+# seed_settings.
+#   id=1: -715643 days -> below 1900-01-01 (production-observed)
+#   id=2:  200000 days -> above 2299-12-31
+#   id=3:       0 days -> 1970-01-01 (in range, survives unchanged)
+description: An out-of-range Date32 due_date clamps to NULL without aborting the pipeline
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  work_items:
+    - { id: 1, iid: 1, title: Way past, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: -715643, traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Way future, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: 200000, traversal_path: "1/100/" }
+    - { id: 3, iid: 3, title: Epoch, description: "", author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, due_date: 0, traversal_path: "1/100/" }
+
+seed_settings:
+  date_time_overflow_behavior: ignore
+
+run: namespace
+
+expect:
+  nodes:
+    gl_work_item:
+      count: 3
+      rows:
+        - { id: 1, due_date: null }
+        - { id: 2, due_date: null }
+        - { id: 3, due_date: "1970-01-01" }

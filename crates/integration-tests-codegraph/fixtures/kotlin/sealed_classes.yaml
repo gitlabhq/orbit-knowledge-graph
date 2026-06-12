@@ -1,0 +1,141 @@
+name: "Kotlin sealed classes and interfaces — hierarchy members and methods"
+
+# Coverage note: classify_kotlin_class in kotlin.rs has no dedicated branch for
+# the `sealed` modifier, so a sealed class is reported as definition_type "Class"
+# and a sealed interface as "Interface" (the "interface" keyword branch). The
+# `sealed`-ness itself is not captured as metadata. Kotlin already had
+# data_classes.yaml and companion_object.yaml, but no fixture for a sealed
+# hierarchy; this proves the subclasses and their overriding methods are indexed
+# and will not regress.
+
+fixtures:
+  - path: com/example/sealed/Expr.kt
+    content: |
+      package com.example.sealed
+
+      sealed interface Expr {
+          fun eval(): Int
+      }
+
+      data class Const(val value: Int) : Expr {
+          override fun eval(): Int = value
+      }
+
+      data class Add(val left: Expr, val right: Expr) : Expr {
+          override fun eval(): Int = left.eval() + right.eval()
+      }
+
+      object Zero : Expr {
+          override fun eval(): Int = 0
+      }
+
+tests:
+  - name: "Sealed interface Expr is extracted as an Interface definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.sealed.Expr'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Expr", type: "Interface" } }
+
+  - name: "Sealed-interface method declaration eval() is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.sealed.Expr.eval'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Function" } }
+
+  - name: "data-class subclass Const is extracted as a DataClass"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.sealed.Const'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "DataClass" } }
+
+  - name: "data-class subclass Add is extracted as a DataClass"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.sealed.Add'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "DataClass" } }
+
+  - name: "object subclass Zero is extracted as an Object"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.sealed.Zero'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Object" } }
+
+  - name: "Each subclass overrides eval() as a Function definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+          'com.example.sealed.Const.eval',
+          'com.example.sealed.Add.eval',
+          'com.example.sealed.Zero.eval'
+        ]
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+      ORDER BY d.fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "Each subclass defines its overriding eval() via a Defines edge"
+    query: |
+      MATCH (c:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE c.fqn IN [
+          'com.example.sealed.Const',
+          'com.example.sealed.Add',
+          'com.example.sealed.Zero'
+        ]
+        AND e.edge_kind = 'Defines'
+        AND m.definition_type = 'Function'
+      RETURN m.fqn AS fqn
+      ORDER BY m.fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+
+  - name: "File defines the sealed interface and all three subclasses"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'com/example/sealed/Expr.kt'
+        AND e.edge_kind = 'Defines'
+        AND d.fqn IN [
+          'com.example.sealed.Expr',
+          'com.example.sealed.Const',
+          'com.example.sealed.Add',
+          'com.example.sealed.Zero'
+        ]
+      RETURN d.fqn AS fqn
+      ORDER BY d.fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+
+  - name: "Sealed interface Expr is not misclassified as a DataClass"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+          'com.example.sealed.Expr',
+          'com.example.sealed.Const',
+          'com.example.sealed.Add'
+        ]
+        AND d.definition_type = 'DataClass'
+      RETURN d.fqn AS fqn
+      ORDER BY d.fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "com.example.sealed.Add" } }
+      - { row: { fqn: "com.example.sealed.Const" } }
+      - { not: true, row: { fqn: "com.example.sealed.Expr" } }

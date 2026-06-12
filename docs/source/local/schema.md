@@ -54,7 +54,7 @@ Edges in the local graph connect:
 
 ## Differences from Orbit Remote
 
-[Orbit Remote](../remote/schema.md) indexes 24 node types across 6 domains. Orbit Local
+[Orbit Remote](../remote/schema.md) indexes 28 node types across 6 domains. Orbit Local
 covers only the source code domain. Anything that requires GitLab data -
 merge requests, pipelines, users, vulnerabilities, work items - is unavailable.
 
