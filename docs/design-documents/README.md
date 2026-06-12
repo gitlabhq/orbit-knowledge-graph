@@ -1,28 +1,6 @@
 # GitLab Knowledge Graph
 
-## Motivation
-
-### Problem Statement
-
-Modern software development operates across a complex web of repositories, issues, merge requests, CI/CD pipelines, deployment environments, infrastructure, and assets. Both code data and SDLC platform metadata are inherently interconnected network graphs. While GitLab is a single vehicle to deliver these collective features, our ability to consume and analyze this data is fragmented, forcing developers and AI agents to piece together context through dozens of API, GraphQL, and Agent-tool calls.
-
-GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data products need to be able to reason about GitLab data in a way that is impractical with traditional data-fetching techniques.
-
-### Solution
-
-We aim to build the ***"Knowledge Graph as a service"***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
-
-What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
-
-The service will index three types of conceptual data in Property Graph Format:
-
-- **Code:** Using our [high-performance Call Graph engine](https://gitlab.com/gitlab-org/rust/knowledge-graph) and the Data Insights Platform, we will index GitLab projects, code definitions, code references, and repository metadata.
-- **SDLC**: Using the Data Insights Platform, we will index GitLab entities like MRs, CI Pipelines, Issues, Work Items, Groups, and Projects.
-- **Custom Entities**: In the future, we intend to enable flexible data modeling to allow users to add arbitrary nodes to the graph.
-
-With this service, we strive to transform how teams understand, navigate, and automate their software ecosystem.
-
-### Current State
+## Current State
 
 This repository now implements the deployed service architecture described in the rest of this design document. The current codebase is no longer centered on the original local Kuzu-backed desktop tool.
 
@@ -35,150 +13,6 @@ Today, the repository includes the following major components:
 - Shared crates for indexing, query compilation, formatting, ontology loading, ClickHouse access, GitLab API access, health checks, and integration testing.
 
 The legacy local-only tooling from the earlier `gitlab-org/rust/knowledge-graph` project remains useful as historical context, but it is not the best description of the current Orbit knowledge-graph service. Where the service intentionally differs from that earlier tool, the service architecture in this repository is the source of truth.
-
-### Why a Property Graph? Why not a REST and GraphQL layer?
-
-While GitLab is powered by two primary data stores (Postgres and Git), GitLab data, including source code, can be represented in a network graph. See the diagram below as an example:
-
-```mermaid
-graph TD
-
-    %% === STYLE DEFINITIONS ===
-    classDef group fill:#ffeaea,stroke:#cc4444,stroke-width:2px,color:#aa2222,font-weight:bold;
-    classDef project fill:#ffe8cc,stroke:#ff9900,stroke-width:2px,color:#cc6600,font-weight:bold;
-    classDef epic fill:#fff5d6,stroke:#ffaa33,stroke-width:2px,color:#cc7700,font-weight:bold;
-    classDef issue fill:#fff8e1,stroke:#ffb347,stroke-width:2px,color:#cc7a00,font-weight:bold;
-    classDef mr fill:#fff1d6,stroke:#ff9900,stroke-width:2px,color:#cc6600,font-weight:bold;
-    classDef file fill:#fff7e6,stroke:#ffaa33,stroke-width:2px,color:#cc7700,font-weight:bold;
-    classDef codeGraph fill:#fffbe6,stroke:#ffcc33,stroke-width:2px,color:#cc9900,font-weight:bold;
-    classDef classNode fill:#e7f1ff,stroke:#80aaff,stroke-width:1.5px,color:#004499;
-    classDef methodNode fill:#ecffe7,stroke:#66cc66,stroke-width:1.5px,color:#006600;
-
-    %% === GITLAB HIERARCHY ===
-    subgraph "Parent Group"
-        PG((Parent<br/>Group))
-        EG((Epic A))
-    end
-
-    subgraph "Subgroup"
-        SG((Subgroup))
-        E2((Epic B))
-    end
-
-    subgraph "Project"
-        PJ((User Service<br/>Project))
-        IS1((Issue 1:<br/>Add Authentication))
-        IS2((Issue 2:<br/>Fix Auth Bug))
-        MR1((MR 1:<br/>Add Authentication))
-        MR2((MR 2:<br/>Fix Auth Bug))
-        F1((fileA.ts))
-        F2((fileB.ts))
-        CG((Code Graph))
-    end
-
-    %% === CODE GRAPH EXPANSION ===
-    subgraph CODEGRAPH["Code Graph (Expanded)"]
-        direction LR
-        C1(("Class Foo"))
-        M1(("hello()"))
-        C2(("Class Bar"))
-        M2(("myMethod()"))
-        C1 -->|"defines"| M1
-        C2 -->|"defines"| M2
-        M1 -.->|"calls"| M2
-    end
-
-    %% === CONNECTIONS BETWEEN LAYERS ===
-    PG --> SG
-    PG --> EG
-    SG --> E2
-    SG --> PJ
-    EG <-->|relates to| E2
-
-    EG -->|contains| IS1
-    E2 -->|contains| IS2
-
-    PJ --> MR1
-    PJ --> MR2
-    MR1 -->|closes| IS1
-    MR2 -->|closes| IS2
-
-    MR1 --> F1
-    MR1 --> F2
-    MR2 --> F1
-    MR2 --> F2
-    IS1 --> |blocks| IS2
-
-    F1 -->|belongs to| CG
-    F2 -->|belongs to| CG
-    CG --> CODEGRAPH
-
-    %% === STYLE ASSIGNMENTS ===
-    class PG,SG group
-    class PJ project
-    class EG,E2 epic
-    class IS1,IS2 issue
-    class MR1,MR2 mr
-    class F1,F2 file
-    class CG codeGraph
-    class C1,C2 classNode
-    class M1,M2 methodNode
-```
-
-#### 1. AI Works Best with Property Graph Data Models
-
-Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their syntax directly mirrors natural “find-things-connected-to-X” reasoning.
-For example, “find all issues closed by merge requests authored by @user within two hops of project Y” translates deterministically into a pattern like `MATCH (p:Project)<-[:CLOSES]-(m:MergeRequest)<-[:AUTHORED]-(u:User)`.
-
-By contrast:
-
-- GraphQL and REST require schema introspection and nested field expansion.
-  LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
-- Cypher exposes explicit graph patterns and bounded hop limits (*1..3) that match the mental model of “neighbor exploration.”
-
-#### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)
-
-Many Knowledge Graph workloads involve **exploring neighbors** and **path finding** up to N levels deep—for example, finding “all pipelines triggered by MRs that close issues linked to epics under a group.”
-Neither REST nor GraphQL provides a clean or efficient way to express variable-length traversal:
-
-- REST would require chained requests or recursive pagination.
-- GraphQL can express limited nesting but not dynamic-depth traversal (*..N); resolvers explode in complexity and performance cost.
-
-Cypher’s MATCH (a)-[*1..N]->(b) semantics make such traversals first-class, optimized at the storage layer, and declarative.
-
-#### 3. Aggregations and Analytics Are Essential
-
-The Knowledge Graph is not just a document API—it is an analytical OLAP system.
-We routinely need aggregations such as:
-
-```cypher
-MATCH (p:Project)-[:HAS_ISSUE]->(i:Issue)
-
-RETURN p.name, count(i) AS issue_count ORDER BY issue_count DESC;
-```
-
-Implementing equivalent groupings via GraphQL or REST would either require bespoke endpoints or push heavy joins into the application layer. GitLab postgres times out on these queries today.
-
-Cypher allows server-side execution with optimized graph planners, leveraging adjacency lists and columnar execution with ClickHouse.
-
-#### 4. Schema Flexibility and Evolution are Essential
-
-Customers will eventually need to be able to add their own data to the graph. Additionally, the Knowledge Graph’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
-
-GraphQL schemas require explicit type registration and backfilling, creating friction for iteration.
-Cypher, being label-based, allows us to introduce new node or relationship labels without altering existing queries—`MATCH (n:Vulnerability)` returns zero rows until those labels exist. We can also use this to add custom data types in the future—something customers have shown strong interest in.
-
-This makes property graphs a far more flexible and schema-tolerant choice for both AI-driven analytics and human consumers.
-
-#### 5. Open Cypher (GQL) and Property Graphs are now Standard
-
-The Knowledge Graph service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage GitLab’s SDLC and code metadata.
-
-> You can read more about how we will enable all LLMs to query under the [querying](./querying) documentation.
-
-### Knowledge Graph is OLAP, not OLTP
-
-The Knowledge Graph is an **OLAP application** over an OLTP one. The service is not required to provide transaction guarantees or real-time data for the first iteration. The Knowledge Graph initial iteration will serve as a **read-only** analytical data store and a data retrieval API for users and AI agents, providing access to code and SDLC metadata.
 
 ## Knowledge Graph Architecture High-Level Overview
 
@@ -326,6 +160,172 @@ The current implementation has already standardized on ClickHouse for deployed g
 ClickHouse was chosen over dedicated graph databases (Neo4j, FalkorDB, Memgraph, Neptune, SpannerGraph) after KuzuDB was archived in October 2025. The full evaluation, benchmarking results, and legal/procurement context are recorded in [ADR 000: ClickHouse as graph storage](decisions/000_clickhouse_graph_storage.md).
 
 View the [Graph Query Engine](querying/graph_engine.md) design document for more details.
+
+## Motivation
+
+### Problem Statement
+
+Modern software development operates across a complex web of repositories, issues, merge requests, CI/CD pipelines, deployment environments, infrastructure, and assets. Both code data and SDLC platform metadata are inherently interconnected network graphs. While GitLab is a single vehicle to deliver these collective features, our ability to consume and analyze this data is fragmented, forcing developers and AI agents to piece together context through dozens of API, GraphQL, and Agent-tool calls.
+
+GitLab has hundreds of REST APIs and GraphQL Schema Elements. AI agents and data products need to be able to reason about GitLab data in a way that is impractical with traditional data-fetching techniques.
+
+### Solution
+
+We aim to build the ***"Knowledge Graph as a service"***, which will be a separate service outside of GitLab Rails to index and query metadata. This service will expose a **unified** **data** **API layer** that enables developers and AI agents to query across the entire software development lifecycle.
+
+What underlying technology will power this unified data layer? Graph technology empowers analytics, users, and AI agents to reason across a **wide range of data types**. We will model GitLab data in a [**Property Graph**](https://pg-format.github.io/) format, which will be queried via a high-performance Graph Query Engine built on ClickHouse that we are calling **GitLab GraphHouse**.
+
+The service will index three types of conceptual data in Property Graph Format:
+
+- **Code:** Using our [high-performance Call Graph engine](https://gitlab.com/gitlab-org/rust/knowledge-graph) and the Data Insights Platform, we will index GitLab projects, code definitions, code references, and repository metadata.
+- **SDLC**: Using the Data Insights Platform, we will index GitLab entities like MRs, CI Pipelines, Issues, Work Items, Groups, and Projects.
+- **Custom Entities**: In the future, we intend to enable flexible data modeling to allow users to add arbitrary nodes to the graph.
+
+With this service, we strive to transform how teams understand, navigate, and automate their software ecosystem.
+
+### Why a Property Graph? Why not a REST and GraphQL layer?
+
+While GitLab is powered by two primary data stores (Postgres and Git), GitLab data, including source code, can be represented in a network graph. See the diagram below as an example:
+
+```mermaid
+graph TD
+
+    %% === STYLE DEFINITIONS ===
+    classDef group fill:#ffeaea,stroke:#cc4444,stroke-width:2px,color:#aa2222,font-weight:bold;
+    classDef project fill:#ffe8cc,stroke:#ff9900,stroke-width:2px,color:#cc6600,font-weight:bold;
+    classDef epic fill:#fff5d6,stroke:#ffaa33,stroke-width:2px,color:#cc7700,font-weight:bold;
+    classDef issue fill:#fff8e1,stroke:#ffb347,stroke-width:2px,color:#cc7a00,font-weight:bold;
+    classDef mr fill:#fff1d6,stroke:#ff9900,stroke-width:2px,color:#cc6600,font-weight:bold;
+    classDef file fill:#fff7e6,stroke:#ffaa33,stroke-width:2px,color:#cc7700,font-weight:bold;
+    classDef codeGraph fill:#fffbe6,stroke:#ffcc33,stroke-width:2px,color:#cc9900,font-weight:bold;
+    classDef classNode fill:#e7f1ff,stroke:#80aaff,stroke-width:1.5px,color:#004499;
+    classDef methodNode fill:#ecffe7,stroke:#66cc66,stroke-width:1.5px,color:#006600;
+
+    %% === GITLAB HIERARCHY ===
+    subgraph "Parent Group"
+        PG((Parent<br/>Group))
+        EG((Epic A))
+    end
+
+    subgraph "Subgroup"
+        SG((Subgroup))
+        E2((Epic B))
+    end
+
+    subgraph "Project"
+        PJ((User Service<br/>Project))
+        IS1((Issue 1:<br/>Add Authentication))
+        IS2((Issue 2:<br/>Fix Auth Bug))
+        MR1((MR 1:<br/>Add Authentication))
+        MR2((MR 2:<br/>Fix Auth Bug))
+        F1((fileA.ts))
+        F2((fileB.ts))
+        CG((Code Graph))
+    end
+
+    %% === CODE GRAPH EXPANSION ===
+    subgraph CODEGRAPH["Code Graph (Expanded)"]
+        direction LR
+        C1(("Class Foo"))
+        M1(("hello()"))
+        C2(("Class Bar"))
+        M2(("myMethod()"))
+        C1 -->|"defines"| M1
+        C2 -->|"defines"| M2
+        M1 -.->|"calls"| M2
+    end
+
+    %% === CONNECTIONS BETWEEN LAYERS ===
+    PG --> SG
+    PG --> EG
+    SG --> E2
+    SG --> PJ
+    EG <-->|relates to| E2
+
+    EG -->|contains| IS1
+    E2 -->|contains| IS2
+
+    PJ --> MR1
+    PJ --> MR2
+    MR1 -->|closes| IS1
+    MR2 -->|closes| IS2
+
+    MR1 --> F1
+    MR1 --> F2
+    MR2 --> F1
+    MR2 --> F2
+    IS1 --> |blocks| IS2
+
+    F1 -->|belongs to| CG
+    F2 -->|belongs to| CG
+    CG --> CODEGRAPH
+
+    %% === STYLE ASSIGNMENTS ===
+    class PG,SG group
+    class PJ project
+    class EG,E2 epic
+    class IS1,IS2 issue
+    class MR1,MR2 mr
+    class F1,F2 file
+    class CG codeGraph
+    class C1,C2 classNode
+    class M1,M2 methodNode
+```
+
+#### 1. AI Works Best with Property Graph Data Models
+
+Our [research and live prototypes](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/263) showed that LLMs reliably generate property graph tool calls because their syntax directly mirrors natural “find-things-connected-to-X” reasoning.
+For example, “find all issues closed by merge requests authored by @user within two hops of project Y” translates deterministically into a pattern like `MATCH (p:Project)<-[:CLOSES]-(m:MergeRequest)<-[:AUTHORED]-(u:User)`.
+
+By contrast:
+
+- GraphQL and REST require schema introspection and nested field expansion.
+  LLMs struggle to reason about variable-depth recursion or dynamic joins inside those structures.
+- Cypher exposes explicit graph patterns and bounded hop limits (*1..3) that match the mental model of “neighbor exploration.”
+
+#### 2. We Need Arbitrary Neighbor Exploration and Path Finding (N-Hop Queries)
+
+Many Knowledge Graph workloads involve **exploring neighbors** and **path finding** up to N levels deep—for example, finding “all pipelines triggered by MRs that close issues linked to epics under a group.”
+Neither REST nor GraphQL provides a clean or efficient way to express variable-length traversal:
+
+- REST would require chained requests or recursive pagination.
+- GraphQL can express limited nesting but not dynamic-depth traversal (*..N); resolvers explode in complexity and performance cost.
+
+Cypher’s MATCH (a)-[*1..N]->(b) semantics make such traversals first-class, optimized at the storage layer, and declarative.
+
+#### 3. Aggregations and Analytics Are Essential
+
+The Knowledge Graph is not just a document API—it is an analytical OLAP system.
+We routinely need aggregations such as:
+
+```cypher
+MATCH (p:Project)-[:HAS_ISSUE]->(i:Issue)
+
+RETURN p.name, count(i) AS issue_count ORDER BY issue_count DESC;
+```
+
+Implementing equivalent groupings via GraphQL or REST would either require bespoke endpoints or push heavy joins into the application layer. GitLab postgres times out on these queries today.
+
+Cypher allows server-side execution with optimized graph planners, leveraging adjacency lists and columnar execution with ClickHouse.
+
+#### 4. Schema Flexibility and Evolution are Essential
+
+Customers will eventually need to be able to add their own data to the graph. Additionally, the Knowledge Graph’s schema must evolve rapidly as new GitLab SDLC entities (e.g., vulnerabilities, packages, runners) appear.
+
+GraphQL schemas require explicit type registration and backfilling, creating friction for iteration.
+Cypher, being label-based, allows us to introduce new node or relationship labels without altering existing queries—`MATCH (n:Vulnerability)` returns zero rows until those labels exist. We can also use this to add custom data types in the future—something customers have shown strong interest in.
+
+This makes property graphs a far more flexible and schema-tolerant choice for both AI-driven analytics and human consumers.
+
+#### 5. Open Cypher (GQL) and Property Graphs are now Standard
+
+The Knowledge Graph service is intentionally aligned with Open Cypher (GQL) and, most importantly, with Property Graphs, which are now standardized by [SQL 2023’s ISO/IEC 9075-16:2023)](https://www.iso.org/standard/79473.html). Cypher-like patterns are the de facto standard for property-graph databases and Knowledge Graphs (Neo4j, Memgraph, Kùzu). By adopting it, we inherit a well-understood, declarative language for expressing complex traversals, aggregations, and pattern matching over graph data—operations required to fully leverage the GitLab SDLC and code metadata.
+
+> You can read more about how we will enable all LLMs to query under the [querying](./querying) documentation.
+
+### Knowledge Graph is OLAP, not OLTP
+
+The Knowledge Graph is an **OLAP application** over an OLTP one. The service is not required to provide transaction guarantees or real-time data for the first iteration. The Knowledge Graph initial iteration will serve as a **read-only** analytical data store and a data retrieval API for users and AI agents, providing access to code and SDLC metadata.
 
 ## Architecture Goals
 
