@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlScope, NodeEntity, Ontology};
 use tracing::{info, warn};
 
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{CheckpointStore, WriteDurability};
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
@@ -159,7 +159,7 @@ impl StaleEdgeReconciliation {
         }
 
         self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &new_watermark)
+            .save_completed(CHECKPOINT_KEY, &new_watermark, WriteDurability::Durable)
             .await
             .map_err(TaskError::new)?;
 

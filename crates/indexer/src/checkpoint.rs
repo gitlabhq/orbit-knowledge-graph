@@ -52,6 +52,7 @@ pub trait CheckpointStore: Send + Sync {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError>;
 
     async fn load_by_prefix(
@@ -139,8 +140,9 @@ impl ClickHouseCheckpointStore {
     }
 }
 
-/// Completion and tombstone rows gate consolidation, so they wait for the flush.
-enum WriteDurability {
+/// Durable only where a dropped write forces a re-pull from the start: full-load completions and tombstones.
+#[derive(Clone, Copy)]
+pub enum WriteDurability {
     FireAndForget,
     Durable,
 }
@@ -256,9 +258,9 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        self.upsert(key, watermark, &None, &None, WriteDurability::Durable)
-            .await
+        self.upsert(key, watermark, &None, &None, durability).await
     }
 
     async fn load_by_prefix(
@@ -323,7 +325,8 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .map(|(key, _)| key)
             .collect();
 
-        self.save_completed(parent_key, watermark).await?;
+        self.save_completed(parent_key, watermark, WriteDurability::Durable)
+            .await?;
 
         for key in partition_keys {
             self.tombstone(&key, watermark).await?;

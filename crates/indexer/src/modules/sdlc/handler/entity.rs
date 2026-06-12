@@ -8,7 +8,7 @@ use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::checkpoint::{Checkpoint, CheckpointStore, WriteDurability, namespace_position_key};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
@@ -170,6 +170,12 @@ impl EntityHandler {
             Vec::new()
         };
 
+        let completion_durability = if parent_checkpoint.is_none() {
+            WriteDurability::Durable
+        } else {
+            WriteDurability::FireAndForget
+        };
+
         let result = if ranges.is_empty() {
             self.pipeline
                 .run_plan(
@@ -178,6 +184,7 @@ impl EntityHandler {
                     base_query,
                     &checkpoint_key,
                     window,
+                    completion_durability,
                 )
                 .await
         } else {
@@ -192,6 +199,7 @@ impl EntityHandler {
                     base_query.into_partitions(ranges),
                     &checkpoint_key,
                     window,
+                    completion_durability,
                     &context,
                     &pipeline_context,
                 )
@@ -263,6 +271,7 @@ impl EntityHandler {
         )>,
         checkpoint_key: &str,
         window: WindowBounds,
+        completion_durability: WriteDurability,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
@@ -292,7 +301,14 @@ impl EntityHandler {
 
             set.spawn(async move {
                 pipeline
-                    .run_plan(&partition_context, &plan, query, &position_key, window)
+                    .run_plan(
+                        &partition_context,
+                        &plan,
+                        query,
+                        &position_key,
+                        window,
+                        completion_durability,
+                    )
                     .await
             });
         }

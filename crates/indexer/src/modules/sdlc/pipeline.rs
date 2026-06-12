@@ -21,7 +21,7 @@ use super::datalake::{DatalakeQuery, ScanStats};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore};
+use crate::checkpoint::{Checkpoint, CheckpointStore, WriteDurability};
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
@@ -130,6 +130,7 @@ impl Pipeline {
         base_query: PreparedQuery,
         position_key: &str,
         window: WindowBounds,
+        completion_durability: WriteDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -230,7 +231,7 @@ impl Pipeline {
         }
 
         self.checkpoint_store
-            .save_completed(position_key, &window.target)
+            .save_completed(position_key, &window.target, completion_durability)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -659,6 +660,7 @@ mod tests {
             &self,
             _key: &str,
             watermark: &DateTime<Utc>,
+            _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
             *self.state.lock().unwrap() = Some(Checkpoint {
                 watermark: *watermark,
@@ -701,6 +703,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
         assert!(result.is_ok());
@@ -727,6 +730,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -766,6 +770,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -843,6 +848,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -884,6 +890,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -924,6 +931,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -1003,6 +1011,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -1044,6 +1053,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await;
 
@@ -1121,6 +1131,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
+                WriteDurability::Durable,
             )
             .await
             .expect("run should succeed");
