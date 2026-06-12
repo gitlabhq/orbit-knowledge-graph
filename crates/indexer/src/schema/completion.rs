@@ -270,9 +270,6 @@ impl MigrationCompletionChecker {
             version = migrating_version,
             "marking migrating version as active — schema migration complete"
         );
-        // If a retired version were ever re-promoted, its merges would need
-        // restarting (SYSTEM START MERGES). Migrations only move forward today,
-        // so this path doesn't exist yet.
         mark_version_active(&self.graph, migrating_version)
             .await
             .map_err(|e| TaskError::new(format!("mark v{migrating_version} active: {e}")))?;

@@ -64,7 +64,10 @@ mod tests {
 
     #[test]
     fn reads_an_enabled_flag() {
-        let features = FeaturesConfig { system_notes: true };
+        let features = FeaturesConfig {
+            system_notes: true,
+            ..Default::default()
+        };
         assert!(features.is_enabled(Feature::SystemNotes));
     }
 
