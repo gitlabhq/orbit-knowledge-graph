@@ -152,6 +152,23 @@ async fn setup(ctx: &TestContext) {
     ))
     .await;
 
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, version, package_type, status, project_id, traversal_path) VALUES
+         (6000, '@gitlab/ui', '1.0.0', 'npm', 'default', 1000, '1/100/1000/'),
+         (6001, 'rails', '7.1.0', 'rubygems', 'default', 1000, '1/100/1000/'),
+         (6002, 'lodash', '4.17.21', 'npm', 'default', 1001, '1/101/1001/')",
+        t("gl_package")
+    ))
+    .await;
+
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, status, project_id, traversal_path) VALUES
+         (7000, 'gitlab-org/gitlab/web', '', 1000, '1/100/1000/'),
+         (7001, 'gitlab-org/gitlab/api', '', 1001, '1/101/1001/')",
+        t("gl_container_repository")
+    ))
+    .await;
+
     ctx.optimize_all().await;
 }
 
@@ -274,6 +291,12 @@ async fn root_traversal_path_returns_all_entity_counts(ctx: &TestContext) {
 
     let code = find_domain(&status.domains, "code_review");
     assert_eq!(find_item(code, "MergeRequest"), 2);
+
+    let packages = find_domain(&status.domains, "packages");
+    assert_eq!(find_item(packages, "Package"), 3);
+
+    let container = find_domain(&status.domains, "container_registry");
+    assert_eq!(find_item(container, "ContainerRepository"), 2);
 }
 
 async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
@@ -291,6 +314,16 @@ async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
 
     let code = find_domain(&status.domains, "code_review");
     assert_eq!(find_item(code, "MergeRequest"), 1, "MRs under 1/100/");
+
+    let packages = find_domain(&status.domains, "packages");
+    assert_eq!(find_item(packages, "Package"), 2, "packages under 1/100/");
+
+    let container = find_domain(&status.domains, "container_registry");
+    assert_eq!(
+        find_item(container, "ContainerRepository"),
+        1,
+        "container repos under 1/100/"
+    );
 }
 
 async fn empty_traversal_path_rejected(ctx: &TestContext) {
