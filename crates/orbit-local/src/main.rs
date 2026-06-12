@@ -139,6 +139,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Print the version string and exit.
+    Version,
     /// Index a code repository and output graph statistics as JSON
     Index {
         /// Path to the repository to index
@@ -208,6 +210,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Version => {
+            println!("{}", env!("ORBIT_VERSION"));
+            return Ok(());
+        }
         Commands::Index {
             path,
             threads,
