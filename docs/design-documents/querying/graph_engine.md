@@ -11,20 +11,20 @@ This plan draws on the [team's research](https://gitlab.com/gitlab-org/rust/know
 The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency list index concepts from [KuzuDB’s whitepaper](https://www.cidrdb.org/cidr2023/papers/p48-jin.pdf).
 
 - Nodes by type: separate ReplacingMergeTree tables per entity (e.g., `groups`, `projects`, `issues`, `merge_requests`, `files`, `symbols`).
-  - Primary key and ORDER BY include `organization_id`, then `traversal_id` (for SDLC entities) or `branch` (for code node types), followed by the local identifier.
-  - SDLC example: `(organization_id, traversal_id, issue_id)`
+  - Primary key and ORDER BY include `organization_id`, then `traversal_path` (for SDLC entities) or `branch` (for code node types), followed by the local identifier.
+  - SDLC example: `(organization_id, traversal_path, issue_id)`
   - Code example: `(organization_id, branch, symbol_id)`
 
 - Edges by relationship: separate MergeTree tables per relationship (e.g., `has_subgroup`, `has_project`, `mr_closes_issue`, `imports`, `calls`).
-  - ORDER BY `(organization_id, traversal_id, src_id, dst_id)` for SDLC edges or `(organization_id, branch, src_id, dst_id)` for code edges to create contiguous adjacency lists per source. This is the on-disk adjacency index the query engine exploits for fast neighbor scans.
-  - Optional projection per edge table ordered by destination for reverse traversals: `ORDER BY (organization_id, traversal_id, dst_id, src_id)` or `ORDER BY (organization_id, branch, dst_id, src_id)`.
+  - ORDER BY `(organization_id, traversal_path, src_id, dst_id)` for SDLC edges or `(organization_id, branch, src_id, dst_id)` for code edges to create contiguous adjacency lists per source. This is the on-disk adjacency index the query engine exploits for fast neighbor scans.
+  - Optional projection per edge table ordered by destination for reverse traversals: `ORDER BY (organization_id, traversal_path, dst_id, src_id)` or `ORDER BY (organization_id, branch, dst_id, src_id)`.
   - Branched edges for code relationships; current-state edges for SDLC hierarchy unless historical analysis is required.
 
-- `traversal_id`: SDLC entities (issues, merge requests, pipelines, etc.) are enriched with a `traversal_id` column during indexing. This array represents the full ancestor hierarchy of the entity's parent namespace (e.g., `[100, 200, 300]` for a project inside a subgroup inside a top-level group). The query engine uses `traversal_id` for prefix-based permission filtering, enabling efficient authorization checks without joining back to the namespace hierarchy. See [Security Architecture](../security.md) for details on how `traversal_id` filters are injected.
+- `traversal_path`: SDLC entities (issues, merge requests, pipelines, etc.) are enriched with a `traversal_path` column during indexing. This slash-delimited string encodes the full ancestor hierarchy of the entity's parent namespace (e.g., `"42/100/1000/"` for a project inside a subgroup inside a top-level group, where `42` is the organization ID). The query engine uses `traversal_path` for prefix-based permission filtering via `startsWith` predicates, enabling efficient authorization checks without joining back to the namespace hierarchy. See [Security Architecture](../security.md) for details on how `traversal_path` filters are injected.
 
 - `branch`: Code node types (`files`, `symbols`, `definitions`) include a `branch` column to track which Git branch the indexed code belongs to. SDLC entities do not use this column as it is not relevant to their current state. **Note**: we intend to only index the **current** state of a particular branch in the initial iteration, not the historical state. See [Code Indexing](../indexing/code_indexing.md) for more details.
 
-- Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
+- Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_path` to keep scans local and permission-scoped.
 
 ### Edge table schema
 
@@ -60,7 +60,7 @@ There are two intended ways to interact with the graph engine:
 
 The planner emits ClickHouse SQL similar to these patterns:
 
-- One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE organization_id = ? AND branch = ? AND src_id IN (...)` (for code) or `WHERE organization_id = ? AND hasAll(traversal_id, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
+- One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE organization_id = ? AND branch = ? AND src_id IN (...)` (for code) or `WHERE organization_id = ? AND startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
 - Multi‑hop fixed depth (2–3): chained JOINs/CTEs with DISTINCT frontiers between hops to avoid blow‑ups.
 - Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
@@ -112,7 +112,7 @@ The injected prefix is re-validated before use: it is only applied when it is a 
 ## Request Flow (Deployed)
 
 1. Client (MCP or REST) submits a tool call or Cypher.
-2. Adapter validates/normalizes input pursuant to the currently deployed schema, resolves `organization_id`, computes the user's `traversal_id` prefixes for SDLC queries, and selects the active `branch` for code queries.
+2. Adapter validates/normalizes input pursuant to the currently deployed schema, resolves `organization_id`, computes the user's `traversal_path` prefixes for SDLC queries, and selects the active `branch` for code queries.
 3. Planner compiles to ClickHouse SQL (CTEs, recursive CTEs, unions, joins) with bound parameters.
 4. ClickHouse executes; the server returns rows plus the generated SQL for audit.
 
@@ -130,7 +130,7 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 - Redaction layer: final pass to drop rows the upstream filters could not precisely exclude (e.g., confidential flags). Avoid redaction for aggregates; either pre‑filter or block the query shape.
 - All queries will be parameterized.
 - Depth caps and relationship allow‑lists to prevent runaway traversals; row and time limits per request.
-- Grammar‑based query validation: the planner validates generated SQL against a strict subset of the ClickHouse grammar. The validator walks the AST to verify that required predicates (e.g., `organization_id`, traversal ID filters) are present in `WHERE` clauses and rejects queries that omit them. This "fail closed" approach ensures malformed or overly broad queries are blocked before execution rather than relying solely on downstream filtering.
+- Grammar‑based query validation: the planner validates generated SQL against a strict subset of the ClickHouse grammar. The validator walks the AST to verify that required predicates (e.g., `organization_id`, traversal path filters) are present in `WHERE` clauses and rejects queries that omit them. This "fail closed" approach ensures malformed or overly broad queries are blocked before execution rather than relying solely on downstream filtering.
 
 ## Observability
 
@@ -150,14 +150,14 @@ Security testing and performance testing share the same underlying techniques fo
 
 - **Fuzzing**: Automated generation of malformed, edge-case, and adversarial inputs to the JSON tool interface and (optionally) Cypher parser. The same fuzzer that finds performance regressions (e.g., queries that blow up in time or memory) will also surface authorization bypass attempts (e.g., queries missing required predicates).
 - **Automated Query Generation**: Property-based testing that generates random valid query shapes and verifies:
-  - All generated SQL includes `organization_id` and traversal ID predicates (security invariant).
+  - All generated SQL includes `organization_id` and traversal path predicates (security invariant).
   - Query execution time stays within bounds (performance invariant).
   - Result sets respect authorization constraints (correctness invariant).
 - **Automated Penetration Testing**: Scripted scenarios that attempt common bypass techniques (SQL injection, predicate stripping, cross-tenant access). These run as part of CI and are informed by the threat model.
 
 This unified approach ensures that security and performance are validated together—an authorization check that slows queries unacceptably is as much a bug as one that fails to block unauthorized access. Results from fuzzing and automated testing feed back into both the threat model and the grammar-based validation described in [Authorization and Safety](#authorization-and-safety).
 
-In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort, with specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal ID filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
+In addition to the above, a formal threat model is being developed for the query engine. This will be tracked as an epic under the broader GKGaaS effort, with specific issues for high-risk components such as the query planner and JSON-to-SQL transformation pipeline. For the full authorization model (tenant segregation, traversal path filtering, JWT verification, and final redaction), see [Security Architecture](../security.md).
 
 ## References
 
