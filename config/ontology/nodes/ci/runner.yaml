@@ -102,8 +102,8 @@ properties:
     description: "Last contact timestamp."
 
 etl:
-  type: table
   source: siphon_ci_runners
+  scope: global
   order_by: [id, runner_type]
 
 storage:

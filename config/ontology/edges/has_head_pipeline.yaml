@@ -9,3 +9,9 @@ variants:
     fk_column: head_pipeline_id
     scope: same_namespace
     description: "Merge request has head pipeline."
+
+sources:
+  - node: MergeRequest
+    from: {type: MergeRequest, id: id}
+    to: {type: Pipeline, id: head_pipeline_id}
+    mutable: true

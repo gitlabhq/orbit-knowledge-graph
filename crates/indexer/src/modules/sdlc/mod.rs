@@ -214,6 +214,8 @@ mod tests {
             "enrichment CTE must prune by traversal_path: {template}"
         );
         assert!(template.contains("ORDER BY traversal_path, id"));
-        assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
+        // The query file is wrapped as a derived table, so the watermark is
+        // one of its output columns rather than an alias-qualified reference.
+        assert_eq!(system_note.watermark_column, "_siphon_watermark");
     }
 }

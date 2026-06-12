@@ -6,21 +6,14 @@ description: >-
 emits: [MENTIONS]
 
 etl:
-  type: query
-  transform: system_notes
   source: siphon_notes
-  from: siphon_notes AS sn
-  select: >-
-    sn.id AS id, sn.note AS note, sn.noteable_id AS noteable_id,
-    sn.noteable_type AS noteable_type, sn.author_id AS author_id,
-    sn.project_id AS project_id, sn.created_at AS created_at,
-    sn.traversal_path AS traversal_path
-  where: "sn.system = true AND sn.{{deleted_column}} = false"
-  traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
-  watermark: sn.{{watermark_column}}
-  deleted: sn.{{deleted_column}}
-  table_alias: sn
+  scope: namespaced
+  transform: system_notes
   order_by: [traversal_path, id]
+  columns: [id, note, noteable_id, noteable_type, author_id, project_id, created_at, traversal_path]
+  query: system_note.sql
+  # Joined below the page LIMIT; inlining this in system_note.sql would scan
+  # the metadata table namespace-wide per batch (#830).
   page_join:
     table: siphon_system_note_metadata
     alias: snm

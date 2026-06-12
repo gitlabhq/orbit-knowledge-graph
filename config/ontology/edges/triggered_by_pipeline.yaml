@@ -8,3 +8,8 @@ variants:
     to_node: { type: Pipeline, id: id }
     fk_column: upstream_pipeline_id
     description: "Job runs in a child pipeline whose parent is the upstream pipeline."
+
+sources:
+  - node: Job
+    from: {type: Job, id: id}
+    to: {type: Pipeline, id: upstream_pipeline_id}

@@ -17,9 +17,9 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "Work item is related to another work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_issue_links
+sources:
+  - table: siphon_issue_links
+    scope: namespaced
     order_by: [traversal_path, source_id, id]
     from:
       id: source_id

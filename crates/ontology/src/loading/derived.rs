@@ -2,18 +2,18 @@ use serde::Deserialize;
 
 use crate::OntologyError;
 use crate::entities::DerivedEntity;
-use crate::etl::{DEFAULT_TRANSFORM, EtlScope};
-use crate::loading::EtlSettings;
+use crate::etl::DEFAULT_TRANSFORM;
 use crate::loading::node::EtlYaml;
+use crate::loading::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DerivedYaml {
     #[serde(default)]
     name: Option<String>,
+    /// Transform-emitted kinds (MENTIONS, REOPENED) are not in the edge
+    /// registry, so this stays the contract; edge sources validate against it.
     #[serde(default)]
     emits: Vec<String>,
-    #[serde(default)]
-    global: bool,
     etl: EtlYaml,
 }
 
@@ -22,6 +22,8 @@ impl DerivedYaml {
         self,
         name: String,
         etl_settings: &EtlSettings,
+        reader: &impl ReadOntologyFile,
+        yaml_dir: &str,
     ) -> Result<DerivedEntity, OntologyError> {
         if self
             .name
@@ -42,12 +44,15 @@ impl DerivedYaml {
             }
         };
 
-        let scope = if self.global {
-            EtlScope::Global
-        } else {
-            EtlScope::Namespaced
-        };
-        let etl = self.etl.into_config(&name, etl_settings, scope)?;
+        let columns = self
+            .etl
+            .columns()
+            .map(<[String]>::to_vec)
+            .unwrap_or_default();
+        let etl = self
+            .etl
+            .into_config(&name, etl_settings, reader, yaml_dir, &columns)?;
+
         Ok(DerivedEntity {
             name,
             emits: self.emits,

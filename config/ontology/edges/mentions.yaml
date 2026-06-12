@@ -18,3 +18,6 @@ variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
     description: "Work item mentions another work item."
+
+sources:
+  - transform: system_notes

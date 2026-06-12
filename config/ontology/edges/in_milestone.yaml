@@ -12,3 +12,13 @@ variants:
     to_node: { type: Milestone, id: id }
     fk_column: milestone_id
     description: "Merge request assigned to milestone."
+
+sources:
+  - node: MergeRequest
+    from: {type: MergeRequest, id: id}
+    to: {type: Milestone, id: milestone_id}
+    mutable: true
+  - node: WorkItem
+    from: {type: WorkItem, id: id}
+    to: {type: Milestone, id: milestone_id}
+    mutable: true

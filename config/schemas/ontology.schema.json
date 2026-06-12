@@ -3,52 +3,72 @@
   "$id": "https://gitlab.com/knowledge-graph/ontology.schema.json",
   "title": "GitLab Knowledge Graph Ontology Schema",
   "description": "Schema for validating ontology YAML files used by the Knowledge Graph ETL pipeline.",
-
   "oneOf": [
-    { "$ref": "#/definitions/mainSchema" },
-    { "$ref": "#/definitions/nodeSchema" },
-    { "$ref": "#/definitions/edgeSchema" },
-    { "$ref": "#/definitions/derivedSchema" }
+    {
+      "$ref": "#/definitions/mainSchema"
+    },
+    {
+      "$ref": "#/definitions/nodeSchema"
+    },
+    {
+      "$ref": "#/definitions/edgeSchema"
+    },
+    {
+      "$ref": "#/definitions/derivedSchema"
+    }
   ],
-
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
+      "enum": [
+        "core",
+        "source_code",
+        "code_review",
+        "ci",
+        "security",
+        "plan",
+        "packages",
+        "container_registry"
+      ],
       "description": "Domain classification for organizing entities."
     },
-
     "propertyType": {
       "type": "string",
-      "enum": ["string", "int64", "boolean", "timestamp", "date", "enum", "uuid"],
+      "enum": [
+        "string",
+        "int64",
+        "boolean",
+        "timestamp",
+        "date",
+        "enum",
+        "uuid"
+      ],
       "description": "Data type for a property field."
     },
-
     "etlScope": {
       "type": "string",
-      "enum": ["global", "namespaced"],
+      "enum": [
+        "global",
+        "namespaced"
+      ],
       "description": "ETL processing scope - global processes all records, namespaced processes per-namespace."
     },
-
-    "edgeDirection": {
-      "type": "string",
-      "enum": ["incoming", "outgoing"],
-      "description": "Direction of the edge relationship from the current node's perspective."
-    },
-
     "enumValues": {
       "type": "object",
       "description": "Mapping of integer values to string labels for enum types.",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
-
     "enumType": {
       "type": "string",
-      "enum": ["int", "string"],
+      "enum": [
+        "int",
+        "string"
+      ],
       "description": "How the enum is stored in the source: 'int' (integer mapped to labels, requires CASE transformation) or 'string' (already a string, pass-through).",
       "default": "int"
     },
-
     "virtualSourceDefinition": {
       "type": "object",
       "description": "Configuration for a field resolved from a remote service at query time.",
@@ -68,23 +88,34 @@
         },
         "depends_on": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them."
         },
         "allowed_ops": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["eq", "contains", "starts_with", "ends_with", "is_null", "is_not_null"]
+            "enum": [
+              "eq",
+              "contains",
+              "starts_with",
+              "ends_with",
+              "is_null",
+              "is_not_null"
+            ]
           },
           "description": "Filter operators allowed on this virtual column. Applied in-memory after hydration. Defaults to [eq, contains, starts_with, ends_with, is_null, is_not_null] when omitted.",
           "default": []
         }
       },
-      "required": ["service", "lookup"],
+      "required": [
+        "service",
+        "lookup"
+      ],
       "additionalProperties": false
     },
-
     "propertyDefinition": {
       "description": "Definition of a node property/field. Exactly one of 'source' (column-backed) or 'virtual' (remote-resolved) must be present.",
       "oneOf": [
@@ -92,7 +123,9 @@
           "type": "object",
           "description": "Column-backed property read from ClickHouse.",
           "properties": {
-            "type": { "$ref": "#/definitions/propertyType" },
+            "type": {
+              "$ref": "#/definitions/propertyType"
+            },
             "source": {
               "type": "string",
               "description": "Source column name in the database table."
@@ -131,7 +164,10 @@
             },
             "selectivity": {
               "type": "string",
-              "enum": ["low", "high"],
+              "enum": [
+                "low",
+                "high"
+              ],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             },
             "mutable": {
@@ -141,7 +177,9 @@
             },
             "terminal_values": {
               "type": "array",
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "For enum fields, values that once reached never change (absorbing states). A filter on a terminal value can skip FINAL dedup."
             },
             "traversal_path_lookup": {
@@ -149,12 +187,22 @@
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
-          "required": ["type", "source", "description"],
+          "required": [
+            "type",
+            "source",
+            "description"
+          ],
           "additionalProperties": false,
           "if": {
             "not": {
-              "properties": { "type": { "const": "enum" } },
-              "required": ["type"]
+              "properties": {
+                "type": {
+                  "const": "enum"
+                }
+              },
+              "required": [
+                "type"
+              ]
             }
           },
           "then": {
@@ -168,7 +216,9 @@
           "type": "object",
           "description": "Virtual property resolved from a remote service at query time.",
           "properties": {
-            "type": { "$ref": "#/definitions/propertyType" },
+            "type": {
+              "$ref": "#/definitions/propertyType"
+            },
             "virtual": {
               "$ref": "#/definitions/virtualSourceDefinition"
             },
@@ -182,19 +232,25 @@
               "description": "Human-readable description of the property."
             }
           },
-          "required": ["type", "virtual", "description"],
+          "required": [
+            "type",
+            "virtual",
+            "description"
+          ],
           "additionalProperties": false
         }
       ]
     },
-
     "traversalPathLookup": {
       "type": "object",
       "description": "Path-resolution annotation for a scoping column: how to map an id/full_path filter to a traversal_path leaf.",
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["id", "full_path"],
+          "enum": [
+            "id",
+            "full_path"
+          ],
           "description": "Whether this column resolves by entity id or by full_path."
         },
         "dictionary": {
@@ -210,213 +266,64 @@
           "description": "Column the dictionary or scan keys on."
         }
       },
-      "required": ["kind", "source_table", "key_column"],
+      "required": [
+        "kind",
+        "source_table",
+        "key_column"
+      ],
       "additionalProperties": false
     },
-
-    "edgeMappingDefinition": {
-      "type": "object",
-      "description": "Configuration for generating edges during ETL.",
-      "properties": {
-        "to": {
-          "type": "string",
-          "description": "Target node type (literal value)."
-        },
-        "to_column": {
-          "type": "string",
-          "description": "Column containing the target node type (for polymorphic edges)."
-        },
-        "type_mapping": {
-          "type": "object",
-          "description": "Maps raw column values to ontology node types (e.g., Issue -> WorkItem). Only valid with `to_column`.",
-          "additionalProperties": { "type": "string" }
-        },
-        "as": {
-          "type": "string",
-          "description": "Relationship kind name for the generated edge."
-        },
-        "direction": {
-          "$ref": "#/definitions/edgeDirection",
-          "description": "Edge direction from this node's perspective."
-        },
-        "delimiter": {
-          "type": "string",
-          "description": "Delimiter for splitting multi-value columns."
-        },
-        "array_field": {
-          "type": "string",
-          "description": "When a datalake column is typed Array(Tuple(...)), names the tuple element holding the foreign key ID (e.g. 'user_id'). The indexer will ARRAY JOIN the column and extract one edge per element."
-        },
-        "array": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
-        },
-        "mutable": {
-          "type": "boolean",
-          "default": false,
-          "description": "Set when the FK can change over the entity's lifetime (a 'latest'/'current' pointer); such edges are reconciled by the stale-edge sweep. Immutable FKs leave this false."
-        }
-      },
-      "required": ["as"],
-      "additionalProperties": false
-    },
-
     "etlConfig": {
       "type": "object",
-      "description": "ETL configuration for indexing this entity from source tables.",
-      "oneOf": [
-        {
-          "description": "Table ETL: simple extraction from a single source table.",
-          "properties": {
-            "type": { "type": "string", "const": "table" },
-            "source": {
-              "type": "string",
-              "description": "Source table name."
-            },
-            "watermark": {
-              "type": "string",
-              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "deleted": {
-              "type": "string",
-              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
-            },
-            "order_by": {
-              "type": "array",
-              "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
-              "items": { "type": "string" },
-              "minItems": 1
-            },
-            "transform": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*$",
-              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
-            },
-            "edges": {
-              "type": "object",
-              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges (for example an outgoing FK plus its inverse).",
-              "additionalProperties": {
-                "oneOf": [
-                  { "$ref": "#/definitions/edgeMappingDefinition" },
-                  {
-                    "type": "array",
-                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
-                    "minItems": 1
-                  }
-                ]
-              }
-            }
-          },
-          "required": ["type", "source"],
-          "additionalProperties": false
+      "description": "ETL declaration. Tier 1 is declarative (source/scope/filter); tier 2 points at a complete SELECT statement in a .sql file next to the YAML. Edge bindings live in the relationship files, not here.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Base datalake table. Drives watermark windowing and batching."
         },
-        {
-          "description": "Query ETL: structured extraction with JOINs and custom conditions.",
-          "properties": {
-            "type": { "type": "string", "const": "query" },
-            "source": {
-              "type": "string",
-              "description": "Underlying primary table."
-            },
-            "select": {
-              "type": "string",
-              "description": "Column expressions for the SELECT clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "from": {
-              "type": "string",
-              "description": "Table or JOIN expression for the FROM clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "where": {
-              "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters). Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "watermark": {
-              "type": "string",
-              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "deleted": {
-              "type": "string",
-              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
-            },
-            "order_by": {
-              "type": "array",
-              "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
-              "items": { "type": "string" },
-              "minItems": 1
-            },
-            "traversal_path_filter": {
-              "type": "string",
-              "description": "Custom traversal_path filter expression for namespace scoping. When set, replaces the default startsWith(traversal_path, ...) filter. Must contain {traversal_path:String} placeholder."
-            },
-            "table_alias": {
-              "type": "string",
-              "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
-            },
-            "page_join": {
-              "type": "object",
-              "description": "Secondary table joined after the page LIMIT to avoid materializing the full secondary table in ClickHouse's hash-join build phase. The lowering wraps the base query in a _batch CTE and enriches via fk_column IN (SELECT id FROM _batch).",
-              "properties": {
-                "table": {
-                  "type": "string",
-                  "description": "Datalake table to join (e.g. siphon_system_note_metadata)."
-                },
-                "alias": {
-                  "type": "string",
-                  "description": "Table alias used in the enrichment CTE (e.g. snm)."
-                },
-                "fk_column": {
-                  "type": "string",
-                  "description": "FK column on the joined table that references the base table's id (e.g. note_id)."
-                },
-                "select": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "minItems": 1,
-                  "description": "Columns to select from the joined table (e.g. [action])."
-                },
-                "where": {
-                  "type": "string",
-                  "description": "Extra WHERE predicate on the joined table (e.g. {{deleted_column}} = false). Use {{watermark_column}} and {{deleted_column}} placeholders instead of hardcoding column names."
-                },
-                "watermark": {
-                  "type": "string",
-                  "description": "Watermark column for argMax deduplication. Defaults to schema.yaml's default_watermark. Use {{watermark_column}} placeholder instead of hardcoding the column name."
-                },
-                "traversal_path_column": {
-                  "type": "string",
-                  "description": "traversal_path column on the joined table. When set and the entity is namespaced, the enrichment CTE adds startsWith(<col>, {traversal_path}) so the join prunes by the joined table's leading PK column instead of scanning its whole FK index. The IN (SELECT id FROM _batch) bound already guarantees correctness; this is a pruning hint that must be a superset of the matched rows."
-                }
-              },
-              "required": ["table", "alias", "fk_column", "select"],
-              "additionalProperties": false
-            },
-            "transform": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*$",
-              "description": "Name of the transform that consumes this extract. Absent means the built-in data_fusion projection; a name (e.g. system_notes) resolves a registered transform in the indexer."
-            },
-            "edges": {
-              "type": "object",
-              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges.",
-              "additionalProperties": {
-                "oneOf": [
-                  { "$ref": "#/definitions/edgeMappingDefinition" },
-                  {
-                    "type": "array",
-                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
-                    "minItems": 1
-                  }
-                ]
-              }
-            }
+        "scope": {
+          "$ref": "#/definitions/etlScope"
+        },
+        "order_by": {
+          "type": "array",
+          "description": "Columns for ORDER BY and keyset pagination. Defaults to settings.etl.default_etl_order_by.",
+          "items": {
+            "type": "string"
           },
-          "required": ["type", "source", "select", "from"],
-          "additionalProperties": false
+          "minItems": 1
+        },
+        "filter": {
+          "type": "string",
+          "description": "Plain WHERE predicate on the base table. The only SQL string allowed in YAML; mutually exclusive with `query`. Use {{watermark_column}}/{{deleted_column}} placeholders if those columns are referenced."
+        },
+        "query": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]+\\.sql$",
+          "description": "Relative path to a complete SELECT statement. Must emit every property source column plus {{watermark_column}} and {{deleted_column}} aliased under those names; hardcoding the configured column names is rejected at load time."
+        },
+        "transform": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Rust transform that consumes the extract. Only valid on derived entities."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Output columns of `query`. Only valid on derived entities, which have no property list to infer them from.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "page_join": {
+          "$ref": "#/definitions/pageJoin"
         }
-      ]
+      },
+      "required": [
+        "source",
+        "scope"
+      ],
+      "additionalProperties": false
     },
-
     "redactionConfig": {
       "type": "object",
       "description": "Redaction configuration for access control. Defines how query results for this entity are validated against Rails' RedactionService to filter out entities the user cannot access. When a node has redaction config, the query engine includes id/type columns in results, and gkg-server validates these against the user's permissions before returning data.",
@@ -436,14 +343,22 @@
         },
         "required_role": {
           "type": "string",
-          "enum": ["guest", "reporter", "security_manager", "developer", "maintainer", "owner"],
+          "enum": [
+            "guest",
+            "reporter",
+            "security_manager",
+            "developer",
+            "maintainer",
+            "owner"
+          ],
           "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
         }
       },
-      "required": ["resource_type"],
+      "required": [
+        "resource_type"
+      ],
       "additionalProperties": false
     },
-
     "styleConfig": {
       "type": "object",
       "description": "Visual styling configuration for graph visualization.",
@@ -460,10 +375,12 @@
           "description": "Hex color code for the node (e.g., '#3B82F6')."
         }
       },
-      "required": ["size", "color"],
+      "required": [
+        "size",
+        "color"
+      ],
       "additionalProperties": false
     },
-
     "settingsDefinition": {
       "type": "object",
       "description": "Global settings for the ontology.",
@@ -481,21 +398,27 @@
         "default_entity_sort_key": {
           "type": "array",
           "description": "Default ClickHouse ORDER BY columns for node tables. Individual nodes inherit this unless they override with their own sort_key.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "uniqueItems": true
         },
         "edge_tables": {
           "type": "object",
           "description": "Edge table definitions keyed by table name. Each defines sort_key and columns.",
-          "propertyNames": { "pattern": "^[a-z_]+$" },
+          "propertyNames": {
+            "pattern": "^[a-z_]+$"
+          },
           "additionalProperties": {
             "type": "object",
             "properties": {
               "sort_key": {
                 "type": "array",
                 "description": "ClickHouse ORDER BY columns for this edge table.",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "minItems": 1,
                 "uniqueItems": true
               },
@@ -505,10 +428,19 @@
                 "items": {
                   "type": "object",
                   "properties": {
-                    "name": {"type": "string", "description": "Column name."},
-                    "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+                    "name": {
+                      "type": "string",
+                      "description": "Column name."
+                    },
+                    "type": {
+                      "$ref": "#/definitions/propertyType",
+                      "description": "Column data type."
+                    }
                   },
-                  "required": ["name", "type"],
+                  "required": [
+                    "name",
+                    "type"
+                  ],
                   "additionalProperties": false
                 },
                 "minItems": 1
@@ -517,17 +449,45 @@
                 "type": "object",
                 "description": "ClickHouse DDL storage metadata for the edge table.",
                 "properties": {
-                  "index_granularity": { "type": "integer", "minimum": 1 },
-                  "primary_key": { "type": "array", "items": { "type": "string" } },
-                  "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
-                  "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
-                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
-                  "settings": { "$ref": "#/definitions/tableSettings" }
+                  "index_granularity": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "primary_key": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "columns": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/storageColumn"
+                    }
+                  },
+                  "indexes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/storageIndex"
+                    }
+                  },
+                  "projections": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/storageProjection"
+                    }
+                  },
+                  "settings": {
+                    "$ref": "#/definitions/tableSettings"
+                  }
                 },
                 "additionalProperties": false
               }
             },
-            "required": ["sort_key", "columns"],
+            "required": [
+              "sort_key",
+              "columns"
+            ],
             "additionalProperties": false
           },
           "minProperties": 1
@@ -537,11 +497,23 @@
           "description": "Node properties to denormalize onto all edge tables. The loader auto-derives which edges need each property based on edge variants.",
           "items": {
             "type": "object",
-            "required": ["node", "property"],
+            "required": [
+              "node",
+              "property"
+            ],
             "properties": {
-              "node": { "type": "string", "description": "Entity type (e.g. Pipeline)." },
-              "property": { "type": "string", "description": "Property name on the node (e.g. status)." },
-              "as": { "type": "string", "description": "Edge column suffix. Defaults to property name. Full column is {direction}_{as}." }
+              "node": {
+                "type": "string",
+                "description": "Entity type (e.g. Pipeline)."
+              },
+              "property": {
+                "type": "string",
+                "description": "Property name on the node (e.g. status)."
+              },
+              "as": {
+                "type": "string",
+                "description": "Edge column suffix. Defaults to property name. Full column is {direction}_{as}."
+              }
             },
             "additionalProperties": false
           }
@@ -569,10 +541,17 @@
             "lifetime": {
               "type": "object",
               "properties": {
-                "min": { "type": "integer" },
-                "max": { "type": "integer" }
+                "min": {
+                  "type": "integer"
+                },
+                "max": {
+                  "type": "integer"
+                }
               },
-              "required": ["min", "max"],
+              "required": [
+                "min",
+                "max"
+              ],
               "additionalProperties": false,
               "description": "Dictionary refresh interval in seconds."
             },
@@ -604,16 +583,30 @@
                   },
                   "columns": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "Column names to exclude."
                   }
                 },
-                "required": ["node", "columns"],
+                "required": [
+                  "node",
+                  "columns"
+                ],
                 "additionalProperties": false
               }
             }
           },
-          "required": ["stats_table", "histogram_table", "token_table", "dictionary", "lifetime", "histogram_buckets", "top_k_tokens", "partition_key"],
+          "required": [
+            "stats_table",
+            "histogram_table",
+            "token_table",
+            "dictionary",
+            "lifetime",
+            "histogram_buckets",
+            "top_k_tokens",
+            "partition_key"
+          ],
           "additionalProperties": false
         },
         "internal_column_prefix": {
@@ -630,7 +623,9 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": ["name"],
+                "required": [
+                  "name"
+                ],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -638,7 +633,9 @@
                   },
                   "exclude_properties": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "Property names excluded from the local table for this entity (e.g. server-only columns like 'traversal_path')."
                   }
                 },
@@ -649,7 +646,10 @@
             "edge_table": {
               "type": "object",
               "description": "Edge table schema for the local DuckDB graph.",
-              "required": ["name", "columns"],
+              "required": [
+                "name",
+                "columns"
+              ],
               "properties": {
                 "name": {
                   "type": "string",
@@ -659,7 +659,10 @@
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": ["name", "type"],
+                    "required": [
+                      "name",
+                      "type"
+                    ],
                     "properties": {
                       "name": {
                         "type": "string",
@@ -667,7 +670,14 @@
                       },
                       "type": {
                         "type": "string",
-                        "enum": ["string", "int64", "float64", "boolean", "date", "datetime"],
+                        "enum": [
+                          "string",
+                          "int64",
+                          "float64",
+                          "boolean",
+                          "date",
+                          "datetime"
+                        ],
                         "description": "Column data type."
                       }
                     },
@@ -687,28 +697,64 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
+              "name": {
+                "type": "string"
+              },
               "columns": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "name": { "type": "string" },
-                    "type": { "$ref": "#/definitions/propertyType" },
-                    "nullable": { "type": "boolean" },
-                    "codec": { "type": "array", "items": { "type": "string" } },
-                    "default": { "type": "string" }
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "$ref": "#/definitions/propertyType"
+                    },
+                    "nullable": {
+                      "type": "boolean"
+                    },
+                    "codec": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "default": {
+                      "type": "string"
+                    }
                   },
-                  "required": ["name", "type"],
+                  "required": [
+                    "name",
+                    "type"
+                  ],
                   "additionalProperties": false
                 }
               },
-              "order_by": { "type": "array", "items": { "type": "string" } },
-              "version_only_engine": { "type": "boolean" },
-              "version_type": { "type": "string" },
-              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+              "order_by": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "version_only_engine": {
+                "type": "boolean"
+              },
+              "version_type": {
+                "type": "string"
+              },
+              "projections": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/storageProjection"
+                }
+              }
             },
-            "required": ["name", "columns", "order_by"],
+            "required": [
+              "name",
+              "columns",
+              "order_by"
+            ],
             "additionalProperties": false
           }
         },
@@ -736,12 +782,16 @@
               },
               "engine_args": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "Engine arguments for implicit storage."
               },
               "order_by": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "description": "ORDER BY columns for implicit storage. Ignored when to_table is set."
               },
               "populate": {
@@ -749,16 +799,29 @@
                 "description": "When true, emit POPULATE to backfill the view with existing data on creation. Defaults to false."
               }
             },
-            "required": ["name", "select_query"],
+            "required": [
+              "name",
+              "select_query"
+            ],
             "oneOf": [
               {
-                "required": ["to_table"],
-                "properties": { "engine": false, "engine_args": false, "order_by": false },
+                "required": [
+                  "to_table"
+                ],
+                "properties": {
+                  "engine": false,
+                  "engine_args": false,
+                  "order_by": false
+                },
                 "description": "TO-table mode: the view writes into a pre-existing ontology-tracked table."
               },
               {
-                "required": ["engine"],
-                "properties": { "to_table": false },
+                "required": [
+                  "engine"
+                ],
+                "properties": {
+                  "to_table": false
+                },
                 "description": "Implicit-storage mode: ClickHouse creates backing storage with the given engine."
               }
             ],
@@ -771,42 +834,77 @@
           "items": {
             "type": "object",
             "properties": {
-              "name": { "type": "string" },
-              "source_table": { "type": "string" },
-              "key": { "type": "string" },
-              "key_type": { "$ref": "#/definitions/propertyType" },
+              "name": {
+                "type": "string"
+              },
+              "source_table": {
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "key_type": {
+                "$ref": "#/definitions/propertyType"
+              },
               "attributes": {
                 "type": "array",
                 "items": {
                   "type": "object",
                   "properties": {
-                    "name": { "type": "string" },
-                    "type": { "$ref": "#/definitions/propertyType" }
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "$ref": "#/definitions/propertyType"
+                    }
                   },
-                  "required": ["name", "type"],
+                  "required": [
+                    "name",
+                    "type"
+                  ],
                   "additionalProperties": false
                 }
               },
               "layout": {
                 "type": "object",
                 "properties": {
-                  "kind": { "type": "string" },
-                  "size_in_cells": { "type": "integer" }
+                  "kind": {
+                    "type": "string"
+                  },
+                  "size_in_cells": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["kind"],
+                "required": [
+                  "kind"
+                ],
                 "additionalProperties": false
               },
               "lifetime": {
                 "type": "object",
                 "properties": {
-                  "min": { "type": "integer" },
-                  "max": { "type": "integer" }
+                  "min": {
+                    "type": "integer"
+                  },
+                  "max": {
+                    "type": "integer"
+                  }
                 },
-                "required": ["min", "max"],
+                "required": [
+                  "min",
+                  "max"
+                ],
                 "additionalProperties": false
               }
             },
-            "required": ["name", "source_table", "key", "attributes", "layout", "lifetime"],
+            "required": [
+              "name",
+              "source_table",
+              "key",
+              "attributes",
+              "layout",
+              "lifetime"
+            ],
             "additionalProperties": false
           }
         },
@@ -821,10 +919,16 @@
           "default": []
         }
       },
-      "required": ["table_prefix", "default_edge_table", "default_entity_sort_key", "edge_tables", "internal_column_prefix", "etl"],
+      "required": [
+        "table_prefix",
+        "default_edge_table",
+        "default_entity_sort_key",
+        "edge_tables",
+        "internal_column_prefix",
+        "etl"
+      ],
       "additionalProperties": false
     },
-
     "etlSettingsDefinition": {
       "type": "object",
       "description": "Default ETL settings applied when node/edge YAML omits watermark, deleted, or order_by.",
@@ -840,14 +944,19 @@
         "default_etl_order_by": {
           "type": "array",
           "description": "Default ORDER BY columns for node ETL extract queries.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         }
       },
-      "required": ["default_watermark", "default_deleted", "default_etl_order_by"],
+      "required": [
+        "default_watermark",
+        "default_deleted",
+        "default_etl_order_by"
+      ],
       "additionalProperties": false
     },
-
     "domainDefinition": {
       "type": "object",
       "description": "A domain grouping related entities.",
@@ -859,18 +968,23 @@
         "nodes": {
           "type": "object",
           "description": "Map of node names to their YAML file paths.",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "derived": {
           "type": "object",
           "description": "Map of edge-producing derived-entity names to their YAML file paths.",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
-      "required": ["description"],
+      "required": [
+        "description"
+      ],
       "additionalProperties": false
     },
-
     "mainSchema": {
       "type": "object",
       "description": "Main schema.yaml file that references all nodes and edges.",
@@ -880,7 +994,10 @@
           "description": "Discriminator identifying this as the main schema file."
         },
         "schema_version": {
-          "type": ["string", "number"],
+          "type": [
+            "string",
+            "number"
+          ],
           "description": "Schema version identifier."
         },
         "description": {
@@ -894,19 +1011,30 @@
         "domains": {
           "type": "object",
           "description": "Domain definitions containing node references.",
-          "propertyNames": { "$ref": "#/definitions/domainName" },
-          "additionalProperties": { "$ref": "#/definitions/domainDefinition" }
+          "propertyNames": {
+            "$ref": "#/definitions/domainName"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/domainDefinition"
+          }
         },
         "edges": {
           "type": "object",
           "description": "Map of edge names to their YAML file paths.",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
-      "required": ["type", "schema_version", "settings", "domains", "edges"],
+      "required": [
+        "type",
+        "schema_version",
+        "settings",
+        "domains",
+        "edges"
+      ],
       "additionalProperties": false
     },
-
     "nodeSchema": {
       "type": "object",
       "description": "Node entity definition file.",
@@ -932,31 +1060,45 @@
           "type": "string",
           "description": "ClickHouse table name for storing this entity."
         },
-        "style": { "$ref": "#/definitions/styleConfig" },
+        "style": {
+          "$ref": "#/definitions/styleConfig"
+        },
         "properties": {
           "type": "object",
           "description": "Property definitions for this node.",
-          "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
+          "additionalProperties": {
+            "$ref": "#/definitions/propertyDefinition"
+          }
         },
         "default_columns": {
           "type": "array",
           "description": "Columns returned by default when this node appears in dynamic query results (e.g., path finding, neighbors). If omitted, all columns are returned.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "uniqueItems": true
         },
         "sort_key": {
           "type": "array",
           "description": "ClickHouse ORDER BY columns for this node's destination table. Used as the deduplication key for ReplacingMergeTree.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "uniqueItems": true
         },
-        "etl": { "$ref": "#/definitions/etlConfig" },
+        "etl": {
+          "$ref": "#/definitions/etlConfig"
+        },
         "redaction": {
           "oneOf": [
-            { "type": "null" },
-            { "$ref": "#/definitions/redactionConfig" }
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/redactionConfig"
+            }
           ],
           "description": "Redaction configuration for access control. Set to null if not yet configured."
         },
@@ -965,10 +1107,19 @@
           "description": "ClickHouse DDL storage metadata. Columns, indexes, projections, and engine settings for DDL generation."
         }
       },
-      "required": ["node_type", "domain", "description", "label", "destination_table", "default_columns", "style", "properties", "redaction"],
+      "required": [
+        "node_type",
+        "domain",
+        "description",
+        "label",
+        "destination_table",
+        "default_columns",
+        "style",
+        "properties",
+        "redaction"
+      ],
       "additionalProperties": false
     },
-
     "edgeNodeReference": {
       "type": "object",
       "description": "Reference to a node in an edge variant.",
@@ -982,22 +1133,32 @@
           "description": "ID field name on the node."
         }
       },
-      "required": ["type", "id"],
+      "required": [
+        "type",
+        "id"
+      ],
       "additionalProperties": false
     },
-
     "edgeVariantScope": {
       "type": "string",
-      "enum": ["namespace_anchor", "same_namespace", "prune_to_source", "prune_to_target"],
+      "enum": [
+        "namespace_anchor",
+        "same_namespace",
+        "prune_to_source",
+        "prune_to_target"
+      ],
       "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) — the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
     },
-
     "edgeVariant": {
       "type": "object",
       "description": "A specific source-target pair for an edge relationship.",
       "properties": {
-        "from_node": { "$ref": "#/definitions/edgeNodeReference" },
-        "to_node": { "$ref": "#/definitions/edgeNodeReference" },
+        "from_node": {
+          "$ref": "#/definitions/edgeNodeReference"
+        },
+        "to_node": {
+          "$ref": "#/definitions/edgeNodeReference"
+        },
         "fk_column": {
           "type": "string",
           "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
@@ -1011,10 +1172,12 @@
           "description": "Human-readable description of this edge variant."
         }
       },
-      "required": ["from_node", "to_node"],
+      "required": [
+        "from_node",
+        "to_node"
+      ],
       "additionalProperties": false
     },
-
     "edgeEtlEndpoint": {
       "type": "object",
       "description": "Configuration for an edge endpoint in ETL.",
@@ -1034,49 +1197,24 @@
         "type_mapping": {
           "type": "object",
           "description": "Maps raw column values to entity types (e.g., Namespace -> Group).",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "enrich": {
           "type": "array",
           "description": "Columns to enrich from this endpoint's node datalake table via LEFT JOIN. Makes node properties available for denormalization onto edge rows.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1
         }
       },
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": false
     },
-
-    "edgeEtlConfig": {
-      "type": "object",
-      "description": "ETL configuration for edges sourced from join tables.",
-      "properties": {
-        "scope": { "$ref": "#/definitions/etlScope" },
-        "source": {
-          "type": "string",
-          "description": "Source table name."
-        },
-        "watermark": {
-          "type": "string",
-          "description": "Column for incremental processing."
-        },
-        "deleted": {
-          "type": "string",
-          "description": "Column indicating deleted records."
-        },
-        "order_by": {
-          "type": "array",
-          "description": "Columns for ORDER BY in extract queries and cursor-based pagination.",
-          "items": { "type": "string" },
-          "minItems": 1
-        },
-        "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
-        "to": { "$ref": "#/definitions/edgeEtlEndpoint" }
-      },
-      "required": ["scope", "source", "order_by", "from", "to"],
-      "additionalProperties": false
-    },
-
     "edgeSchema": {
       "type": "object",
       "description": "Edge relationship definition file.",
@@ -1093,24 +1231,43 @@
         "properties": {
           "type": "object",
           "description": "Property definitions for this edge (for edges with additional data).",
-          "additionalProperties": { "$ref": "#/definitions/propertyDefinition" }
+          "additionalProperties": {
+            "$ref": "#/definitions/propertyDefinition"
+          }
         },
         "variants": {
           "type": "array",
           "description": "List of valid source-target node type pairs.",
-          "items": { "$ref": "#/definitions/edgeVariant" },
+          "items": {
+            "$ref": "#/definitions/edgeVariant"
+          },
           "minItems": 1
         },
-        "etl": {
+        "sources": {
           "type": "array",
-          "items": { "$ref": "#/definitions/edgeEtlConfig" },
+          "description": "Every producer of this relationship: join tables, node rows, and Rust transforms.",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/definitions/edgeTableSource"
+              },
+              {
+                "$ref": "#/definitions/edgeNodeSource"
+              },
+              {
+                "$ref": "#/definitions/edgeTransformSource"
+              }
+            ]
+          },
           "minItems": 1
         }
       },
-      "required": ["description", "variants"],
+      "required": [
+        "description",
+        "variants"
+      ],
       "additionalProperties": false
     },
-
     "derivedSchema": {
       "type": "object",
       "description": "Edge-producing derived entity. The extract (with `transform: rust`) is declared in `etl`; the registered Rust transform parses and emits edges. Produces no node table.",
@@ -1125,20 +1282,20 @@
         },
         "emits": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Edge relationship kinds this entity is expected to emit (informational)."
+          "items": {
+            "type": "string"
+          },
+          "description": "Relationship kinds the transform writes. The contract for transform-emitted edges; edge files' `- transform:` sources are validated against it."
         },
-        "global": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, the entity is non-namespaced and indexed globally rather than per-namespace. Defaults to false (namespaced). Mirrors the node-level `global` flag."
-        },
-        "etl": { "$ref": "#/definitions/etlConfig" }
+        "etl": {
+          "$ref": "#/definitions/etlConfig"
+        }
       },
-      "required": ["etl"],
+      "required": [
+        "etl"
+      ],
       "additionalProperties": false
     },
-
     "nodeStorage": {
       "type": "object",
       "description": "ClickHouse DDL storage metadata for a node table.",
@@ -1150,23 +1307,31 @@
         },
         "primary_key": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "PRIMARY KEY columns. When absent, ClickHouse defaults to ORDER BY."
         },
         "columns": {
           "type": "array",
           "description": "Columns in exact DDL order (excluding _version and _deleted).",
-          "items": { "$ref": "#/definitions/storageColumn" }
+          "items": {
+            "$ref": "#/definitions/storageColumn"
+          }
         },
         "indexes": {
           "type": "array",
           "description": "Skip indexes.",
-          "items": { "$ref": "#/definitions/storageIndex" }
+          "items": {
+            "$ref": "#/definitions/storageIndex"
+          }
         },
         "projections": {
           "type": "array",
           "description": "Materialized projections.",
-          "items": { "$ref": "#/definitions/storageProjection" }
+          "items": {
+            "$ref": "#/definitions/storageProjection"
+          }
         },
         "settings": {
           "$ref": "#/definitions/tableSettings"
@@ -1174,7 +1339,6 @@
       },
       "additionalProperties": false
     },
-
     "tableSettings": {
       "type": "object",
       "description": "ClickHouse MergeTree table settings emitted in the CREATE TABLE SETTINGS clause.",
@@ -1186,7 +1350,6 @@
         "pattern": "^[A-Za-z0-9_.'(), -]+$"
       }
     },
-
     "storageColumn": {
       "type": "object",
       "description": "A column as it appears in CREATE TABLE DDL.",
@@ -1215,10 +1378,12 @@
           }
         }
       },
-      "required": ["name", "type"],
+      "required": [
+        "name",
+        "type"
+      ],
       "additionalProperties": false
     },
-
     "storageIndex": {
       "type": "object",
       "description": "A skip index definition.",
@@ -1238,17 +1403,32 @@
           "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\)|ngrambf_v1\\([0-9, ]+\\)|tokenbf_v1\\([0-9, ]+\\))$",
           "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), text(tokenizer = ...), ngrambf_v1(n, size, hashes, seed), or tokenbf_v1(size, hashes, seed)."
         },
-        "granularity": { "type": "integer", "minimum": 1, "default": 1 }
+        "granularity": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
       },
-      "required": ["name", "column", "type", "granularity"],
+      "required": [
+        "name",
+        "column",
+        "type",
+        "granularity"
+      ],
       "additionalProperties": false
     },
-
     "storageProjection": {
       "type": "object",
       "description": "A materialized projection.",
       "properties": {
-        "type": { "type": "string", "enum": ["reorder", "lightweight", "aggregate"] },
+        "type": {
+          "type": "string",
+          "enum": [
+            "reorder",
+            "lightweight",
+            "aggregate"
+          ]
+        },
         "name": {
           "type": "string",
           "pattern": "^[a-z_][a-z0-9_]*$",
@@ -1291,7 +1471,127 @@
           "description": "Prefix columns for a dedup-compatible lightweight projection. The table sort key and _version are appended automatically."
         }
       },
-      "required": ["type", "name"],
+      "required": [
+        "type",
+        "name"
+      ],
+      "additionalProperties": false
+    },
+    "edgeTableSource": {
+      "type": "object",
+      "description": "Join-table source: one edge per row of `table`.",
+      "properties": {
+        "table": {
+          "type": "string",
+          "description": "Source datalake table."
+        },
+        "scope": {
+          "$ref": "#/definitions/etlScope"
+        },
+        "order_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "from": {
+          "$ref": "#/definitions/edgeEtlEndpoint"
+        },
+        "to": {
+          "$ref": "#/definitions/edgeEtlEndpoint"
+        }
+      },
+      "required": [
+        "table",
+        "scope",
+        "order_by",
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "edgeNodeSource": {
+      "type": "object",
+      "description": "Node-row source: an FK column (or unnested array column) of the producing node's extraction output. Exactly one endpoint must be the node's own row, written {type: <node>, id: id}.",
+      "properties": {
+        "node": {
+          "type": "string",
+          "description": "Producing node type."
+        },
+        "from": {
+          "$ref": "#/definitions/edgeEtlEndpoint"
+        },
+        "to": {
+          "$ref": "#/definitions/edgeEtlEndpoint"
+        },
+        "unnest": {
+          "type": "string",
+          "description": "Array column on the node's output; one edge per element. Endpoint ids then resolve inside the element."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when the FK can change over the entity's lifetime; such edges are reconciled by the stale-edge sweep."
+        }
+      },
+      "required": [
+        "node",
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "edgeTransformSource": {
+      "type": "object",
+      "description": "Edges emitted by a derived entity's Rust transform. Cross-checked against the derived entity's `emits` list.",
+      "properties": {
+        "transform": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      },
+      "required": [
+        "transform"
+      ],
+      "additionalProperties": false
+    },
+    "pageJoin": {
+      "type": "object",
+      "description": "Engine-owned enrichment joined below the page LIMIT, via `fk_column IN (SELECT id FROM _batch)`. A plain join in the query file would build the join table namespace-wide per batch (#830).",
+      "properties": {
+        "table": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "fk_column": {
+          "type": "string",
+          "description": "FK on the joined table referencing the base table's id."
+        },
+        "select": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "where": {
+          "type": "string",
+          "description": "Extra predicate on the joined table; supports {{deleted_column}}/{{watermark_column}}."
+        },
+        "traversal_path_column": {
+          "type": "string",
+          "description": "traversal_path column on the joined table, used as a pruning hint."
+        }
+      },
+      "required": [
+        "table",
+        "alias",
+        "fk_column",
+        "select"
+      ],
       "additionalProperties": false
     }
   }

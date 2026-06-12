@@ -12,3 +12,11 @@ variants:
     fk_column: closed_by_id
     scope: prune_to_target
     description: "User closed a merge request."
+
+sources:
+  - node: MergeRequest
+    from: {type: User, id: metric_latest_closed_by_id}
+    to: {type: MergeRequest, id: id}
+  - node: WorkItem
+    from: {type: User, id: closed_by_id}
+    to: {type: WorkItem, id: id}

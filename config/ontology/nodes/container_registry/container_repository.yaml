@@ -70,14 +70,9 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: table
   source: siphon_container_repositories
+  scope: namespaced
   order_by: [traversal_path, id]
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
 
 storage:
   primary_key: [traversal_path, id]

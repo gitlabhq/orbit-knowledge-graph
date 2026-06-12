@@ -8,3 +8,9 @@ variants:
     fk_column: last_edited_by_id
     scope: prune_to_target
     description: "User last edited merge request content."
+
+sources:
+  - node: MergeRequest
+    from: {type: User, id: last_edited_by_id}
+    to: {type: MergeRequest, id: id}
+    mutable: true

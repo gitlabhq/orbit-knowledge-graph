@@ -231,7 +231,9 @@ If the worker fails unexpectedly, the unacked message is redelivered by NATS to 
 
 **Ontology-driven plan building**
 
-ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `Plan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
+ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. A node's `etl` block is two-tier: declarative (`source` + `scope`, optionally `filter` for a plain WHERE) or a complete SELECT statement in a `query: <file>.sql` next to the YAML, which the engine wraps for traversal scoping, watermark windowing, and pagination. Each node entity with an `etl` config becomes a `Plan` with an extraction query and one or more transforms.
+
+Every producer of a relationship is declared in its file under `config/ontology/edges/` as a `sources:` entry: `table:` sources (one edge per join-table row), `node:` sources (an FK column — or `unnest:` array column — of a node's extraction output, with explicit `from`/`to` endpoints), and `transform:` sources (emitted by a derived entity's Rust transform). At load time, node-sourced bindings are folded into the producing node's plan so they share the same extracted batch instead of querying the datalake twice; table sources get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
 
 **Pipeline: extract, transform, write**
 

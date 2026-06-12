@@ -8,9 +8,9 @@ variants:
     scope: prune_to_target
     description: "User is a reviewer of merge request."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_request_reviewers
+sources:
+  - table: siphon_merge_request_reviewers
+    scope: namespaced
     order_by: [traversal_path, merge_request_id, id]
     from:
       id: user_id
@@ -20,3 +20,7 @@ etl:
       id: merge_request_id
       type: MergeRequest
       enrich: [state_id, merge_status, draft, squash, discussion_locked]
+  - node: MergeRequest
+    from: {type: User, id: user_id}
+    to: {type: MergeRequest, id: id}
+    unnest: reviewers

@@ -12,8 +12,14 @@ use crate::{Ontology, OntologyError};
 
 use derived::DerivedYaml;
 pub(crate) use edge::EdgeYaml;
+use edge::NodeEdgeBinding;
 pub(crate) use node::NodeYaml;
 use schema::SchemaYaml;
+
+/// Resolves `query:` SQL files relative to their YAML's directory.
+fn parent_dir(path: &str) -> &str {
+    path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
+}
 
 #[derive(Embed)]
 #[folder = "$ONTOLOGY_DIR"]
@@ -210,6 +216,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 &ontology.default_entity_sort_key,
                 &etl_settings,
                 &ontology.internal_column_prefix,
+                reader,
+                parent_dir(node_path),
             )?;
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
@@ -233,7 +241,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             let content = reader.read(derived_path)?;
             let derived_def: DerivedYaml = parse_yaml(&content, derived_path)?;
-            let derived = derived_def.into_derived(derived_name.clone(), &etl_settings)?;
+            let derived = derived_def.into_derived(
+                derived_name.clone(),
+                &etl_settings,
+                reader,
+                parent_dir(derived_path),
+            )?;
             ontology
                 .derived_entities
                 .insert(derived_name.clone(), derived);
@@ -249,6 +262,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             },
         );
     }
+
+    let mut node_bindings: Vec<NodeEdgeBinding> = Vec::new();
+    let mut transform_emits: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
 
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
@@ -293,13 +310,23 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let etl_configs = edge_def.into_etl_configs(edge_name, &etl_settings)?;
-        if !etl_configs.is_empty() {
+        let sources = edge_def.into_sources(edge_name, &etl_settings)?;
+        if !sources.table_etls.is_empty() {
             ontology
                 .edge_etl_configs
-                .insert(edge_name.clone(), etl_configs);
+                .insert(edge_name.clone(), sources.table_etls);
+        }
+        node_bindings.extend(sources.node_bindings);
+        for transform in sources.transforms {
+            transform_emits
+                .entry(transform)
+                .or_default()
+                .push(edge_name.clone());
         }
     }
+
+    attach_node_bindings(&mut ontology, node_bindings)?;
+    resolve_transform_emits(&mut ontology, transform_emits)?;
 
     // Auto-derive denormalized properties from central denormalization list.
     let has_denorm = !denormalization_entries.is_empty();
@@ -666,6 +693,106 @@ fn validate_derived_emits_registered(ontology: &crate::Ontology) -> Result<(), O
                 return Err(OntologyError::Validation(format!(
                     "derived entity '{}' emits '{edge}' but it is not registered in the \
                      edges: map of schema.yaml",
+                    derived.name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Attaches relationship-file bindings to the producing nodes' ETL configs,
+/// rejecting duplicates across files.
+fn attach_node_bindings(
+    ontology: &mut Ontology,
+    bindings: Vec<NodeEdgeBinding>,
+) -> Result<(), OntologyError> {
+    use crate::etl::{EdgeDirection, EdgeMapping};
+    use std::collections::{BTreeMap, HashSet};
+
+    let mut per_node: BTreeMap<String, BTreeMap<String, Vec<EdgeMapping>>> = BTreeMap::new();
+    let mut seen: HashSet<(String, String, String, EdgeDirection)> = HashSet::new();
+
+    for binding in bindings {
+        let node = ontology.nodes.get(&binding.node).ok_or_else(|| {
+            OntologyError::Validation(format!(
+                "edge '{}' declares a node source on unknown node '{}'",
+                binding.mapping.relationship_kind, binding.node
+            ))
+        })?;
+        if node.etl.is_none() {
+            return Err(OntologyError::Validation(format!(
+                "edge '{}' declares a node source on '{}', which has no etl block",
+                binding.mapping.relationship_kind, binding.node
+            )));
+        }
+        let key = (
+            binding.node.clone(),
+            binding.column.clone(),
+            binding.mapping.relationship_kind.clone(),
+            binding.mapping.direction,
+        );
+        if !seen.insert(key) {
+            return Err(OntologyError::Validation(format!(
+                "duplicate node source: edge '{}' on '{}.{}' (direction {:?})",
+                binding.mapping.relationship_kind,
+                binding.node,
+                binding.column,
+                binding.mapping.direction
+            )));
+        }
+        per_node
+            .entry(binding.node)
+            .or_default()
+            .entry(binding.column)
+            .or_default()
+            .push(binding.mapping);
+    }
+
+    for (node_name, edges) in per_node {
+        let node = ontology
+            .nodes
+            .get_mut(&node_name)
+            .expect("node existence checked above");
+        let etl = node.etl.as_mut().expect("etl presence checked above");
+        for (column, mappings) in &edges {
+            let is_array = mappings.iter().any(|m| m.array_field.is_some());
+            if is_array && matches!(etl, crate::etl::EtlConfig::Table { .. }) {
+                return Err(OntologyError::Validation(format!(
+                    "node '{node_name}': unnest binding on column '{column}' requires a \
+                     'filter' or 'query' ETL that outputs the array column"
+                )));
+            }
+            etl.ensure_select_column(column);
+        }
+        etl.set_edges(edges);
+    }
+
+    Ok(())
+}
+
+/// A `- transform:` source must name an existing derived transform whose
+/// `emits` lists the relationship.
+fn resolve_transform_emits(
+    ontology: &mut Ontology,
+    transform_emits: std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<(), OntologyError> {
+    for (transform, kinds) in transform_emits {
+        let derived = ontology
+            .derived_entities
+            .values()
+            .find(|d| d.transform == transform)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "edge source references transform '{transform}', but no derived entity \
+                     declares it"
+                ))
+            })?;
+        for kind in kinds {
+            if !derived.emits.contains(&kind) {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{kind}' declares source transform '{transform}', but derived \
+                     entity '{}' does not list it in emits",
                     derived.name
                 )));
             }

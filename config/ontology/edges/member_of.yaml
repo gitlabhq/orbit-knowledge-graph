@@ -45,9 +45,9 @@ variants:
     scope: prune_to_target
     description: "User has access to project (via direct membership or group inheritance)."
 
-etl:
-  - scope: namespaced
-    source: siphon_members
+sources:
+  - table: siphon_members
+    scope: namespaced
     order_by: [traversal_path, id]
     from:
       id: user_id

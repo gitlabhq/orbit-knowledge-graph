@@ -27,3 +27,16 @@ variants:
     scope: prune_to_target
     description: "User authored work item."
 
+sources:
+  - node: MergeRequest
+    from: {type: User, id: author_id}
+    to: {type: MergeRequest, id: id}
+  - node: Note
+    from: {type: User, id: author_id}
+    to: {type: Note, id: id}
+  - node: Vulnerability
+    from: {type: User, id: author_id}
+    to: {type: Vulnerability, id: id}
+  - node: WorkItem
+    from: {type: User, id: author_id}
+    to: {type: WorkItem, id: id}

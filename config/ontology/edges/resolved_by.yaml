@@ -8,3 +8,8 @@ variants:
     fk_column: resolved_by_id
     scope: prune_to_target
     description: "User resolved vulnerability."
+
+sources:
+  - node: Vulnerability
+    from: {type: User, id: resolved_by_id}
+    to: {type: Vulnerability, id: id}

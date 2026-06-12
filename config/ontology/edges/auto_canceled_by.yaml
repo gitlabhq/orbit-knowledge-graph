@@ -15,3 +15,11 @@ variants:
     fk_column: auto_canceled_by_id
     scope: same_namespace
     description: "Job was auto-canceled when its pipeline was superseded."
+
+sources:
+  - node: Job
+    from: {type: Job, id: id}
+    to: {type: Pipeline, id: auto_canceled_by_id}
+  - node: Pipeline
+    from: {type: Pipeline, id: id}
+    to: {type: Pipeline, id: auto_canceled_by_id}

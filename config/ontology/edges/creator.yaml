@@ -7,3 +7,8 @@ variants:
     to_node: { type: Project, id: id }
     scope: prune_to_target
     description: "User created project."
+
+sources:
+  - node: Project
+    from: {type: User, id: creator_id}
+    to: {type: Project, id: id}

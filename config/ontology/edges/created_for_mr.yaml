@@ -8,3 +8,8 @@ variants:
     to_node: { type: MergeRequest, id: id }
     fk_column: merge_request_id
     description: "Environment was first created by a merge request pipeline."
+
+sources:
+  - node: Environment
+    from: {type: Environment, id: id}
+    to: {type: MergeRequest, id: merge_request_id}

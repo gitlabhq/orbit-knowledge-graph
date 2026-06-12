@@ -13,9 +13,9 @@ variants:
     scope: prune_to_target
     description: "User is assigned to work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_request_assignees
+sources:
+  - table: siphon_merge_request_assignees
+    scope: namespaced
     order_by: [traversal_path, merge_request_id, id]
     from:
       id: user_id
@@ -25,8 +25,8 @@ etl:
       id: merge_request_id
       type: MergeRequest
       enrich: [state_id, merge_status, draft, squash, discussion_locked]
-  - scope: namespaced
-    source: siphon_issue_assignees
+  - table: siphon_issue_assignees
+    scope: namespaced
     order_by: [traversal_path, issue_id, user_id]
     from:
       id: user_id

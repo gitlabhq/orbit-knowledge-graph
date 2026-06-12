@@ -7,3 +7,8 @@ variants:
     to_node: { type: Project, id: id }
     fk_column: project_id
     description: "VulnerabilityScanner scans project."
+
+sources:
+  - node: VulnerabilityScanner
+    from: {type: VulnerabilityScanner, id: id}
+    to: {type: Project, id: project_id}

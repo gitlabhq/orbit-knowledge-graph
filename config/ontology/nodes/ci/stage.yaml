@@ -93,18 +93,9 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: table
   source: siphon_p_ci_stages
+  scope: namespaced
   order_by: [traversal_path, id, partition_id]
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    pipeline_id:
-      to: Pipeline
-      as: HAS_STAGE
-      direction: incoming
 
 storage:
   primary_key: [traversal_path, id]

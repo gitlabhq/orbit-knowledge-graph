@@ -8,3 +8,8 @@ variants:
     fk_column: merge_request_id
     scope: same_namespace
     description: "Merge request has a diff snapshot."
+
+sources:
+  - node: MergeRequestDiff
+    from: {type: MergeRequest, id: merge_request_id}
+    to: {type: MergeRequestDiff, id: id}

@@ -1585,6 +1585,17 @@ mod tests {
     use super::*;
     use crate::loading::{EtlSettings, NodeYaml, ReadOntologyFile, load_with};
 
+    /// Reader for tests whose node YAML declares no `query:` file.
+    struct EmptyReader;
+    impl ReadOntologyFile for EmptyReader {
+        fn read(&self, path: &str) -> Result<String, OntologyError> {
+            Err(OntologyError::Io {
+                path: path.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "no files in test"),
+            })
+        }
+    }
+
     fn fixtures_dir() -> std::path::PathBuf {
         Path::new(env!("ONTOLOGY_DIR")).to_path_buf()
     }
@@ -2323,6 +2334,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
@@ -2361,6 +2374,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
@@ -2585,6 +2600,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .unwrap_err();
         assert!(
@@ -2630,6 +2647,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
@@ -3077,6 +3096,44 @@ properties:
                 "{entity} is global / has no traversal_path"
             );
         }
+    }
+
+    #[test]
+    fn node_edge_bindings_attach_from_relationship_files() {
+        let o = Ontology::load_embedded().unwrap();
+
+        let pipeline_etl = o.get_node("Pipeline").unwrap().etl.as_ref().unwrap();
+        let in_project = &pipeline_etl.edges()["project_id"];
+        assert_eq!(in_project.len(), 1);
+        assert_eq!(in_project[0].relationship_kind, "IN_PROJECT");
+        assert_eq!(in_project[0].direction, crate::etl::EdgeDirection::Outgoing);
+
+        let mr_etl = o.get_node("MergeRequest").unwrap().etl.as_ref().unwrap();
+        let reviewer = &mr_etl.edges()["reviewers"];
+        assert_eq!(reviewer[0].relationship_kind, "REVIEWER");
+        assert_eq!(reviewer[0].array_field.as_deref(), Some("user_id"));
+        let crate::etl::EtlConfig::Query { select, .. } = mr_etl else {
+            panic!("MergeRequest should be a query ETL");
+        };
+        assert!(
+            select.split(", ").any(|c| c == "reviewers"),
+            "edge-feed array column must be appended to the select: {select}"
+        );
+
+        let note_etl = o.get_node("Note").unwrap().etl.as_ref().unwrap();
+        let has_note = &note_etl.edges()["noteable_id"];
+        assert!(matches!(
+            &has_note[0].target,
+            crate::etl::EdgeTarget::Column { column, .. } if column == "noteable_type"
+        ));
+
+        let total_bindings: usize = o
+            .nodes()
+            .filter_map(|n| n.etl.as_ref())
+            .flat_map(|e| e.edges().values())
+            .map(Vec::len)
+            .sum();
+        assert_eq!(total_bindings, 70, "every inventory binding must attach");
     }
 
     #[test]

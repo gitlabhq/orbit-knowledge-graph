@@ -7,9 +7,9 @@ variants:
     to_node: { type: Vulnerability, id: id }
     description: "Merge request fixes vulnerability."
 
-etl:
-  - scope: namespaced
-    source: siphon_vulnerability_merge_request_links
+sources:
+  - table: siphon_vulnerability_merge_request_links
+    scope: namespaced
     order_by: [traversal_path, id]
     from:
       id: merge_request_id

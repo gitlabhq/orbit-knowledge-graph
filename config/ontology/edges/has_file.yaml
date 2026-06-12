@@ -8,3 +8,8 @@ variants:
     fk_column: merge_request_diff_id
     scope: same_namespace
     description: "Merge request diff contains changed file."
+
+sources:
+  - node: MergeRequestDiffFile
+    from: {type: MergeRequestDiff, id: merge_request_diff_id}
+    to: {type: MergeRequestDiffFile, id: id}

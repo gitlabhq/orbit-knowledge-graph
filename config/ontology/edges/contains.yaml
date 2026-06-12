@@ -41,9 +41,9 @@ variants:
     scope: same_namespace
     description: "Directory contains file."
 
-etl:
-  - scope: namespaced
-    source: siphon_work_item_parent_links
+sources:
+  - table: siphon_work_item_parent_links
+    scope: namespaced
     order_by: [traversal_path, work_item_parent_id, id]
     from:
       id: work_item_parent_id
@@ -53,3 +53,9 @@ etl:
       id: work_item_id
       type: WorkItem
       enrich: [state_id, work_item_type_id, confidential]
+  - node: Group
+    from: {type: Group, id: parent_id}
+    to: {type: Group, id: id}
+  - node: Project
+    from: {type: Group, id: namespace_id}
+    to: {type: Project, id: id}

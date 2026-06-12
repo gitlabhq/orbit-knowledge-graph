@@ -12,9 +12,9 @@ variants:
     fk_column: primary_identifier_id
     description: "Vulnerability occurrence has primary identifier."
 
-etl:
-  - scope: namespaced
-    source: siphon_vulnerability_occurrence_identifiers
+sources:
+  - table: siphon_vulnerability_occurrence_identifiers
+    scope: namespaced
     order_by: [traversal_path, id]
     from:
       id: occurrence_id
@@ -23,3 +23,6 @@ etl:
     to:
       id: identifier_id
       type: VulnerabilityIdentifier
+  - node: VulnerabilityOccurrence
+    from: {type: VulnerabilityOccurrence, id: id}
+    to: {type: VulnerabilityIdentifier, id: primary_identifier_id}

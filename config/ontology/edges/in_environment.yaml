@@ -9,3 +9,8 @@ variants:
     fk_column: environment_id
     scope: same_namespace
     description: "Deployment targets environment."
+
+sources:
+  - node: Deployment
+    from: {type: Deployment, id: id}
+    to: {type: Environment, id: environment_id}

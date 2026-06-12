@@ -15,3 +15,11 @@ variants:
     fk_column: pipeline_id
     scope: same_namespace
     description: "Pipeline contains job (skips the Stage hop, matches the natural CI mental model)."
+
+sources:
+  - node: Job
+    from: {type: Pipeline, id: commit_id}
+    to: {type: Job, id: id}
+  - node: Job
+    from: {type: Stage, id: stage_id}
+    to: {type: Job, id: id}

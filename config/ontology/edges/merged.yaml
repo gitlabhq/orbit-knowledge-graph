@@ -6,3 +6,8 @@ variants:
     fk_column: merge_user_id
     scope: prune_to_target
     description: "User merged a merge request."
+
+sources:
+  - node: MergeRequest
+    from: {type: User, id: merge_user_id}
+    to: {type: MergeRequest, id: id}

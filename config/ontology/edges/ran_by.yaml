@@ -9,3 +9,8 @@ variants:
     fk_column: build_id
     scope: same_namespace
     description: "Security scan was run by job."
+
+sources:
+  - node: SecurityScan
+    from: {type: SecurityScan, id: id}
+    to: {type: Job, id: build_id}

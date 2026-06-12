@@ -173,6 +173,30 @@ impl EtlConfig {
         }
     }
 
+    /// Edge bindings live in the relationship files; the loader attaches
+    /// them here after all edge files are parsed.
+    pub(crate) fn set_edges(&mut self, new_edges: BTreeMap<String, Vec<EdgeMapping>>) {
+        match self {
+            EtlConfig::Table { edges, .. } => *edges = new_edges,
+            EtlConfig::Query { edges, .. } => *edges = new_edges,
+        }
+    }
+
+    /// Edge-feed columns (e.g. `unnest:` arrays) are not properties, so the
+    /// synthesized Query select must be patched to extract them.
+    pub(crate) fn ensure_select_column(&mut self, column: &str) {
+        if let EtlConfig::Query { select, .. } = self {
+            let suffix = format!(" AS {column}");
+            let present = select
+                .split(", ")
+                .any(|c| c == column || c.ends_with(&suffix));
+            if !present {
+                select.push_str(", ");
+                select.push_str(column);
+            }
+        }
+    }
+
     pub fn edge_mappings(&self) -> impl Iterator<Item = (&String, &EdgeMapping)> + '_ {
         self.edges()
             .iter()

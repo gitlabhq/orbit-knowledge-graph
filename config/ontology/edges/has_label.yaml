@@ -13,9 +13,9 @@ variants:
     scope: prune_to_source
     description: "Merge request has label."
 
-etl:
-  - scope: namespaced
-    source: siphon_label_links
+sources:
+  - table: siphon_label_links
+    scope: namespaced
     order_by: [traversal_path, target_id, id]
     from:
       id: target_id

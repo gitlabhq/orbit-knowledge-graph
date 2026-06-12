@@ -128,3 +128,59 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Container repository belongs to project."
+
+sources:
+  - node: ContainerRepository
+    from: {type: ContainerRepository, id: id}
+    to: {type: Project, id: project_id}
+  - node: Deployment
+    from: {type: Deployment, id: id}
+    to: {type: Project, id: project_id}
+  - node: Environment
+    from: {type: Environment, id: id}
+    to: {type: Project, id: project_id}
+  - node: Finding
+    from: {type: Finding, id: id}
+    to: {type: Project, id: project_id}
+  - node: Job
+    from: {type: Job, id: id}
+    to: {type: Project, id: project_id}
+  - node: Label
+    from: {type: Label, id: id}
+    to: {type: Project, id: project_id}
+  - node: MergeRequest
+    from: {type: MergeRequest, id: id}
+    to: {type: Project, id: target_project_id}
+  - node: MergeRequestDiff
+    from: {type: MergeRequestDiff, id: id}
+    to: {type: Project, id: project_id}
+  - node: Milestone
+    from: {type: Milestone, id: id}
+    to: {type: Project, id: project_id}
+  - node: Note
+    from: {type: Note, id: id}
+    to: {type: Project, id: project_id}
+  - node: Package
+    from: {type: Package, id: id}
+    to: {type: Project, id: project_id}
+  - node: Pipeline
+    from: {type: Pipeline, id: id}
+    to: {type: Project, id: project_id}
+  - node: SecurityScan
+    from: {type: SecurityScan, id: id}
+    to: {type: Project, id: project_id}
+  - node: Stage
+    from: {type: Stage, id: id}
+    to: {type: Project, id: project_id}
+  - node: Vulnerability
+    from: {type: Vulnerability, id: id}
+    to: {type: Project, id: project_id}
+  - node: VulnerabilityIdentifier
+    from: {type: VulnerabilityIdentifier, id: id}
+    to: {type: Project, id: project_id}
+  - node: VulnerabilityOccurrence
+    from: {type: VulnerabilityOccurrence, id: id}
+    to: {type: Project, id: project_id}
+  - node: WorkItem
+    from: {type: WorkItem, id: id}
+    to: {type: Project, id: project_id}

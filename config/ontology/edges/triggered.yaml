@@ -21,3 +21,14 @@ variants:
     fk_column: user_id
     scope: prune_to_target
     description: "User triggered job."
+
+sources:
+  - node: Job
+    from: {type: User, id: user_id}
+    to: {type: Job, id: id}
+  - node: Pipeline
+    from: {type: MergeRequest, id: merge_request_id}
+    to: {type: Pipeline, id: id}
+  - node: Pipeline
+    from: {type: User, id: user_id}
+    to: {type: Pipeline, id: id}

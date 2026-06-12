@@ -12,3 +12,11 @@ variants:
     to_node: { type: VulnerabilityScanner, id: id }
     fk_column: scanner_id
     description: "Vulnerability occurrence detected by vulnerability scanner."
+
+sources:
+  - node: Finding
+    from: {type: Finding, id: id}
+    to: {type: VulnerabilityScanner, id: scanner_id}
+  - node: VulnerabilityOccurrence
+    from: {type: VulnerabilityOccurrence, id: id}
+    to: {type: VulnerabilityScanner, id: scanner_id}

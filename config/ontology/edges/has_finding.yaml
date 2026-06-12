@@ -14,3 +14,11 @@ variants:
     fk_column: scan_id
     scope: same_namespace
     description: "Security scan has finding."
+
+sources:
+  - node: Finding
+    from: {type: SecurityScan, id: scan_id}
+    to: {type: Finding, id: id}
+  - node: Vulnerability
+    from: {type: Vulnerability, id: id}
+    to: {type: VulnerabilityOccurrence, id: finding_id}

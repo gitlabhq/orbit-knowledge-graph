@@ -9,3 +9,8 @@ variants:
     fk_column: user_id
     scope: prune_to_target
     description: "User triggered deployment."
+
+sources:
+  - node: Deployment
+    from: {type: User, id: user_id}
+    to: {type: Deployment, id: id}

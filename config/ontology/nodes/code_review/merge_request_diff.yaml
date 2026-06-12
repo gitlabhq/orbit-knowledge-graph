@@ -130,18 +130,9 @@ properties:
     description: "Full unified patch. Resolved from GitLab at query time."
 
 etl:
-  type: table
   source: siphon_merge_request_diffs
+  scope: namespaced
   order_by: [traversal_path, merge_request_id, id]
-  edges:
-    merge_request_id:
-      to: MergeRequest
-      as: HAS_DIFF
-      direction: incoming
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
 
 storage:
   primary_key: [traversal_path, id]

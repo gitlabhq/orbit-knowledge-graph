@@ -8,9 +8,9 @@ variants:
     scope: same_namespace
     description: "Package was built by pipeline."
 
-etl:
-  - scope: namespaced
-    source: siphon_packages_build_infos
+sources:
+  - table: siphon_packages_build_infos
+    scope: namespaced
     order_by: [traversal_path, id]
     from:
       id: package_id

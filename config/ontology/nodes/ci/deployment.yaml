@@ -142,21 +142,8 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: table
   source: siphon_deployments
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    environment_id:
-      to: Environment
-      as: IN_ENVIRONMENT
-      direction: outgoing
-    user_id:
-      to: User
-      as: DEPLOYED_BY
-      direction: incoming
+  scope: namespaced
 
 storage:
   primary_key: [traversal_path, id]

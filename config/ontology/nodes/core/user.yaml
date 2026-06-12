@@ -166,8 +166,8 @@ properties:
       17: import_user
 
 etl:
-  type: table
   source: siphon_users
+  scope: global
 
 storage:
   primary_key: [id]

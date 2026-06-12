@@ -20,3 +20,14 @@ variants:
     fk_column: namespace_id
     scope: namespace_anchor
     description: "Work item belongs to group."
+
+sources:
+  - node: Label
+    from: {type: Label, id: id}
+    to: {type: Group, id: group_id}
+  - node: Milestone
+    from: {type: Milestone, id: id}
+    to: {type: Group, id: group_id}
+  - node: WorkItem
+    from: {type: WorkItem, id: id}
+    to: {type: Group, id: namespace_id}

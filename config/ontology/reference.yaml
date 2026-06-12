@@ -1,26 +1,11 @@
-# config/ontology/nodes/core/user.yaml
+# Annotated reference for ontology authoring. This file is NOT loaded; it
+# documents the node/edge YAML surface. See config/schemas/ontology.schema.json
+# for the machine-checked schema.
 
 node_type: User
 domain: core
 description: A GitLab user account
 destination_table: users
-
-# Source definition for ETL
-# source:
-#   table: siphon_users
-#   watermark_column: _siphon_watermark  (use {{watermark_column}} in ETL SQL)
-#   deleted_column: _siphon_deleted           (use {{deleted_column}} in ETL SQL)
-#   primary_key: id
-#
-# ETL SQL fields (select, from, where, watermark, deleted, traversal_path_filter,
-# page_join.where, page_join.watermark) must use the {{watermark_column}} and
-# {{deleted_column}} placeholders instead of hardcoding column names. The loader
-# substitutes them with schema.yaml's default_watermark / default_deleted at
-# load time.
-
-# Output destination
-# destination:
-#   table: users
 
 properties:
   id:
@@ -33,43 +18,72 @@ properties:
     source: username
     nullable: false
 
-  email:
-    type: string
-    source: email
-    nullable: false
-
   is_admin:
     type: boolean
     source: admin  # rename: admin → is_admin
     nullable: false
 
-  user_type:
-    type: enum
-    source: user_type
-    nullable: false
-    values: 
-      0: human
-      1: support_bot
-      2: alert_bot
-      8: automation_bot
-
-edges:
-  - type: OWNER
-    source_id: owner_id
-    target_kind: User
-
-  - type: CONTAINS
-    source: parent_id
-    target_kind: Group
-
-# using this overrides automatic query gen via the properties fields above
+# ETL has two tiers. Tier 1 is fully declarative:
+#
+#   etl:
+#     source: siphon_users          # datalake table
+#     scope: global                 # or: namespaced (traversal_path scoping)
+#     order_by: [id]                # optional; defaults to settings.etl.default_etl_order_by
+#     filter: "system = false"      # optional plain WHERE on the base table —
+#                                   # the only SQL string allowed in YAML
+#
+# Tier 2 is a complete SELECT statement in a .sql file next to the YAML:
+#
+#   etl:
+#     source: project_namespace_traversal_paths
+#     scope: namespaced
+#     query: project.sql
+#
+# The query file contract:
+#   - emits every declared property's source column, plus
+#     {{watermark_column}} and {{deleted_column}} aliased under those names
+#   - may use the engine parameters {traversal_path:String},
+#     {last_watermark:String}, {watermark:String}
+#   - must use the {{watermark_column}} / {{deleted_column}} placeholders;
+#     hardcoding the configured column names is rejected at load time so a
+#     rename stays a one-line schema.yaml change
+#   - the engine wraps the statement for traversal scoping, watermark
+#     windowing, and keyset pagination
+#
+# Derived entities (config/ontology/derived/) additionally set:
+#   transform: <rust transform name>
+#   columns: [..]                   # query output columns; derived entities
+#                                   # have no properties to infer them from
+#   emits: [KINDS]                  # relationship kinds the transform writes
+#
+# Edges are NOT declared on nodes. Every producer of a relationship lives in
+# its file under config/ontology/edges/ as a `sources:` entry:
+#
+#   sources:
+#     - table: siphon_members       # join-table source: one edge per row
+#       scope: namespaced
+#       order_by: [traversal_path, id]
+#       from: {type: User, id: user_id, enrich: [state]}
+#       to:
+#         id: source_id
+#         type_column: source_type  # polymorphic target resolved per row
+#         type_mapping:
+#           Namespace: Group
+#
+#     - node: Pipeline              # node-row source: FK column on the node
+#       from: {type: Pipeline, id: id}
+#       to: {type: Project, id: project_id}
+#
+#     - node: MergeRequest          # array source: one edge per element of
+#       from: {type: User, id: user_id}     # the node query's output column
+#       to: {type: MergeRequest, id: id}
+#       unnest: reviewers
+#
+#     - transform: system_notes     # emitted by a derived entity's transform
+#
+# Exactly one endpoint of a node source is the node's own row, written
+# {type: <Node>, id: id}; the other endpoint names the FK column. `mutable:
+# true` marks bindings whose FK column is expected to change in place.
 etl:
-  # codepath: siphon
-  # codepath: internal_code_indexing
-  query: |
-    SELECT * FROM notes where noteable_type = 'MergeRequest'
-
-# below scenario is where you want to split 1 siphon table into multiple tables 
-# etl:
-#   query: |
-#     SELECT * FROM notes where noteable_type = 'Issue'
+  source: siphon_users
+  scope: global

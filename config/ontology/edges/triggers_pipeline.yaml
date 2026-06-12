@@ -8,9 +8,9 @@ variants:
     to_node: { type: Pipeline, id: id }
     description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
 
-etl:
-  - scope: namespaced
-    source: siphon_ci_sources_pipelines
+sources:
+  - table: siphon_ci_sources_pipelines
+    scope: namespaced
     order_by: [traversal_path, id, partition_id]
     from:
       id: source_job_id

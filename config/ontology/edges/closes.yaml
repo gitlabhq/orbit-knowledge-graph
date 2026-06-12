@@ -7,9 +7,9 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "Merge request closes work item."
 
-etl:
-  - scope: namespaced
-    source: siphon_merge_requests_closing_issues
+sources:
+  - table: siphon_merge_requests_closing_issues
+    scope: namespaced
     order_by: [traversal_path, issue_id, id]
     from:
       id: merge_request_id

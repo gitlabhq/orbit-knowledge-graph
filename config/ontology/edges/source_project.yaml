@@ -7,3 +7,8 @@ variants:
     to_node: { type: Project, id: id }
     fk_column: source_project_id
     description: "Merge request originates from source project."
+
+sources:
+  - node: MergeRequest
+    from: {type: MergeRequest, id: id}
+    to: {type: Project, id: source_project_id}

@@ -8,3 +8,8 @@ variants:
     fk_column: vulnerability_id
     scope: same_namespace
     description: "Occurrence is linked to a vulnerability."
+
+sources:
+  - node: VulnerabilityOccurrence
+    from: {type: VulnerabilityOccurrence, id: id}
+    to: {type: Vulnerability, id: vulnerability_id}

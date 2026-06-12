@@ -105,21 +105,8 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: table
   source: siphon_security_scans
-  edges:
-    project_id:
-      to: Project
-      as: IN_PROJECT
-      direction: outgoing
-    pipeline_id:
-      to: Pipeline
-      as: IN_PIPELINE
-      direction: outgoing
-    build_id:
-      to: Job
-      as: RAN_BY
-      direction: outgoing
+  scope: namespaced
 
 storage:
   primary_key: [traversal_path, id]
