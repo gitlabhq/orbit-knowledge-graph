@@ -3,6 +3,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use ontology::Ontology;
+use query_engine::compiler::{
+    DictionarySource, emit_create_dictionary, emit_create_materialized_view, emit_create_table,
+    generate_graph_dictionaries, generate_graph_materialized_views,
+    generate_graph_materialized_views_with_prefix, generate_graph_tables, generate_local_ddl,
+    generate_statistics_ddl, generate_statistics_ddl_with_prefix,
+};
 
 fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
     match path {
@@ -14,8 +20,8 @@ fn load_ontology(path: Option<&PathBuf>) -> Result<Ontology> {
 /// Reference DDL emitted to `config/graph.sql` always assumes a local `default`
 /// ClickHouse user; the indexer substitutes the deployment's configured
 /// credentials at migration time.
-fn local_dictionary_source() -> query_engine::compiler::DictionarySource<'static> {
-    query_engine::compiler::DictionarySource {
+fn local_dictionary_source() -> DictionarySource<'static> {
+    DictionarySource {
         database: "default",
         user: "default",
         password: None,
@@ -29,7 +35,7 @@ pub fn run_remote(
 ) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
 
-    let tables = query_engine::compiler::generate_graph_tables(&ont);
+    let tables = generate_graph_tables(&ont);
     let mut generated: Vec<String> = tables
         .iter()
         .map(|t| {
@@ -38,11 +44,11 @@ pub fn run_remote(
             } else {
                 t.clone().with_prefix(&prefix)
             };
-            format!("{};\n", query_engine::compiler::emit_create_table(&t))
+            format!("{};\n", emit_create_table(&t))
         })
         .collect();
 
-    let dicts = query_engine::compiler::generate_graph_dictionaries(&ont);
+    let dicts = generate_graph_dictionaries(&ont);
     generated.extend(dicts.iter().map(|d| {
         let d = if prefix.is_empty() {
             d.clone()
@@ -51,44 +57,35 @@ pub fn run_remote(
         };
         format!(
             "{};\n",
-            query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
+            emit_create_dictionary(&d, &local_dictionary_source())
         )
     }));
 
     let views = if prefix.is_empty() {
-        query_engine::compiler::generate_graph_materialized_views(&ont)
+        generate_graph_materialized_views(&ont)
     } else {
-        query_engine::compiler::generate_graph_materialized_views_with_prefix(&ont, &prefix)
+        generate_graph_materialized_views_with_prefix(&ont, &prefix)
     };
     for mv in &views {
-        generated.push(format!(
-            "{};\n",
-            query_engine::compiler::emit_create_materialized_view(mv)
-        ));
+        generated.push(format!("{};\n", emit_create_materialized_view(mv)));
     }
 
     let stats = if prefix.is_empty() {
-        query_engine::compiler::generate_statistics_ddl(&ont)
+        generate_statistics_ddl(&ont)
     } else {
-        query_engine::compiler::generate_statistics_ddl_with_prefix(&ont, &prefix)
+        generate_statistics_ddl_with_prefix(&ont, &prefix)
     };
     if let Some(stats) = stats {
         for t in &stats.tables {
-            generated.push(format!(
-                "{};\n",
-                query_engine::compiler::emit_create_table(t)
-            ));
+            generated.push(format!("{};\n", emit_create_table(t)));
         }
         for mv in &stats.views {
-            generated.push(format!(
-                "{};\n",
-                query_engine::compiler::emit_create_materialized_view(mv)
-            ));
+            generated.push(format!("{};\n", emit_create_materialized_view(mv)));
         }
         for d in &stats.dictionaries {
             generated.push(format!(
                 "{};\n",
-                query_engine::compiler::emit_create_dictionary(d, &local_dictionary_source())
+                emit_create_dictionary(d, &local_dictionary_source())
             ));
         }
     }
@@ -127,10 +124,7 @@ CREATE TABLE IF NOT EXISTS _orbit_manifest (
 
 pub fn run_local(ontology_path: Option<PathBuf>) -> Result<()> {
     let ont = load_ontology(ontology_path.as_ref())?;
-    print!(
-        "{}",
-        query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL)
-    );
+    print!("{}", generate_local_ddl(&ont, MANIFEST_DDL));
     Ok(())
 }
 
@@ -291,16 +285,16 @@ mod tests {
     #[test]
     fn remote_ddl_contains_create_table() {
         let ont = ontology::Ontology::load_embedded().unwrap();
-        let tables = query_engine::compiler::generate_graph_tables(&ont);
+        let tables = generate_graph_tables(&ont);
         assert!(!tables.is_empty());
-        let sql = query_engine::compiler::emit_create_table(&tables[0]);
+        let sql = emit_create_table(&tables[0]);
         assert!(sql.contains("CREATE TABLE"));
     }
 
     #[test]
     fn local_ddl_contains_create_table_and_manifest() {
         let ont = ontology::Ontology::load_embedded().unwrap();
-        let ddl = query_engine::compiler::generate_local_ddl(&ont, MANIFEST_DDL);
+        let ddl = generate_local_ddl(&ont, MANIFEST_DDL);
         assert!(ddl.contains("CREATE TABLE"));
         assert!(ddl.contains("_orbit_manifest"));
         assert!(ddl.contains("SCHEMA_VERSION="));
