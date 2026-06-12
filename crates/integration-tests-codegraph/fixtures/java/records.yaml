@@ -1,10 +1,15 @@
-name: "Java 14+ records — definitions, constructors, methods, interface implementation, nesting"
+name: "Java 14+ records — definitions, members, call resolution, and pattern matching"
 
 # Gaps confirmed by this fixture — tracked in #846, do not expand this issue to fix them:
 #   - compact_constructor_declaration has no scope rule → compact constructors not indexed.
 #     Follow-up: add scope("compact_constructor_declaration", "Constructor") to java.rs.
 #   - Implicit accessor methods generated from record components (e.g. x(), y()) are
 #     compiler-synthesised and absent from the source AST → not indexed.
+# Additional gap tracked in #851:
+#   - Java 21 record patterns (record_pattern nodes) produce no edges at all:
+#     neither the type reference (instanceof Point(int x, int y)) nor accessor
+#     calls for destructured components. Accessor-call emission for destructured
+#     components additionally depends on implicit accessors existing (#846).
 
 fixtures:
   - path: com/example/records/Measurable.java
@@ -22,6 +27,20 @@ fixtures:
       /** Simple record — no explicit constructor or methods. */
       public record Point(int x, int y) {}
 
+  - path: com/example/records/PointUser.java
+    content: |
+      package com.example.records;
+
+      /** Calls into a record: constructor and implicit accessors. */
+      public class PointUser {
+          public Point origin() {
+              return new Point(0, 0);
+          }
+          public String describe(Point p) {
+              return p.x() + "," + p.y();
+          }
+      }
+
   - path: com/example/records/Range.java
     content: |
       package com.example.records;
@@ -38,6 +57,28 @@ fixtures:
 
           public int length() {
               return end - start;
+          }
+      }
+
+  - path: com/example/records/RangeUser.java
+    content: |
+      package com.example.records;
+
+      /** Cross-file call to an explicit record method. */
+      public class RangeUser {
+          public int span(Range r) {
+              return r.length();
+          }
+      }
+
+  - path: com/example/records/Bounds.java
+    content: |
+      package com.example.records;
+
+      /** Record with a compact canonical constructor. */
+      public record Bounds(int lo, int hi) {
+          public Bounds {
+              if (lo > hi) throw new IllegalArgumentException("lo must be <= hi");
           }
       }
 
@@ -60,6 +101,126 @@ fixtures:
       /** Generic record with a nested record. */
       public record Pair<A, B>(A first, B second) {
           public record Swap<A, B>(B first, A second) {}
+      }
+
+  - path: com/example/records/Shape.java
+    content: |
+      package com.example.records;
+
+      public sealed interface Shape permits Circle, Rectangle {}
+
+  - path: com/example/records/Circle.java
+    content: |
+      package com.example.records;
+
+      public record Circle(int radius) implements Shape {}
+
+  - path: com/example/records/Rectangle.java
+    content: |
+      package com.example.records;
+
+      public record Rectangle(int width, int height) implements Shape {}
+
+  - path: com/example/records/ShapeUser.java
+    content: |
+      package com.example.records;
+
+      /** Java 16 instanceof type patterns binding record-typed variables. */
+      public class ShapeUser {
+          public void create() {
+              Circle c = new Circle(5);
+              Rectangle r = new Rectangle(3, 4);
+          }
+          public double area(Shape s) {
+              if (s instanceof Circle c) return Math.PI * c.radius() * c.radius();
+              if (s instanceof Rectangle r) return r.width() * r.height();
+              return 0.0;
+          }
+      }
+
+  - path: com/example/records/Outer.java
+    content: |
+      package com.example.records;
+
+      /** Record nested inside a class, with calls to its constructor and method. */
+      public class Outer {
+          public record Inner(int value) {
+              public int doubled() {
+                  return value * 2;
+              }
+          }
+          public Inner make(int v) {
+              return new Inner(v);
+          }
+          public int use(Inner i) {
+              return i.doubled();
+          }
+      }
+
+  - path: com/example/records/Wrapped.java
+    content: |
+      package com.example.records;
+
+      /** Record with an explicit accessor override and Object-method overrides. */
+      public record Wrapped(int raw) {
+          public int raw() {
+              return raw < 0 ? 0 : raw;
+          }
+
+          @Override
+          public String toString() {
+              return "Wrapped(" + raw + ")";
+          }
+
+          @Override
+          public boolean equals(Object o) {
+              return o instanceof Wrapped w && w.raw == raw;
+          }
+      }
+
+  - path: com/example/records/WrappedUser.java
+    content: |
+      package com.example.records;
+
+      /** Calls that must resolve to the explicit overrides in Wrapped. */
+      public class WrappedUser {
+          public int read(Wrapped w) {
+              return w.raw();
+          }
+          public String print(Wrapped w) {
+              return w.toString();
+          }
+          public boolean same(Wrapped a, Wrapped b) {
+              return a.equals(b);
+          }
+      }
+
+  - path: com/example/records/PatternMatcher.java
+    content: |
+      package com.example.records;
+
+      /** Java 21 record pattern in instanceof. */
+      public class PatternMatcher {
+          public String describe(Object obj) {
+              if (obj instanceof Point(int x, int y)) {
+                  return x + "," + y;
+              }
+              return "unknown";
+          }
+      }
+
+  - path: com/example/records/SwitchMatcher.java
+    content: |
+      package com.example.records;
+
+      /** Java 21 record patterns in switch. */
+      public class SwitchMatcher {
+          public double area(Shape s) {
+              return switch (s) {
+                  case Circle(int r) -> Math.PI * r * r;
+                  case Rectangle(int w, int h) -> w * h;
+              };
+          }
       }
 
 tests:
@@ -92,7 +253,7 @@ tests:
       - { row_count: 1 }
       - { row: { type: "Record" } }
 
-  - name: "All five records (four top-level plus nested Swap) are indexed"
+  - name: "All ten records (eight top-level plus nested Swap and Inner) are indexed"
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Record'
@@ -100,7 +261,7 @@ tests:
       RETURN d.fqn AS fqn
       ORDER BY d.fqn
     assert:
-      - { row_count: 5 }
+      - { row_count: 10 }
       - { match: { field: fqn, pattern: "com.example.records.*" } }
 
   # ── Constructor ───────────────────────────────────────────────────
@@ -189,3 +350,250 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
+
+  # ── Call resolution into records ──────────────────────────────────
+
+  - name: "PointUser.origin() calls Point constructor"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PointUser.origin'
+        AND callee.fqn = 'com.example.records.Point'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      # Two edges: the Point return-type reference and the new Point(...) call.
+      - { row_count: 2 }
+
+  - name: "RangeUser.span() calls explicit record method Range.length"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.RangeUser.span'
+        AND callee.fqn = 'com.example.records.Range.length'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Records Circle and Rectangle extend sealed interface Shape"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE parent.fqn = 'com.example.records.Shape' AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+      ORDER BY child
+    assert:
+      - { row_count: 2 }
+      - { row: { child: "com.example.records.Circle" } }
+      - { row: { child: "com.example.records.Rectangle" } }
+
+  - name: "ShapeUser.create() calls Circle and Rectangle constructors"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.ShapeUser.create'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "Circle" } }
+      - { row: { callee: "Rectangle" } }
+
+  - name: "ShapeUser.area() instanceof type patterns emit Circle and Rectangle type references"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.ShapeUser.area'
+        AND e.edge_kind = 'Calls'
+        AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+
+  - name: "Outer.make() calls nested record Inner constructor"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.Outer.make'
+        AND callee.fqn = 'com.example.records.Outer.Inner'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      # Two edges: the Inner return-type reference and the new Inner(...) call.
+      - { row_count: 2 }
+
+  - name: "Outer.use() calls nested record method Inner.doubled"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.Outer.use'
+        AND callee.fqn = 'com.example.records.Outer.Inner.doubled'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── Explicit overrides of implicit members ────────────────────────
+
+  - name: "Explicit accessor override is a single Method definition"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Wrapped' AND m.name = 'raw'
+        AND m.definition_type = 'Method'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Explicit toString and equals overrides are single Method definitions"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Wrapped'
+        AND m.name IN ['toString', 'equals']
+        AND m.definition_type = 'Method'
+      RETURN m.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "equals" } }
+      - { row: { name: "toString" } }
+
+  - name: "WrappedUser.read() calls explicitly overridden accessor Wrapped.raw"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.WrappedUser.read'
+        AND callee.fqn = 'com.example.records.Wrapped.raw'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee, callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      # Pinning the line ensures the call resolves to the explicit override,
+      # not an implicit definition, once implicit accessors are synthesised.
+      - { row: { line: 5 } }
+
+  - name: "WrappedUser.print() calls explicitly overridden Wrapped.toString"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.WrappedUser.print'
+        AND callee.fqn = 'com.example.records.Wrapped.toString'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee, callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      # Line 9 is the @Override annotation: an annotated method's range starts
+      # at its annotation, not its signature.
+      - { row: { line: 9 } }
+
+  - name: "WrappedUser.same() calls explicitly overridden Wrapped.equals"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.WrappedUser.same'
+        AND callee.fqn = 'com.example.records.Wrapped.equals'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee, callee.start_line AS line
+    assert:
+      - { row_count: 1 }
+      - { row: { line: 14 } }
+
+  # ── Gaps (severity: warning — see header comment) ─────────────────
+
+  - name: "GAP: Point accessor methods defined"
+    severity: warning
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Point'
+        AND m.definition_type = 'Method'
+      RETURN m.name AS name
+      ORDER BY name
+    assert:
+      - { row: { name: "x" } }
+      - { row: { name: "y" } }
+
+  - name: "GAP: implicit equals/hashCode/toString defined on Point"
+    severity: warning
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Point'
+        AND m.name IN ['equals', 'hashCode', 'toString']
+      RETURN m.name AS name
+      ORDER BY name
+    assert:
+      - { row: { name: "equals" } }
+      - { row: { name: "hashCode" } }
+      - { row: { name: "toString" } }
+
+  - name: "GAP: PointUser.describe() calls Point.x and Point.y accessors"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PointUser.describe'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "x" } }
+      - { row: { callee: "y" } }
+
+  - name: "GAP: ShapeUser.area() accessor calls on instanceof-bound variables"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.ShapeUser.area'
+        AND e.edge_kind = 'Calls'
+        AND callee.name IN ['radius', 'width', 'height']
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "height" } }
+      - { row: { callee: "radius" } }
+      - { row: { callee: "width" } }
+
+  - name: "GAP: Bounds compact constructor is extracted"
+    severity: warning
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.fqn = 'com.example.records.Bounds' AND m.name = 'Bounds'
+        AND m.definition_type IN ['Constructor', 'Method']
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "GAP: instanceof record pattern emits Point type reference"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PatternMatcher.describe'
+        AND callee.fqn = 'com.example.records.Point'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "GAP: instanceof record pattern destructuring emits Point.x and Point.y accessor calls"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.PatternMatcher.describe'
+        AND e.edge_kind = 'Calls' AND callee.name IN ['x', 'y']
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "x" } }
+      - { row: { callee: "y" } }
+
+  - name: "GAP: switch record patterns emit Circle and Rectangle type references"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.SwitchMatcher.area'
+        AND callee.fqn IN ['com.example.records.Circle', 'com.example.records.Rectangle']
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+
+  - name: "GAP: switch record pattern destructuring emits accessor calls"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.records.SwitchMatcher.area'
+        AND e.edge_kind = 'Calls' AND callee.name IN ['radius', 'width', 'height']
+      RETURN callee.name AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "height" } }
+      - { row: { callee: "radius" } }
+      - { row: { callee: "width" } }
