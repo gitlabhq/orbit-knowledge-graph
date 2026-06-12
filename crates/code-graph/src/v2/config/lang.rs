@@ -217,6 +217,13 @@ define_languages! {
         separator: "\\",
         names: ["php"],
     },
+    Hcl => {
+        support_lang: Hcl,
+        extensions: ["tf", "tfvars"],
+        exclude: [],
+        separator: ".",
+        names: ["hcl", "terraform"],
+    },
 }
 
 #[cfg(test)]

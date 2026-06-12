@@ -182,6 +182,22 @@ repos:
     commit_sha: 251df518d73abb5c5d573c4d5d266a3edae9ca5a
     groups: [rust]
 
+  # Terraform / HCL (canonical terraform-aws-modules: multi-file modules with
+  # heavy cross-file var/local/resource references)
+  - name: terraform-aws-vpc
+    source: github
+    project: terraform-aws-modules/terraform-aws-vpc
+    version: v6.6.1
+    commit_sha: 3ffbd46fb1c7733e1b34d8666893280454e27436
+    groups: [terraform]
+
+  - name: terraform-aws-eks
+    source: github
+    project: terraform-aws-modules/terraform-aws-eks
+    version: v21.23.0
+    commit_sha: 5a267ec4264cdeb529512901119223889463703f
+    groups: [terraform]
+
 scenarios:
   hyperfine:
     - id: v2
