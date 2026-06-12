@@ -229,29 +229,17 @@ settings:
     - {node: WorkItem, property: state}
     - {node: WorkItem, property: work_item_type, as: wi_type}
     - {node: WorkItem, property: confidential}
-  statistics:
-    stats_table: gkg_column_stats
-    histogram_table: gkg_histogram_stats
-    token_table: gkg_token_stats
-    dictionary: gkg_column_stats_dict
-    lifetime: {min: 120, max: 300}
-    histogram_buckets: 16
-    top_k_tokens: 100
-    # Stats are partitioned by this column for namespace-level granularity.
-    # Entities without this column (User, Runner) use an empty partition
-    # key for global stats. Total row count per entity comes from the
-    # histogram table's id column.
-    partition_key: traversal_path
-    # All filterable properties on all entities are auto-tracked.
-    # Categorization is derived from property types:
-    #   boolean / enum / selectivity:low  →  stats_table  (value frequencies)
-    #   string                            →  token_table  (token frequencies)
-    #   int64 / timestamp / date / float  →  histogram_table (equi-depth buckets)
-    #   uuid                              →  skipped (selectivity = 1/row_count)
-    #   filterable: false / virtual        →  skipped
-    # Use exclude to skip noisy or irrelevant columns.
-    exclude:
-      - {node: Note, columns: [st_diff]}
+  # statistics:
+  #   stats_table: gkg_column_stats
+  #   histogram_table: gkg_histogram_stats
+  #   token_table: gkg_token_stats
+  #   dictionary: gkg_column_stats_dict
+  #   lifetime: {min: 120, max: 300}
+  #   histogram_buckets: 16
+  #   top_k_tokens: 100
+  #   partition_key: traversal_path
+  #   exclude:
+  #     - {node: Note, columns: [st_diff]}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User, Runner]
   local_db:
