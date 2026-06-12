@@ -35,6 +35,10 @@ use crate::schema::version::{
     read_all_versions, read_migrating_version, table_prefix,
 };
 
+/// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
+/// need cross-replica propagation (e.g. `SYSTEM STOP MERGES`).
+const CLICKHOUSE_CLUSTER: &str = "default";
+
 /// NATS KV key used to serialize migration-completion checks across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 
@@ -494,7 +498,6 @@ impl MigrationCompletionChecker {
     ///
     /// `SYSTEM STOP MERGES` is node-local runtime state (unlike DDL which
     /// auto-replicates), so it is issued `ON CLUSTER` to reach every replica.
-    /// Cluster name `'default'` matches ClickHouse Cloud convention.
     async fn stop_merges_for_version(&self, version: u32) {
         let prefix = table_prefix(version);
         let db = self.graph.database();
@@ -504,7 +507,7 @@ impl MigrationCompletionChecker {
             let _ = self
                 .graph
                 .execute(&format!(
-                    "SYSTEM STOP MERGES ON CLUSTER 'default' {qualified}"
+                    "SYSTEM STOP MERGES ON CLUSTER '{CLICKHOUSE_CLUSTER}' {qualified}"
                 ))
                 .await
                 .inspect_err(
