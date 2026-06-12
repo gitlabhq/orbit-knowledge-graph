@@ -88,7 +88,7 @@ pub fn run_remote(
         for d in &stats.dictionaries {
             generated.push(format!(
                 "{};\n",
-                query_engine::compiler::emit_create_dictionary(&d, &local_dictionary_source())
+                query_engine::compiler::emit_create_dictionary(d, &local_dictionary_source())
             ));
         }
     }
