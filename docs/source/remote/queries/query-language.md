@@ -10,13 +10,14 @@ title: Orbit query language
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experiment
+- Status: Beta
 
 {{< /details >}}
 
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 
 {{< /history >}}
 
@@ -28,6 +29,35 @@ title: Orbit query language
 Use the Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
+
+## Request envelope
+
+When submitting a query via the REST API or `glab orbit remote query`, wrap the
+query object in a top-level `query` field:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "node_ids": [12345],
+      "columns": ["iid", "title", "state"]
+    },
+    "limit": 1
+  },
+  "response_format": "raw"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `query` | Yes | The query object documented below. |
+| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+
+The `orbit query` CLI (for local graphs) takes the raw query body **without**
+the envelope.
 
 ## Query shape
 
@@ -161,6 +191,39 @@ Or they can use an operator:
 
 Token operators work only on properties with text indexes.
 
+### Text-indexed properties
+
+The following properties support `token_match`, `all_tokens`, and `any_tokens`.
+Using these operators on other properties falls back to a full string scan, which is slower.
+
+| Entity | Text-indexed properties |
+|--------|------------------------|
+| `Branch` | `name` |
+| `Definition` | `file_path`, `fqn`, `name` |
+| `Deployment` | `ref` |
+| `Directory` | `name`, `path` |
+| `Environment` | `environment_type`, `name` |
+| `File` | `name`, `path` |
+| `Finding` | `name` |
+| `Group` | `description`, `name` |
+| `ImportedSymbol` | `file_path`, `import_path` |
+| `Job` | `name`, `ref` |
+| `Label` | `description`, `title` |
+| `MergeRequest` | `description`, `source_branch`, `target_branch`, `title` |
+| `MergeRequestDiffFile` | `new_path`, `old_path` |
+| `Milestone` | `description`, `title` |
+| `Note` | `note` |
+| `Pipeline` | `ref` |
+| `Project` | `description`, `name` |
+| `Runner` | `name` |
+| `Stage` | `name` |
+| `User` | `name`, `username` |
+| `Vulnerability` | `description`, `title` |
+| `VulnerabilityIdentifier` | `external_id`, `external_type`, `name` |
+| `VulnerabilityOccurrence` | `name` |
+| `VulnerabilityScanner` | `external_id`, `name` |
+| `WorkItem` | `description`, `title` |
+
 ## Columns and virtual columns
 
 Most columns come from indexed graph tables in ClickHouse. Some columns are
@@ -271,7 +334,7 @@ Find merged merge requests in a project:
     {
       "id": "project",
       "entity": "Project",
-      "filters": {"full_path": "gitlab-org/gitlab"},
+      "filters": {"full_path": "your-group/your-project"},
       "columns": ["name", "full_path"]
     },
     {
@@ -338,6 +401,19 @@ Aggregation queries use `aggregations`.
 | `property` | `string` | Property to aggregate. Required for `sum`, `avg`, `min`, and `max`. |
 | `alias` | `string` | Name of the output column. |
 
+Property type support depends on the function:
+
+| Function | Requires `property` | Supported property types |
+|----------|---------------------|--------------------------|
+| `count` | No | N/A |
+| `sum` | Yes | Numeric only |
+| `avg` | Yes | Numeric only |
+| `min` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+| `max` | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+
+`sum` and `avg` reject `DateTime` properties with a validation error. To
+aggregate over dates, use `min` or `max`.
+
 Use top-level `group_by` to group aggregation rows. It applies to every
 aggregation in the query. Do not put grouping inside an individual aggregation.
 
@@ -366,7 +442,7 @@ Count merged merge requests per project:
     {
       "id": "project",
       "entity": "Project",
-      "filters": {"full_path": "gitlab-org/gitlab"}
+      "filters": {"full_path": "your-group/your-project"}
     },
     {
       "id": "mr",

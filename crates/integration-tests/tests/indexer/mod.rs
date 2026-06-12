@@ -9,4 +9,5 @@ mod nats;
 mod nats_tls;
 mod schema;
 mod sdlc;
+mod stale_edge_reconciliation;
 mod table_cleanup;

@@ -1,0 +1,31 @@
+# The checkpoint row makes the second run incremental, so only the renamed
+# route (replicated after the watermark) is re-read.
+description: A route rename on an incremental run updates the group full_path
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: old-name }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: old-name, namespace_id: 100, traversal_path: "1/100/" }
+    expect:
+      nodes:
+        gl_group:
+          rows:
+            - { id: 100, full_path: old-name }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Group, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null" }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: renamed-group, namespace_id: 100, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+      siphon_namespaces:
+        - { id: 100, name: renamed-group, path: renamed-group, type: Group, visibility_level: 0, traversal_ids: [1, 100], _siphon_replicated_at: "2024-01-20 18:00:00" }
+      siphon_namespace_details:
+        - { namespace_id: 100, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_group:
+          rows:
+            - { id: 100, full_path: renamed-group }

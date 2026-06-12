@@ -76,6 +76,7 @@ impl CheckpointStore for MockCheckpointStore {
         &self,
         _key: &str,
         _watermark: &chrono::DateTime<chrono::Utc>,
+        _durability: crate::checkpoint::WriteDurability,
     ) -> Result<(), CheckpointError> {
         Ok(())
     }

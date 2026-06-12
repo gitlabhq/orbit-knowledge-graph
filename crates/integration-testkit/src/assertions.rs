@@ -10,7 +10,7 @@ static ONTOLOGY: LazyLock<ontology::Ontology> =
     LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
 
 /// Returns the prefixed edge table name for the given relationship kind.
-fn edge_table(relationship_kind: &str) -> String {
+pub(crate) fn edge_table(relationship_kind: &str) -> String {
     t(ONTOLOGY.edge_table_for_relationship(relationship_kind))
 }
 

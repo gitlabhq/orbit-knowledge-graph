@@ -1,0 +1,114 @@
+name: "Ruby: lambda and Proc assignments as named definitions — gitlab-org/orbit/knowledge-graph#715"
+
+# Assignments whose RHS constructs a callable are indexed as `Lambda`
+# definitions keyed on the LHS name, so queries can enumerate callable
+# constants ("what callable constants exist?") and resolve references to
+# them, instead of seeing an opaque `Constant`. Covers all four Ruby
+# callable forms — stabby `->`, `lambda {}`, `proc {}`, `Proc.new {}` —
+# plus a lowercase-identifier LHS. A plain value constant and an ordinary
+# `.new` constructor must NOT be reclassified.
+
+fixtures:
+  - path: lib/callables.rb
+    content: |
+      TRIPLE = ->(x) { x * 3 }
+      DOUBLE = lambda { |x| x * 2 }
+      VALIDATE_EMAIL = proc { |email| email.include?('@') }
+      MAKER = Proc.new { |x| x }
+      handler = ->(req) { req.status }
+
+      MAX_RETRIES = 3
+      BUILDER = Widget.new
+
+  - path: lib/middleware.rb
+    content: |
+      class Middleware
+        AUTH = ->(env) { env[:user] }
+
+        def initialize
+          @auth = AUTH
+        end
+      end
+
+tests:
+  - name: "stabby lambda constant is a Lambda definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'TRIPLE'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
+
+  - name: "all four callable forms are emitted as Lambda definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'lib/callables.rb'
+        AND d.definition_type = 'Lambda'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 5 }
+      - { row: { name: "TRIPLE" } }
+      - { row: { name: "DOUBLE" } }
+      - { row: { name: "VALIDATE_EMAIL" } }
+      - { row: { name: "MAKER" } }
+      - { row: { name: "handler" } }
+
+  - name: "a lowercase-identifier lambda is captured too"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'handler'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
+
+  - name: "a nested callable constant carries its enclosing class FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'AUTH'
+      RETURN d.fqn AS fqn, d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "Middleware::AUTH", dt: "Lambda" } }
+
+  - name: "a plain value constant stays a Constant"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'MAX_RETRIES'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Constant" } }
+
+  - name: "an ordinary .new constructor stays a Constant"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'BUILDER'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Constant" } }
+
+  - name: "callable constants are not double-emitted as Constants"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Constant'
+        AND (d.name = 'TRIPLE' OR d.name = 'DOUBLE' OR d.name = 'VALIDATE_EMAIL'
+             OR d.name = 'MAKER' OR d.name = 'AUTH' OR d.name = 'handler')
+      RETURN count(*) AS n
+    assert:
+      - { row: { n: 0 } }
+
+  # Mirrors the proven same-class ImplicitMember resolution in
+  # top_level_constants.yaml: a bare `AUTH` reference inside `initialize`
+  # resolves to the enclosing class's callable constant.
+  - name: "a reference to a callable constant resolves to its Lambda definition"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Middleware::initialize'
+        AND callee.fqn = 'Middleware::AUTH'
+      RETURN callee.definition_type AS dt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda", kind: "Calls" } }

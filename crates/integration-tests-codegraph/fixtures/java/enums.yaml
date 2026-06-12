@@ -1,0 +1,143 @@
+name: "Java enums — constants, constructor, fields, methods, interface implementation"
+
+# Coverage note: java.rs maps enum_declaration to definition_type "Enum"
+# (scope("enum_declaration", "Enum")) and enum_constant to "EnumConstant"
+# (scope("enum_constant", "EnumConstant").no_scope()). Before this fixture only
+# e2e_weather_app.yaml touched an enum incidentally; there was no focused
+# exercise of enum constants, enum constructors, enum instance methods, or an
+# enum implementing an interface.
+#
+# Known gap (not asserted here): the compiler-synthesised enum members values(),
+# valueOf(), and ordinal() are not present in the source AST, so they are not
+# indexed — only members written in source are extracted. This mirrors the
+# synthesised-accessor gap documented in fixtures/java/records.yaml (#846).
+
+fixtures:
+  - path: com/example/enums/Describable.java
+    content: |
+      package com.example.enums;
+
+      public interface Describable {
+          String describe();
+      }
+
+  - path: com/example/enums/Planet.java
+    content: |
+      package com.example.enums;
+
+      public enum Planet implements Describable {
+          MERCURY(3.303e+23, 2.4397e6),
+          EARTH(5.976e+24, 6.37814e6);
+
+          private final double mass;
+          private final double radius;
+
+          Planet(double mass, double radius) {
+              this.mass = mass;
+              this.radius = radius;
+          }
+
+          public double surfaceGravity() {
+              return 6.67300E-11 * mass / (radius * radius);
+          }
+
+          @Override
+          public String describe() {
+              return name() + " (g=" + surfaceGravity() + ")";
+          }
+      }
+
+tests:
+  - name: "Enum Planet is extracted as definition_type Enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.enums.Planet'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Planet", type: "Enum" } }
+
+  - name: "Enum constants are extracted as EnumConstant definitions"
+    query: |
+      MATCH (e:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      WHERE e.fqn = 'com.example.enums.Planet'
+        AND c.definition_type = 'EnumConstant'
+      RETURN c.name AS name
+      ORDER BY c.name
+    assert:
+      - { row_count: 2 }
+      - { unique: name }
+      - { row: { name: "EARTH" } }
+      - { row: { name: "MERCURY" } }
+
+  - name: "Enum constructor is extracted"
+    query: |
+      MATCH (e:Definition)-[:DefinitionToDefinition]->(c:Definition)
+      WHERE e.fqn = 'com.example.enums.Planet'
+        AND c.definition_type = 'Constructor'
+      RETURN c.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Planet" } }
+
+  - name: "Enum instance method surfaceGravity() is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.enums.Planet.surfaceGravity'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "Interface method override describe() in the enum is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.enums.Planet.describe'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "Enum defines its instance method via a Defines edge"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      WHERE e.fqn = 'com.example.enums.Planet'
+        AND m.fqn = 'com.example.enums.Planet.surfaceGravity'
+        AND edge.edge_kind = 'Defines'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Enum defines its constants via Defines edges"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(c:Definition)
+      WHERE e.fqn = 'com.example.enums.Planet'
+        AND c.definition_type = 'EnumConstant'
+        AND edge.edge_kind = 'Defines'
+      RETURN c.name AS name
+      ORDER BY c.name
+    assert:
+      - { row_count: 2 }
+      - { unique: name }
+      - { row: { name: "EARTH" } }
+      - { row: { name: "MERCURY" } }
+
+  - name: "Enum Planet has an Extends edge to the Describable interface"
+    query: |
+      MATCH (e:Definition)-[r:DefinitionToDefinition]->(i:Definition)
+      WHERE e.fqn = 'com.example.enums.Planet'
+        AND i.fqn = 'com.example.enums.Describable'
+        AND r.edge_kind = 'Extends'
+      RETURN i.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines the enum"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'com/example/enums/Planet.java'
+        AND d.fqn = 'com.example.enums.Planet'
+        AND e.edge_kind = 'Defines'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }

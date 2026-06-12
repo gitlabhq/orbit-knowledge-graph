@@ -1,0 +1,580 @@
+# Time-bucket aggregation corpus.
+#
+# Aggregations grouped by a truncated temporal column.
+# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
+# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+#
+# Absolute date filters (e.g. "2026-03-01T00:00:00Z") are intentional fixed
+# historical windows: the graph is append-only, so these windows keep matching
+# rows over time and stay reproducible. Roll them forward only if you want the
+# window to track "recent" activity.
+
+01_jobs_failed_per_month:
+  desc: "Jobs failed per month"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": "failed",
+            "finished_at": {
+              "op": "gte",
+              "value": "2026-03-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "month"
+          },
+          "alias": "month"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "failure_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "month",
+        "direction": "ASC"
+      },
+      "limit": 12
+    }
+
+02_mrs_merged_per_quarter:
+  desc: "Mrs merged per quarter"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged",
+            "merged_at": {
+              "op": "gte",
+              "value": "2026-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "mr",
+          "property": "merged_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "quarter"
+          },
+          "alias": "quarter"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "merge_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "quarter",
+        "direction": "ASC"
+      },
+      "limit": 12
+    }
+
+03_pipelines_per_year:
+  desc: "Pipelines per year"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Pipeline",
+          "filters": {
+            "started_at": {
+              "op": "gte",
+              "value": "2024-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "p",
+          "property": "started_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "year"
+          },
+          "alias": "year"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "p",
+          "alias": "pipeline_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "year",
+        "direction": "ASC"
+      },
+      "limit": 10
+    }
+
+04_jobs_per_week_last_month:
+  desc: "Jobs per week last month"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "finished_at": {
+              "op": "gte",
+              "value": "2026-04-15T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "week"
+          },
+          "alias": "week"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "week",
+        "direction": "ASC"
+      },
+      "limit": 10
+    }
+
+05_jobs_failed_per_day_three_weeks:
+  desc: "Jobs failed per day three weeks"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": "failed",
+            "finished_at": {
+              "op": "gte",
+              "value": "2026-04-25T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "day"
+          },
+          "alias": "day"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "failure_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "day",
+        "direction": "ASC"
+      },
+      "limit": 30
+    }
+
+06_pipelines_per_hour_with_property_filter:
+  desc: "Pipelines per hour with property filter"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Pipeline",
+          "filters": {
+            "started_at": {
+              "op": "gte",
+              "value": "2026-05-10T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "p",
+          "property": "started_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "hour"
+          },
+          "alias": "hour"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "p",
+          "alias": "pipeline_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "hour",
+        "direction": "ASC"
+      },
+      "limit": 50
+    }
+
+07_jobs_per_minute_with_node_ids:
+  desc: "Jobs per minute with node ids"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "node_ids": "$sample:10"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "minute"
+          },
+          "alias": "minute"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "minute",
+        "direction": "ASC"
+      },
+      "limit": 50
+    }
+
+08_mrs_per_month_by_project:
+  desc: "Mrs per month by project"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Project",
+          "columns": [
+            "name"
+          ]
+        },
+        {
+          "id": "mr",
+          "entity": "MergeRequest",
+          "filters": {
+            "state": "merged",
+            "merged_at": {
+              "op": "gte",
+              "value": "2026-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "type": "IN_PROJECT",
+          "from": "mr",
+          "to": "p"
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "node",
+          "node": "p"
+        },
+        {
+          "kind": "property",
+          "node": "mr",
+          "property": "merged_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "month"
+          },
+          "alias": "month"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "mr",
+          "alias": "merge_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "merge_count",
+        "direction": "DESC"
+      },
+      "limit": 30
+    }
+
+09_jobs_status_per_month:
+  desc: "Jobs status per month"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "finished_at": {
+              "op": "gte",
+              "value": "2026-03-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "status"
+        },
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "month"
+          },
+          "alias": "month"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "job_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "job_count",
+        "direction": "DESC"
+      },
+      "limit": 30
+    }
+
+10_workitems_opened_per_month:
+  desc: "Workitems opened per month"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "wi",
+          "entity": "WorkItem",
+          "filters": {
+            "state": "opened",
+            "created_at": {
+              "op": "gte",
+              "value": "2026-01-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "wi",
+          "property": "created_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "month"
+          },
+          "alias": "month"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "wi",
+          "alias": "opened_count"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "month",
+        "direction": "ASC"
+      },
+      "limit": 12
+    }
+
+11_pipeline_duration_sum_per_day:
+  desc: "Pipeline duration sum per day"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "p",
+          "entity": "Pipeline",
+          "filters": {
+            "started_at": {
+              "op": "gte",
+              "value": "2026-05-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "p",
+          "property": "started_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "day"
+          },
+          "alias": "day"
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "p",
+          "alias": "pipeline_count"
+        },
+        {
+          "function": "sum",
+          "target": "p",
+          "property": "duration",
+          "alias": "total_duration_secs"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "day",
+        "direction": "ASC"
+      },
+      "limit": 30
+    }
+
+12_truncate_without_alias_uses_default_name:
+  desc: "Truncate without alias uses default name"
+  category: time_series
+  suite: time_series
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {
+          "id": "j",
+          "entity": "Job",
+          "filters": {
+            "status": "failed",
+            "finished_at": {
+              "op": "gte",
+              "value": "2026-03-01T00:00:00Z"
+            }
+          }
+        }
+      ],
+      "group_by": [
+        {
+          "kind": "property",
+          "node": "j",
+          "property": "finished_at",
+          "transform": {
+            "kind": "truncate",
+            "unit": "month"
+          }
+        }
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "j",
+          "alias": "n"
+        }
+      ],
+      "aggregation_sort": {
+        "column": "finished_at_month",
+        "direction": "ASC"
+      },
+      "limit": 12
+    }
+

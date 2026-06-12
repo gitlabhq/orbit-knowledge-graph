@@ -1,7 +1,7 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
 
 pub mod aggregation;
-mod fk_star;
+mod fk;
 mod flat_chain;
 mod helpers;
 pub mod hydration;
@@ -20,7 +20,7 @@ impl Plan {
     pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
         match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
-            Strategy::FkStar { ref center } => fk_star::emit_fk_star(self, center),
+            Strategy::Fk(ref shape) => fk::emit_fk(self, shape),
             Strategy::Flat | Strategy::Bidirectional { .. } => flat_chain::emit_flat_chain(self),
         }
     }
@@ -77,7 +77,15 @@ pub fn emit(plan: &Plan, input: &Input) -> Result<Node> {
             direction,
             edge,
             has_non_denorm,
-        } => neighbors::emit_neighbors(plan, center, *direction, edge, *has_non_denorm),
+            center_tp_lookup,
+        } => neighbors::emit_neighbors(
+            plan,
+            center,
+            *direction,
+            edge,
+            *has_non_denorm,
+            center_tp_lookup.as_ref(),
+        ),
         PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, pf),
         PlanBody::Hydration(nodes) => {
             hydration::emit_hydration(nodes, plan.limit, input.hydration_dynamic)

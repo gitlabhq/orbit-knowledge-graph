@@ -1,0 +1,58 @@
+name: "Go: generic functions and types (Go 1.18+)"
+fixtures:
+  - path: generics.go
+    content: |
+      package main
+
+      func Map[T, U any](slice []T, fn func(T) U) []U {
+          result := make([]U, len(slice))
+          for i, v := range slice {
+              result[i] = fn(v)
+          }
+          return result
+      }
+
+      type Set[T comparable] struct {
+          items map[T]struct{}
+      }
+
+      func NewSet[T comparable]() *Set[T] {
+          return &Set[T]{items: make(map[T]struct{})}
+      }
+
+      func (s *Set[T]) Add(item T) {
+          s.items[item] = struct{}{}
+      }
+
+tests:
+  - name: "Generic function extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Map' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "Map" } }
+
+  - name: "Generic struct extracted as Struct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Set' AND d.definition_type = 'Struct'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "Set" } }
+
+  - name: "Constructor for generic type extracted as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'NewSet' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "NewSet" } }
+
+  - name: "Method on generic type extracted as Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Add' AND d.definition_type = 'Method'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "Add" } }

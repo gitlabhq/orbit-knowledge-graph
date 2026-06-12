@@ -11,6 +11,8 @@ Resource            gitlab.resource
 Resource            orbit.resource
 Resource            git.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Variables ***
 ${RUBY_FIXTURE_DIR}     /fixtures/ruby/weather-app

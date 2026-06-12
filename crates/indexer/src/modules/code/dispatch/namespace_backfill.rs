@@ -18,9 +18,11 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
+use const_format::concatcp;
 use gkg_server_config::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
 /// Project IDs that already have a checkpoint row under a given namespace's
 /// traversal-path scope. Used to filter the dispatch list down to projects
@@ -43,12 +45,15 @@ WHERE deleted = false
 /// `traversal_path` directly from the enabled namespaces table
 /// (gitlab-org/gitlab!232941) instead of joining `namespace_traversal_paths`
 /// per namespace.
-const ENABLED_NAMESPACES_QUERY: &str = r#"
-SELECT root_namespace_id, traversal_path
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = false
-  AND traversal_path != ''
-"#;
+const ENABLED_NAMESPACES_QUERY: &str = concatcp!(
+    "\
+\nSELECT root_namespace_id, traversal_path\n\
+FROM siphon_knowledge_graph_enabled_namespaces\n\
+WHERE ",
+    DEL,
+    " = false\n\
+  AND traversal_path != ''\n"
+);
 
 pub struct NamespaceCodeBackfillDispatcher {
     nats: Arc<dyn NatsServices>,

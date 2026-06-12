@@ -203,6 +203,26 @@ pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     }
 }
 
+// Match the indexer's stored token (`concat(key, ':', CAST(col AS VARCHAR))`):
+// bool renders `true`/`false`, number its decimal form. `as_str()` matches only
+// strings, so a boolean filter otherwise compiled to an unmatchable `key:`.
+fn tag_value_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => String::new(),
+    }
+}
+
+fn tag_value_opt(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => None,
+        other => Some(tag_value_string(other)),
+    }
+}
+
 /// Convert a denormalized tag filter into a ClickHouse expression.
 /// Returns `None` for unsupported filter ops.
 pub fn denorm_tag_expr(
@@ -213,7 +233,11 @@ pub fn denorm_tag_expr(
 ) -> Option<Expr> {
     match filter.op {
         None | Some(FilterOp::Eq) => {
-            let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            let val = filter
+                .value
+                .as_ref()
+                .map(tag_value_string)
+                .unwrap_or_default();
             Some(Expr::func(
                 "has",
                 vec![
@@ -226,7 +250,7 @@ pub fn denorm_tag_expr(
             let values = filter.value.as_ref().and_then(|v| v.as_array())?;
             let tags: Vec<String> = values
                 .iter()
-                .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
+                .filter_map(|v| tag_value_opt(v).map(|s| format!("{tag_key}:{s}")))
                 .collect();
             if tags.len() == 1 {
                 Some(Expr::func(
@@ -274,6 +298,34 @@ pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
             })
             .collect();
         TableRef::union_all(arms, alias)
+    }
+}
+
+/// Like `edge_table_scan` but pushes per-arm predicates into each UNION arm; returns predicates the caller must apply on the enclosing query (single-table case).
+pub fn edge_table_scan_filtered(
+    tables: &[String],
+    alias: &str,
+    arm_where: impl Fn(&str) -> Vec<Expr>,
+) -> (TableRef, Vec<Expr>) {
+    if tables.len() == 1 {
+        (TableRef::scan(&tables[0], alias), arm_where(alias))
+    } else {
+        let inner_alias = format!("_{alias}");
+        let mut common_cols: Vec<SelectExpr> = ontology::constants::EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|col| SelectExpr::col(&inner_alias, *col))
+            .collect();
+        common_cols.push(SelectExpr::col(&inner_alias, DELETED_COLUMN));
+        let arms: Vec<Query> = tables
+            .iter()
+            .map(|table| Query {
+                select: common_cols.clone(),
+                from: TableRef::scan(table, &inner_alias),
+                where_clause: Expr::conjoin(arm_where(&inner_alias)),
+                ..Default::default()
+            })
+            .collect();
+        (TableRef::union_all(arms, alias), Vec::new())
     }
 }
 

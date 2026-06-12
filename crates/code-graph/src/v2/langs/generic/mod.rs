@@ -1,6 +1,8 @@
+pub mod bash;
 pub mod c;
 pub mod cpp;
 pub mod csharp;
+pub mod elixir;
 pub mod go;
 pub mod hcl;
 pub mod java;

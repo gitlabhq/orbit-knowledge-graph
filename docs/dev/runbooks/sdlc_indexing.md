@@ -177,7 +177,7 @@ INSERT INTO `<gkg-database>`.checkpoint (key, watermark, cursor_values, _version
 VALUES ('ns.42.Project', '2026-01-01T00:00:00', '', now64(), false);
 ```
 
-The handler will extract rows where `_siphon_replicated_at` falls between the old watermark and the new one.
+The handler will extract rows where `_siphon_watermark` falls between the old watermark and the new one.
 
 ## Remove stuck messages from NATS
 

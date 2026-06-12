@@ -10,22 +10,32 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
 
+use const_format::formatcp;
+
 use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
-// Datalake tables (siphon_*) are never prefixed — only graph tables are.
-const IS_NAMESPACE_STILL_DELETED: &str = r#"
-SELECT argMax(_siphon_deleted, _siphon_replicated_at) AS is_deleted
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE root_namespace_id = {namespace_id:Int64}
-"#;
+const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
-const ENABLED_NAMESPACE_ROOTS_QUERY: &str = r#"
+// Datalake tables (siphon_*) are never prefixed — only graph tables are.
+// ClickHouse params (`{x:Type}`) are doubled to escape formatcp's braces.
+const IS_NAMESPACE_STILL_DELETED: &str = formatcp!(
+    "
+SELECT argMax({DEL}, {WM}) AS is_deleted
+FROM siphon_knowledge_graph_enabled_namespaces
+WHERE root_namespace_id = {{namespace_id:Int64}}
+"
+);
+
+const ENABLED_NAMESPACE_ROOTS_QUERY: &str = formatcp!(
+    "
 SELECT traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = false
+WHERE {DEL} = false
   AND traversal_path != ''
-"#;
+"
+);
 
 const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
 SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
@@ -38,17 +48,19 @@ WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 // Reads `traversal_path` directly from the enabled-namespaces table
 // (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
 // reconstructing the path with CONCAT.
-const DELETED_NAMESPACES_QUERY: &str = r#"
+const DELETED_NAMESPACES_QUERY: &str = formatcp!(
+    "
 SELECT
     root_namespace_id AS namespace_id,
     traversal_path,
-    toString(_siphon_replicated_at) AS deleted_at
+    toString({WM}) AS deleted_at
 FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = true
+WHERE {DEL} = true
   AND traversal_path != ''
-  AND _siphon_replicated_at > {last_watermark:String}
-  AND _siphon_replicated_at <= {watermark:String}
-"#;
+  AND {WM} > {{last_watermark:String}}
+  AND {WM} <= {{watermark:String}}
+"
+);
 
 fn mark_deletion_complete_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);

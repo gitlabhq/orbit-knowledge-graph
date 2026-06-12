@@ -1,0 +1,19 @@
+description: Deployments link to their environment via IN_ENVIRONMENT
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+  siphon_environments:
+    - { id: 7201, project_id: 1000, name: production, slug: production, state: available, tier: 0, traversal_path: "1/100/1000/" }
+  siphon_deployments:
+    - { id: 9201, iid: 1, project_id: 1000, environment_id: 7201, ref: main, tag: false, sha: aaa111, user_id: 1, deployable_type: CommitStatus, status: 2, traversal_path: "1/100/1000/" }
+    - { id: 9202, iid: 2, project_id: 1000, environment_id: 7201, ref: main, tag: false, sha: bbb222, user_id: 1, deployable_type: CommitStatus, status: 2, traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - { kind: IN_ENVIRONMENT, from: Deployment, to: Environment, traversal_path: "1/100/1000/", count: 2 }

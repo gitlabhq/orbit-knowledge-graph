@@ -158,6 +158,7 @@ CREATE TABLE knowledge_graph_enabled_namespaces (
     active BOOLEAN NOT NULL DEFAULT FALSE,
     last_indexed_at TIMESTAMP NULL,
     _siphon_replicated_at TIMESTAMP NULL,
+    _siphon_watermark TIMESTAMP NULL,
     _siphon_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     ...
 );
@@ -271,9 +272,9 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
 3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
-4. Stream each page out of the datalake in small Arrow blocks rather than collecting the whole page. ClickHouse's `max_block_size` is decoupled from the page `LIMIT`, so a page arrives as a sequence of bounded blocks. The page-level enrichment (CTEs, `argMax … GROUP BY`) still runs server-side over the full page; `max_block_size` only governs how the result is chunked on the wire. ClickHouse's Arrow output encodes `String` columns with 32-bit offsets, so a single block whose String column exceeds 2GB fails the page (error code 1002) — possible on wide-text rows (e.g. MR diffs) when the datalake server profile lets a block grow that large. The happy path pays nothing for this; on such a failure the page is retried with a smaller `max_block_size` and `preferred_block_size_bytes` pinned to byte-cap each block (see `Producer::extract_page`). The retry re-streams from the page's start cursor, which is idempotent (point 7).
-5. Transform each block independently in-memory with DataFusion SQL (a row-wise projection: mapping source columns to graph columns, resolving FK edges, applying type discriminators), then stream its rows into the destination. Extraction runs in its own task and reads ahead through a bounded channel, so the next page's query-open latency overlaps the current page's writes (the cross-page overlap the old whole-page prefetch provided) without holding more than a few blocks in memory.
-6. Each transform's output for a page flows into one streaming `INSERT` per page — the same write pattern as before. The destination's streaming writer flushes each batch into the open insert as it is produced, so the whole transformed page is never resident; peak memory is bounded by the read-ahead window (a few blocks), giving an ~88% peak reduction. The logical workload sent to ClickHouse is unchanged, though streaming interleaves reads and writes differently than the old collect-then-write, which is parity-or-faster on low-latency backends and can cost a little throughput on high-latency ones. The read-ahead window and block size are tunable per deployment via `engine.handlers.entity_handler.write_channel_capacity` (blocks buffered ahead of the writer) and `engine.handlers.entity_handler.stream_block_size` (rows per streamed block); raise both to trade peak memory for throughput on memory-generous deployments.
+4. Read each page out of the datalake in full, buffering its Arrow blocks in memory. ClickHouse's `max_block_size` only governs how the result is chunked on the wire; the page-level enrichment (CTEs, `argMax … GROUP BY`) runs server-side over the full page. ClickHouse's Arrow output encodes `String` columns with 32-bit offsets, so a single block whose String column exceeds 2GB fails the page (error code 1002) — possible on wide-text rows (e.g. MR diffs) when the datalake server profile lets a block grow that large. The happy path pays nothing for this; on such a failure the page is retried with a smaller `max_block_size` and `preferred_block_size_bytes` pinned to byte-cap each block (see `Pipeline::extract_page`). The retry re-reads from the page's start cursor, which is idempotent (point 7).
+5. Transform the whole page in-memory with DataFusion SQL (a row-wise projection: mapping source columns to graph columns, resolving FK edges, applying type discriminators), grouping the output rows by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
+6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. `engine.handlers.entity_handler.stream_block_size` (rows per wire block on the read side) is tunable per deployment.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
@@ -287,11 +288,11 @@ SELECT
     state,
     title,
     traversal_path,
-    _siphon_replicated_at AS _version,
+    _siphon_watermark AS _version,
     _siphon_deleted AS _deleted
 FROM sdlc.issues
-WHERE _siphon_replicated_at > {last_watermark:String}
-  AND _siphon_replicated_at <= {watermark:String}
+WHERE _siphon_watermark > {last_watermark:String}
+  AND _siphon_watermark <= {watermark:String}
   AND traversal_path LIKE {traversal_path:String}
   AND ((traversal_path > {cursor_0:String})
        OR (traversal_path = {cursor_0:String} AND id > {cursor_1:Int64}))
@@ -319,6 +320,12 @@ Position keys encode scope and entity, e.g. `"global.User"` or `"ns.42.Project"`
 **Data deletion**
 
 Rows deleted in the source database have `_siphon_deleted` set to `true`. The extraction query pulls these rows alongside live data, and the `_deleted` flag carries through to the graph table. Downstream queries filter on the flag. Periodic cleanup jobs remove flagged rows from the graph tables.
+
+**Stale FK-edge reconciliation**
+
+Edge tables are `ReplacingMergeTree` keyed on `(traversal_path, relationship_kind, source_id, target_id, …)`. For an FK-derived edge whose FK column is *mutable* — a "latest"/"who did X last" pointer such as `HAS_LATEST_DIFF` (`latest_merge_request_diff_id`) — a changed FK value writes a new edge row with a different `target_id`. Because `target_id` is part of the dedup identity, the prior row keeps a distinct identity and is never replaced or tombstoned, so the owner accumulates one live edge per historical FK value. The before-image needed to tombstone the old edge at write time is unavailable (the datalake `siphon_*` tables are collapsed current-state), so this is reconciled out-of-band instead.
+
+`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column. A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op. The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology. This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
 
 ##### Zero-downtime schema changes
 

@@ -40,6 +40,19 @@ pub struct Hop {
     /// Pre-resolved join columns for connecting to the previous hop.
     /// None for the first hop (it's the initial FROM).
     pub join_prev: Option<JoinColumns>,
+    /// Tight `traversal_path` prefix to confine this hop's edge scan to,
+    /// carried over from the originating `InputRelationship`.
+    pub scope_prefix: Option<String>,
+    /// Whether this hop keeps both endpoints in the same namespace (intrinsic
+    /// child). Gates the FK-chain lowering, which is only result-equivalent to
+    /// the edge scan for such relationships.
+    pub scope_preserving: bool,
+    /// Anchor this hop's join column with an IN-subquery over the previous
+    /// hop's output ids, so ClickHouse can use the by_source/by_target
+    /// projection or bloom filter instead of scanning the full relationship
+    /// range. Set by the plan pass for interior single-hop edges in a
+    /// multi-edge chain.
+    pub cascade_anchor: bool,
 }
 
 /// Pre-resolved join columns for connecting a hop to the previous hop.
@@ -147,10 +160,22 @@ pub enum Strategy {
     Bidirectional { meeting_hop: usize },
     /// Single node, no edges.
     SingleNode,
-    /// Star-schema optimization: all hops have FKs on the same center node.
-    /// The center node drives a single scan; other nodes JOIN via FK columns.
-    /// Zero edge table scans.
-    FkStar { center: String },
+    /// FK-derived traversal answered by joining node tables on their FK
+    /// columns, with zero edge-table scans. The [`FkShape`] selects how the
+    /// nodes are joined; both shapes share one emit path (`lower::fk`).
+    Fk(FkShape),
+}
+
+/// Topology of an FK-derived traversal. Single-hop FK is the degenerate
+/// one-hop [`FkShape::Star`].
+pub enum FkShape {
+    /// All hops have FKs on the same center node. The center node drives a
+    /// single scan; other nodes JOIN via the center's FK columns.
+    Star { center: String },
+    /// Every hop is FK-derived and consecutive hops share a node. The node
+    /// tables are joined on their FK columns; the edges are a materialization
+    /// of those FKs, so the chain skips all edge-table scans.
+    Chain,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,7 +186,7 @@ pub fn plan(input: &mut Input) -> Plan {
     let hops = build_hops(input);
     let mut nodes = build_node_plans(input);
 
-    let (mut hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
+    let (mut hops, elided_fks, input) = elide_hops(hops, &mut nodes, input);
 
     let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
     hops = reordered_hops;
@@ -170,18 +195,19 @@ pub fn plan(input: &mut Input) -> Plan {
     }
 
     for node_plan in nodes.values_mut() {
-        node_plan.hydration = determine_hydration(node_plan, input);
+        node_plan.hydration = determine_hydration(node_plan, input, &hops);
     }
 
     let strategy = if hops.is_empty() {
         Strategy::SingleNode
-    } else if let Some(center) = detect_fk_star(&hops) {
-        Strategy::FkStar { center }
+    } else if let Some(shape) = detect_fk(&hops, &nodes) {
+        Strategy::Fk(shape)
     } else {
         Strategy::Flat
     };
 
     resolve_join_columns(&mut hops);
+    resolve_cascade_anchors(&mut hops);
 
     let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
 
@@ -216,6 +242,7 @@ pub fn plan(input: &mut Input) -> Plan {
         cursor: input.cursor,
         node_edge_mappings,
         denorm_columns: input.compiler.denormalized_columns.clone(),
+        denorm_rel_kinds: input.compiler.denorm_rel_kinds.clone(),
         table_columns: input.compiler.table_columns.clone(),
         table_sort_keys: input.compiler.table_sort_keys.clone(),
         body,
@@ -279,12 +306,15 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.min_hops,
                 max_hops: rel.max_hops,
                 fk,
+                scope_preserving: rel.scope_preserving,
                 filters: rel
                     .filters
                     .iter()
                     .flat_map(|(k, v)| v.iter().map(move |f| (k.clone(), f.clone())))
                     .collect(),
                 join_prev: None,
+                scope_prefix: rel.scope_prefix.clone(),
+                cascade_anchor: false,
             }
         })
         .collect()
@@ -324,11 +354,47 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .collect()
 }
 
-/// Elide hops that have an FK column when the far-end node is pinned.
-/// Converts the FK into a node-level filter and removes the hop + its
-/// input.relationships entry so edge alias indices stay in sync.
+/// Whether `alias` exists only to pin scope: path-scopable, only a `full_path`/`id`
+/// filter, no group-by/agg/order/display role, and touched by exactly one hop.
+fn is_pure_scope_anchor(
+    alias: &str,
+    nodes: &HashMap<String, NodePlan>,
+    input: &Input,
+    hop_count: &HashMap<String, usize>,
+) -> bool {
+    let Some(np) = nodes.get(alias) else {
+        return false;
+    };
+    if !np.has_traversal_path || hop_count.get(alias).copied().unwrap_or(0) != 1 {
+        return false;
+    }
+    let Some(input_node) = input.nodes.iter().find(|n| n.id == alias) else {
+        return false;
+    };
+    if !crate::scope::is_scope_only(input_node) {
+        return false;
+    }
+
+    let in_group_by = input.aggregation.group_by.iter().any(|g| g.node() == alias);
+    let is_agg_target = input
+        .aggregation
+        .metrics
+        .iter()
+        .any(|m| m.target.as_deref() == Some(alias));
+    let is_order_target = input.order_by.as_ref().is_some_and(|ob| ob.node == alias);
+
+    !in_group_by && !is_agg_target && !is_order_target
+}
+
+/// Elide hops the node-join path answers without an edge scan, keeping
+/// `input.relationships` in sync:
+///   - an FK hop whose far end is pinned: push the FK as a node-level filter;
+///   - the sole non-FK hop, when it is a scope-implied container (aggregations
+///     only): drop it and its orphaned anchor, since the resolved
+///     `traversal_path` prefix already encodes the containment and every
+///     survivor is then FK-lowerable by `detect_fk`.
 #[allow(clippy::type_complexity)]
-fn elide_fk_hops<'a>(
+fn elide_hops<'a>(
     hops: Vec<Hop>,
     nodes: &mut HashMap<String, NodePlan>,
     input: &'a mut Input,
@@ -337,11 +403,33 @@ fn elide_fk_hops<'a>(
     let mut keep_rels = Vec::new();
     let mut elided_fks = Vec::new();
 
+    let mut hop_count: HashMap<String, usize> = HashMap::new();
+    for hop in &hops {
+        *hop_count.entry(hop.from_node.clone()).or_insert(0) += 1;
+        *hop_count.entry(hop.to_node.clone()).or_insert(0) += 1;
+    }
+    let sole_non_fk = input.query_type == QueryType::Aggregation
+        && hops.iter().filter(|h| h.fk.is_none()).count() == 1;
+
     for (i, hop) in hops.into_iter().enumerate() {
+        if sole_non_fk
+            && hop.fk.is_none()
+            && hop.scope_preserving
+            && hop.scope_prefix.is_some()
+            && hop.filters.is_empty()
+            && let Some(anchor) = [hop.from_node.as_str(), hop.to_node.as_str()]
+                .into_iter()
+                .find(|a| is_pure_scope_anchor(a, nodes, input, &hop_count))
+                .map(str::to_string)
+        {
+            nodes.remove(&anchor);
+            input.nodes.retain(|n| n.id != anchor);
+            continue;
+        }
+
         // Only elide if at least one non-FK hop would remain — otherwise
         // the emit loop has no edges to populate node_edge_col from.
-        let remaining_non_fk = keep_hops.len();
-        let would_be_last = remaining_non_fk == 0;
+        let would_be_last = keep_hops.is_empty();
 
         let elide_info = hop.fk.as_ref().and_then(|fk| {
             if would_be_last {
@@ -410,6 +498,19 @@ fn elide_fk_hops<'a>(
     (keep_hops, elided_fks, input)
 }
 
+/// Star first (covers single-hop FK), then chain. Chain applies to aggregations
+/// too: it joins node tables on FK columns, which is the source of truth for a
+/// relationship whose edge rows can lag (e.g. stale `HAS_LATEST_DIFF` edges).
+fn detect_fk(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> Option<FkShape> {
+    if let Some(center) = detect_fk_star(hops) {
+        return Some(FkShape::Star { center });
+    }
+    if detect_fk_chain(hops, nodes) {
+        return Some(FkShape::Chain);
+    }
+    None
+}
+
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
     for hop in &hops[1..] {
@@ -419,6 +520,46 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
         }
     }
     Some(first_center.clone())
+}
+
+/// Linear FK chain the node-join path answers without edge scans. Each hop must be
+/// FK-backed, scope-preserving, single fixed-length, edge-filter-free, and not
+/// `Both`; gated out of point-selective endpoints (SIP narrowing on the edge scan
+/// beats a full leaf-node scan there) and non-emittable shapes.
+fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
+    let point_selective = |alias: &str| {
+        nodes
+            .get(alias)
+            .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
+    };
+    hops.len() >= 2
+        && hops.iter().all(|h| {
+            h.fk.is_some()
+                && h.scope_preserving
+                && h.max_hops == 1
+                && h.filters.is_empty()
+                && !matches!(h.direction, Direction::Both)
+                && !point_selective(&h.from_node)
+                && !point_selective(&h.to_node)
+        })
+        && is_emittable_fk_chain(hops)
+}
+
+/// `emit_chain` joins each hop's not-yet-reached endpoint onto the running FROM,
+/// so every hop after the first must attach via exactly one already-reached node
+/// (accepts branching trees and either hop orientation; rejects disconnected hops).
+fn is_emittable_fk_chain(hops: &[Hop]) -> bool {
+    let Some(first) = hops.first() else {
+        return false;
+    };
+    let mut reached: HashSet<&str> =
+        HashSet::from([first.from_node.as_str(), first.to_node.as_str()]);
+    hops[1..].iter().all(|h| {
+        let ok = reached.contains(h.from_node.as_str()) != reached.contains(h.to_node.as_str());
+        reached.insert(h.from_node.as_str());
+        reached.insert(h.to_node.as_str());
+        ok
+    })
 }
 
 fn reorder_by_selectivity(
@@ -453,7 +594,7 @@ fn reorder_by_selectivity(
     }
 }
 
-fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
+fn determine_hydration(node_plan: &NodePlan, input: &Input, hops: &[Hop]) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
     let is_group_by_node = crate::input::node_group_ids(&input.aggregation.group_by)
@@ -474,17 +615,64 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
         return HydrationStrategy::Join;
     }
 
-    let has_non_denorm_filters = crate::passes::shared::has_non_denorm_filters(
-        node_plan.entity.as_deref().unwrap_or(""),
-        &node_plan.filters,
-        &input.compiler.denormalized_columns,
-    );
+    // Skip the node table only when every filter is carried by a hop's edge
+    // tag; an uncovered filter stays on the node table so it isn't dropped.
+    let entity = node_plan.entity.as_deref().unwrap_or("");
+    let has_uncovered_filter = node_plan.filters.iter().any(|(prop, _)| {
+        !filter_covered_by_denorm(entity, prop, alias, hops, &input.compiler.denorm_rel_kinds)
+    });
 
-    if has_non_denorm_filters {
+    if has_uncovered_filter {
         return HydrationStrategy::FilterOnly;
     }
 
     HydrationStrategy::Skip
+}
+
+// Mirrors the lowerer's `emit_denorm_tags`: the hydration decision and the tag
+// push must agree on which hop carries a denorm.
+fn filter_covered_by_denorm(
+    entity: &str,
+    prop: &str,
+    alias: &str,
+    hops: &[Hop],
+    denorm_rel_kinds: &HashMap<(String, String, String), Vec<String>>,
+) -> bool {
+    hops.iter().any(|hop| {
+        if crate::passes::normalize::is_wildcard(&hop.rel_types) {
+            return false;
+        }
+        let (start_col, end_col) = hop.direction.edge_columns();
+        [(&hop.from_node, start_col), (&hop.to_node, end_col)]
+            .iter()
+            .any(|(node, id_col)| {
+                if node.as_str() != alias {
+                    return false;
+                }
+                let dir = if *id_col == SOURCE_ID_COLUMN {
+                    "source"
+                } else {
+                    "target"
+                };
+                let key = (entity.to_string(), prop.to_string(), dir.to_string());
+                denorm_rel_kinds
+                    .get(&key)
+                    .is_some_and(|kinds| hop.rel_types.iter().any(|t| kinds.iter().any(|k| k == t)))
+            })
+    })
+}
+
+/// Mark interior hops for cascade SIP anchoring. A hop qualifies when it
+/// is a non-first, single-hop edge with a resolved `join_prev` in a
+/// multi-edge chain. Variable-length hops (max_hops > 1) are excluded
+/// because their UNION-ALL arms have their own internal join structure.
+fn resolve_cascade_anchors(hops: &mut [Hop]) {
+    if hops.len() < 2 {
+        return;
+    }
+    for hop in hops.iter_mut().skip(1) {
+        hop.cascade_anchor = hop.join_prev.is_some() && hop.max_hops == 1;
+    }
 }
 
 /// Pre-resolve join columns for each hop based on shared-node topology
@@ -528,13 +716,11 @@ fn compute_node_edge_mappings(
     let mut mappings = HashMap::new();
 
     match strategy {
-        Strategy::FkStar { center } => {
-            // Center node maps to itself.
+        Strategy::Fk(FkShape::Star { center }) => {
             mappings.insert(
                 center.clone(),
                 (center.clone(), DEFAULT_PRIMARY_KEY.to_string()),
             );
-            // Each hop's target maps via the FK column on the center.
             for hop in hops {
                 if let Some(ref fk) = hop.fk {
                     let fk_alias = if fk.fk_node == *center {
@@ -546,8 +732,17 @@ fn compute_node_edge_mappings(
                 }
             }
         }
+        Strategy::Fk(FkShape::Chain) => {
+            // Each node is joined as its own table, so it maps to its own PK.
+            for hop in hops {
+                for node in [&hop.from_node, &hop.to_node] {
+                    mappings
+                        .entry(node.clone())
+                        .or_insert_with(|| (node.clone(), DEFAULT_PRIMARY_KEY.to_string()));
+                }
+            }
+        }
         _ => {
-            // Flat/Bidirectional: each hop contributes from_node and to_node.
             for (i, hop) in hops.iter().enumerate() {
                 let alias = format!("e{i}");
                 let (start_col, end_col) = hop.direction.edge_columns();
@@ -577,6 +772,7 @@ fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
+
     if has_filter_only {
         let mut convergent_targets: HashMap<&str, usize> = HashMap::new();
         for hop in hops {

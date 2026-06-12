@@ -35,7 +35,14 @@ ci_skip_requested() {
         if git rev-parse --is-shallow-repository 2>/dev/null | grep -q true; then
             git fetch --deepen=100 2>/dev/null || true
         fi
-        git log "${BASE_REF}"...HEAD --format=%B 2>/dev/null | grep -qF "${tag}" && return 0
+        # Buffer git log output before grepping to avoid SIGPIPE.
+        # grep -q closes the pipe on first match, which SIGPIPEs the
+        # producer (exit 141). Under set -o pipefail the pipeline takes
+        # that non-zero exit and the && never fires. Buffering first
+        # avoids the race entirely.
+        local msgs
+        msgs="$(git log "${BASE_REF}"...HEAD --format=%B 2>/dev/null)" || true
+        echo "$msgs" | grep -qF "${tag}" && return 0
     fi
 
     return 1

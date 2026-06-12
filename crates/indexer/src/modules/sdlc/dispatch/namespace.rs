@@ -14,14 +14,20 @@ use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
+use const_format::concatcp;
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-const ENABLED_NAMESPACE_QUERY: &str = r#"
-SELECT root_namespace_id, traversal_path
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE _siphon_deleted = false
-  AND traversal_path != ''
-"#;
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+
+const ENABLED_NAMESPACE_QUERY: &str = concatcp!(
+    "\
+\nSELECT root_namespace_id, traversal_path\n\
+FROM siphon_knowledge_graph_enabled_namespaces\n\
+WHERE ",
+    DEL,
+    " = false\n\
+  AND traversal_path != ''\n"
+);
 
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,

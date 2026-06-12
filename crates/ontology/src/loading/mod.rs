@@ -293,7 +293,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let etl_configs = edge_def.into_etl_configs(&etl_settings)?;
+        let etl_configs = edge_def.into_etl_configs(edge_name, &etl_settings)?;
         if !etl_configs.is_empty() {
             ontology
                 .edge_etl_configs
@@ -319,6 +319,10 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 ))
             })?;
         let enum_values = field.enum_values.clone();
+        let field_column = field
+            .column_name()
+            .map(str::to_string)
+            .unwrap_or_else(|| entry.property.clone());
 
         let tag_key = entry
             .column_alias
@@ -336,6 +340,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
+                    // Declare the denorm only on edges whose ETL materializes
+                    // the column, so the compiler never pushes a tag onto an
+                    // edge with empty tags.
+                    if !ontology.edge_projects_column(edge_name, direction.clone(), &field_column) {
+                        continue;
+                    }
                     let edge_column = match direction {
                         crate::entities::DenormDirection::Source => "source_tags",
                         crate::entities::DenormDirection::Target => "target_tags",
@@ -807,6 +817,37 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
                     fk_to_anchor.insert(fk, &edge.target_kind);
                 }
             }
+        }
+
+        if edge.scope == Some(EdgeVariantScope::SameNamespace) {
+            for endpoint in [edge.source_kind.as_str(), edge.target_kind.as_str()] {
+                if !ontology.is_path_scopable(endpoint) {
+                    return Err(OntologyError::Validation(format!(
+                        "{} ({}→{}): scope 'same_namespace' requires both endpoints \
+                         to be path-scopable, but '{}' is not. Use 'prune_to_source' or \
+                         'prune_to_target' so the prefix scopes the edge without propagating.",
+                        edge.relationship_kind, edge.source_kind, edge.target_kind, endpoint
+                    )));
+                }
+            }
+        }
+
+        let pruned = match edge.scope {
+            Some(EdgeVariantScope::PruneToSource) => {
+                Some(("prune_to_source", edge.source_kind.as_str()))
+            }
+            Some(EdgeVariantScope::PruneToTarget) => {
+                Some(("prune_to_target", edge.target_kind.as_str()))
+            }
+            _ => None,
+        };
+        if let Some((label, named)) = pruned
+            && !ontology.is_path_scopable(named)
+        {
+            return Err(OntologyError::Validation(format!(
+                "{} ({}→{}): scope '{}' requires the named endpoint '{}' to be path-scopable",
+                edge.relationship_kind, edge.source_kind, edge.target_kind, label, named
+            )));
         }
     }
 

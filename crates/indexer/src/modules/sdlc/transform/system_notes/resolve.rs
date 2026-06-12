@@ -17,7 +17,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use const_format::concatcp;
+
 use super::parse::{RefKind, Reference};
+
+const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
 /// The clickhouse crate serializes params into the URL query string, so these
 /// lookup arrays must stay bounded independently of Arrow block size.
@@ -29,17 +34,18 @@ pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
 ///
-/// `argMax(..., _siphon_replicated_at)` rather than `FINAL`: the reconciler
-/// re-inserts a route under a new `traversal_path`, so the stale `0/` and
-/// reconciled `1/22/94/` rows have different sort keys and `FINAL` won't
-/// collapse them — picking the stale row would land the edge in the wrong
-/// namespace. (Mirrors the SDLC entity ETL in `plan/input.rs`; also cheaper.)
+/// `argMax(..., <watermark>)` rather than `FINAL`: the reconciler re-inserts a
+/// route under a new `traversal_path`, so the stale `0/` and reconciled
+/// `1/22/94/` rows have different sort keys and `FINAL` won't collapse them —
+/// picking the stale row would land the edge in the wrong namespace. (Mirrors
+/// the SDLC entity ETL in `plan/input.rs`; also cheaper.)
 ///
 /// `startsWith(traversal_path, {root_prefix})` bounds the scan to the source's
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;
 /// cross-top-level is deferred to the dictionary lever (ADR 013).
-pub const ROUTES_SQL: &str = "\
+pub const ROUTES_SQL: &str = concatcp!(
+    "\
 SELECT \
     source_id, \
     path, \
@@ -49,22 +55,34 @@ FROM ( \
         id, \
         source_id, \
         path, \
-        argMax(traversal_path, _siphon_replicated_at) AS traversal_path, \
-        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+        argMax(traversal_path, ",
+    WM,
+    ") AS traversal_path, \
+        argMax(",
+    DEL,
+    ", ",
+    WM,
+    ") AS ",
+    DEL,
+    " \
     FROM siphon_routes \
     WHERE startsWith(siphon_routes.traversal_path, {root_prefix:String}) \
       AND path IN {paths:Array(String)} \
       AND source_type = 'Project' \
     GROUP BY id, source_id, path \
 ) \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// Reverse routes lookup (project `source_id` -> path), to give each note a
 /// default project path for its unqualified refs. Keyed on `source_id` so it
 /// complements [`ROUTES_SQL`]; same `argMax` dedup and `root_prefix` bounding.
 /// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
 /// `(source_id, path)`.
-pub const PROJECT_PATHS_SQL: &str = "\
+pub const PROJECT_PATHS_SQL: &str = concatcp!(
+    "\
 SELECT \
     source_id, \
     path \
@@ -73,14 +91,23 @@ FROM ( \
         id, \
         source_id, \
         path, \
-        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+        argMax(",
+    DEL,
+    ", ",
+    WM,
+    ") AS ",
+    DEL,
+    " \
     FROM siphon_routes \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND source_type = 'Project' \
       AND source_id IN {source_ids:Array(Int64)} \
     GROUP BY id, source_id, path \
 ) \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
 /// `root_prefix` bounding as [`ROUTES_SQL`].
@@ -89,7 +116,8 @@ WHERE _siphon_deleted = false";
 /// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
 /// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
 /// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
-pub const MERGE_REQUESTS_SQL: &str = "\
+pub const MERGE_REQUESTS_SQL: &str = concatcp!(
+    "\
 SELECT \
     id, \
     target_project_id, \
@@ -99,17 +127,27 @@ FROM ( \
         id, \
         target_project_id, \
         iid, \
-        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+        argMax(",
+    DEL,
+    ", ",
+    WM,
+    ") AS ",
+    DEL,
+    " \
     FROM merge_requests \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, target_project_id, iid \
 ) \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
 /// `(id, project_id, iid)`.
-pub const WORK_ITEMS_SQL: &str = "\
+pub const WORK_ITEMS_SQL: &str = concatcp!(
+    "\
 SELECT \
     id, \
     project_id, \
@@ -119,13 +157,22 @@ FROM ( \
         id, \
         project_id, \
         iid, \
-        argMax(_siphon_deleted, _siphon_replicated_at) AS _siphon_deleted \
+        argMax(",
+    DEL,
+    ", ",
+    WM,
+    ") AS ",
+    DEL,
+    " \
     FROM work_items \
     WHERE startsWith(traversal_path, {root_prefix:String}) \
       AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
     GROUP BY id, project_id, iid \
 ) \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// A row from the `siphon_routes` lookup, keyed by `path`. Decoded from the
 /// `ROUTES_SQL` result in `handler::query_routes`. `ROUTES_SQL` already
@@ -358,7 +405,7 @@ mod tests {
         ] {
             assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
             assert!(
-                sql.contains("argMax(_siphon_deleted, _siphon_replicated_at)"),
+                sql.contains("argMax(_siphon_deleted, _siphon_watermark)"),
                 "missing latest-version _siphon_deleted in: {sql}"
             );
             assert!(
@@ -367,7 +414,7 @@ mod tests {
             );
         }
         assert!(
-            ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
+            ROUTES_SQL.contains("argMax(traversal_path, _siphon_watermark)"),
             "routes must take the latest traversal_path so a stale 0/ can't win"
         );
     }

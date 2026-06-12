@@ -47,8 +47,11 @@ pub async fn register_handlers(
     let metrics = SdlcMetrics::new();
 
     let inputs = plan::input::from_ontology(ontology);
-    let partition_strategies =
-        partitioning::build_strategies(&inputs, &entity_handler_config.partition_overrides);
+    let partition_strategies = partitioning::build_strategies(
+        &inputs,
+        &entity_handler_config.partition_overrides,
+        entity_handler_config.partition_min_rows,
+    );
     let plans = plan::build_plans(
         ontology,
         entity_handler_config.datalake_batch_size,
@@ -74,7 +77,6 @@ pub async fn register_handlers(
             metrics.clone(),
             config.engine.datalake_retry.clone(),
         )
-        .with_write_channel_capacity(entity_handler_config.write_channel_capacity)
         .with_registry(Arc::clone(&transform_registry)),
     );
 
@@ -180,15 +182,38 @@ mod tests {
             system_note.transform
         );
         let template = &system_note.extract_template;
+
+        // #830: the metadata join is bounded by the page CTE, not inlined
+        // above the LIMIT. The _batch CTE contains only the base table scan;
+        // siphon_system_note_metadata is read via an enrichment CTE scoped
+        // to `note_id IN (SELECT DISTINCT id FROM _batch)`.
         assert!(
-            template
-                .contains("INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id"),
-            "extract should inner-join the metadata table: {template}"
+            template.contains("WITH _batch AS ("),
+            "extract must wrap the base scan in a _batch CTE: {template}"
+        );
+        assert!(
+            !template.contains("INNER JOIN siphon_system_note_metadata"),
+            "metadata table must not be inlined above the LIMIT: {template}"
+        );
+        assert!(
+            template.contains("note_id IN (SELECT DISTINCT id FROM _batch)"),
+            "enrichment CTE must scope metadata to the page: {template}"
+        );
+        assert!(
+            template.contains("_e0.action AS action"),
+            "action column must be projected from the enrichment CTE: {template}"
+        );
+        assert!(
+            template.contains("LEFT JOIN _e0"),
+            "enrichment must LEFT JOIN back onto _batch: {template}"
         );
         assert!(template.contains("sn.system = true"));
         assert!(template.contains("snm._siphon_deleted = false"));
-        assert!(template.contains("snm.action AS action"));
+        assert!(
+            template.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
+            "enrichment CTE must prune by traversal_path: {template}"
+        );
         assert!(template.contains("ORDER BY traversal_path, id"));
-        assert_eq!(system_note.watermark_column, "sn._siphon_replicated_at");
+        assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
     }
 }

@@ -16,6 +16,115 @@ use super::helpers::{
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
 
+/// Build a cascade anchor subquery for hop `i`, recursing through the chain
+/// to nest each prior hop's anchor. Returns `None` when the hop shouldn't be
+/// anchored (first hop, or no selective upstream).
+///
+/// Terminates when a hop has no `cascade_anchor` (the chain root) or when
+/// `emit_node_ids_on_edge` / `_filter_<node>` CTEs supply the base selectivity.
+fn build_cascade_anchor(plan: &Plan, i: usize, ctes: &[Cte]) -> Option<Query> {
+    let hop = &plan.hops[i];
+    let jc = hop.join_prev.as_ref()?;
+    if !hop.cascade_anchor {
+        return None;
+    }
+
+    let prev_idx = i.checked_sub(1).filter(|&idx| idx < plan.hops.len())?;
+    let prev_hop = &plan.hops[prev_idx];
+
+    let has_pinned_ids = [&prev_hop.from_node, &prev_hop.to_node].iter().any(|n| {
+        plan.nodes
+            .get(n.as_str())
+            .is_some_and(|np| !np.node_ids.is_empty() || np.id_range.is_some())
+    });
+    let has_filter_cte = [&prev_hop.from_node, &prev_hop.to_node]
+        .iter()
+        .any(|n| ctes.iter().any(|c| c.name == format!("_filter_{n}")));
+    let inner_anchor = build_cascade_anchor(plan, prev_idx, ctes);
+    if !has_pinned_ids && !has_filter_cte && inner_anchor.is_none() {
+        return None;
+    }
+
+    let prev_alias_inner = format!("{}p", jc.prev_alias);
+    let (prev_start, prev_end) = prev_hop.direction.edge_columns();
+
+    let mut prev_preds = Vec::new();
+    let mut anchor_tags = HashSet::new();
+    push_edge_predicates(
+        &mut prev_preds,
+        &prev_alias_inner,
+        prev_hop,
+        &plan.nodes,
+        &plan.table_columns,
+        false,
+    );
+    for (prop, filter) in &prev_hop.filters {
+        prev_preds.push(filter_to_expr(&prev_alias_inner, prop, filter));
+    }
+    emit_denorm_tags(
+        &mut prev_preds,
+        plan,
+        prev_hop,
+        &prev_alias_inner,
+        prev_start,
+        prev_end,
+        &mut anchor_tags,
+    );
+    emit_node_ids_on_edge(
+        &mut prev_preds,
+        &prev_alias_inner,
+        prev_hop,
+        &plan.nodes,
+        prev_start,
+        prev_end,
+    );
+    for (node_alias, id_col) in [
+        (&prev_hop.from_node, prev_start),
+        (&prev_hop.to_node, prev_end),
+    ] {
+        let cte_name = format!("_filter_{node_alias}");
+        if ctes.iter().any(|c| c.name == cte_name) {
+            prev_preds.push(Expr::InSubquery {
+                expr: Box::new(Expr::col(&prev_alias_inner, id_col)),
+                cte_name,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            });
+        }
+    }
+    prev_preds.extend(edge_scope_predicate(prev_hop, &prev_alias_inner));
+
+    if let Some(inner_anchor) = inner_anchor {
+        let prev_jc = prev_hop.join_prev.as_ref().unwrap();
+        prev_preds.push(Expr::InSelect {
+            expr: Box::new(Expr::col(&prev_alias_inner, &prev_jc.curr_col)),
+            query: Box::new(inner_anchor),
+        });
+    }
+
+    Some(Query {
+        select: vec![SelectExpr::col(&prev_alias_inner, &jc.prev_col)],
+        from: TableRef::scan(&prev_hop.edge_table, &prev_alias_inner),
+        where_clause: Expr::conjoin(prev_preds),
+        ..Default::default()
+    })
+}
+
+/// `startsWith(<alias>.traversal_path, '<prefix>')` for a hop confined to a
+/// project/group scope, or `None` when the hop carries no resolved prefix.
+/// Emitted alongside the broad authorization filter so ClickHouse can seek the
+/// edge PK to the project's contiguous range instead of the whole org.
+fn edge_scope_predicate(hop: &Hop, alias: &str) -> Option<Expr> {
+    hop.scope_prefix.as_deref().map(|prefix| {
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                Expr::string(prefix),
+            ],
+        )
+    })
+}
+
 /// Collect all edge predicates for a hop into a target vec.
 #[allow(clippy::too_many_arguments)]
 fn collect_edge_predicates(
@@ -26,9 +135,9 @@ fn collect_edge_predicates(
     start_col: &str,
     end_col: &str,
     ctes: &mut Vec<Cte>,
-    tagged_nodes: &mut HashSet<String>,
+    tagged_nodes: &mut HashSet<(String, String)>,
     narrowed_nodes: &mut HashSet<String>,
-) {
+) -> Result<()> {
     push_edge_predicates(target, alias, hop, &plan.nodes, &plan.table_columns, false);
     for (prop, filter) in &hop.filters {
         target.push(filter_to_expr(alias, prop, filter));
@@ -44,7 +153,9 @@ fn collect_edge_predicates(
         end_col,
         ctes,
         narrowed_nodes,
-    );
+        &plan.table_sort_keys,
+    )?;
+    Ok(())
 }
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
@@ -55,7 +166,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
-    let mut tagged_nodes: HashSet<String> = HashSet::new();
+    let mut tagged_nodes: HashSet<(String, String)> = HashSet::new();
     let mut narrowed_nodes: HashSet<String> = HashSet::new();
     let mut filter_only_done: HashSet<String> = HashSet::new();
     let mut edge_if_predicates: Option<Expr> = None;
@@ -93,7 +204,9 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 &mut ctes,
                 &mut tagged_nodes,
                 &mut narrowed_nodes,
-            );
+            )?;
+
+            inner_preds.extend(edge_scope_predicate(hop, &alias));
 
             edge_if_predicates = Expr::conjoin(inner_preds.clone());
 
@@ -115,7 +228,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 end_col,
                 &mut ctes,
                 &mut narrowed_nodes,
-            );
+                &plan.table_sort_keys,
+            )?;
             // For multi-hop dedup queries, FilterOnly nodes still use
             // CTEs so their IN-subqueries can be pushed inside the edge
             // dedup scan for PK pruning. Single-hop queries handle
@@ -132,9 +246,28 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     if (is_filter_only || elevated_skip)
                         && filter_only_done.insert(node_alias.clone())
                     {
-                        narrow_in.extend(emit_filter_subquery(np, &alias, edge_col, &mut ctes)?);
+                        let node_table = np.table.as_deref().unwrap_or("");
+                        let node_sk = plan
+                            .table_sort_keys
+                            .get(node_table)
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[]);
+                        narrow_in.extend(emit_filter_subquery(
+                            np, &alias, edge_col, &mut ctes, node_sk,
+                        )?);
                     }
                 }
+            }
+
+            if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                let jc = hop
+                    .join_prev
+                    .as_ref()
+                    .expect("cascade-anchored hop must have join_prev");
+                narrow_in.push(Expr::InSelect {
+                    expr: Box::new(Expr::col(&alias, &jc.curr_col)),
+                    query: Box::new(anchor_query),
+                });
             }
 
             let edge_pk_leading: Vec<&str> = plan
@@ -152,6 +285,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 union
             } else if dedup_edges {
                 let mut inner = node_id_pin_predicates(&alias, hop, &plan.nodes);
+                inner.extend(edge_scope_predicate(hop, &alias));
                 if push_narrow_inner {
                     inner.extend(narrow_in);
                 } else {
@@ -160,6 +294,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 dedup_edge_scan(&hop.edge_table, &alias, &plan.table_columns, inner)
             } else {
                 where_parts.extend(narrow_in);
+                where_parts.extend(edge_scope_predicate(hop, &alias));
                 TableRef::scan(&hop.edge_table, &alias)
             };
 
@@ -240,25 +375,41 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                 HydrationStrategy::Join => {
                     let narrow_source = if np.use_narrowing {
                         let narrow_alias = format!("{edge_alias}n");
+                        let mut nw = Vec::new();
+                        push_edge_predicates(
+                            &mut nw,
+                            &narrow_alias,
+                            hop,
+                            &plan.nodes,
+                            &plan.table_columns,
+                            false,
+                        );
+                        nw.extend(edge_scope_predicate(hop, &narrow_alias));
+                        emit_node_ids_on_edge(
+                            &mut nw,
+                            &narrow_alias,
+                            hop,
+                            &plan.nodes,
+                            start_col,
+                            end_col,
+                        );
+                        if let Some(anchor_query) = build_cascade_anchor(plan, i, &ctes) {
+                            let jc = hop
+                                .join_prev
+                                .as_ref()
+                                .expect("cascade-anchored hop must have join_prev");
+                            nw.push(Expr::InSelect {
+                                expr: Box::new(Expr::col(&narrow_alias, &jc.curr_col)),
+                                query: Box::new(anchor_query),
+                            });
+                        }
                         let narrow_query = Query {
                             select: vec![SelectExpr::new(
                                 Expr::col(&narrow_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
-                            distinct: true,
                             from: TableRef::scan(&hop.edge_table, &narrow_alias),
-                            where_clause: {
-                                let mut nw = Vec::new();
-                                push_edge_predicates(
-                                    &mut nw,
-                                    &format!("{edge_alias}n"),
-                                    hop,
-                                    &plan.nodes,
-                                    &plan.table_columns,
-                                    false,
-                                );
-                                Expr::conjoin(nw)
-                            },
+                            where_clause: Expr::conjoin(nw),
                             ..Default::default()
                         };
                         let narrow_name = format!("_narrow_{}", np.alias);

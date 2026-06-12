@@ -4,10 +4,9 @@ use gkg_server_config::BillingConfig;
 use labkit_events::BillingEvent;
 
 use crate::constants::APP_ID;
-use crate::metrics::METRICS;
 
 pub trait BillingTracker: Send + Sync {
-    fn track(&self, event: BillingEvent);
+    fn track(&self, event: BillingEvent) -> Result<(), labkit_events::Error>;
 }
 
 pub struct SnowplowBillingTracker {
@@ -35,18 +34,8 @@ impl SnowplowBillingTracker {
 }
 
 impl BillingTracker for SnowplowBillingTracker {
-    fn track(&self, event: BillingEvent) {
-        if let Err(e) = self.tracker.track_billing_event(event) {
-            let correlation_id = labkit::correlation::current()
-                .map(|id| id.as_str().to_string())
-                .unwrap_or_default();
-            tracing::error!(
-                error = %e,
-                correlation_id = %correlation_id,
-                "billing tracker rejected event at enqueue"
-            );
-            METRICS.rejected.add(1, &[]);
-        }
+    fn track(&self, event: BillingEvent) -> Result<(), labkit_events::Error> {
+        self.tracker.track_billing_event(event)
     }
 }
 
@@ -70,8 +59,36 @@ impl InMemoryBillingTracker {
 
 #[cfg(test)]
 impl BillingTracker for InMemoryBillingTracker {
-    fn track(&self, _event: BillingEvent) {
+    fn track(&self, _event: BillingEvent) -> Result<(), labkit_events::Error> {
         self.count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct FailingBillingTracker {
+    count: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl FailingBillingTracker {
+    pub fn new() -> Self {
+        Self {
+            count: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    pub fn count(&self) -> usize {
+        self.count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+impl BillingTracker for FailingBillingTracker {
+    fn track(&self, _event: BillingEvent) -> Result<(), labkit_events::Error> {
+        self.count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err(labkit_events::Error::Emitter("test failure".into()))
     }
 }

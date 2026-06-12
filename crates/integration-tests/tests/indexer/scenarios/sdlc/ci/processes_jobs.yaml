@@ -1,0 +1,28 @@
+description: Jobs index with transformed failure_reason plus IN_PROJECT / HAS_JOB / TRIGGERED edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: build, status: 3, position: 0, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: compile, status: success, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30", finished_at: "2024-01-15 10:01:00", queued_at: "2024-01-15 10:00:00", failure_reason: null, traversal_path: "1/100/1000/" }
+    - { id: 7002, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: lint, status: success, ref: main, tag: false, allow_failure: true, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30", finished_at: "2024-01-15 10:01:00", queued_at: "2024-01-15 10:00:00", failure_reason: 1, traversal_path: "1/100/1000/" }
+    - { id: 7003, partition_id: 1, stage_id: 6001, project_id: 1000, user_id: 1, name: deploy, status: failed, ref: main, tag: false, allow_failure: false, when: on_success, retried: false, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:00:30", finished_at: "2024-01-15 10:01:00", queued_at: "2024-01-15 10:00:00", failure_reason: 1000, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_job:
+      rows:
+        - { id: 7001, name: compile, failure_reason: "" }
+        - { id: 7002, name: lint, failure_reason: script_failure }
+        - { id: 7003, name: deploy, failure_reason: protected_environment_failure }
+  edges:
+    - { kind: IN_PROJECT, from: Job, to: Project, traversal_path: "1/100/1000/", count: 3 }
+    - { kind: HAS_JOB, from: Stage, to: Job, traversal_path: "1/100/1000/", count: 3 }
+    - { kind: TRIGGERED, from: User, to: Job, traversal_path: "1/100/1000/", count: 3 }

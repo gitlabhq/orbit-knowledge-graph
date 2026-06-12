@@ -10,13 +10,14 @@ title: Use Orbit with the GitLab CLI (`glab`)
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experiment
+- Status: Beta
 
 {{< /details >}}
 
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 
 {{< /history >}}
 
@@ -84,9 +85,25 @@ glab orbit remote tools
 
 ### Run a query
 
+Replace `your-group` with your own group path. This query returns the first
+five projects in that group:
+
 ```shell
-echo '{"query":{"query_type":"traversal","node":{"id":"p","entity":"Project","filters":{"full_path":{"op":"starts_with","value":"your-group/"}}},"limit":5}}' \
-  | glab orbit remote query -
+glab orbit remote query - <<'EOF'
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": { "op": "starts_with", "value": "your-group/" }
+      }
+    },
+    "limit": 5
+  }
+}
+EOF
 ```
 
 The `--format` flag maps to the body's `response_format`:
@@ -102,7 +119,7 @@ final fallback.
 Pass exactly one scope flag:
 
 ```shell
-glab orbit remote graph-status --full-path gitlab-org/gitlab
+glab orbit remote graph-status --full-path your-group/your-project
 glab orbit remote graph-status --namespace-id 24
 glab orbit remote graph-status --project-id 2
 ```

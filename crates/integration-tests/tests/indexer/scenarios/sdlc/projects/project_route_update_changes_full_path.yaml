@@ -1,0 +1,35 @@
+# A project moved into a subgroup gets a new route on the second
+# incremental run; the checkpoint row makes that run incremental rather
+# than a full re-pull.
+description: A route rename on an incremental run updates the project full_path
+scope: { namespace: 100 }
+
+steps:
+  - seed:
+      namespaces:
+        - { id: 100, traversal_path: "1/100/", slug: org }
+        - { id: 200, parent_id: 100, traversal_path: "1/100/200/", slug: team }
+      projects:
+        - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/", slug: app }
+      siphon_routes:
+        - { id: 100, source_id: 100, source_type: Namespace, path: org, namespace_id: 100, traversal_path: "1/100/" }
+        - { id: 200, source_id: 200, source_type: Namespace, path: org/team, namespace_id: 200, traversal_path: "1/100/200/" }
+        - { id: 1000, source_id: 1000, source_type: Project, path: org/app, namespace_id: 100, traversal_path: "1/100/1000/" }
+    expect:
+      nodes:
+        gl_project:
+          rows:
+            - { id: 1000, full_path: org/app }
+
+  - seed:
+      checkpoint:
+        - { key: ns.100.Project, watermark: "2024-01-20 12:00:00.000000", cursor_values: "null" }
+      siphon_routes:
+        - { id: 1000, source_id: 1000, source_type: Project, path: org/team/app, namespace_id: 200, traversal_path: "1/100/200/1000/", _siphon_replicated_at: "2024-01-20 18:00:00" }
+      siphon_projects:
+        - { id: 1000, name: app, path: app, visibility_level: 0, namespace_id: 200, creator_id: 1, _siphon_replicated_at: "2024-01-20 18:00:00" }
+    expect:
+      nodes:
+        gl_project:
+          rows:
+            - { id: 1000, full_path: org/team/app }

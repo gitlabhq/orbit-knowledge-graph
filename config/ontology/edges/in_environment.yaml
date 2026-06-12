@@ -7,4 +7,5 @@ variants:
   - from_node: { type: Deployment, id: id }
     to_node: { type: Environment, id: id }
     fk_column: environment_id
+    scope: same_namespace
     description: "Deployment targets environment."

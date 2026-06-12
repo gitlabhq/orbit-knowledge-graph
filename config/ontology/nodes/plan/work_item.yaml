@@ -45,13 +45,10 @@ properties:
     type: enum
     source: state_id
     nullable: false
-    description: "Current state. Only opened (1) and closed (2) apply to work items."
+    description: "Current state."
     values:
       1: opened
       2: closed
-      3: merged
-      4: locked
-
   work_item_type:
     type: enum
     source: work_item_type_id
@@ -160,6 +157,7 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
+      mutable: true
     namespace_id:
       to: Group
       as: IN_GROUP
@@ -205,16 +203,16 @@ storage:
     - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_due_date, column: due_date, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_namespace_id, column: namespace_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_namespace_id, column: namespace_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

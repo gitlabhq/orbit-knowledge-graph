@@ -6,20 +6,24 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Note, id: id }
     fk_column: author_id
+    scope: prune_to_target
     description: "User authored note."
 
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     fk_column: author_id
+    scope: prune_to_target
     description: "User authored merge request."
 
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
     fk_column: author_id
+    scope: prune_to_target
     description: "User reported vulnerability."
 
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
     fk_column: author_id
+    scope: prune_to_target
     description: "User authored work item."
 

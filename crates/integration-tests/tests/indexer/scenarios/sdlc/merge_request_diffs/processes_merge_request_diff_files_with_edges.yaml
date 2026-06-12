@@ -1,0 +1,22 @@
+description: Diff files index (no id column) with HAS_FILE edges
+scope: { namespace: 100 }
+
+seed:
+  merge_requests:
+    - { id: 1, iid: 101, title: Add feature X, source_branch: feature-x, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: true, target_project_id: 1000, traversal_path: "1/100/" }
+  siphon_merge_request_diffs:
+    - { id: 10, merge_request_id: 1, state: collected, traversal_path: "1/100/" }
+  siphon_merge_request_diff_files:
+    - { merge_request_diff_id: 10, relative_order: 0, old_path: src/main.rs, new_path: src/main.rs, new_file: false, renamed_file: false, deleted_file: false, too_large: false, binary: false, generated: false, a_mode: "100644", b_mode: "100644", traversal_path: "1/100/1000/" }
+    - { merge_request_diff_id: 10, relative_order: 1, old_path: "", new_path: src/new_file.rs, new_file: true, renamed_file: false, deleted_file: false, too_large: false, binary: false, generated: null, a_mode: "000000", b_mode: "100644", traversal_path: "1/100/" }
+    - { merge_request_diff_id: 10, relative_order: 2, old_path: src/old_file.rs, new_path: "", new_file: false, renamed_file: false, deleted_file: true, too_large: false, binary: false, generated: true, a_mode: "100644", b_mode: "000000", traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_merge_request_diff_file:
+      rows:
+        - { old_path: src/main.rs, merge_request_id: 1, new_file: false, generated: false, a_mode: "100644", b_mode: "100644" }
+        - { old_path: "", merge_request_id: 1, new_file: true, generated: null, a_mode: "000000", b_mode: "100644" }
+        - { old_path: src/old_file.rs, merge_request_id: 1, new_file: false, generated: true, a_mode: "100644", b_mode: "000000" }
+  edges:
+    - { kind: HAS_FILE, from: MergeRequestDiff, to: MergeRequestDiffFile, traversal_path: "1/100/", count: 3 }

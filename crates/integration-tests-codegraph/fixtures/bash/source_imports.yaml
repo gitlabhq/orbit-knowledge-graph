@@ -1,0 +1,33 @@
+name: "Bash sourced-script imports — `source` and `.` forms"
+
+fixtures:
+  - path: scripts/main.sh
+    content: |
+      #!/usr/bin/env bash
+
+      source ./lib.sh
+      . ../shared/util.sh
+      source "config/env.sh"
+
+      echo "running"
+
+tests:
+  - name: "source and dot both emit Source ImportedSymbols keyed on the path argument"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'scripts/main.sh'
+        AND s.import_type = 'Source'
+      RETURN s.path AS path
+    assert:
+      - { row_count: 3 }
+      - { row: { path: "./lib.sh" } }
+      - { row: { path: "../shared/util.sh" } }
+      - { row: { path: "config/env.sh" } }
+
+  - name: "Ordinary commands (echo) do not produce imports"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(s:ImportedSymbol)
+      WHERE f.path = 'scripts/main.sh'
+      RETURN s.path AS path
+    assert:
+      - { row_count: 3 }

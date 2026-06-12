@@ -1,0 +1,24 @@
+description: Reviewer rows produce REVIEWER edges with merge-request target tags
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 10, iid: 101, title: Add auth, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+    - { id: 20, iid: 102, title: Fix crash, description: Crash fix, source_branch: fix-crash, target_branch: main, state_id: 3, merge_status: merged, draft: false, squash: false, target_project_id: 1000, author_id: 2, traversal_path: "1/100/" }
+  siphon_merge_request_reviewers:
+    - { id: 1, user_id: 10, merge_request_id: 10, created_at: "2024-01-15 10:00:00", state: 0, project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, user_id: 11, merge_request_id: 10, created_at: "2024-01-15 11:00:00", state: 0, project_id: 1000, traversal_path: "1/100/" }
+    - { id: 3, user_id: 10, merge_request_id: 20, created_at: "2024-01-16 09:00:00", state: 0, project_id: 1000, traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - kind: REVIEWER
+      from: User
+      to: MergeRequest
+      traversal_path: "1/100/"
+      count: 3
+      target_tags:
+        10: ["discussion_locked:null", "draft:false", "merge_status:can_be_merged", "squash:false", "state:opened"]
+        20: ["discussion_locked:null", "draft:false", "merge_status:merged", "squash:false", "state:merged"]

@@ -45,6 +45,23 @@ pub fn extract_request_context<T>(
         Status::unauthenticated(format!("JWT validation failed: {e}"))
     })?;
 
+    tracing::info!(
+        user_id = claims.user_id,
+        source_type = <&str>::from(claims.source_type),
+        realm = claims.realm.as_deref().unwrap_or(""),
+        deployment_type = claims.deployment_type.as_deref().unwrap_or(""),
+        root_namespace_id = claims.root_namespace_id.unwrap_or_default(),
+        organization_id = claims.organization_id.unwrap_or_default(),
+        instance_id = claims.instance_id.as_deref().unwrap_or(""),
+        unique_instance_id = claims.unique_instance_id.as_deref().unwrap_or(""),
+        instance_version = claims.instance_version.as_deref().unwrap_or(""),
+        global_user_id = claims.global_user_id.as_deref().unwrap_or(""),
+        correlation_id = %labkit::correlation::current()
+            .as_deref()
+            .unwrap_or_default(),
+        "JWT claims received"
+    );
+
     let user_agent = request
         .metadata()
         .get("x-client-user-agent")

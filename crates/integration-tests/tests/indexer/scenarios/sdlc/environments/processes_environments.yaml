@@ -1,0 +1,22 @@
+description: Environments produce nodes with transformed tier plus IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_environments:
+    - { id: 7001, project_id: 1000, name: production, slug: production, state: available, tier: 0, external_url: "https://example.com", traversal_path: "1/100/1000/" }
+    - { id: 7002, project_id: 1000, name: staging, slug: staging, state: available, tier: 1, external_url: "https://staging.example.com", traversal_path: "1/100/1000/" }
+    - { id: 7003, project_id: 1000, name: review/feature-x, slug: review-feature-x, state: stopping, tier: 4, environment_type: review, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_environment:
+      count: 3
+      rows:
+        - { id: 7001, name: production, state: available, tier: production }
+        - { id: 7003, name: review/feature-x, state: stopping, tier: other }
+  edges:
+    - { kind: IN_PROJECT, from: Environment, to: Project, traversal_path: "1/100/1000/", count: 3 }

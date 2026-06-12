@@ -1,0 +1,26 @@
+# status NULL is the active state and coerces to the '' storage default
+# (see container_repository.yaml); 0 maps to the delete_scheduled enum.
+description: Container repositories index with status null/enum coercion plus IN_PROJECT edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_container_repositories:
+    - { id: 6001, project_id: 1000, name: "app/backend", status: null, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 6002, project_id: 1000, name: "app/frontend", status: 0, created_at: "2024-01-16 10:00:00", updated_at: "2024-01-16 10:00:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_container_repository:
+      rows:
+        - { id: 6001, name: "app/backend", status: "" }
+        - { id: 6002, name: "app/frontend", status: delete_scheduled }
+  edges:
+    - kind: IN_PROJECT
+      from: ContainerRepository
+      to: Project
+      traversal_path: "1/100/1000/"
+      count: 2

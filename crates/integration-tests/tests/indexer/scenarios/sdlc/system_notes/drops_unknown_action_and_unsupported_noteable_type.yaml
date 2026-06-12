@@ -1,0 +1,30 @@
+# The unknown "description" action is pre-filtered by the extract query's
+# action IN-list; the Snippet noteable drops in process_batch. Neither may
+# fail the handler or produce an edge.
+description: Unknown actions and unsupported noteable types drop without edges
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  work_items:
+    - { id: 10, iid: 9, title: WI 9, description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: changed the description, noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note: closed, noteable_type: Snippet, noteable_id: 2000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note: "mentioned in #9", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: description, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note_id: 2, action: closed, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note_id: 3, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MENTIONS
+      count: 1
+      rows:
+        - { target_id: 10 }
+  totals:
+    gl_edge: 1

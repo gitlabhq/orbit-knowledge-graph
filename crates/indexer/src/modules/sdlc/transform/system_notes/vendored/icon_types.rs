@@ -2,85 +2,18 @@
 //!
 //! Source-of-truth:
 //! `gitlab-org/gitlab` `app/models/system_note_metadata.rb`.
-//! Pinned to `7ca75b3c001b1bd19387fea78fe67032322da436` (refs/heads/master,
-//! captured 2026-05-27).
+//! The pinned commit SHA and capture date are recorded at the top of
+//! `config/vendored/system_note_metadata.actions`.
 //!
-//! Why vendor: the parser dispatcher in `parse.rs` only handles a subset of
-//! these actions (see `parse::Action`). When Rails adds a new action that
-//! encodes a graph relationship, we need to notice — the
-//! `scripts/check-system-note-actions.sh` drift check diffs this list against
-//! the upstream file and fails CI if a new action appears upstream that is
-//! not present here. The two `_HANDLED_*` constants below make the parser's
-//! coverage explicit so the same script can also verify "every handled
-//! action is in ICON_TYPES".
+//! `ICON_TYPES` is generated at build time from that file by `build.rs`;
+//! To update: edit the `.actions` file, refresh the pinned SHA
+//! comment of the file, and rebuild.
 //!
-//! The pattern mirrors ADR 012's vendored-constant + CI drift-check approach
-//! for the GOON format version
-//! (`scripts/check-goon-format-version.sh`).
+//! The two `_HANDLED_*` constants below make the parser's coverage explicit.
+//! The subset tests assert they remain subsets of `ICON_TYPES` so any future
+//! update to the vendor file immediately surfaces coverage gaps at test time.
 
-/// All known `system_note_metadata.action` values from Rails. Read by the
-/// `scripts/check-system-note-actions.sh` drift check and the subset tests;
-/// the parser dispatches off the `HANDLED_*` subsets, not this full list.
-#[allow(dead_code, reason = "consumed by the drift-check script and tests")]
-pub const ICON_TYPES: &[&str] = &[
-    "commit",
-    "description",
-    "merge",
-    "confidential",
-    "visible",
-    "label",
-    "assignee",
-    "cross_reference",
-    "designs_added",
-    "designs_modified",
-    "designs_removed",
-    "designs_discussion_added",
-    "title",
-    "time_tracking",
-    "branch",
-    "milestone",
-    "discussion",
-    "task",
-    "moved",
-    "cloned",
-    "opened",
-    "closed",
-    "merged",
-    "duplicate",
-    "locked",
-    "unlocked",
-    "outdated",
-    "reviewer",
-    "tag",
-    "due_date",
-    "start_date_or_due_date",
-    "pinned_embed",
-    "cherry_pick",
-    "health_status",
-    "approved",
-    "unapproved",
-    "status",
-    "alert_issue_added",
-    "relate",
-    "unrelate",
-    "new_alert_added",
-    "severity",
-    "contact",
-    "timeline_event",
-    "issue_type",
-    "relate_to_child",
-    "unrelate_from_child",
-    "relate_to_parent",
-    "unrelate_from_parent",
-    "override",
-    "issue_email_participants",
-    "requested_changes",
-    "reviewed",
-    "custom_field",
-    "duo_agent_started",
-    "duo_agent_completed",
-    "duo_agent_failed",
-];
+include!(concat!(env!("OUT_DIR"), "/icon_types_generated.rs"));
 
 /// Subset of `ICON_TYPES` the parser dispatcher knows how to handle as
 /// cross-reference / lifecycle actions. Asserted to be a subset of
