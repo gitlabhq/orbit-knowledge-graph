@@ -331,6 +331,7 @@ yaml_test!(
 );
 yaml_test!(csharp_aliased_using, "csharp/aliased_using.yaml");
 yaml_test!(csharp_structs, "csharp/structs.yaml");
+yaml_test!(csharp_records, "csharp/records.yaml");
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
