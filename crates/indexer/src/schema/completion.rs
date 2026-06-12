@@ -37,6 +37,10 @@ use crate::schema::version::{
     read_all_versions, read_migrating_version, table_prefix,
 };
 
+/// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
+/// need cross-replica propagation (e.g. `SYSTEM STOP MERGES`).
+const CLICKHOUSE_CLUSTER: &str = "default";
+
 /// NATS KV key used to serialize migration-completion checks across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
 
@@ -267,6 +271,11 @@ impl MigrationCompletionChecker {
                 mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
+                if gkg_server_config::features::enabled(
+                    gkg_server_config::Feature::StopMergesOnRetire,
+                ) {
+                    self.stop_merges_for_version(entry.version).await;
+                }
             }
         }
 
@@ -496,6 +505,30 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
+    /// Stops background merges on all graph tables for a version so the merge
+    /// pool is reserved for the active version. Best-effort: failures are
+    /// logged but never propagated.
+    ///
+    /// `SYSTEM STOP MERGES` is node-local runtime state (unlike DDL which
+    /// auto-replicates), so it is issued `ON CLUSTER` to reach every replica.
+    async fn stop_merges_for_version(&self, version: u32) {
+        let prefix = table_prefix(version);
+        let db = self.graph.database();
+
+        for t in &generate_graph_tables(&self.ontology) {
+            let qualified = format!("{db}.{prefix}{}", t.name);
+            let _ = self
+                .graph
+                .execute(&format!(
+                    "SYSTEM STOP MERGES ON CLUSTER '{CLICKHOUSE_CLUSTER}' {qualified}"
+                ))
+                .await
+                .inspect_err(
+                    |e| warn!(version, table = %qualified, error = %e, "failed to stop merges"),
+                );
+        }
+    }
+
     /// Enumerates dead-version objects via `system.tables` (keep-set computed
     /// in SQL), validates each against the ontology, and drops recognized
     /// objects. Unrecognized objects are logged and left alone.
@@ -554,6 +587,13 @@ impl MigrationCompletionChecker {
             "VIEW" => 1,
             _ => 2,
         });
+
+        if gkg_server_config::features::enabled(gkg_server_config::Feature::StopMergesOnRetire) {
+            let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
+            for version in &dead_versions {
+                self.stop_merges_for_version(*version).await;
+            }
+        }
 
         let mut succeeded: HashSet<u32> = HashSet::new();
         let mut failed: HashSet<u32> = HashSet::new();
