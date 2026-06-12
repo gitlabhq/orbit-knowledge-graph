@@ -6,4 +6,5 @@ variants:
   - from_node: { type: VulnerabilityOccurrence, id: id }
     to_node: { type: Vulnerability, id: id }
     fk_column: vulnerability_id
+    scope: same_namespace
     description: "Occurrence is linked to a vulnerability."

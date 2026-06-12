@@ -7,4 +7,5 @@ variants:
   - from_node: { type: Job, id: id }
     to_node: { type: Runner, id: id }
     fk_column: runner_id
+    scope: prune_to_source
     description: "Job ran on this runner."

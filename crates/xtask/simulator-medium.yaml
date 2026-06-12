@@ -225,7 +225,7 @@ generation:
       "WorkItem -> Label": 0.5
 
 evaluation:
-  queries_path: fixtures/queries/sdlc_queries.yaml
+  queries_path: fixtures/queries/corpus/sdlc.yaml
   metadata_dir: ./evaluation_results_medium
   sample_size: 50
   iterations: 1

@@ -1,7 +1,9 @@
 mod metrics;
+pub mod stale_edge_reconciliation;
 pub mod table_cleanup;
 
 pub use metrics::ScheduledTaskMetrics;
+pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;
 
 use std::str::FromStr;

@@ -1,16 +1,8 @@
-use crate::{sql_format, workspace::Workspace};
+use crate::sql_format::{self, Format};
+use crate::workspace;
 use anyhow::{Context, Result};
 use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
-
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
-pub enum Format {
-    #[default]
-    Table,
-    Json,
-    Ndjson,
-    Csv,
-}
 
 pub fn run(
     query: Option<String>,
@@ -24,10 +16,7 @@ pub fn run(
         anyhow::bail!("empty SQL query");
     }
 
-    let db_path = match db {
-        Some(p) => p,
-        None => Workspace::open_default()?.db_path(),
-    };
+    let db_path = workspace::resolve_db_path(db)?;
     if !db_path.exists() {
         anyhow::bail!(
             "no local graph found at {}. Run `orbit index` first.",
@@ -44,12 +33,7 @@ pub fn run(
     })?;
 
     let stdout = std::io::stdout().lock();
-    match format {
-        Format::Table => sql_format::write_table(stdout, &batches),
-        Format::Json => sql_format::write_json(stdout, &batches),
-        Format::Ndjson => sql_format::write_ndjson(stdout, &batches),
-        Format::Csv => sql_format::write_csv(stdout, &batches),
-    }
+    sql_format::write(stdout, format, &batches)
 }
 
 fn resolve_sql(query: Option<&str>, file: Option<PathBuf>) -> Result<String> {

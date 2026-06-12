@@ -10,17 +10,23 @@ etl:
   transform: system_notes
   scope: namespaced
   source: siphon_notes
-  from: >-
-    siphon_notes AS sn
-    INNER JOIN siphon_system_note_metadata AS snm ON sn.id = snm.note_id
+  from: siphon_notes AS sn
   select: >-
     sn.id AS id, sn.note AS note, sn.noteable_id AS noteable_id,
     sn.noteable_type AS noteable_type, sn.author_id AS author_id,
     sn.project_id AS project_id, sn.created_at AS created_at,
-    sn.traversal_path AS traversal_path, snm.action AS action
-  where: "sn.system = true AND sn._siphon_deleted = false AND snm._siphon_deleted = false"
+    sn.traversal_path AS traversal_path
+  where: "sn.system = true AND sn.{{deleted_column}} = false"
   traversal_path_filter: "startsWith(sn.traversal_path, {traversal_path:String})"
-  watermark: sn._siphon_replicated_at
-  deleted: sn._siphon_deleted
+  watermark: sn.{{watermark_column}}
+  deleted: sn.{{deleted_column}}
   table_alias: sn
   order_by: [traversal_path, id]
+  page_join:
+    table: siphon_system_note_metadata
+    alias: snm
+    fk_column: note_id
+    select: [action]
+    where: "snm.{{deleted_column}} = false"
+    # Sorted by (traversal_path, id), so this prunes by the leading PK column.
+    traversal_path_column: traversal_path

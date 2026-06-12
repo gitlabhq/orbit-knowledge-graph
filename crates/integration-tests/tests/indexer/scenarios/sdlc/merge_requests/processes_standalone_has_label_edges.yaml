@@ -1,0 +1,15 @@
+description: Label links produce HAS_LABEL edges for merge requests
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  merge_requests:
+    - { id: 10, iid: 101, title: Add auth, description: Auth feature, source_branch: feat-auth, target_branch: main, state_id: 1, merge_status: can_be_merged, draft: false, squash: false, target_project_id: 1000, author_id: 1, traversal_path: "1/100/" }
+  siphon_label_links:
+    - { id: 1, label_id: 5, target_id: 10, target_type: MergeRequest, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 2, label_id: 6, target_id: 10, target_type: MergeRequest, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", namespace_id: 100, traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - { kind: HAS_LABEL, from: MergeRequest, to: Label, traversal_path: "1/100/", count: 2 }

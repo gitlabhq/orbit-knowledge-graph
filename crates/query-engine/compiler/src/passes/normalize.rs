@@ -10,7 +10,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
-use ontology::{EnumType, Ontology};
+use ontology::{EnumType, Ontology, TraversalPathKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -89,6 +89,14 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .edge_target_kinds
             .insert(name.to_string(), ontology.get_edge_all_target_types(name));
     }
+    for lookup in ontology.traversal_path_lookups() {
+        if lookup.kind == TraversalPathKind::Id {
+            input.compiler.tp_id_lookup.insert(
+                lookup.entity.clone(),
+                (lookup.source_table.clone(), lookup.key_column.clone()),
+            );
+        }
+    }
     input.compiler.table_columns.clear();
     for node in ontology.nodes() {
         input.compiler.table_columns.insert(
@@ -141,14 +149,21 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             ontology::DenormDirection::Source => "source",
             ontology::DenormDirection::Target => "target",
         };
-        input.compiler.denormalized_columns.insert(
-            (
-                dp.node_kind.clone(),
-                dp.property_name.clone(),
-                dir_prefix.to_string(),
-            ),
-            (dp.edge_column.clone(), dp.tag_key.clone()),
+        let key = (
+            dp.node_kind.clone(),
+            dp.property_name.clone(),
+            dir_prefix.to_string(),
         );
+        input
+            .compiler
+            .denormalized_columns
+            .insert(key.clone(), (dp.edge_column.clone(), dp.tag_key.clone()));
+        input
+            .compiler
+            .denorm_rel_kinds
+            .entry(key)
+            .or_default()
+            .push(dp.relationship_kind.clone());
     }
 
     // Populate text index metadata from the ontology's StorageIndex entries.

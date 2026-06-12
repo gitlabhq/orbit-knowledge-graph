@@ -40,6 +40,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
+- Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
 
 ## Where to find things
 
@@ -64,6 +65,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
+| Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
@@ -107,7 +109,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
 | `gkg-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
-| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and table cleanup (`migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
+| `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and dead-version GC (`migration_completion.rs`). **See `crates/indexer/AGENTS.md` (reuse-infra checklist) before adding a handler.** |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-graph` | Single crate split into `src/v2/` (current pipeline: `pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`) and `src/legacy/` (old `parser` + `linker` paths kept for the existing indexer path). Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |
 | `code-graph/treesitter-visit` | Tree-sitter language bindings wrapper (kept as a separate sub-crate for compile-time isolation) |

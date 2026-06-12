@@ -21,12 +21,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   name:
@@ -126,6 +128,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -138,6 +141,7 @@ properties:
     type: int64
     source: merge_request_id
     nullable: true
+    mutable: false
     description: "MR that created this review environment."
 
   traversal_path:
@@ -192,11 +196,11 @@ storage:
     - {name: idx_tier, column: tier, type: "set(8)", granularity: 2}
     - {name: idx_environment_type, column: environment_type, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_environment_type_ngram, column: environment_type, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

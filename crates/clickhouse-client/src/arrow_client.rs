@@ -26,6 +26,7 @@ use crate::error::ClickHouseError;
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
+    database: String,
     insert_settings: std::collections::HashMap<String, String>,
 }
 
@@ -60,8 +61,13 @@ impl ArrowClickHouseClient {
         Self {
             client,
             base_url: url.to_string(),
+            database: database.to_string(),
             insert_settings: insert_settings.clone(),
         }
+    }
+
+    pub fn database(&self) -> &str {
+        &self.database
     }
 
     pub fn query(&self, sql: &str) -> ArrowQuery {
@@ -207,16 +213,6 @@ impl ArrowClickHouseClient {
 
         insert.end().await.map_err(ClickHouseError::Insert)?;
         Ok(())
-    }
-
-    /// Opens an [`ArrowStreamInsert`]: one `INSERT` fed batches incrementally.
-    pub fn open_arrow_stream(&self, table: &str) -> ArrowStreamInsert {
-        let sql = self.build_insert_sql(table);
-        ArrowStreamInsert {
-            client: self.client.clone(),
-            sql,
-            state: None,
-        }
     }
 
     pub async fn execute(&self, sql: &str) -> Result<(), ClickHouseError> {
@@ -498,79 +494,6 @@ impl ArrowQuery {
         });
 
         Ok((ReceiverStream::new(rx).boxed(), summary_rx))
-    }
-}
-
-/// One `INSERT ... FORMAT ArrowStream` kept open across writes; each batch is
-/// flushed to the HTTP body as it arrives, so peak stays at ~one batch.
-pub struct ArrowStreamInsert {
-    client: Client,
-    sql: String,
-    state: Option<ArrowStreamState>,
-}
-
-struct ArrowStreamState {
-    insert: clickhouse::insert_formatted::InsertFormatted,
-    writer: StreamWriter<DrainableWriter>,
-    drain: DrainableWriter,
-    schema: arrow::datatypes::SchemaRef,
-}
-
-impl ArrowStreamInsert {
-    pub async fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), ClickHouseError> {
-        if self.state.is_none() {
-            let schema = batch.schema();
-            let options = arrow_ipc::writer::IpcWriteOptions::try_new(
-                8,
-                false,
-                arrow_ipc::MetadataVersion::V5,
-            )
-            .map_err(ClickHouseError::ArrowEncode)?
-            .try_with_compression(Some(arrow_ipc::CompressionType::LZ4_FRAME))
-            .map_err(ClickHouseError::ArrowEncode)?;
-
-            let drain = DrainableWriter::new();
-            let writer = StreamWriter::try_new_with_options(drain.clone(), &schema, options)
-                .map_err(ClickHouseError::ArrowEncode)?;
-            let insert = self.client.insert_formatted_with(&self.sql);
-            self.state = Some(ArrowStreamState {
-                insert,
-                writer,
-                drain,
-                schema,
-            });
-        }
-
-        let state = self.state.as_mut().expect("state initialized above");
-        if batch.schema() != state.schema {
-            // A different schema mid-stream would corrupt the IPC stream the
-            // header was written for, so reject it instead of writing garbage.
-            return Err(ClickHouseError::ArrowEncode(
-                arrow::error::ArrowError::SchemaError(
-                    "ArrowStreamInsert batch schema does not match the open stream".to_string(),
-                ),
-            ));
-        }
-        state
-            .writer
-            .write(batch)
-            .map_err(ClickHouseError::ArrowEncode)?;
-        flush_drain(&mut state.insert, &state.drain).await?;
-        Ok(())
-    }
-
-    /// No-op when no batch was ever written (no request was opened).
-    pub async fn finish(mut self) -> Result<(), ClickHouseError> {
-        let Some(mut state) = self.state.take() else {
-            return Ok(());
-        };
-        state
-            .writer
-            .finish()
-            .map_err(ClickHouseError::ArrowEncode)?;
-        flush_drain(&mut state.insert, &state.drain).await?;
-        state.insert.end().await.map_err(ClickHouseError::Insert)?;
-        Ok(())
     }
 }
 

@@ -99,6 +99,18 @@ impl TestContext {
     }
 
     pub async fn query_parameterized(&self, pq: &ParameterizedQuery) -> Vec<RecordBatch> {
+        self.try_query_parameterized(pq)
+            .await
+            .expect("parameterized query failed")
+    }
+
+    /// Like [`query_parameterized`] but returns the ClickHouse error instead of
+    /// panicking, so callers (e.g. the corpus smoke test) can collect per-query
+    /// failures rather than aborting on the first one.
+    pub async fn try_query_parameterized(
+        &self,
+        pq: &ParameterizedQuery,
+    ) -> Result<Vec<RecordBatch>, String> {
         let client = self.create_client();
         let mut query = client.query(&pq.sql);
 
@@ -106,10 +118,7 @@ impl TestContext {
             query = ArrowClickHouseClient::bind_param(query, name, &param.value, &param.ch_type);
         }
 
-        query
-            .fetch_arrow()
-            .await
-            .expect("parameterized query failed")
+        query.fetch_arrow().await.map_err(|e| e.to_string())
     }
 
     /// Force-merge all ReplacingMergeTree parts so subsequent SELECTs see

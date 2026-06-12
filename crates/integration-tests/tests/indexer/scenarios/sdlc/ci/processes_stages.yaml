@@ -1,0 +1,25 @@
+description: Stages index with IN_PROJECT / HAS_STAGE edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, iid: 1, sha: abc123, ref: main, status: success, source: 1, tag: false, traversal_path: "1/100/1000/" }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: build, status: 3, position: 0, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:01:00", traversal_path: "1/100/1000/" }
+    - { id: 6002, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: test, status: 3, position: 1, created_at: "2024-01-15 10:01:00", updated_at: "2024-01-15 10:02:00", traversal_path: "1/100/1000/" }
+    - { id: 6003, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: deploy, status: 3, position: 2, created_at: "2024-01-15 10:02:00", updated_at: "2024-01-15 10:03:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_stage:
+      rows:
+        - { id: 6001, name: build }
+        - { id: 6002, name: test }
+        - { id: 6003, name: deploy }
+  edges:
+    - { kind: IN_PROJECT, from: Stage, to: Project, traversal_path: "1/100/1000/", count: 3 }
+    - { kind: HAS_STAGE, from: Pipeline, to: Stage, traversal_path: "1/100/1000/", count: 3 }

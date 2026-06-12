@@ -21,24 +21,28 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: true
+    mutable: false
     description: "Project-scoped pipeline number."
 
   sha:
     type: string
     source: sha
     nullable: false
+    mutable: false
     description: "Commit SHA the pipeline runs against."
 
   ref:
     type: string
     source: ref
     nullable: false
+    mutable: false
     description: "Branch or tag name."
 
   status:
@@ -61,11 +65,13 @@ properties:
       10: waiting_for_resource
       11: waiting_for_callback
       12: canceling
+    terminal_values: [success, failed, canceled, skipped]
 
   source:
     type: enum
     source: source
     nullable: false
+    mutable: false
     description: "Trigger source."
     values:
       0: unknown
@@ -93,6 +99,7 @@ properties:
     type: boolean
     source: tag
     nullable: false
+    mutable: false
     description: "Whether running on a git tag."
 
   duration:
@@ -125,6 +132,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Creation timestamp."
 
   started_at:
@@ -143,6 +151,7 @@ properties:
     type: timestamp
     source: committed_at
     nullable: true
+    mutable: false
     description: "Commit timestamp."
 
   updated_at:
@@ -155,6 +164,7 @@ properties:
     type: string
     source: before_sha
     nullable: false
+    mutable: false
     description: "Previous commit SHA before the triggering push."
 
   yaml_errors:
@@ -173,18 +183,21 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
+    mutable: false
     description: "Triggering user ID."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: true
+    mutable: false
     description: "Triggering MR ID."
 
   auto_canceled_by_id:
@@ -260,14 +273,14 @@ storage:
     - {name: idx_finished_at, column: finished_at, type: "minmax", granularity: 1}
     - {name: idx_committed_at, column: committed_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_source, column: source, type: "set(20)", granularity: 2}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_user_id, column: user_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_user_id, column: user_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_auto_canceled_by_id, column: auto_canceled_by_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

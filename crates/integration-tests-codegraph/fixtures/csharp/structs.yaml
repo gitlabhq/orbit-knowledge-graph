@@ -1,0 +1,127 @@
+name: "C# structs — struct definitions, properties, fields, methods, readonly struct"
+
+# Coverage note: csharp.rs maps struct_declaration to definition_type "Struct"
+# (scope("struct_declaration", "Struct")), property_declaration to "Property",
+# constructor_declaration to "Constructor", and method_declaration to "Method".
+# Existing C# fixtures cover classes and resolution but not struct extraction or
+# struct members; this proves they are indexed and will not regress.
+#
+# Known gap: a bare struct field written without an initializer (e.g.
+# `public int X;`) is not emitted as a Field definition — the field_declaration
+# scope's name_from(field("declaration").field("name")) does not resolve the
+# declarator name for that form, so X/Y do not appear in the graph. Auto-property
+# members (Width/Height) are extracted normally, and are asserted below.
+
+fixtures:
+  - path: Geometry/Point.cs
+    content: |
+      namespace Geometry
+      {
+          public struct Point
+          {
+              public int X;
+              public int Y;
+
+              public Point(int x, int y)
+              {
+                  X = x;
+                  Y = y;
+              }
+
+              public double DistanceToOrigin()
+              {
+                  return System.Math.Sqrt(X * X + Y * Y);
+              }
+          }
+      }
+
+  - path: Geometry/Size.cs
+    content: |
+      namespace Geometry
+      {
+          public readonly struct Size
+          {
+              public int Width { get; }
+              public int Height { get; }
+
+              public Size(int width, int height)
+              {
+                  Width = width;
+                  Height = height;
+              }
+
+              public int Area() => Width * Height;
+          }
+      }
+
+tests:
+  - name: "struct Point is extracted as definition_type Struct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geometry.Point'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point", type: "Struct" } }
+
+  - name: "readonly struct Size is extracted as Struct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geometry.Size'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Struct" } }
+
+  - name: "struct method DistanceToOrigin() is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geometry.Point.DistanceToOrigin'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Method" } }
+
+  - name: "struct constructor is extracted"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(c:Definition)
+      WHERE s.fqn = 'Geometry.Point'
+        AND c.definition_type = 'Constructor'
+        AND e.edge_kind = 'Defines'
+      RETURN c.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Point" } }
+
+  - name: "readonly-struct properties Width and Height are extracted as Property definitions"
+    query: |
+      MATCH (s:Definition)-[:DefinitionToDefinition]->(p:Definition)
+      WHERE s.fqn = 'Geometry.Size'
+        AND p.definition_type = 'Property'
+      RETURN p.name AS name
+      ORDER BY p.name
+    assert:
+      - { row_count: 2 }
+      - { unique: name }
+      - { row: { name: "Height" } }
+      - { row: { name: "Width" } }
+
+  - name: "struct defines its method via a Defines edge"
+    query: |
+      MATCH (s:Definition)-[e:DefinitionToDefinition]->(m:Definition)
+      WHERE s.fqn = 'Geometry.Point'
+        AND m.fqn = 'Geometry.Point.DistanceToOrigin'
+        AND e.edge_kind = 'Defines'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines the struct"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'Geometry/Point.cs'
+        AND d.fqn = 'Geometry.Point'
+        AND e.edge_kind = 'Defines'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }

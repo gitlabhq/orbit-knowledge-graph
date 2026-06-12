@@ -394,6 +394,56 @@ mod tests {
     }
 
     #[test]
+    fn permits_clause_names_reach_the_reference_stream() {
+        // JEP 409 sealed types: the `permits` clause is not extracted into
+        // metadata and produces no semantic Extends edge (#847) — in valid
+        // Java the child-side extends/implements clause already provides it.
+        // The permitted type names are still picked up by the bare
+        // `reference("type_identifier")` rule, attributed to the sealed
+        // parent, so the parent->child relationship stays reachable even
+        // when a child file is missing or malformed.
+        let probe = |code: &str| {
+            JavaDsl::spec()
+                .parse_full_collect(
+                    code.as_bytes(),
+                    "Test.java",
+                    crate::v2::config::Language::Java,
+                    &Tracer::new(false),
+                )
+                .unwrap()
+        };
+
+        // Sealed interface
+        let r = probe(
+            "public sealed interface Shape permits Circle, Rectangle, Triangle {\n    double area();\n}\n",
+        );
+        let shape_idx = r
+            .definitions
+            .iter()
+            .position(|d| d.name == "Shape")
+            .unwrap() as u32;
+        for name in ["Circle", "Rectangle", "Triangle"] {
+            let r#ref = r
+                .refs
+                .iter()
+                .find(|x| x.name == name)
+                .unwrap_or_else(|| panic!("{name} should appear as a reference"));
+            assert_eq!(r#ref.enclosing_def, Some(shape_idx));
+        }
+
+        // Sealed class, with extends/implements alongside permits
+        let r = probe(
+            "public sealed class Animal extends Creature implements Living permits Dog, Cat {\n}\n",
+        );
+        for name in ["Dog", "Cat"] {
+            assert!(
+                r.refs.iter().any(|x| x.name == name),
+                "{name} should appear as a reference"
+            );
+        }
+    }
+
+    #[test]
     fn imports_extracted() {
         let result =
             parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n").unwrap();

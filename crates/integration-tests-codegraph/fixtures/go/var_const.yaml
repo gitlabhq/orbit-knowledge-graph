@@ -1,0 +1,40 @@
+name: "Go: package-level var and const as definitions"
+fixtures:
+  - path: errors.go
+    content: |
+      package mylib
+
+      import "errors"
+
+      var ErrNotFound = errors.New("not found")
+      var ErrPermission = errors.New("permission denied")
+      const MaxRetries = 3
+
+      func doSomething() {
+          var localErr = errors.New("local")
+          const localMax = 5
+      }
+
+tests:
+  - name: "Sentinel errors extracted as definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['ErrNotFound', 'ErrPermission']
+      RETURN d.name AS name ORDER BY name
+    assert:
+      - { row: { name: "ErrNotFound" } }
+      - { row: { name: "ErrPermission" } }
+
+  - name: "Package constant extracted as definition"
+    query: |
+      MATCH (d:Definition) WHERE d.name = 'MaxRetries'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "MaxRetries" } }
+
+  - name: "Function-local var and const are NOT extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['localErr', 'localMax']
+      RETURN d.name
+    assert: []

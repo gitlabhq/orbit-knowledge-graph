@@ -1,0 +1,19 @@
+description: Users index globally with transformed user_type and is_admin
+
+seed:
+  siphon_users:
+    - { id: 1, username: alice, email: alice@test.com, name: Alice Smith, first_name: Alice, last_name: Smith, state: active, public_email: alice.public@test.com, preferred_language: en, last_activity_on: "2024-01-15", private_profile: false, admin: true, auditor: false, external: false, user_type: 0, created_at: "2023-01-01", updated_at: "2024-01-15" }
+    - { id: 2, username: bob, email: bob@test.com, name: Bob Jones, first_name: Bob, last_name: Jones, state: active, public_email: bob.public@test.com, preferred_language: es, last_activity_on: "2024-01-10", private_profile: true, admin: false, auditor: false, external: true, user_type: 1, created_at: "2023-06-15", updated_at: "2024-01-10" }
+    - { id: 3, username: charlie, email: charlie@test.com, name: Charlie Brown, first_name: Charlie, last_name: Brown, state: blocked, public_email: "", preferred_language: fr, last_activity_on: "2024-01-05", private_profile: false, admin: false, auditor: true, external: false, user_type: 4, created_at: "2023-09-20", updated_at: "2024-01-05" }
+    - { id: 4, username: service-account, email: service-account@test.com, name: Service Account, first_name: Service, last_name: Account, state: active, public_email: "", preferred_language: en, last_activity_on: "2024-01-07", private_profile: false, admin: false, auditor: false, external: false, user_type: 13, created_at: "2023-09-20", updated_at: "2024-01-05" }
+
+run: global
+
+expect:
+  nodes:
+    gl_user:
+      rows:
+        - { id: 1, user_type: human, is_admin: true }
+        - { id: 2, user_type: support_bot, is_admin: false }
+        - { id: 3, user_type: service_user, is_admin: false }
+        - { id: 4, user_type: service_account }

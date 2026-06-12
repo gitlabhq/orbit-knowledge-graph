@@ -14,7 +14,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
       "description": "Domain classification for organizing entities."
     },
 
@@ -134,13 +134,35 @@
               "enum": ["low", "high"],
               "description": "Filter selectivity hint for the query planner. 'low' = few distinct values (enums, booleans), 'high' = many distinct values. Auto-derived from type when omitted."
             },
+            "mutable": {
+              "type": "boolean",
+              "description": "Whether this field can change after creation. Fields that never change (IDs, paths, timestamps) should be marked false.",
+              "default": true
+            },
+            "terminal_values": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "For enum fields, values that once reached never change (absorbing states). A filter on a terminal value can skip FINAL dedup."
+            },
             "traversal_path_lookup": {
               "$ref": "#/definitions/traversalPathLookup",
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
-          "required": ["type", "source"],
-          "additionalProperties": false
+          "required": ["type", "source", "description"],
+          "additionalProperties": false,
+          "if": {
+            "not": {
+              "properties": { "type": { "const": "enum" } },
+              "required": ["type"]
+            }
+          },
+          "then": {
+            "properties": {
+              "values": false,
+              "enum_type": false
+            }
+          }
         },
         {
           "type": "object",
@@ -160,7 +182,7 @@
               "description": "Human-readable description of the property."
             }
           },
-          "required": ["type", "virtual"],
+          "required": ["type", "virtual", "description"],
           "additionalProperties": false
         }
       ]
@@ -229,6 +251,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when the FK can change over the entity's lifetime (a 'latest'/'current' pointer); such edges are reconciled by the stale-edge sweep. Immutable FKs leave this false."
         }
       },
       "required": ["as"],
@@ -250,11 +277,11 @@
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -296,23 +323,23 @@
             },
             "select": {
               "type": "string",
-              "description": "Column expressions for the SELECT clause."
+              "description": "Column expressions for the SELECT clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "from": {
               "type": "string",
-              "description": "Table or JOIN expression for the FROM clause."
+              "description": "Table or JOIN expression for the FROM clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "where": {
               "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters)."
+              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters). Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "watermark": {
               "type": "string",
-              "description": "Column name for incremental processing watermark."
+              "description": "Column name for incremental processing watermark. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
             },
             "deleted": {
               "type": "string",
-              "description": "Column name indicating soft-deleted records."
+              "description": "Column name indicating soft-deleted records. Use {{deleted_column}} placeholder instead of hardcoding the deleted column name."
             },
             "order_by": {
               "type": "array",
@@ -327,6 +354,44 @@
             "table_alias": {
               "type": "string",
               "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+            },
+            "page_join": {
+              "type": "object",
+              "description": "Secondary table joined after the page LIMIT to avoid materializing the full secondary table in ClickHouse's hash-join build phase. The lowering wraps the base query in a _batch CTE and enriches via fk_column IN (SELECT id FROM _batch).",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "description": "Datalake table to join (e.g. siphon_system_note_metadata)."
+                },
+                "alias": {
+                  "type": "string",
+                  "description": "Table alias used in the enrichment CTE (e.g. snm)."
+                },
+                "fk_column": {
+                  "type": "string",
+                  "description": "FK column on the joined table that references the base table's id (e.g. note_id)."
+                },
+                "select": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1,
+                  "description": "Columns to select from the joined table (e.g. [action])."
+                },
+                "where": {
+                  "type": "string",
+                  "description": "Extra WHERE predicate on the joined table (e.g. {{deleted_column}} = false). Use {{watermark_column}} and {{deleted_column}} placeholders instead of hardcoding column names."
+                },
+                "watermark": {
+                  "type": "string",
+                  "description": "Watermark column for argMax deduplication. Defaults to schema.yaml's default_watermark. Use {{watermark_column}} placeholder instead of hardcoding the column name."
+                },
+                "traversal_path_column": {
+                  "type": "string",
+                  "description": "traversal_path column on the joined table. When set and the entity is namespaced, the enrichment CTE adds startsWith(<col>, {traversal_path}) so the join prunes by the joined table's leading PK column instead of scanning its whole FK index. The IN (SELECT id FROM _batch) bound already guarantees correctness; this is a pruning hint that must be a superset of the matched rows."
+                }
+              },
+              "required": ["table", "alias", "fk_column", "select"],
+              "additionalProperties": false
             },
             "transform": {
               "type": "string",
@@ -920,8 +985,8 @@
 
     "edgeVariantScope": {
       "type": "string",
-      "enum": ["namespace_anchor", "same_namespace"],
-      "description": "Namespace scope relationship between the two endpoints. Controls whether a resolved traversal_path prefix can propagate across this edge during query compilation. 'namespace_anchor': the source entity's namespace-of-record FK points to the target, which is a namespace anchor (Project/Group) — also enables anchor FK resolution for scope keys. 'same_namespace': both endpoints are guaranteed to live in the same namespace subtree (structural containment, project-local association, or intra-repo reference) — prefix propagates but no anchor FK resolution. Omitted (default): no namespace guarantee, fail-closed — prefix must not propagate."
+      "enum": ["namespace_anchor", "same_namespace", "prune_to_source", "prune_to_target"],
+      "description": "How a resolved traversal_path prefix relates to an edge variant's endpoints. 'namespace_anchor': source FK points to a Project/Group anchor; propagates and enables anchor FK resolution. 'same_namespace': both endpoints share a namespace subtree; prefix propagates across the edge. 'prune_to_source'/'prune_to_target': confine the edge's own scan to the named endpoint's namespace WITHOUT propagating, so the other endpoint may be a global hub (User/Runner/Label) — the named endpoint must be path-scopable. Omitted (default): fail-closed, no scoping or propagation."
     },
 
     "edgeVariant": {

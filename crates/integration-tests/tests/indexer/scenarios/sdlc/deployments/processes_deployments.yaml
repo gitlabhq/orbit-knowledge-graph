@@ -1,0 +1,26 @@
+description: Deployments produce nodes with transformed status plus IN_PROJECT / DEPLOYED_BY edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+  siphon_deployments:
+    - { id: 9001, iid: 1, project_id: 1000, environment_id: 7001, ref: main, tag: false, sha: abc123, user_id: 1, deployable_type: CommitStatus, status: 2, created_at: "2024-01-15 10:00:00", finished_at: "2024-01-15 10:05:00", archived: false, traversal_path: "1/100/1000/" }
+    - { id: 9002, iid: 2, project_id: 1000, environment_id: 7001, ref: main, tag: false, sha: def456, user_id: 1, deployable_type: CommitStatus, status: 3, created_at: "2024-01-16 10:00:00", finished_at: "2024-01-16 10:05:00", archived: false, traversal_path: "1/100/1000/" }
+    # NULL user_id — the IsNotNull filter must skip this row's DEPLOYED_BY edge.
+    - { id: 9003, iid: 3, project_id: 1000, environment_id: 7002, ref: staging, tag: false, sha: ghi789, user_id: null, deployable_type: CommitStatus, status: 1, created_at: "2024-01-17 10:00:00", archived: false, traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_deployment:
+      rows:
+        - { id: 9001, status: success }
+        - { id: 9002, status: failed }
+        - { id: 9003, status: running }
+  edges:
+    - { kind: IN_PROJECT, from: Deployment, to: Project, traversal_path: "1/100/1000/", count: 3 }
+    - { kind: DEPLOYED_BY, from: User, to: Deployment, traversal_path: "1/100/1000/", count: 2 }

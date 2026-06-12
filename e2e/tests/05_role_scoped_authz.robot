@@ -12,7 +12,7 @@ Library             Process
 Resource            gitlab.resource
 Resource            orbit.resource
 
-Suite Setup         Build Role Scoped Authz Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Build Role Scoped Authz Fixture
 
 
 *** Test Cases ***

@@ -12,7 +12,7 @@ use crate::constants::TRAVERSAL_PATH_COLUMN;
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, FilterOp, Input, InputFilter, QueryType};
 use crate::types::{DEFAULT_PATH_ACCESS_LEVEL, SecurityContext};
-use ontology::Ontology;
+use ontology::{EdgeVariantScope, Ontology};
 use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
@@ -196,12 +196,97 @@ fn validate_traversal_path_within_scope(
     )))
 }
 
+/// Confine edge scans to a tight `traversal_path` prefix when the traversal is
+/// pinned to a project/group. An edge row's `traversal_path` is its source
+/// entity's, so an edge whose two endpoints both resolve to the same scope can
+/// only hold rows under that scope; scoping it is lossless and restores the
+/// edge PK prefix that the broad org-wide authorization filter erases (#601941).
+///
+/// The endpoint prefixes come from the ontology's scope-annotation taint walk
+/// ([`Ontology::propagate_scope_prefixes`]) seeded with the prefixes the path
+/// resolver already attached to `scope_prefixes`. The node-table scans are
+/// scoped separately via `scope_prefixes` in the security pass; this stamps the
+/// edges the lowerer emits.
+fn stamp_edge_scope_prefixes(
+    input: &mut Input,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) {
+    if security_ctx.scope_prefixes.is_empty() {
+        return;
+    }
+
+    let node_prefix = {
+        let edges = crate::scope::scope_edges(input);
+        ontology.propagate_scope_prefixes(&edges, &security_ctx.scope_prefixes)
+    };
+
+    let entity_of: std::collections::HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
+        .collect();
+
+    for rel in &mut input.relationships {
+        let pf = node_prefix.get(&rel.from);
+        let pt = node_prefix.get(&rel.to);
+
+        if let (Some(pf), Some(pt)) = (pf, pt)
+            && pf == pt
+        {
+            rel.scope_prefix = Some(pf.clone());
+            continue;
+        }
+
+        let Some(from_kind) = entity_of.get(rel.from.as_str()).copied() else {
+            continue;
+        };
+        let Some(to_kind) = entity_of.get(rel.to.as_str()).copied() else {
+            continue;
+        };
+        for kind in &rel.types {
+            let named = match ontology.edge_scope_for(kind, from_kind, to_kind) {
+                Some(EdgeVariantScope::PruneToSource) => pf,
+                Some(EdgeVariantScope::PruneToTarget) => pt,
+                _ => continue,
+            };
+            if let Some(prefix) = named {
+                rel.scope_prefix = Some(prefix.clone());
+                break;
+            }
+        }
+    }
+}
+
+/// Mark each relationship whose every resolved variant keeps both endpoints in
+/// the same namespace. The orientation is checked both ways because the query
+/// may traverse a variant in reverse of its ontology definition.
+fn stamp_scope_preserving(input: &mut Input, ontology: &Ontology) {
+    let entity_of: std::collections::HashMap<String, String> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.clone(), n.entity.clone()?)))
+        .collect();
+    for rel in &mut input.relationships {
+        let (Some(from_e), Some(to_e)) = (entity_of.get(&rel.from), entity_of.get(&rel.to)) else {
+            continue;
+        };
+        rel.scope_preserving = !rel.types.is_empty()
+            && rel.types.iter().all(|kind| {
+                ontology.is_scope_preserving_triple(kind, from_e, to_e)
+                    || ontology.is_scope_preserving_triple(kind, to_e, from_e)
+            });
+    }
+}
+
 pub fn restrict(
     input: &mut Input,
     ontology: &Ontology,
     security_ctx: &SecurityContext,
 ) -> Result<()> {
     enforce_traversal_path_filters(input, ontology, security_ctx)?;
+    stamp_edge_scope_prefixes(input, ontology, security_ctx);
+    stamp_scope_preserving(input, ontology);
 
     if security_ctx.admin {
         return Ok(());
@@ -324,6 +409,8 @@ mod tests {
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
             fk_column: None,
+            scope_prefix: None,
+            scope_preserving: false,
         }
     }
 
@@ -1096,5 +1183,121 @@ mod tests {
                 "admin must be allowed to filter on User.{field}"
             );
         }
+    }
+
+    fn reviewer_prune_to_target_ontology() -> Ontology {
+        let base = Ontology::new()
+            .with_nodes(["User"])
+            .with_path_scopable_nodes(["MergeRequest"]);
+        let edge_table = base.edge_table().to_string();
+        base.with_edge_variant(ontology::EdgeEntity {
+            relationship_kind: "REVIEWER".into(),
+            source: "user_id".into(),
+            source_kind: "User".into(),
+            target: "id".into(),
+            target_kind: "MergeRequest".into(),
+            destination_table: edge_table,
+            fk_column: None,
+            scope: Some(ontology::EdgeVariantScope::PruneToTarget),
+        })
+    }
+
+    fn rel_kind(types: &[&str], from: &str, to: &str) -> crate::input::InputRelationship {
+        crate::input::InputRelationship {
+            types: types.iter().map(|s| (*s).into()).collect(),
+            from: from.into(),
+            to: to.into(),
+            min_hops: 1,
+            max_hops: 1,
+            direction: crate::input::Direction::Outgoing,
+            filters: std::collections::HashMap::new(),
+            fk_column: None,
+            scope_prefix: None,
+            scope_preserving: false,
+        }
+    }
+
+    #[test]
+    fn prune_to_target_stamps_when_target_resolves() {
+        let ont = reviewer_prune_to_target_ontology();
+        let prefixes = HashMap::from([("mr".to_string(), "1/9970/15846663/".to_string())]);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
+            .unwrap()
+            .with_scope_prefixes(prefixes);
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![rel_kind(&["REVIEWER"], "u", "mr")],
+            ..Input::default()
+        };
+        restrict(&mut input, &ont, &ctx).expect("restrict ok");
+        assert_eq!(
+            input.relationships[0].scope_prefix.as_deref(),
+            Some("1/9970/15846663/"),
+            "prune_to_target must stamp the edge from the pinned target prefix"
+        );
+    }
+
+    #[test]
+    fn prune_to_target_does_not_propagate_across_hub() {
+        let ont = reviewer_prune_to_target_ontology();
+        let prefixes = HashMap::from([("mr_a".to_string(), "1/9970/15846663/".to_string())]);
+        let ctx = SecurityContext::new(1, vec!["1/9970/".into()])
+            .unwrap()
+            .with_scope_prefixes(prefixes);
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr_a".into(),
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "mr_b".into(),
+                    entity: Some("MergeRequest".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                rel_kind(&["REVIEWER"], "u", "mr_a"),
+                rel_kind(&["REVIEWER"], "u", "mr_b"),
+            ],
+            ..Input::default()
+        };
+        restrict(&mut input, &ont, &ctx).expect("restrict ok");
+
+        assert_eq!(
+            input.relationships[0].scope_prefix.as_deref(),
+            Some("1/9970/15846663/"),
+            "edge adjacent to pinned mr_a must be scoped"
+        );
+
+        assert!(
+            input.relationships[1].scope_prefix.is_none(),
+            "edge to unpinned mr_b must NOT inherit mr_a's prefix; got {:?}",
+            input.relationships[1].scope_prefix
+        );
+
+        assert!(
+            !ctx.scope_prefixes.contains_key("mr_b"),
+            "mr_b must remain unpinned in the security context"
+        );
     }
 }

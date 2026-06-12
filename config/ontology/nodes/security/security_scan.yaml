@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   scan_type:
     type: enum
     source: scan_type
     nullable: false
+    mutable: false
     description: "Scan type."
     values:
       1: sast
@@ -53,6 +55,7 @@ properties:
       4: preparing
       5: preparation_failed
       6: purged
+    terminal_values: [succeeded, job_failed, report_error, preparation_failed, purged]
 
   latest:
     type: boolean
@@ -64,6 +67,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: false
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -76,18 +80,21 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   pipeline_id:
     type: int64
     source: pipeline_id
     nullable: true
+    mutable: false
     description: "Pipeline ID that ran this scan."
 
   build_id:
     type: int64
     source: build_id
     nullable: false
+    mutable: false
     description: "Job (build) ID that executed this scan."
 
   traversal_path:
@@ -134,10 +141,10 @@ storage:
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_latest, column: latest, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_build_id, column: build_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

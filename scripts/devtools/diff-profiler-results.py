@@ -13,10 +13,12 @@ import sys
 from pathlib import Path
 
 
+# Peak memory and ProfileEvents are not in profiler output (they need
+# cross-replica system.query_log); fetch those out-of-band by correlation_id.
+# Here we diff the scan + time metrics the response header gives accurately.
 METRICS = {
     "read_rows": ("total_read_rows", "rows"),
     "read_bytes": ("total_read_bytes", "bytes"),
-    "memory": ("total_memory_usage", "bytes"),
     "elapsed_ms": ("total_elapsed_ms", "ms"),
 }
 
@@ -93,7 +95,7 @@ def main():
     parser.add_argument(
         "--wide",
         action="store_true",
-        help="Unified table with rows + memory side by side (2-way only)",
+        help="Unified table with rows + bytes side by side (2-way only)",
     )
     parser.add_argument(
         "--format",
@@ -133,28 +135,28 @@ def main():
 
 
 def print_wide(queries, datasets, labels, fmt):
-    """Unified table: rows + memory side by side for 2-way comparison."""
+    """Unified table: rows + bytes side by side for 2-way comparison."""
     a_data, b_data = datasets
     a_label, b_label = labels
     rows_key, rows_unit = METRICS["read_rows"]
-    mem_key, mem_unit = METRICS["memory"]
+    bytes_key, bytes_unit = METRICS["read_bytes"]
 
     if fmt == "csv":
         print(
-            f"query,{a_label}_rows,{b_label}_rows,delta_rows,{a_label}_mem,{b_label}_mem,delta_mem"
+            f"query,{a_label}_rows,{b_label}_rows,delta_rows,{a_label}_bytes,{b_label}_bytes,delta_bytes"
         )
         for q in queries:
             ar = extract_metric(a_data.get(q, {"error": True}), rows_key)
             br = extract_metric(b_data.get(q, {"error": True}), rows_key)
-            am = extract_metric(a_data.get(q, {"error": True}), mem_key)
-            bm = extract_metric(b_data.get(q, {"error": True}), mem_key)
+            ab = extract_metric(a_data.get(q, {"error": True}), bytes_key)
+            bb = extract_metric(b_data.get(q, {"error": True}), bytes_key)
             dr = fmt_delta(ar, br) if ar and br else "n/a"
-            dm = fmt_delta(am, bm) if am and bm else "n/a"
-            print(f"{q},{ar},{br},{dr},{am},{bm},{dm}")
+            db = fmt_delta(ab, bb) if ab and bb else "n/a"
+            print(f"{q},{ar},{br},{dr},{ab},{bb},{db}")
         return
 
     print(
-        f"| Query | Type | Old rows | New rows | \u0394 rows | Old mem | New mem | \u0394 mem |"
+        f"| Query | Type | Old rows | New rows | \u0394 rows | Old bytes | New bytes | \u0394 bytes |"
     )
     print("|---|---|---|---|---|---|---|---|")
 
@@ -170,17 +172,17 @@ def print_wide(queries, datasets, labels, fmt):
 
         ar = extract_metric(a_result, rows_key) if a_result else None
         br = extract_metric(b_result, rows_key) if b_result else None
-        am = extract_metric(a_result, mem_key) if a_result else None
-        bm = extract_metric(b_result, mem_key) if b_result else None
+        ab = extract_metric(a_result, bytes_key) if a_result else None
+        bb = extract_metric(b_result, bytes_key) if b_result else None
 
         ar_s = fmt_value(ar, rows_unit) if ar is not None else "ERR"
         br_s = fmt_value(br, rows_unit) if br is not None else "ERR"
-        am_s = fmt_value(am, mem_unit) if am is not None else "ERR"
-        bm_s = fmt_value(bm, mem_unit) if bm is not None else "ERR"
+        ab_s = fmt_value(ab, bytes_unit) if ab is not None else "ERR"
+        bb_s = fmt_value(bb, bytes_unit) if bb is not None else "ERR"
         dr = fmt_delta(ar, br) if ar is not None and br is not None else "n/a"
-        dm = fmt_delta(am, bm) if am is not None and bm is not None else "n/a"
+        db = fmt_delta(ab, bb) if ab is not None and bb is not None else "n/a"
 
-        print(f"| {q} | {qtype} | {ar_s} | {br_s} | {dr} | {am_s} | {bm_s} | {dm} |")
+        print(f"| {q} | {qtype} | {ar_s} | {br_s} | {dr} | {ab_s} | {bb_s} | {db} |")
 
 
 def print_two_way(queries, datasets, labels, metric_key, unit, fmt):

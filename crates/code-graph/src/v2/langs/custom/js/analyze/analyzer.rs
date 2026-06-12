@@ -265,7 +265,7 @@ fn extract_class_members(
 
     for (class_id, elements) in class_table.elements.iter_enumerated() {
         let class_node_id = class_table.declarations[class_id];
-        let (class_name, extends) = match ctx.nodes.kind(class_node_id) {
+        let (class_name, extends, class_ast) = match ctx.nodes.kind(class_node_id) {
             AstKind::Class(c) => {
                 let name = c.id.as_ref().map(|id| id.name.to_string());
                 let ext = c.super_class.as_ref().and_then(|expr| {
@@ -275,7 +275,7 @@ fn extract_class_members(
                         None
                     }
                 });
-                (name, ext)
+                (name, ext, c)
             }
             _ => continue,
         };
@@ -284,28 +284,47 @@ fn extract_class_members(
             continue;
         };
 
+        let make_method = |name: String, range, is_static| JsDef {
+            fqn: format!("{class_name}::{name}"),
+            name,
+            kind: JsDefKind::Method {
+                class_fqn: class_name.clone(),
+                is_static,
+            },
+            range,
+            is_exported: false,
+            type_annotation: None,
+            invocation_support: Some(JsInvocationSupport::function()),
+        };
+
         for element in elements.iter() {
             if !element.kind.is_method() {
                 continue;
             }
 
-            let method_name = element.name.to_string();
-            let fqn = format!("{class_name}::{method_name}");
-            let range = ctx.lt.span_to_range(element.span);
-            let is_static = element.r#static;
+            method_defs.push(make_method(
+                element.name.to_string(),
+                ctx.lt.span_to_range(element.span),
+                element.r#static,
+            ));
+        }
 
-            method_defs.push(JsDef {
-                name: method_name,
-                fqn,
-                kind: JsDefKind::Method {
-                    class_fqn: class_name.clone(),
-                    is_static,
-                },
-                range,
-                is_exported: false,
-                type_annotation: None,
-                invocation_support: Some(JsInvocationSupport::function()),
-            });
+        // OXC skips abstract methods during class table construction (body is None →
+        // is_typescript_syntax()), so walk the raw AST class body to catch them.
+        // `static abstract` is illegal in TypeScript (TS1243), so `r#static` is
+        // always false here; it flows through make_method for symmetry only.
+        for element in &class_ast.body.body {
+            if let oxc::ast::ast::ClassElement::MethodDefinition(method) = element
+                && method.r#type == oxc::ast::ast::MethodDefinitionType::TSAbstractMethodDefinition
+                && !method.kind.is_constructor()
+                && let Some(method_name) = method.key.static_name()
+            {
+                method_defs.push(make_method(
+                    method_name.to_string(),
+                    ctx.lt.span_to_range(method.span),
+                    method.r#static,
+                ));
+            }
         }
 
         classes.push(JsClassInfo {

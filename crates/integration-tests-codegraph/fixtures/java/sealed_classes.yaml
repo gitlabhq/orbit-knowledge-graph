@@ -1,0 +1,150 @@
+# Java 17 sealed types (JEP 409): sealed interface with a permits clause and its
+# permitted classes (final, non-sealed).
+#
+# How `permits` is represented (#847): the clause is not extracted into
+# metadata and produces no semantic Extends edge — in valid Java every
+# permitted subtype carries its own extends/implements clause (JLS 8.1.1.2),
+# which is where the Extends edges asserted below come from. The permitted
+# type names in the clause (a `permits` field on class/interface_declaration
+# holding a `type_list`) are picked up by the bare `reference("type_identifier")`
+# rule and attributed to the sealed parent, so the parent->child relationship
+# stays reachable as a Calls edge even when the child file is missing or
+# malformed. The Quad/Square fixtures below pin that fallback.
+name: "Java 17: sealed interfaces and permitted classes"
+fixtures:
+  - path: com/example/shapes/Shape.java
+    content: |
+      package com.example.shapes;
+
+      public sealed interface Shape permits Circle, Rectangle, Triangle {
+          double area();
+      }
+
+  - path: com/example/shapes/Circle.java
+    content: |
+      package com.example.shapes;
+
+      public final class Circle implements Shape {
+          private final double radius;
+          public Circle(double radius) { this.radius = radius; }
+          public double area() { return Math.PI * radius * radius; }
+      }
+
+  - path: com/example/shapes/Rectangle.java
+    content: |
+      package com.example.shapes;
+
+      public final class Rectangle implements Shape {
+          private final double width, height;
+          public Rectangle(double width, double height) {
+              this.width = width;
+              this.height = height;
+          }
+          public double area() { return width * height; }
+      }
+
+  - path: com/example/shapes/Triangle.java
+    content: |
+      package com.example.shapes;
+
+      public non-sealed class Triangle implements Shape {
+          public double area() { return 0; }
+      }
+
+  # Malformed pair: Square does not declare `implements Quad` (illegal Java,
+  # but indexable), so the parent-side `permits` clause is the only place the
+  # relationship is stated.
+  - path: com/example/shapes/Quad.java
+    content: |
+      package com.example.shapes;
+
+      public sealed interface Quad permits Square {
+          double perimeter();
+      }
+
+  - path: com/example/shapes/Square.java
+    content: |
+      package com.example.shapes;
+
+      public final class Square {
+          private final double side;
+          public Square(double side) { this.side = side; }
+          public double perimeter() { return 4 * side; }
+      }
+
+tests:
+  - name: "Sealed interface Shape is extracted as an Interface definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Shape' AND d.definition_type = 'Interface'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Shape", fqn: "com.example.shapes.Shape" } }
+
+  - name: "Permitted classes are extracted as Class definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Circle', 'Rectangle', 'Triangle']
+        AND d.definition_type = 'Class'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { name: "Circle", fqn: "com.example.shapes.Circle" } }
+      - { row: { name: "Rectangle", fqn: "com.example.shapes.Rectangle" } }
+      - { row: { name: "Triangle", fqn: "com.example.shapes.Triangle" } }
+
+  - name: "Extends edges connect permitted classes to the sealed interface"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn IN [
+          'com.example.shapes.Circle',
+          'com.example.shapes.Rectangle',
+          'com.example.shapes.Triangle'
+        ]
+        AND parent.fqn = 'com.example.shapes.Shape'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent, e.edge_kind AS kind
+    assert:
+      - { row_count: 3 }
+      - { row: { child: "com.example.shapes.Circle", parent: "com.example.shapes.Shape", kind: Extends } }
+      - { row: { child: "com.example.shapes.Rectangle", parent: "com.example.shapes.Shape", kind: Extends } }
+      - { row: { child: "com.example.shapes.Triangle", parent: "com.example.shapes.Shape", kind: Extends } }
+
+  - name: "Permits-side references link the sealed parent to each permitted class"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'com.example.shapes.Shape'
+        AND e.edge_kind = 'Calls'
+        AND child.fqn IN [
+          'com.example.shapes.Circle',
+          'com.example.shapes.Rectangle',
+          'com.example.shapes.Triangle'
+        ]
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 3 }
+      - { row: { child: "com.example.shapes.Circle" } }
+      - { row: { child: "com.example.shapes.Rectangle" } }
+      - { row: { child: "com.example.shapes.Triangle" } }
+
+  - name: "Malformed child: no Extends edge exists between Square and Quad"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'com.example.shapes.Square'
+        AND parent.fqn = 'com.example.shapes.Quad'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child
+    assert:
+      - { empty: true }
+
+  - name: "Malformed child: the permits-side reference is the only remaining link"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'com.example.shapes.Quad'
+        AND child.fqn = 'com.example.shapes.Square'
+        AND e.edge_kind = 'Calls'
+      RETURN child.fqn AS child
+    assert:
+      - { row_count: 1 }
+      - { row: { child: "com.example.shapes.Square" } }

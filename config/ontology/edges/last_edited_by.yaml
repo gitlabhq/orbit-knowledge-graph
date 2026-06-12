@@ -6,4 +6,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     fk_column: last_edited_by_id
+    scope: prune_to_target
     description: "User last edited merge request content."
