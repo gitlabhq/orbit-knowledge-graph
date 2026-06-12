@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 pub enum Feature {
     /// SystemNotes derived-entity indexing (system-note reference edges).
     SystemNotes,
+    /// Stop background merges on retired schema versions before GC drop.
+    StopMergesOnRetire,
 }
 
 /// Feature flag states, deserialized from the `features:` config section.
@@ -23,12 +25,14 @@ pub enum Feature {
 #[serde(default, deny_unknown_fields)]
 pub struct FeaturesConfig {
     pub system_notes: bool,
+    pub stop_merges_on_retire: bool,
 }
 
 impl FeaturesConfig {
     fn is_enabled(&self, feature: Feature) -> bool {
         match feature {
             Feature::SystemNotes => self.system_notes,
+            Feature::StopMergesOnRetire => self.stop_merges_on_retire,
         }
     }
 }

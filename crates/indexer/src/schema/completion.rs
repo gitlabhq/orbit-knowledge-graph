@@ -254,7 +254,11 @@ impl MigrationCompletionChecker {
                 mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
-                self.stop_merges_for_version(entry.version).await;
+                if gkg_server_config::features::enabled(
+                    gkg_server_config::Feature::StopMergesOnRetire,
+                ) {
+                    self.stop_merges_for_version(entry.version).await;
+                }
             }
         }
 
@@ -568,11 +572,11 @@ impl MigrationCompletionChecker {
             _ => 2,
         });
 
-        // Stop merges before dropping — idempotent, covers versions that
-        // were retired but never had merges stopped (e.g. on first deploy).
-        let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
-        for version in &dead_versions {
-            self.stop_merges_for_version(*version).await;
+        if gkg_server_config::features::enabled(gkg_server_config::Feature::StopMergesOnRetire) {
+            let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
+            for version in &dead_versions {
+                self.stop_merges_for_version(*version).await;
+            }
         }
 
         let mut succeeded: HashSet<u32> = HashSet::new();
