@@ -116,6 +116,13 @@ graph:
 glab orbit local schema
 ```
 
+Pass table names as positional arguments to scope the output:
+
+```shell
+glab orbit local schema gl_definition              # scoped to one table
+glab orbit local schema gl_definition gl_edge      # scoped to two tables
+```
+
 | Flag | Purpose |
 |------|---------|
 | `--raw` | Emit JSON instead of the default table view. |

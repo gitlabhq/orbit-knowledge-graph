@@ -184,6 +184,12 @@ enum Commands {
         /// Emit JSON instead of the default table view.
         #[arg(long)]
         raw: bool,
+
+        /// Optional table names to scope the output.
+        /// When provided, only columns for those tables are shown.
+        /// e.g. `orbit schema gl_definition gl_edge`
+        #[arg(value_name = "TABLE")]
+        tables: Vec<String>,
     },
     /// List the repositories indexed in the local DuckDB graph.
     List {
@@ -233,14 +239,15 @@ async fn main() -> Result<()> {
             format,
             db,
         } => sql::run(query, file, format, db),
-        Commands::Schema { db, raw } => run_schema(db, raw),
+        Commands::Schema { db, raw, tables } => run_schema(db, raw, tables),
         Commands::List { format, db } => list::run(format, db),
     }
 }
 
 /// Describe the local DuckDB schema by reading `information_schema` from the
 /// graph database. Skips DuckDB's own `*_schema` namespaces.
-fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
+/// When `tables` is non-empty, only columns for those tables are returned.
+fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
     let db_path = workspace::resolve_db_path(db)?;
     if !db_path.exists() {
         anyhow::bail!(
@@ -251,13 +258,75 @@ fn run_schema(db: Option<PathBuf>, raw: bool) -> Result<()> {
 
     let client = duckdb_client::DuckDbClient::open_read_only(&db_path)
         .with_context(|| format!("failed to open {}", db_path.display()))?;
-    let sql = "SELECT table_name, column_name, data_type \
-               FROM information_schema.columns \
-               WHERE table_schema = 'main' \
-               ORDER BY table_name, ordinal_position";
-    let batches = client
-        .query_arrow(sql)
-        .context("failed to read information_schema.columns")?;
+
+    let batches = if tables.is_empty() {
+        let sql = "SELECT table_name, column_name, data_type \
+                   FROM information_schema.columns \
+                   WHERE table_schema = 'main' \
+                   ORDER BY table_name, ordinal_position";
+        client
+            .query_arrow(sql)
+            .context("failed to read information_schema.columns")?
+    } else {
+        let placeholders = vec!["?"; tables.len()].join(", ");
+        let sql = format!(
+            "SELECT table_name, column_name, data_type \
+             FROM information_schema.columns \
+             WHERE table_schema = 'main' \
+             AND table_name IN ({placeholders}) \
+             ORDER BY table_name, ordinal_position"
+        );
+        let params: Vec<serde_json::Value> = tables.iter().map(|t| serde_json::json!(t)).collect();
+        let batches = client
+            .query_arrow_json(&sql, &params)
+            .context("failed to read information_schema.columns")?;
+
+        // Validate that all requested tables were found
+        if !batches.is_empty() {
+            let found_tables: std::collections::HashSet<String> = batches
+                .iter()
+                .flat_map(|batch| {
+                    if let Some(col) = batch.column_by_name("table_name")
+                        && let Some(string_array) =
+                            col.as_any().downcast_ref::<arrow::array::StringArray>()
+                    {
+                        return string_array
+                            .iter()
+                            .filter_map(|s| s.map(String::from))
+                            .collect();
+                    }
+                    Vec::new()
+                })
+                .collect();
+
+            let missing: Vec<_> = tables
+                .iter()
+                .filter(|t| !found_tables.contains(*t))
+                .collect();
+            if !missing.is_empty() {
+                anyhow::bail!(
+                    "no table named {} in the local graph. Run `orbit schema` to list tables.",
+                    missing
+                        .iter()
+                        .map(|t| format!("'{}'", t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        } else if !tables.is_empty() {
+            // No results at all — all requested tables are missing
+            anyhow::bail!(
+                "no table named {} in the local graph. Run `orbit schema` to list tables.",
+                tables
+                    .iter()
+                    .map(|t| format!("'{}'", t))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+
+        batches
+    };
 
     let stdout = std::io::stdout().lock();
     if raw {
