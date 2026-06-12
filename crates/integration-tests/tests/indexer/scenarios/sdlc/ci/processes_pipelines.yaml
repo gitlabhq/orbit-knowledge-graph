@@ -1,0 +1,31 @@
+# Pipeline source_tags come from the MemTable enrichment, not a JOIN.
+description: Pipelines index with transformed source/failure_reason plus IN_PROJECT / TRIGGERED edges and source tags
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, user_id: 1, iid: 1, sha: abc123def456, ref: main, status: success, source: 19, tag: false, duration: 120, failure_reason: null, created_at: "2024-01-15 10:00:00", started_at: "2024-01-15 10:01:00", finished_at: "2024-01-15 10:03:00", traversal_path: "1/100/1000/" }
+    - { id: 5002, partition_id: 1, project_id: 1000, user_id: 1, iid: 2, sha: def456abc789, ref: feature-branch, status: failed, source: 1, tag: false, duration: 60, failure_reason: 30, created_at: "2024-01-16 10:00:00", started_at: "2024-01-16 10:01:00", finished_at: "2024-01-16 10:02:00", traversal_path: "1/100/1000/" }
+
+expect:
+  nodes:
+    gl_pipeline:
+      rows:
+        - { id: 5001, status: success, source: dependency_management_security_update, failure_reason: "" }
+        - { id: 5002, status: failed, source: push, failure_reason: filtered_by_no_pipeline }
+  edges:
+    - kind: IN_PROJECT
+      from: Pipeline
+      to: Project
+      traversal_path: "1/100/1000/"
+      count: 2
+      source_tags:
+        5001: ["failure_reason:null", "protected:null", "source:dependency_management_security_update", "status:success", "tag:false"]
+        5002: ["failure_reason:filtered_by_no_pipeline", "protected:null", "source:push", "status:failed", "tag:false"]
+    - { kind: TRIGGERED, from: User, to: Pipeline, traversal_path: "1/100/1000/", count: 2 }

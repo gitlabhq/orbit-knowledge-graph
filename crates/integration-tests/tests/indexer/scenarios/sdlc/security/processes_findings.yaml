@@ -1,0 +1,23 @@
+description: Security findings index with fields extracted from finding_data JSON
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_vulnerability_scanners:
+    - { id: 1, external_id: gemnasium, name: Gemnasium, vendor: GitLab, project_id: 1000, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+  siphon_security_findings:
+    - { id: 1, uuid: 00000000-0000-0000-0000-000000000f01, scan_id: 100, scanner_id: 1, severity: 7, deduplicated: true, finding_data: '{"name": "SQL Injection", "description": "A SQL injection vulnerability", "solution": "Use parameterized queries"}', project_id: 1000, traversal_path: "1/100/" }
+    - { id: 2, uuid: 00000000-0000-0000-0000-000000000f02, scan_id: 100, scanner_id: 1, severity: 5, deduplicated: false, finding_data: '{"name": "XSS"}', project_id: 1000, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_finding:
+      rows:
+        - { id: 1, uuid: 00000000-0000-0000-0000-000000000f01, name: SQL Injection, description: A SQL injection vulnerability, solution: Use parameterized queries, severity: critical, deduplicated: true }
+        - { id: 2, uuid: 00000000-0000-0000-0000-000000000f02, name: XSS, description: "", solution: "", severity: medium, deduplicated: false }
+  edges:
+    - { kind: IN_PROJECT, from: Finding, to: Project, traversal_path: "1/100/", count: 2 }
+    - { kind: DETECTED_BY, from: Finding, to: VulnerabilityScanner, traversal_path: "1/100/", count: 2 }

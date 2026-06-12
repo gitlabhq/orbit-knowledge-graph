@@ -643,7 +643,8 @@ unknown_id_path_finding_no_widen:
         {"id": "start", "entity": "MergeRequest", "node_ids": [{{MR_NODE_ID}}]},
         {"id": "end", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}]}
       ],
-      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["IN_PROJECT", "CONTAINS"]}
     }
 
 path_finding_two_projects_in_group_by_full_path:

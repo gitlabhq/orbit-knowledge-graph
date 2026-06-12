@@ -845,6 +845,7 @@ mod tests {
                     delimiter: None,
                     array_field: None,
                     array: false,
+                    mutable: false,
                 },
                 EdgeMapping {
                     target: EdgeTarget::Literal("Pipeline".to_string()),
@@ -853,6 +854,7 @@ mod tests {
                     delimiter: None,
                     array_field: None,
                     array: false,
+                    mutable: false,
                 },
             ],
         );
@@ -977,6 +979,7 @@ mod tests {
                     delimiter: None,
                     array_field: None,
                     array: false,
+                    mutable: false,
                 },
                 EdgeMapping {
                     target: EdgeTarget::Literal("Pipeline".to_string()),
@@ -985,6 +988,7 @@ mod tests {
                     delimiter: None,
                     array_field: None,
                     array: false,
+                    mutable: false,
                 },
             ],
         );

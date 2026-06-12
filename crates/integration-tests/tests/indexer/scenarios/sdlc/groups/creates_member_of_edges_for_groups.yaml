@@ -1,0 +1,16 @@
+description: Group memberships produce MEMBER_OF edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  siphon_users:
+    - { id: 1, email: user1@example.com, username: user1, name: User 1, state: active, organization_id: 1 }
+    - { id: 2, email: user2@example.com, username: user2, name: User 2, state: active, organization_id: 1 }
+  siphon_members:
+    - { id: 10100, access_level: 40, source_id: 100, source_type: Namespace, user_id: 1, state: 0, traversal_path: "1/100/" }
+    - { id: 20100, access_level: 40, source_id: 100, source_type: Namespace, user_id: 2, state: 0, traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - { kind: MEMBER_OF, from: User, to: Group, traversal_path: "1/100/", count: 2 }

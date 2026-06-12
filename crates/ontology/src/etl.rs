@@ -73,6 +73,7 @@ pub struct EdgeMapping {
     pub delimiter: Option<String>,
     pub array_field: Option<String>,
     pub array: bool,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

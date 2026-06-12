@@ -1,0 +1,32 @@
+# CHILD_OF is a standalone edge enriched on both sides: source tags come
+# from the child pipeline (5002), target tags from the parent (5001).
+description: ci_sources_pipelines rows produce CHILD_OF and TRIGGERS_PIPELINE edges with tags
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, iid: 1, sha: a, ref: main, status: success, source: 1, tag: false, created_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 5002, partition_id: 1, project_id: 1000, iid: 2, sha: b, ref: main, status: success, source: 12, tag: false, created_at: "2024-01-15 10:05:00", traversal_path: "1/100/1000/" }
+  siphon_p_ci_stages:
+    - { id: 6001, partition_id: 1, pipeline_id: 5001, project_id: 1000, name: trigger-stage, status: 3, position: 0, traversal_path: "1/100/1000/" }
+  siphon_p_ci_builds:
+    - { id: 7001, partition_id: 1, stage_id: 6001, commit_id: 5001, project_id: 1000, type: "Ci::Bridge", name: trigger-downstream, status: success, ref: main, allow_failure: false, traversal_path: "1/100/1000/" }
+  siphon_ci_sources_pipelines:
+    - { id: 1, project_id: 1000, source_project_id: 1000, source_job_id: 7001, partition_id: 1, source_partition_id: 1, pipeline_id: 5002, source_pipeline_id: 5001, traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - kind: CHILD_OF
+      from: Pipeline
+      to: Pipeline
+      traversal_path: "1/100/1000/"
+      count: 1
+      source_tags:
+        5002: ["failure_reason:null", "protected:null", "source:parent_pipeline", "status:success", "tag:false"]
+      target_tags:
+        5001: ["failure_reason:null", "protected:null", "source:push", "status:success", "tag:false"]
+    - { kind: TRIGGERS_PIPELINE, from: Job, to: Pipeline, traversal_path: "1/100/1000/", count: 1 }

@@ -14,6 +14,11 @@ yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
 yaml_test!(range_contract, "range_contract.yaml");
 
+// Bash / Shell
+yaml_test!(bash_function_definitions, "bash/function_definitions.yaml");
+yaml_test!(bash_source_imports, "bash/source_imports.yaml");
+yaml_test!(bash_extension_routing, "bash/extension_routing.yaml");
+
 // JavaScript / TypeScript
 yaml_test!(
     typescript_js_module_resolution,
@@ -47,6 +52,7 @@ yaml_test!(
     javascript_jsx_and_generated_js_files,
     "javascript/jsx_and_generated_js_files.yaml"
 );
+yaml_test!(javascript_error_recovery, "javascript/error_recovery.yaml");
 yaml_test!(
     typescript_gitlab_monolith_barrels,
     "typescript/gitlab_monolith_barrels.yaml"
@@ -145,6 +151,7 @@ yaml_test!(
 );
 yaml_test!(python_wildcard_import, "python/wildcard_import.yaml");
 yaml_test!(python_callable_objects, "python/callable_objects.yaml");
+yaml_test!(python_dataclass, "python/dataclass.yaml");
 yaml_test!(python_instance_attrs, "python/instance_attrs.yaml");
 yaml_test!(
     python_return_type_inference,
@@ -162,6 +169,10 @@ yaml_test!(
 );
 yaml_test!(python_relative_imports, "python/relative_imports.yaml");
 yaml_test!(
+    python_dataclass_references,
+    "python/dataclass_references.yaml"
+);
+yaml_test!(
     python_v1_interfile_resolution,
     "python/v1_interfile_resolution.yaml"
 );
@@ -171,6 +182,7 @@ yaml_test!(
 );
 
 // Java
+yaml_test!(java_records, "java/records.yaml");
 yaml_test!(java_call_resolution, "java_resolution.yaml");
 yaml_test!(java_intrafile_resolution, "java/intrafile_resolution.yaml");
 yaml_test!(java_interfile_resolution, "java/interfile_resolution.yaml");
@@ -188,6 +200,8 @@ yaml_test!(
     java_imported_symbol_fallback_matrix,
     "java/imported_symbol_fallback_matrix.yaml"
 );
+yaml_test!(java_sealed_classes, "java/sealed_classes.yaml");
+yaml_test!(java_enums, "java/enums.yaml");
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
@@ -200,6 +214,9 @@ yaml_test!(
     "kotlin/annotation_references.yaml"
 );
 yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
+yaml_test!(kotlin_coroutines, "kotlin/coroutines.yaml");
+yaml_test!(kotlin_data_classes, "kotlin/data_classes.yaml");
+yaml_test!(kotlin_sealed_classes, "kotlin/sealed_classes.yaml");
 yaml_test!(
     kotlin_imported_symbol_fallback_matrix,
     "kotlin/imported_symbol_fallback_matrix.yaml"
@@ -217,6 +234,9 @@ yaml_test!(go_scope_and_branching, "go/scope_and_branching.yaml");
 yaml_test!(go_multiple_embedding, "go/multiple_embedding.yaml");
 yaml_test!(go_higher_order, "go/higher_order.yaml");
 yaml_test!(go_var_reassignment, "go/var_reassignment.yaml");
+yaml_test!(go_var_const, "go/var_const.yaml");
+yaml_test!(go_special_functions, "go/special_functions.yaml");
+
 yaml_test!(
     go_imported_symbol_fallback_matrix,
     "go/imported_symbol_fallback_matrix.yaml"
@@ -262,6 +282,8 @@ yaml_test!(
 yaml_test!(cpp_resolution, "cpp/resolution.yaml");
 yaml_test!(cpp_cross_language, "cpp/cross_language.yaml");
 yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
+yaml_test!(cpp_concepts, "cpp/concepts.yaml");
+yaml_test!(cpp_templates, "cpp/templates.yaml");
 
 // PHP
 yaml_test!(php_resolution, "php/resolution.yaml");
@@ -291,6 +313,11 @@ yaml_test!(
     "php/cross_file_class_const_singleton.yaml"
 );
 
+// Elixir
+yaml_test!(elixir_definitions, "elixir/definitions.yaml");
+yaml_test!(elixir_imports, "elixir/imports.yaml");
+yaml_test!(elixir_cross_file_calls, "elixir/cross_file_calls.yaml");
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(
@@ -303,10 +330,13 @@ yaml_test!(
     "csharp/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(csharp_aliased_using, "csharp/aliased_using.yaml");
+yaml_test!(csharp_structs, "csharp/structs.yaml");
+yaml_test!(csharp_records, "csharp/records.yaml");
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 yaml_test!(ruby_metaprogramming, "ruby/metaprogramming.yaml");
+yaml_test!(ruby_dynamic_dispatch, "ruby/dynamic_dispatch.yaml");
 yaml_test!(ruby_gitlab_monolith, "ruby/gitlab_monolith.yaml");
 yaml_test!(ruby_e2e_weather_app, "ruby/e2e_weather_app.yaml");
 yaml_test!(ruby_module_imports, "ruby/module_imports.yaml");
@@ -315,6 +345,7 @@ yaml_test!(
     "ruby/imported_symbol_fallback_matrix.yaml"
 );
 yaml_test!(ruby_top_level_constants, "ruby/top_level_constants.yaml");
+yaml_test!(ruby_lambda_defs, "ruby/lambda_defs.yaml");
 yaml_test!(ruby_line_indexing, "ruby/line_indexing.yaml");
 yaml_test!(
     ruby_qualified_and_concern_includes,
@@ -358,6 +389,10 @@ yaml_test!(
 );
 yaml_test!(rust_structural_entities, "rust/structural_entities.yaml");
 yaml_test!(rust_precision_resolution, "rust/precision_resolution.yaml");
+yaml_test!(
+    rust_closure_non_extraction,
+    "rust/closure_non_extraction.yaml"
+);
 yaml_test!(rust_local_items, "rust/local_items.yaml");
 yaml_test!(rust_local_flow_ssa, "rust/local_flow_ssa.yaml");
 yaml_test!(rust_mod_rs_resolution, "rust/mod_rs_resolution.yaml");

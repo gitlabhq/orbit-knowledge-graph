@@ -1,0 +1,31 @@
+description: Projects index with transformed visibility plus CREATOR / CONTAINS edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, creator_id: 1, traversal_path: "1/100/1000/" }
+    - { id: 1001, namespace_id: 100, creator_id: 2, visibility_level: 20, traversal_path: "1/100/1001/" }
+
+expect:
+  nodes:
+    gl_project:
+      rows:
+        - { id: 1000, visibility_level: private }
+        - { id: 1001, visibility_level: public }
+  edges:
+    - kind: CREATOR
+      from: User
+      to: Project
+      count: 2
+      rows:
+        - { target_id: 1000, traversal_path: "1/100/1000/" }
+        - { target_id: 1001, traversal_path: "1/100/1001/" }
+    - kind: CONTAINS
+      from: Group
+      to: Project
+      count: 2
+      rows:
+        - { target_id: 1000, traversal_path: "1/100/1000/" }
+        - { target_id: 1001, traversal_path: "1/100/1001/" }

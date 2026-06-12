@@ -26,6 +26,7 @@ use crate::error::ClickHouseError;
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
+    database: String,
     insert_settings: std::collections::HashMap<String, String>,
 }
 
@@ -60,8 +61,13 @@ impl ArrowClickHouseClient {
         Self {
             client,
             base_url: url.to_string(),
+            database: database.to_string(),
             insert_settings: insert_settings.clone(),
         }
+    }
+
+    pub fn database(&self) -> &str {
+        &self.database
     }
 
     pub fn query(&self, sql: &str) -> ArrowQuery {

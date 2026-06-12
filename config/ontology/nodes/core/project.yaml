@@ -129,6 +129,7 @@ etl:
         AND source_type = 'Project' AND NOT _siphon_deleted
       GROUP BY source_id
     ) route ON project.id = route.source_id
+  where: "project.id IN (SELECT id FROM project_namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
   table_alias: project

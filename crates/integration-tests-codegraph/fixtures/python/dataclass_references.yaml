@@ -1,0 +1,20 @@
+name: "Python: Dataclass field references"
+fixtures:
+  - path: test.py
+    content: |
+      from dataclasses import dataclass
+
+      @dataclass
+      class User:
+          email: str
+
+      def greet(u: User):
+          print(u.email)
+
+tests:
+  - name: "Field access creates a reference to the field definition"
+    query: |
+      MATCH (caller:Definition)-[r:DefinitionToDefinition]->(target:Definition)
+      WHERE caller.name = 'greet' AND target.name = 'email' AND r.edge_kind IN ['Calls', 'References']
+      RETURN target.name AS name
+    assert: []

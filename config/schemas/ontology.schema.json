@@ -14,7 +14,7 @@
   "definitions": {
     "domainName": {
       "type": "string",
-      "enum": ["core", "source_code", "code_review", "ci", "security", "plan"],
+      "enum": ["core", "source_code", "code_review", "ci", "security", "plan", "packages", "container_registry"],
       "description": "Domain classification for organizing entities."
     },
 
@@ -139,8 +139,20 @@
               "description": "Marks this column as a scoping key the path resolver maps to a traversal_path leaf."
             }
           },
-          "required": ["type", "source"],
-          "additionalProperties": false
+          "required": ["type", "source", "description"],
+          "additionalProperties": false,
+          "if": {
+            "not": {
+              "properties": { "type": { "const": "enum" } },
+              "required": ["type"]
+            }
+          },
+          "then": {
+            "properties": {
+              "values": false,
+              "enum_type": false
+            }
+          }
         },
         {
           "type": "object",
@@ -160,7 +172,7 @@
               "description": "Human-readable description of the property."
             }
           },
-          "required": ["type", "virtual"],
+          "required": ["type", "virtual", "description"],
           "additionalProperties": false
         }
       ]
@@ -229,6 +241,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when the FK can change over the entity's lifetime (a 'latest'/'current' pointer); such edges are reconciled by the stale-edge sweep. Immutable FKs leave this false."
         }
       },
       "required": ["as"],

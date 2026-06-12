@@ -426,13 +426,60 @@ fn schema_errors_when_db_missing() {
 }
 
 #[test]
-fn debug_ddl_produces_clickhouse_statements() {
+fn schema_scoped_excludes_unrequested_tables() {
     let data_dir = tempfile::TempDir::new().unwrap();
-    let (stdout, stderr, ok) = run_cmd(&["debug", "ddl"], data_dir.path());
-    assert!(ok, "debug ddl failed: {stderr}");
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (stdout, stderr, ok) = run_cmd(&["schema", "gl_file"], data_dir.path());
+    assert!(ok, "orbit schema gl_file failed: {stderr}");
+
+    assert!(stdout.contains("gl_file"), "expected gl_file in output");
     assert!(
-        stdout.contains("CREATE TABLE"),
-        "expected DDL output, got: {}",
-        &stdout.chars().take(200).collect::<String>()
+        !stdout.contains("gl_directory"),
+        "gl_directory should not be in scoped output"
+    );
+    assert!(
+        !stdout.contains("gl_edge"),
+        "gl_edge should not be in scoped output"
+    );
+}
+
+#[test]
+fn schema_scoped_raw_contains_only_requested_table() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (stdout, stderr, ok) = run_cmd(&["schema", "--raw", "gl_definition"], data_dir.path());
+    assert!(ok, "orbit schema --raw gl_definition failed: {stderr}");
+
+    let v: Value = serde_json::from_str(&stdout).expect("parseable JSON");
+    let tables: BTreeSet<&str> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["table_name"].as_str().unwrap())
+        .collect();
+
+    assert_eq!(tables.len(), 1, "should contain only gl_definition");
+    assert!(tables.contains("gl_definition"));
+}
+
+#[test]
+fn schema_unknown_table_exits_with_error() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let repo = create_test_repo();
+    assert!(orbit_index(&repo.path, data_dir.path()));
+
+    let (_, stderr, ok) = run_cmd(&["schema", "gl_typo"], data_dir.path());
+    assert!(!ok, "schema should fail for unknown table");
+    assert!(
+        stderr.contains("no table named 'gl_typo'"),
+        "expected unknown-table error: {stderr}"
+    );
+    assert!(
+        stderr.contains("Run `orbit schema` to list tables"),
+        "expected suggestion to run orbit schema: {stderr}"
     );
 }

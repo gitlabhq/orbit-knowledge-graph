@@ -13,7 +13,7 @@ Documentation       A project- or group-id-scoped query rewrites the scope filte
 Resource            gitlab.resource
 Resource            orbit.resource
 
-Suite Setup         Seed Cross Namespace Fixture
+Suite Setup         Run Keywords    Attach To Shared Fixture    AND    Seed Cross Namespace Fixture
 
 
 *** Test Cases ***
@@ -89,7 +89,7 @@ Path Finding Within Scoped Project Returns The Path
     [Tags]    cross-namespace
     ${start}=    Create Dictionary    id=start    entity=WorkItem    node_ids=${{[int($XNS_ISSUE_ID_A)]}}
     ${end}=    Create Dictionary    id=end    entity=Project    node_ids=${{[int($XNS_PROJECT_ID_A)]}}
-    ${path}=    Create Dictionary    type=shortest    from=start    to=end    max_depth=${2}
+    ${path}=    Create Dictionary    type=shortest    from=start    to=end    max_depth=${2}    rel_types=${{["IN_PROJECT"]}}
     ${query}=    Create Dictionary    query_type=path_finding    nodes=${{[$start, $end]}}    path=${path}
     Wait Until Result Node Ids Contain    ${query}    ${XNS_ISSUE_ID_A}    ${XNS_PROJECT_ID_A}
 

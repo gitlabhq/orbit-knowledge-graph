@@ -63,6 +63,10 @@ impl DslLanguage for CppDsl {
             scope("enumerator", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
+            // C++20 Concepts
+            scope("concept_definition", "Concept")
+                .def_kind(DefKind::Interface)
+                .no_scope(),
             // Template declarations wrap function/class definitions.
             // The template itself doesn't create a named scope; the
             // inner class/function scope handles naming.

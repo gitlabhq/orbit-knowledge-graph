@@ -1,0 +1,18 @@
+description: Groups produce OWNER edges and subgroup CONTAINS edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+    - { id: 101, parent_id: 100, traversal_path: "1/100/101/" }
+
+expect:
+  edges:
+    - kind: OWNER
+      from: User
+      to: Group
+      count: 2
+      rows:
+        - { target_id: 100, traversal_path: "1/100/" }
+        - { target_id: 101, traversal_path: "1/100/101/" }
+    - { kind: CONTAINS, from: Group, to: Group, traversal_path: "1/100/101/", count: 1 }

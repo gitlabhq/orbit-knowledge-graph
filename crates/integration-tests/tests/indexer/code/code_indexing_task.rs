@@ -4,10 +4,14 @@ use std::sync::Arc;
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use chrono::{TimeZone, Utc};
+use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::destination::{BatchWriter, Destination, DestinationError};
 use indexer::handler::{Handler, HandlerContext};
 use indexer::indexing_status::IndexingStatusStore;
+use indexer::modules::code::config::CodeTableNames;
+use indexer::modules::code::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
@@ -439,6 +443,65 @@ async fn skips_stale_data_cleanup_on_first_index() {
 }
 
 #[tokio::test]
+async fn stale_cleanup_tombstones_must_not_outrank_rows_versioned_at_the_watermark() {
+    let project_id: i64 = 21;
+    let traversal_path = "1/21/";
+    let branch = "main";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    insert_file_row_with_version(
+        &clickhouse,
+        project_id,
+        traversal_path,
+        branch,
+        101,
+        "src/Kept.java",
+        "2026-01-01 00:00:00.000000",
+    )
+    .await;
+    insert_file_row_with_version(
+        &clickhouse,
+        project_id,
+        traversal_path,
+        branch,
+        202,
+        "src/Stale.java",
+        "2026-01-01 00:00:00.000000",
+    )
+    .await;
+
+    let graph_client = Arc::new(clickhouse.config.build_client());
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+    let table_names = CodeTableNames::from_ontology(&ontology).expect("code tables must resolve");
+    let cleaner = ClickHouseStaleDataCleaner::new(graph_client, &table_names);
+
+    let watermark = Utc.with_ymd_and_hms(2026, 1, 2, 0, 0, 0).unwrap();
+    cleaner
+        .delete_stale_data(traversal_path, project_id, branch, watermark)
+        .await
+        .expect("stale data cleanup failed");
+
+    insert_file_row_with_version(
+        &clickhouse,
+        project_id,
+        traversal_path,
+        branch,
+        101,
+        "src/Kept.java",
+        "2026-01-02 00:00:00.000000",
+    )
+    .await;
+
+    assert_file_is_active(&clickhouse, project_id, "src/Kept.java").await;
+    assert_file_not_active(&clickhouse, project_id, "src/Stale.java").await;
+}
+
+#[tokio::test]
 async fn disk_is_clean_after_successful_indexing() {
     let project_id: i64 = 4;
     let commit_sha = "abc123";
@@ -838,6 +901,26 @@ async fn index_code(
         .handle(context, envelope)
         .await
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
+}
+
+async fn insert_file_row_with_version(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    traversal_path: &str,
+    branch: &str,
+    id: i64,
+    path: &str,
+    version: &str,
+) {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let sql = format!(
+        "INSERT INTO {} \
+         (id, traversal_path, project_id, branch, path, name, extension, language, _version) \
+         VALUES ({id}, '{traversal_path}', {project_id}, '{branch}', \
+                 '{path}', '{name}', 'java', 'java', '{version}')",
+        t("gl_file")
+    );
+    clickhouse.execute(&sql).await;
 }
 
 async fn insert_stale_canary_file(

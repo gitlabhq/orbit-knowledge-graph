@@ -106,6 +106,13 @@ macro_rules! define_languages {
 }
 
 define_languages! {
+    Bash => {
+        support_lang: Bash,
+        extensions: ["sh", "bash", "zsh"],
+        exclude: [],
+        separator: ".",
+        names: ["bash", "shell", "sh"],
+    },
     C => {
         support_lang: C,
         extensions: ["c", "h"],
@@ -119,6 +126,13 @@ define_languages! {
         exclude: [],
         separator: "::",
         names: ["cpp", "c++"],
+    },
+    Elixir => {
+        support_lang: Elixir,
+        extensions: ["ex", "exs"],
+        exclude: [],
+        separator: ".",
+        names: ["elixir"],
     },
     Ruby => {
         support_lang: Ruby,

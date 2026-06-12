@@ -438,6 +438,13 @@ impl CodeIndexingPipeline {
         for skipped in &result.skipped {
             self.metrics
                 .record_file_skipped(skipped.kind.as_metric_label());
+            debug!(
+                project_id,
+                branch = %branch,
+                path = %skipped.path,
+                reason = skipped.kind.as_metric_label(),
+                "file skipped during code indexing"
+            );
         }
 
         for fault in &result.faults {

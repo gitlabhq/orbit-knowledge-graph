@@ -7,9 +7,11 @@ use crate::v2::config::{Language, LanguageFamily};
 
 use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
+use crate::v2::langs::generic::bash::{BashDsl, BashRules};
 use crate::v2::langs::generic::c::{CDsl, CRules};
 use crate::v2::langs::generic::cpp::{CppDsl, CppRules};
 use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
+use crate::v2::langs::generic::elixir::{ElixirDsl, ElixirRules};
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
 use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
@@ -94,6 +96,7 @@ macro_rules! register_v2_pipelines {
 // ── Registration ────────────────────────────────────────────────
 
 register_v2_pipelines! {
+    Bash    => [GenericPipeline<BashDsl, BashRules>],
     C       => [GenericPipeline<CDsl, CRules>],
     Cpp     => [GenericPipeline<CppDsl, CppRules>],
     JavaScript => [JsPipeline],
@@ -103,6 +106,7 @@ register_v2_pipelines! {
     Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
     CSharp  => [GenericPipeline<CSharpDsl, CSharpRules>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
+    Elixir  => [GenericPipeline<ElixirDsl, ElixirRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Php     => [GenericPipeline<PhpDsl, PhpRules>],
     Rust    => [RustPipeline],

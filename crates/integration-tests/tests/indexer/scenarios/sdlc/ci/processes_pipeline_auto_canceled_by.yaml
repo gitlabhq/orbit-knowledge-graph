@@ -1,0 +1,15 @@
+description: auto_canceled_by_id produces a Pipeline AUTO_CANCELED_BY Pipeline edge
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_pipelines:
+    - { id: 5001, partition_id: 1, project_id: 1000, iid: 1, sha: a, ref: main, status: canceled, source: 1, tag: false, auto_canceled_by_id: 5002, created_at: "2024-01-15 10:00:00", traversal_path: "1/100/1000/" }
+    - { id: 5002, partition_id: 1, project_id: 1000, iid: 2, sha: b, ref: main, status: success, source: 1, tag: false, created_at: "2024-01-15 10:05:00", traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - { kind: AUTO_CANCELED_BY, from: Pipeline, to: Pipeline, traversal_path: "1/100/1000/", count: 1 }

@@ -1,5 +1,8 @@
 ---
 # See https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md for explanations of each rule
+ignores:
+  - "CHANGELOG.md"
+  - "LICENSE.md"
 config:
   # First, set the default
   default: true

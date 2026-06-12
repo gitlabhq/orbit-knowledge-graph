@@ -10,6 +10,8 @@ Documentation       Verify SDLC entities AND their relationships flow through
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Project Issue And Note Are Indexed

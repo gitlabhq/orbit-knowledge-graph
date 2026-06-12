@@ -51,14 +51,30 @@ non-zero (→ restart) if the budget is exhausted or the binary is outdated. All
 `prefixed_table_name(table, SCHEMA_VERSION)` so they always target the current schema version's
 table-set.
 
-### Migration completion and cleanup
+### Migration completion and dead-version GC
 
 `migration_completion::MigrationCompletionChecker` runs as a scheduled task in DispatchIndexing
 mode. It detects when all enabled namespaces have been re-indexed into new-prefix tables (by
 comparing checkpoint entries against enabled namespaces), promotes the `migrating` version to
-`active`, retires the old active version, and drops tables for retired versions outside the
-`max_retained_versions` retention window. On promotion it also clears the re-index campaign, so
-subsequent steady-state dispatches carry `campaign_id = null`.
+`active`, and retires the old active version. After promotion it clears the re-index campaign.
+
+A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
+outside a keep-set computed in the same query (active + newest retired within
+`max_retained_versions` + migrating above active). Each candidate is validated against the
+ontology before being dropped; unrecognized objects (e.g. rename-orphans) are logged and left
+alone for a future migration framework to handle.
+
+### Stale FK-edge reconciliation
+
+`scheduler::StaleEdgeReconciliation` is a DispatchIndexing-mode `ScheduledTask` that tombstones
+stale FK-derived edges. A mutable-FK "latest" edge (e.g. `HAS_LATEST_DIFF`) orphans its old row when
+the FK changes, because `target_id` is part of the `ReplacingMergeTree` identity, so the prior
+`(source, old_target)` row is never replaced. The task runs one idempotent `INSERT … SELECT` per
+`(relationship_kind, FK-owner)` variant against the changed-owner set (`_version >= cursor`), pruned
+to the changed set by a dual `IN` on the edge PK; the swept set is ontology-derived (edges marked
+`mutable: true`), as is each variant's metadata. It runs directly in the dispatcher (not dispatched to indexer workers):
+one cheap global sweep, off the insert hot path. See
+`docs/design-documents/indexing/sdlc_indexing.md` ("Stale FK-edge reconciliation").
 
 ### Entry point
 

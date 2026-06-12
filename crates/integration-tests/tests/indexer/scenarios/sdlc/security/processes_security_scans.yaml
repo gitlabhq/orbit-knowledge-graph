@@ -1,0 +1,28 @@
+description: Security scans index with transformed scan_type/status plus project/pipeline/job edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_p_ci_pipelines:
+    - { id: 500, project_id: 1000, status: success, source: 1, tag: false, traversal_path: "1/100/" }
+  siphon_p_ci_builds:
+    - { id: 600, name: sast-job, status: success, project_id: 1000, stage_id: 1, allow_failure: false, traversal_path: "1/100/" }
+  siphon_security_scans:
+    - { id: 1, build_id: 600, scan_type: 1, status: 1, latest: true, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 2, build_id: 600, scan_type: 2, status: 1, latest: true, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+    - { id: 3, build_id: 600, scan_type: 9, status: 1, latest: true, project_id: 1000, pipeline_id: 500, traversal_path: "1/100/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00" }
+
+expect:
+  nodes:
+    gl_security_scan:
+      rows:
+        - { id: 1, scan_type: sast, status: succeeded, latest: true }
+        - { id: 2, scan_type: dependency_scanning, status: succeeded, latest: true }
+        - { id: 3, scan_type: sarif, status: succeeded, latest: true }
+  edges:
+    - { kind: IN_PROJECT, from: SecurityScan, to: Project, traversal_path: "1/100/", count: 3 }
+    - { kind: IN_PIPELINE, from: SecurityScan, to: Pipeline, traversal_path: "1/100/", count: 3 }
+    - { kind: RAN_BY, from: SecurityScan, to: Job, traversal_path: "1/100/", count: 3 }

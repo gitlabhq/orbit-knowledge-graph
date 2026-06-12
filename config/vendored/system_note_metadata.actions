@@ -1,0 +1,67 @@
+# Vendored copy of Rails SystemNoteMetadata::ICON_TYPES action values.
+#
+# Source: app/models/system_note_metadata.rb in gitlab-org/gitlab
+# Pinned: ea52f8c3adc370db76545ecd82728710f2609800 (refs/heads/master, captured 2026-06-12)
+#
+# To update: replace the list below with the %w[] body from the Rails file at a
+# newer commit, then update the "Pinned:" line above.
+#
+# ICON_TYPES is generated at build time from this file by crates/indexer/build.rs.
+# One action per line; lines starting with # are ignored.
+commit
+description
+merge
+confidential
+visible
+label
+assignee
+cross_reference
+designs_added
+designs_modified
+designs_removed
+designs_discussion_added
+title
+time_tracking
+branch
+milestone
+discussion
+task
+moved
+cloned
+opened
+closed
+merged
+duplicate
+locked
+unlocked
+outdated
+reviewer
+tag
+due_date
+start_date_or_due_date
+pinned_embed
+cherry_pick
+health_status
+approved
+unapproved
+status
+alert_issue_added
+relate
+unrelate
+new_alert_added
+severity
+contact
+timeline_event
+issue_type
+relate_to_child
+unrelate_from_child
+relate_to_parent
+unrelate_from_parent
+override
+issue_email_participants
+requested_changes
+reviewed
+custom_field
+duo_agent_started
+duo_agent_completed
+duo_agent_failed

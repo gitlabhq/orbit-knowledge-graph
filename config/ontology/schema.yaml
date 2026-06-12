@@ -376,6 +376,14 @@ domains:
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
+  packages:
+    description: "Entities related to packages published to the package registry."
+    nodes:
+      Package: nodes/packages/package.yaml
+  container_registry:
+    description: "Entities related to container image repositories in the container registry."
+    nodes:
+      ContainerRepository: nodes/container_registry/container_repository.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -435,3 +443,4 @@ edges:
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   HAS_METADATA: edges/has_metadata.yaml
+  BUILT_BY: edges/built_by.yaml

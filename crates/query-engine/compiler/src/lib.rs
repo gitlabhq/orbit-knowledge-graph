@@ -67,6 +67,7 @@ pub use passes::codegen::{
     ddl::clickhouse::emit_create_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    ddl::duckdb::generate_local_ddl,
     ddl::generate_graph_dictionaries,
     ddl::generate_graph_dictionaries_with_prefix,
     ddl::generate_graph_materialized_views,
@@ -918,6 +919,31 @@ mod tests {
         assert!(
             !sql.contains("f.traversal_path = b.traversal_path"),
             "User paths must not require traversal_path on frontier rows, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn path_finding_clamps_settings_to_safety_floor() {
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("max_execution_time = 15"),
+            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("max_memory_usage = 16106127360"),
+            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
         );
     }
 

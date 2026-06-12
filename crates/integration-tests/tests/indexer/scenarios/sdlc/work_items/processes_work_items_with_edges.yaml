@@ -1,0 +1,16 @@
+description: Work items index with transformed state and type
+scope: { namespace: 100 }
+
+seed:
+  siphon_milestones:
+    - { id: 10, title: v1.0, project_id: 1000, state: active, traversal_path: "1/100/" }
+  work_items:
+    - { id: 1, iid: 1, title: Fix login bug, description: Users cannot log in, author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, milestone_id: 10, namespace_id: 100, assignees: [2, 3], label_ids: { sql: "[(5, '2024-01-20 12:00:00'), (6, '2024-01-20 12:00:00'), (7, '2024-01-20 12:00:00')]" }, traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Add feature Y, description: New feature request, author_id: 2, state_id: 2, work_item_type_id: 5, confidential: true, milestone_id: null, namespace_id: 100, assignees: [], label_ids: { sql: "[(8, '2024-01-20 12:00:00')]" }, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_work_item:
+      rows:
+        - { id: 1, title: Fix login bug, state: opened, work_item_type: issue }
+        - { id: 2, title: Add feature Y, state: closed, work_item_type: task }

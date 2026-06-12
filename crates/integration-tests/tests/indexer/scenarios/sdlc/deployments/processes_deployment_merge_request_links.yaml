@@ -1,0 +1,16 @@
+description: Deployment merge-request join rows produce DEPLOYED_TO edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  projects:
+    - { id: 1000, namespace_id: 100, traversal_path: "1/100/1000/" }
+  siphon_deployment_merge_requests:
+    - { deployment_id: 9301, merge_request_id: 5001, environment_id: 7301, project_id: 1000, traversal_path: "1/100/1000/" }
+    - { deployment_id: 9301, merge_request_id: 5002, environment_id: 7301, project_id: 1000, traversal_path: "1/100/1000/" }
+    - { deployment_id: 9302, merge_request_id: 5003, environment_id: 7301, project_id: 1000, traversal_path: "1/100/1000/" }
+
+expect:
+  edges:
+    - { kind: DEPLOYED_TO, from: MergeRequest, to: Deployment, traversal_path: "1/100/1000/", count: 3 }

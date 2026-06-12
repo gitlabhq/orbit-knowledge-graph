@@ -116,3 +116,15 @@ variants:
     fk_column: project_id
     scope: namespace_anchor
     description: "Vulnerability occurrence belongs to project."
+
+  - from_node: { type: Package, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Package belongs to project."
+
+  - from_node: { type: ContainerRepository, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    scope: namespace_anchor
+    description: "Container repository belongs to project."

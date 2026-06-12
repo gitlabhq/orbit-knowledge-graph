@@ -41,7 +41,7 @@ Start with [Orbit Local getting started](docs/source/local/getting-started.md).
 
 Enable Orbit on a top-level GitLab.com group. Orbit indexes your SDLC and source code into a managed property graph.
 
-What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 11+ languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, and C++.
+What it indexes: SDLC objects (including groups, projects, users, notes, merge requests, pipelines, jobs, work items, milestones, labels, vulnerabilities, findings) and source code on the default branch across 11+ languages including Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP, Bash/Shell, and Elixir.
 
 | Access method | Use for |
 |---|---|
@@ -148,7 +148,7 @@ The product name is Orbit. The binary and config still use the engineering name 
 - [Indexer crate guide](crates/indexer/AGENTS.md)
 - [Operational runbooks](docs/dev/runbooks/)
 - [Server configuration runbook](docs/dev/runbooks/server_configuration.md)
-- Contributing: open an issue or MR using the templates under [`.gitlab/`](.gitlab/).
+- [Contributing](CONTRIBUTING.md) — quickstart, testing, linting, and MR conventions.
 
 </details>
 

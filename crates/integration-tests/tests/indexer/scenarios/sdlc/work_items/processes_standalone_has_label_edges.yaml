@@ -1,0 +1,17 @@
+description: Label links produce HAS_LABEL edges for work items
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  work_items:
+    - { id: 1, iid: 1, title: Fix login bug, author_id: 1, state_id: 1, work_item_type_id: 1, confidential: false, namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 2, iid: 2, title: Add feature Y, author_id: 2, state_id: 1, work_item_type_id: 5, confidential: false, namespace_id: 100, traversal_path: "1/100/" }
+  siphon_label_links:
+    - { id: 1, label_id: 5, target_id: 1, target_type: Issue, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 2, label_id: 6, target_id: 1, target_type: Issue, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", namespace_id: 100, traversal_path: "1/100/" }
+    - { id: 3, label_id: 7, target_id: 2, target_type: Issue, created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", namespace_id: 100, traversal_path: "1/100/" }
+
+expect:
+  edges:
+    - { kind: HAS_LABEL, from: WorkItem, to: Label, traversal_path: "1/100/", count: 3 }

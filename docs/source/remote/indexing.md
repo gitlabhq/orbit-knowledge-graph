@@ -76,6 +76,7 @@ the default branch changes.
 | C | Yes | Yes |
 | C++ | Yes | Yes |
 | PHP | Yes | Yes |
+| Bash/Shell | Yes | No |
 
 Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 

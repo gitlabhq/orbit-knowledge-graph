@@ -1,11 +1,11 @@
 ---
-redirect_to: 'remote/_index.md'
+redirect_to: 'troubleshooting.md'
 remove_date: '2026-08-07'
 ---
 
 <!-- markdownlint-disable -->
 
-This document was moved to [another location](remote/_index.md).
+This document was moved to [another location](troubleshooting.md).
 
 <!-- This redirect file can be deleted after <2026-08-07>. -->
 

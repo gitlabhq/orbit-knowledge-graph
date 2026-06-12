@@ -9,8 +9,10 @@ use std::fmt;
 /// Variants are always available, but tree-sitter parsing requires the corresponding feature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SupportLang {
+    Bash,
     C,
     Cpp,
+    Elixir,
     Python,
     Ruby,
     TypeScript,
@@ -46,6 +48,11 @@ impl Language for SupportLang {
 impl LanguageExt for SupportLang {
     fn get_ts_language(&self) -> TSLanguage {
         match self {
+            #[cfg(feature = "tree-sitter-bash")]
+            Self::Bash => tree_sitter_bash::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-bash"))]
+            Self::Bash => panic!("tree-sitter-bash feature not enabled"),
+
             #[cfg(feature = "tree-sitter-c")]
             Self::C => tree_sitter_c::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-c"))]
@@ -55,6 +62,11 @@ impl LanguageExt for SupportLang {
             Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-cpp"))]
             Self::Cpp => panic!("tree-sitter-cpp feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-elixir")]
+            Self::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-elixir"))]
+            Self::Elixir => panic!("tree-sitter-elixir feature not enabled"),
 
             #[cfg(feature = "tree-sitter-python")]
             Self::Python => tree_sitter_python::LANGUAGE.into(),
@@ -157,6 +169,13 @@ mod tests {
     #[cfg(feature = "tree-sitter-php")]
     fn test_php_parsing() {
         let root = SupportLang::Php.ast_grep("<?php function hello() {}");
+        assert!(!root.source().is_empty());
+    }
+
+    #[test]
+    #[cfg(feature = "tree-sitter-elixir")]
+    fn test_elixir_parsing() {
+        let root = SupportLang::Elixir.ast_grep("defmodule Foo do\nend");
         assert!(!root.source().is_empty());
     }
 }

@@ -231,14 +231,18 @@ Aggregation responses are table-shaped: `columns` describes the metrics,
 plus metric values. Node groups put a nested node object in the row under the
 group key; property groups put the scalar bucket value there.
 
-| Aggregation Function | Description | Requires `property` |
-|---------------------|-------------|---------------------|
-| `count` | Count matching entities | No |
-| `sum` | Sum of property values | Yes |
-| `avg` | Average of property values | Yes |
-| `min` | Minimum property value | Yes |
-| `max` | Maximum property value | Yes |
-| `collect` | Collect values into array | Yes |
+| Aggregation Function | Description | Requires `property` | Supported property types |
+|---------------------|-------------|---------------------|--------------------------|
+| `count` | Count matching entities | No | N/A |
+| `sum` | Sum of property values | Yes | Numeric only |
+| `avg` | Average of property values | Yes | Numeric only |
+| `min` | Minimum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+| `max` | Maximum property value | Yes | Numeric, string, boolean, `Date`, or `DateTime` |
+
+`sum` and `avg` reject `DateTime` properties with a validation error. To
+aggregate over dates, use `min` or `max`.
+
+> **Note:** `collect` (collect property values into an array) is planned but not yet implemented and will return an error if used.
 
 ### Path Finding Queries
 

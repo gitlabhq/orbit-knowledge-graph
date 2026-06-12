@@ -111,6 +111,6 @@ curl --request POST \
 ## What to try next
 
 - [What Orbit indexes](indexing.md) - understand coverage before writing queries
-- [Schema reference](schema.md) - explore the 24 node types and their properties
+- [Schema reference](schema.md) - explore the 28 node types and their properties
 - [Cookbook](cookbook.md) - copy-paste queries for common use cases
 - [Get started with Orbit Local](../local/getting-started.md) - query a local repository offline

@@ -51,8 +51,8 @@ default branch - whatever you have checked out is what gets indexed.
 
 ### Supported languages
 
-Orbit Local supports the same 11 languages as Orbit Remote, with full
-cross-file reference resolution.
+Orbit Local supports the same 13 languages as Orbit Remote. All resolve
+cross-file references except Bash/Shell (definitions only).
 
 | Language | Definitions | Cross-file references |
 |----------|-------------|----------------------|
@@ -67,6 +67,8 @@ cross-file reference resolution.
 | C# | Yes | Yes |
 | C | Yes | Yes |
 | C++ | Yes | Yes |
+| PHP | Yes | Yes |
+| Bash/Shell | Yes | No |
 
 Languages not currently indexed: Swift, COBOL, Terraform, YAML.
 

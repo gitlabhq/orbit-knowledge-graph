@@ -1310,3 +1310,70 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, target_id, id)
 ORDER BY (traversal_path, target_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for packages
+CREATE TABLE IF NOT EXISTS siphon_packages_packages
+(
+    `id` Int64,
+    `project_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `name` String,
+    `version` Nullable(String),
+    `package_type` Int16,
+    `creator_id` Nullable(Int64),
+    `status` Int16 DEFAULT 0,
+    `last_downloaded_at` Nullable(DateTime64(6, 'UTC')),
+    `status_message` Nullable(String),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, package_type, id)
+ORDER BY (traversal_path, package_type, id);
+
+-- Siphon source tables for package build infos (join table: package -> pipeline)
+CREATE TABLE IF NOT EXISTS siphon_packages_build_infos
+(
+    `id` Int64,
+    `package_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for container repositories
+CREATE TABLE IF NOT EXISTS siphon_container_repositories
+(
+    `id` Int64,
+    `project_id` Int64,
+    `name` String,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `status` Nullable(Int16),
+    `expiration_policy_started_at` Nullable(DateTime64(6, 'UTC')),
+    `expiration_policy_cleanup_status` Int16 DEFAULT 0,
+    `expiration_policy_completed_at` Nullable(DateTime64(6, 'UTC')),
+    `last_cleanup_deleted_tags_count` Nullable(Int64),
+    `delete_started_at` Nullable(DateTime64(6, 'UTC')),
+    `status_updated_at` Nullable(DateTime64(6, 'UTC')),
+    `failed_deletion_count` Int64 DEFAULT 0,
+    `next_delete_attempt_at` Nullable(DateTime64(6, 'UTC')),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id);

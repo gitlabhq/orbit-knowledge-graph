@@ -47,8 +47,11 @@ pub async fn register_handlers(
     let metrics = SdlcMetrics::new();
 
     let inputs = plan::input::from_ontology(ontology);
-    let partition_strategies =
-        partitioning::build_strategies(&inputs, &entity_handler_config.partition_overrides);
+    let partition_strategies = partitioning::build_strategies(
+        &inputs,
+        &entity_handler_config.partition_overrides,
+        entity_handler_config.partition_min_rows,
+    );
     let plans = plan::build_plans(
         ontology,
         entity_handler_config.datalake_batch_size,
