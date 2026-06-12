@@ -10,13 +10,14 @@ title: How Orbit Local works
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experiment
+- Status: Beta
 
 {{< /details >}}
 
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 
 {{< /history >}}
 
@@ -66,8 +67,9 @@ The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple
 
 ## Supported languages
 
-All 12 languages supported by Orbit Remote are also supported locally:
-Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP.
+All 13 languages supported by Orbit Remote are also supported locally:
+Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++, PHP,
+and Bash/Shell.
 
 See [What Orbit indexes](../remote/indexing.md#supported-languages) for the full language support table.
 

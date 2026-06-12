@@ -1,0 +1,56 @@
+name: "TypeScript: abstract class with abstract methods"
+pipeline: js
+fixtures:
+  - path: animals.ts
+    content: |
+      abstract class Animal {
+        abstract makeSound(): void;
+        abstract get name(): string;
+
+        move(distanceInMeters: number = 0): void {
+          console.log(`Animal moved ${distanceInMeters}m.`);
+        }
+      }
+
+      class Dog extends Animal {
+        makeSound(): void {
+          console.log("Woof!");
+        }
+        get name(): string {
+          return "Dog";
+        }
+        static create(): Dog {
+          return new Dog();
+        }
+      }
+tests:
+  - name: "Abstract method makeSound is extracted with Class::method FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Animal::makeSound'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row: { name: "makeSound", fqn: "Animal::makeSound", type: "Method" } }
+  - name: "Abstract getter name is extracted with Class::method FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Animal::name'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row: { name: "name", fqn: "Animal::name", type: "Method" } }
+  - name: "Concrete method move is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Animal::move'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row: { fqn: "Animal::move", type: "Method" } }
+  # static abstract is illegal in TS (TS1243), so is_static is exercised via a
+  # concrete static method, which shares the JsDef construction with the abstract path.
+  - name: "Concrete static method maps to StaticMethod"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Dog::create'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row: { fqn: "Dog::create", type: "StaticMethod" } }

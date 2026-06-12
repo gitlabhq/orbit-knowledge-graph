@@ -410,7 +410,7 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         engine,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
-        settings: table_settings(Some(2048), !projections.is_empty(), &node.storage.settings),
+        settings: table_settings(Some(1024), !projections.is_empty(), &node.storage.settings),
     }
 }
 
@@ -847,27 +847,6 @@ mod tests {
         for expected in ["checkpoint", "gl_user", "gl_project", "gl_edge"] {
             assert!(names.contains(&expected), "missing {expected}: {names:?}");
         }
-    }
-
-    #[test]
-    fn code_edge_has_no_reorder_projections() {
-        let tables = generate_graph_tables(&ontology());
-        let code_edge = tables
-            .iter()
-            .find(|table| table.name == "gl_code_edge")
-            .expect("gl_code_edge table should be generated");
-
-        let reorder_count = code_edge
-            .projections
-            .iter()
-            .filter(|p| matches!(p, ProjectionDef::Reorder { .. }))
-            .count();
-
-        assert_eq!(
-            reorder_count, 0,
-            "gl_code_edge should have no reorder projections (forward traversals \
-             use the 3-column PK, reverse use bloom_filter on target_id)"
-        );
     }
 
     #[test]

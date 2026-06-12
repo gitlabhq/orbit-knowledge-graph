@@ -184,6 +184,7 @@ pub(super) fn emit_filter_subquery(
     edge_alias: &str,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
+    sort_key: &[String],
 ) -> Result<Vec<Expr>> {
     let table = np
         .table
@@ -194,12 +195,7 @@ pub(super) fn emit_filter_subquery(
 
     ctes.push(Cte::new(
         &cte_name,
-        Query {
-            select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-            from: TableRef::scan_final(table, alias),
-            where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
-            ..Default::default()
-        },
+        node_ids_dedup_scan(alias, table, np, sort_key)?,
     ));
 
     Ok(vec![Expr::InSubquery {
@@ -209,13 +205,32 @@ pub(super) fn emit_filter_subquery(
     }])
 }
 
-pub(super) fn node_ids_from_final_scan(alias: &str, table: &str, np: &NodePlan) -> Query {
-    Query {
-        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        from: TableRef::scan_final(table, alias),
-        where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
-        ..Default::default()
+fn node_ids_dedup_scan(
+    alias: &str,
+    table: &str,
+    np: &NodePlan,
+    sort_key: &[String],
+) -> Result<Query> {
+    if sort_key.is_empty() {
+        return Err(QueryError::Lowering(format!(
+            "no sort key for node table '{table}'; cannot emit LIMIT BY dedup"
+        )));
     }
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+        .collect();
+    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+
+    Ok(Query {
+        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(latest_node_predicates(alias, np)),
+        order_by,
+        limit_by: Some((1, limit_by_cols)),
+        ..Default::default()
+    })
 }
 
 pub(super) fn node_ids_from_candidate_scan(
@@ -228,7 +243,6 @@ pub(super) fn node_ids_from_candidate_scan(
     predicates.extend(extra_predicates);
     Query {
         select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
-        distinct: true,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(predicates),
         ..Default::default()
@@ -249,7 +263,6 @@ pub(super) fn fk_values_from_candidate_scan(
             Expr::col(alias, fk_column),
             DEFAULT_PRIMARY_KEY,
         )],
-        distinct: true,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(predicates),
         ..Default::default()
@@ -529,7 +542,8 @@ pub(super) fn emit_filter_narrowing(
     end_col: &str,
     ctes: &mut Vec<Cte>,
     narrowed: &mut HashSet<String>,
-) {
+    table_sort_keys: &HashMap<String, Vec<String>>,
+) -> Result<()> {
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
         let Some(np) = nodes.get(node_alias) else {
             continue;
@@ -541,8 +555,6 @@ pub(super) fn emit_filter_narrowing(
             .any(|(_, f)| f.selectivity == ontology::FieldSelectivity::High);
         let selective = has_point_selectivity || has_selective_filters;
         let should_narrow = match np.hydration {
-            // FilterOnly nodes are JOINed directly in the node
-            // processing loop — no narrowing CTE needed here.
             HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
             HydrationStrategy::Skip => false,
@@ -551,12 +563,15 @@ pub(super) fn emit_filter_narrowing(
             continue;
         }
         let cte_name = format!("_filter_{node_alias}");
-        // Create the CTE once per node for selective Join nodes.
         if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
             let table = np.table.as_deref().unwrap_or("");
+            let sort_key = table_sort_keys
+                .get(table)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
             ctes.push(Cte::new(
                 &cte_name,
-                node_ids_from_final_scan(node_alias, table, np),
+                node_ids_dedup_scan(node_alias, table, np, sort_key)?,
             ));
         }
         where_parts.push(Expr::InSubquery {
@@ -565,6 +580,7 @@ pub(super) fn emit_filter_narrowing(
             column: "id".to_string(),
         });
     }
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -595,6 +611,7 @@ pub(super) fn build_multi_hop_union(
                 end_type_col,
                 hop.direction,
                 &type_filter,
+                hop.scope_prefix.as_deref(),
             )
         })
         .collect();
@@ -622,6 +639,7 @@ pub(super) fn build_multi_hop_union(
     (union, where_parts)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn build_depth_arm(
     depth: u32,
     edge_table: &str,
@@ -630,7 +648,17 @@ pub(super) fn build_depth_arm(
     end_type_col: &str,
     direction: Direction,
     type_filter: &Option<Vec<String>>,
+    scope_prefix: Option<&str>,
 ) -> Query {
+    let scope_pred = |alias: &str| -> Option<Expr> {
+        scope_prefix.map(|p| {
+            Expr::func(
+                "startsWith",
+                vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(p)],
+            )
+        })
+    };
+
     let mut from = TableRef::scan(edge_table, "e1");
     // First edge: relationship kind + _deleted filter.
     let mut where_parts = Vec::new();
@@ -648,6 +676,7 @@ pub(super) fn build_depth_arm(
         where_parts.push(f);
     }
     where_parts.push(deleted_false("e1"));
+    where_parts.extend(scope_pred("e1"));
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
@@ -669,6 +698,9 @@ pub(super) fn build_depth_arm(
             )
         {
             join_on = Expr::and(join_on, tc);
+        }
+        if let Some(sp) = scope_pred(&curr) {
+            join_on = Expr::and(join_on, sp);
         }
         from = TableRef::join(JoinType::Inner, from, right, join_on);
     }

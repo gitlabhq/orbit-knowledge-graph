@@ -7,7 +7,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::NamespaceDeletionStore;
-use crate::checkpoint::CheckpointStore;
+use crate::checkpoint::{CheckpointStore, WriteDurability};
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
@@ -161,7 +161,7 @@ impl NamespaceDeletionScheduler {
         }
 
         self.checkpoint_store
-            .save_completed(CHECKPOINT_KEY, &watermark)
+            .save_completed(CHECKPOINT_KEY, &watermark, WriteDurability::Durable)
             .await
             .map_err(TaskError::new)?;
 
@@ -248,7 +248,7 @@ mod tests {
     };
     use crate::testkit::mocks::MockNatsServices;
 
-    use crate::checkpoint::{Checkpoint, CheckpointError};
+    use crate::checkpoint::{Checkpoint, CheckpointError, WriteDurability};
     use crate::nats::{NatsError, NatsServices};
     use crate::types::{Envelope, Subscription};
 
@@ -272,6 +272,7 @@ mod tests {
             &self,
             _key: &str,
             _watermark: &chrono::DateTime<Utc>,
+            _durability: WriteDurability,
         ) -> Result<(), CheckpointError> {
             Ok(())
         }

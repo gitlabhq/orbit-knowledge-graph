@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Runner, id: id }
     to_node: { type: Project, id: id }
+    scope: prune_to_target
     description: "Runner serves jobs for this project."
 
 etl:

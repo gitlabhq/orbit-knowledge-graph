@@ -1,0 +1,14 @@
+description: Top-level group full_path resolves from its route
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/", slug: acme }
+  siphon_routes:
+    - { id: 100, source_id: 100, source_type: Namespace, path: acme, namespace_id: 100, traversal_path: "1/100/" }
+
+expect:
+  nodes:
+    gl_group:
+      rows:
+        - { id: 100, full_path: acme }

@@ -25,6 +25,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
     traversal_path_lookup:
       kind: id
@@ -58,6 +59,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -123,16 +125,17 @@ etl:
     ) traversal_paths
     ON project.id = traversal_paths.id
     LEFT JOIN (
-      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
+      SELECT toNullable(source_id) AS source_id, argMax(path, {{watermark_column}}) AS path
       FROM siphon_routes
       WHERE startsWith(traversal_path, {traversal_path:String})
-        AND source_type = 'Project' AND NOT _siphon_deleted
+        AND source_type = 'Project' AND NOT {{deleted_column}}
       GROUP BY source_id
     ) route ON project.id = route.source_id
+  where: "project.id IN (SELECT id FROM project_namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
-  watermark: project._siphon_replicated_at
+  watermark: project.{{watermark_column}}
   table_alias: project
-  deleted: project._siphon_deleted
+  deleted: project.{{deleted_column}}
   edges:
     creator_id:
       to: User
@@ -166,10 +169,10 @@ storage:
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_last_activity_at, column: last_activity_at, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_full_path, column: full_path, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_full_path, column: full_path, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:

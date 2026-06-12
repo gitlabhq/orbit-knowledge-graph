@@ -1,0 +1,100 @@
+name: "Kotlin: data class component-function and destructuring resolution"
+fixtures:
+  - path: com/example/DataClasses.kt
+    content: |
+      package com.example
+
+      data class Pair(val a: Int, val b: Int)
+
+      data class User(val name: String, val age: Int)
+
+      fun usePair() {
+          val p = Pair(1, 2)
+          val (a, b) = p
+          println(a)
+          println(b)
+      }
+
+      fun useUser() {
+          val u = User("Alice", 30)
+          val copy = u.copy(age = 31)
+          val (name, age) = copy
+          println(name)
+          println(age)
+      }
+
+  - path: com/example/Consumer.kt
+    content: |
+      package com.example
+
+      fun consumePair(p: Pair) {
+          val (x, y) = p
+          println(x + y)
+      }
+
+      fun createAndDestructure(): String {
+          val user = User("Bob", 25)
+          val (name, _) = user
+          return name
+      }
+
+tests:
+  - name: data class Pair is extracted as a DataClass definition
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.Pair' AND d.definition_type = 'DataClass'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "com.example.Pair" } }
+
+  - name: data class User is extracted as a DataClass definition
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.User' AND d.definition_type = 'DataClass'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "com.example.User" } }
+
+  - name: usePair calls Pair constructor
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'usePair' AND e.edge_kind = 'Calls'
+        AND callee.fqn = 'com.example.Pair'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.Pair" } }
+
+  - name: useUser calls User constructor
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'useUser' AND e.edge_kind = 'Calls'
+        AND callee.fqn = 'com.example.User'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.User" } }
+
+  - name: cross-file consumePair is extracted as Function
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.consumePair' AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "com.example.consumePair" } }
+
+  - name: cross-file consumePair calls Pair
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'consumePair' AND e.edge_kind = 'Calls'
+        AND callee.fqn = 'com.example.Pair'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.Pair" } }
+
+  - name: cross-file createAndDestructure calls User
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'createAndDestructure' AND e.edge_kind = 'Calls'
+        AND callee.fqn = 'com.example.User'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.User" } }

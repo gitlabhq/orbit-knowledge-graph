@@ -10,6 +10,8 @@ Documentation       Verify the namespace enable/disable lifecycle as observed th
 Resource            gitlab.resource
 Resource            orbit.resource
 
+Suite Setup         Attach To Shared Fixture
+
 
 *** Test Cases ***
 Disabling Knowledge Graph Retains Indexed Data

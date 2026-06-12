@@ -21,36 +21,42 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   iid:
     type: int64
     source: iid
     nullable: false
+    mutable: false
     description: "Project-scoped deployment number."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   ref:
     type: string
     source: ref
     nullable: false
+    mutable: false
     description: "Git ref (branch or tag) deployed."
 
   tag:
     type: boolean
     source: tag
     nullable: false
+    mutable: false
     description: "Whether the ref is a tag."
 
   sha:
     type: string
     source: sha
     nullable: false
+    mutable: false
     description: "Deployed commit SHA."
 
   status:
@@ -66,11 +72,13 @@ properties:
       4: canceled
       5: skipped
       6: blocked
+    terminal_values: [success, failed, canceled, skipped]
 
   deployable_type:
     type: string
     source: deployable_type
     nullable: false
+    mutable: false
     description: "Polymorphic type (typically CommitStatus, the STI base class for Ci::Build)."
     selectivity: low
 
@@ -78,6 +86,7 @@ properties:
     type: int64
     source: deployable_id
     nullable: true
+    mutable: false
     description: "Deployable ID."
 
   on_stop:
@@ -96,6 +105,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Creation timestamp."
 
   finished_at:
@@ -114,12 +124,14 @@ properties:
     type: int64
     source: environment_id
     nullable: false
+    mutable: false
     description: "Target environment ID."
 
   user_id:
     type: int64
     source: user_id
     nullable: true
+    mutable: false
     description: "Deploying user ID."
 
   traversal_path:
@@ -174,12 +186,12 @@ storage:
   indexes:
     - {name: idx_status, column: status, type: "set(8)", granularity: 2}
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_environment_id, column: environment_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_user_id, column: user_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_environment_id, column: environment_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_user_id, column: user_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

@@ -16,6 +16,33 @@ pub enum EtlScope {
     Namespaced,
 }
 
+/// A secondary table joined to the page after `LIMIT`, so ClickHouse never
+/// builds a hash table over the entire secondary table. The lowering wraps
+/// the base query in a `_batch` CTE and enriches via
+/// `fk_column IN (SELECT id FROM _batch)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageJoin {
+    /// Datalake table to join (e.g. `siphon_system_note_metadata`).
+    pub table: String,
+    /// Table alias (e.g. `snm`).
+    pub alias: String,
+    /// FK column on the joined table that references the base table's `id`
+    /// (e.g. `note_id`).
+    pub fk_column: String,
+    /// Columns to select from the joined table (e.g. `["action"]`).
+    pub select: Vec<String>,
+    /// Extra WHERE predicate on the joined table (e.g. `{{deleted_column}} = false`).
+    pub where_clause: Option<String>,
+    /// Watermark column for `argMax` deduplication. Always filled by the
+    /// ontology loader; defaults to the ontology's `default_watermark`.
+    pub watermark: String,
+    /// `traversal_path` column on the joined table. When set on a namespaced
+    /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
+    /// prune by the joined table's leading PK column. A superset of the matched
+    /// rows; correctness still comes from the `IN (_batch)` bound.
+    pub traversal_path_column: Option<String>,
+}
+
 /// Direction of an edge relative to the node defining the FK column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -47,6 +74,7 @@ pub struct EdgeMapping {
     pub delimiter: Option<String>,
     pub array_field: Option<String>,
     pub array: bool,
+    pub mutable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +103,11 @@ pub enum EtlConfig {
         /// Used to qualify bare column references (e.g. `id`) that would
         /// otherwise be ambiguous across JOINed tables.
         table_alias: Option<String>,
+        /// Join pushed below the page `LIMIT` to avoid materializing the
+        /// full joined table in ClickHouse's hash-join build phase.
+        /// When set, the lowering wraps the base query in a `_batch` CTE
+        /// and enriches via `fk IN (SELECT id FROM _batch)`.
+        page_join: Option<Box<PageJoin>>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -116,6 +149,13 @@ impl EtlConfig {
         match self {
             EtlConfig::Table { .. } => None,
             EtlConfig::Query { table_alias, .. } => table_alias.as_deref(),
+        }
+    }
+
+    pub fn page_join(&self) -> Option<&PageJoin> {
+        match self {
+            EtlConfig::Table { .. } => None,
+            EtlConfig::Query { page_join, .. } => page_join.as_deref(),
         }
     }
 
@@ -179,11 +219,12 @@ mod tests {
             select: "id, name".to_string(),
             from: "source_table".to_string(),
             where_clause: where_clause.map(String::from),
-            watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
+            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
+            page_join: None,
             edges: BTreeMap::new(),
         }
     }
@@ -246,14 +287,14 @@ mod tests {
             scope: EtlScope::Global,
             source: "t".to_string(),
             watermark: "w".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.deleted(), "_siphon_deleted");
+        assert_eq!(table.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.deleted(), "_siphon_deleted");
+        assert_eq!(query.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
     }
 
     #[test]
@@ -261,14 +302,14 @@ mod tests {
         let table = EtlConfig::Table {
             scope: EtlScope::Global,
             source: "t".to_string(),
-            watermark: "_siphon_replicated_at".to_string(),
+            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.watermark(), "_siphon_replicated_at");
+        assert_eq!(table.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.watermark(), "_siphon_replicated_at");
+        assert_eq!(query.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
     }
 }

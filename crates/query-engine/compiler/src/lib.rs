@@ -68,6 +68,7 @@ pub use passes::codegen::{
     ddl::clickhouse::emit_create_materialized_view,
     ddl::clickhouse::{DictionarySource, emit_create_dictionary, emit_create_table},
     ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    ddl::duckdb::generate_local_ddl,
     ddl::generate_graph_dictionaries,
     ddl::generate_graph_dictionaries_with_prefix,
     ddl::generate_graph_materialized_views,
@@ -852,6 +853,32 @@ mod tests {
     }
 
     #[test]
+    fn neighbors_disable_reorder_projections_but_traversal_keeps_them() {
+        let neighbors = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "both"},
+            "limit": 10
+        }"#;
+        assert!(
+            compile_sql(neighbors).contains("optimize_use_projections = 0"),
+            "neighbors must disable reorder projections: the auth-scoped id seek degrades them to a generic-exclusion scan, got:\n{}",
+            compile_sql(neighbors)
+        );
+
+        let traversal = r#"{
+            "query_type": "traversal",
+            "node": {"id": "p", "entity": "Project", "node_ids": [1]},
+            "limit": 10
+        }"#;
+        assert!(
+            !compile_sql(traversal).contains("optimize_use_projections"),
+            "non-neighbors queries keep projections enabled, got:\n{}",
+            compile_sql(traversal)
+        );
+    }
+
+    #[test]
     fn cursor_neighbors_both_orders_by_projected_columns() {
         let query = r#"{
             "query_type": "neighbors",
@@ -895,6 +922,31 @@ mod tests {
         assert!(
             !sql.contains("f.traversal_path = b.traversal_path"),
             "User paths must not require traversal_path on frontier rows, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn path_finding_clamps_settings_to_safety_floor() {
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("max_execution_time = 15"),
+            "pathfinding must clamp max_execution_time to 15, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("max_memory_usage = 16106127360"),
+            "pathfinding must clamp max_memory_usage to 15 GiB, got:\n{sql}"
         );
     }
 
@@ -1399,6 +1451,41 @@ mod tests {
     }
 
     #[test]
+    fn count_with_property_on_skip_target_drops_column_arg() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "wi", "entity": "WorkItem", "filters": {"state": "closed"}},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+                {"type": "CLOSED", "from": "u", "to": "wi"}
+            ],
+            "group_by": [{"kind": "node", "node": "p"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "u",
+                "property": "id",
+                "alias": "closers_count"
+            }],
+            "limit": 20
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("u.id") && !sql.contains("(u.id"),
+            "must not reference u.id when User is not hydrated and absent from FROM, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("COUNT()") || sql.contains("countIf("),
+            "Count over unhydrated target must collapse to bare COUNT()/countIf(cond), got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_preserves_role_gated_node_table_for_security() {
         let query = r#"{
             "query_type": "aggregation",
@@ -1576,14 +1663,12 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains(
-                "_candidate_pipe AS (SELECT DISTINCT pipe.id AS id FROM gl_pipeline AS pipe WHERE"
-            ),
-            "joined target should get a non-FINAL candidate CTE, got:\n{sql}"
+            sql.contains("_candidate_pipe AS (SELECT pipe.id AS id FROM gl_pipeline AS pipe WHERE"),
+            "joined target should get a candidate CTE, got:\n{sql}"
         );
         assert!(
-            sql.contains("_candidate_j AS (SELECT DISTINCT j.id AS id FROM gl_job AS j WHERE"),
-            "center should get a non-FINAL candidate CTE, got:\n{sql}"
+            sql.contains("_candidate_j AS (SELECT j.id AS id FROM gl_job AS j WHERE"),
+            "center should get a candidate CTE, got:\n{sql}"
         );
         assert!(
             sql.contains("FROM (SELECT * FROM gl_job AS j")
@@ -1643,13 +1728,13 @@ mod tests {
 
         assert!(
             sql.contains(
-                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
+                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 WHERE"
             ),
-            "unfiltered joined target should be narrowed by a non-FINAL candidate scan, got:\n{sql}"
+            "unfiltered joined target should be narrowed by a candidate scan, got:\n{sql}"
         );
         assert!(
             !sql.contains(
-                "_narrow_j2 AS (SELECT DISTINCT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
+                "_narrow_j2 AS (SELECT j1.auto_canceled_by_id AS id FROM gl_job AS j1 FINAL"
             ),
             "narrowing CTE should not run a second FINAL scan, got:\n{sql}"
         );
@@ -1666,6 +1751,141 @@ mod tests {
                 && sql.contains("AS j1 INNER JOIN (SELECT * FROM gl_job AS j2"),
             "outer source and joined target should use dedup (FINAL or LIMIT BY), got:\n{sql}"
         );
+    }
+
+    #[test]
+    fn fk_center_group_by_aggregation_drops_redundant_narrow_scan() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}},
+                {"id": "proj", "entity": "Project"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "j", "to": "proj"}],
+            "group_by": [{"kind": "node", "node": "proj"}],
+            "aggregations": [{"function": "count", "target": "j", "alias": "failed_jobs"}],
+            "limit": 200
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("_narrow_proj"),
+            "FK-center group-by aggregation must not re-scan the center for narrowing, got:\n{sql}"
+        );
+        assert_eq!(
+            sql.matches("FROM gl_job").count(),
+            1,
+            "gl_job must be scanned exactly once, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("proj.id = j.project_id"),
+            "Project hydration must still join on the center FK, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_center_traversal_keeps_narrow_scan() {
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "j1", "entity": "Job", "filters": {"status": "canceled"}},
+                {"id": "j2", "entity": "Job"},
+                {"id": "p", "entity": "Project", "node_ids": [278964]}
+            ],
+            "relationships": [
+                {"type": "AUTO_CANCELED_BY", "from": "j1", "to": "j2"},
+                {"type": "IN_PROJECT", "from": "j1", "to": "p"}
+            ],
+            "limit": 10
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            sql.contains("_narrow_j2"),
+            "traversal FK-center join must keep its narrowing CTE, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn fk_chain_aggregation_joins_nodes_without_edge_scans() {
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed", "source": "merge_request_event"}},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff"},
+                {"id": "f", "entity": "MergeRequestDiffFile"}
+            ],
+            "relationships": [
+                {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+                {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+                {"type": "HAS_FILE", "from": "d", "to": "f"}
+            ],
+            "aggregations": [{"function": "count", "target": "f", "alias": "appearances"}],
+            "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+            "limit": 60
+        }"#;
+
+        let sql = compile_sql(query);
+
+        assert!(
+            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
+            "FK-chain aggregation must join node tables, not scan edge tables, got:\n{sql}"
+        );
+        for on in [
+            "pl.merge_request_id = mr.id",
+            "mr.latest_merge_request_diff_id = d.id",
+            "f.merge_request_diff_id = d.id",
+        ] {
+            assert!(sql.contains(on), "expected FK join `{on}`, got:\n{sql}");
+        }
+        assert!(sql.contains("GROUP BY f.old_path"), "got:\n{sql}");
+    }
+
+    fn compile_sql_scoped(nodes: &str, rels: &str, group: &str, agg: &str) -> String {
+        let query = format!(
+            r#"{{"query_type":"aggregation","nodes":[{nodes}],"relationships":[{rels}],"group_by":[{{"kind":"node","node":"{group}"}}],"aggregations":[{{"function":"count","target":"{agg}","alias":"c"}}],"limit":20}}"#
+        );
+        let ctx = SecurityContext::new(1, vec!["1/".into()])
+            .unwrap()
+            .with_scope_prefixes([("g".to_string(), "1/9970/".to_string())].into());
+        compile(&query, &ONTOLOGY, &ctx).unwrap().base.render()
+    }
+
+    // SQL-shape smoke: the 4-hop diff chain elides CONTAINS to FK node-joins
+    // (guards the orientation-agnostic emit_chain), and a non-FK survivor blocks
+    // elision. `expect` is `|`-separated; a `!x` token asserts `x` is absent.
+    // End-to-end result parity (chain/star, scoped vs unscoped) lives in the
+    // data-correctness suite (`scope_implied_container_elision_*`).
+    #[test]
+    fn scope_implied_container_hop_elision() {
+        let cases: &[(&str, &str, &str, &str, &str)] = &[
+            (
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"d","entity":"MergeRequestDiff"},{"id":"f","entity":"MergeRequestDiffFile"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_LATEST_DIFF","from":"mr","to":"d"},{"type":"HAS_FILE","from":"d","to":"f"}"#,
+                "p",
+                "f",
+                "mr.project_id = p.id|mr.latest_merge_request_diff_id = d.id|f.merge_request_diff_id = d.id|gl_project|!gl_edge|!gl_ci_edge|!gl_group",
+            ),
+            (
+                r#"{"id":"g","entity":"Group","filters":{"full_path":"gitlab-org"}},{"id":"p","entity":"Project"},{"id":"mr","entity":"MergeRequest"},{"id":"n","entity":"Note"}"#,
+                r#"{"type":"CONTAINS","from":"g","to":"p"},{"type":"IN_PROJECT","from":"mr","to":"p"},{"type":"HAS_NOTE","from":"mr","to":"n"}"#,
+                "p",
+                "n",
+                "'CONTAINS'|'HAS_NOTE'",
+            ),
+        ];
+        for (nodes, rels, group, agg, expect) in cases {
+            let sql = compile_sql_scoped(nodes, rels, group, agg);
+            for e in expect.split('|') {
+                match e.strip_prefix('!') {
+                    Some(absent) => assert!(!sql.contains(absent), "{absent} present:\n{sql}"),
+                    None => assert!(sql.contains(e), "{e} missing:\n{sql}"),
+                }
+            }
+        }
     }
 
     #[test]

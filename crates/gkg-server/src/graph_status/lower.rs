@@ -107,27 +107,41 @@ fn live_project_scope_filter(alias: &str, traversal_path: &str) -> Expr {
 
 fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
     let alias = "d";
-
-    let select = vec![
-        SelectExpr::new(Expr::string(&node.name), "entity"),
-        SelectExpr::new(Expr::func("count", vec![]), "cnt"),
-    ];
-
-    let where_clause = Expr::and(
-        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, "traversal_path"),
-                Expr::string(traversal_path),
-            ],
-        ),
+    let starts_with = Expr::func(
+        "startsWith",
+        vec![
+            Expr::col(alias, "traversal_path"),
+            Expr::string(traversal_path),
+        ],
     );
 
+    // Group alone needs FINAL: namespace-deletion tombstones (distinct ids the
+    // _deleted-less projection can't drop) inflate uniq(id) ~6x on prod. Tiny
+    // table, so it's cheap; every other type is within ~1% with uniq(id).
+    if node.name == "Group" {
+        return Query {
+            select: vec![
+                SelectExpr::new(Expr::string(&node.name), "entity"),
+                SelectExpr::new(Expr::func("count", vec![]), "cnt"),
+            ],
+            from: TableRef::scan_final(&node.table, alias),
+            where_clause: Some(Expr::and(
+                Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
+                starts_with,
+            )),
+            ..Default::default()
+        };
+    }
+
+    // uniq(id) with no FINAL/_deleted is served by the tp_count projection,
+    // reading HyperLogLog state instead of merging the namespace.
     Query {
-        select,
-        from: TableRef::scan_final(&node.table, alias),
-        where_clause: Some(where_clause),
+        select: vec![
+            SelectExpr::new(Expr::string(&node.name), "entity"),
+            SelectExpr::new(Expr::func("uniq", vec![Expr::col(alias, "id")]), "cnt"),
+        ],
+        from: TableRef::scan(&node.table, alias),
+        where_clause: Some(starts_with),
         ..Default::default()
     }
 }
@@ -162,6 +176,10 @@ mod tests {
                     name: "MergeRequest".to_string(),
                     table: "v1_gl_merge_request".to_string(),
                 },
+                NodeTable {
+                    name: "Definition".to_string(),
+                    table: "v1_gl_definition".to_string(),
+                },
             ],
             project_tables: test_tables(),
         }
@@ -178,6 +196,11 @@ mod tests {
         assert!(result.sql.contains("v1_gl_group"), "SQL: {}", result.sql);
         assert!(
             result.sql.contains("v1_gl_merge_request"),
+            "SQL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("v1_gl_definition"),
             "SQL: {}",
             result.sql
         );
@@ -217,28 +240,47 @@ mod tests {
     }
 
     #[test]
-    fn entity_counts_uses_final_per_table() {
+    fn group_uses_exact_final() {
         let input = test_input();
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
-        let final_count = result.sql.matches(" FINAL").count();
         assert_eq!(
-            final_count,
-            input.nodes.len(),
-            "Each entity count should scan its table with FINAL. SQL: {}",
+            result.sql.matches(" FINAL").count(),
+            1,
+            "only Group should scan with FINAL. SQL: {}",
             result.sql
         );
+        assert!(
+            result.sql.contains("v1_gl_group AS d FINAL"),
+            "SQL: {}",
+            result.sql
+        );
+        assert!(result.sql.contains("d._deleted"), "SQL: {}", result.sql);
     }
 
     #[test]
-    fn entity_counts_has_deleted_filter() {
+    fn non_group_entities_use_uniq_projection() {
         let input = test_input();
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
-        assert!(result.sql.contains("_deleted"), "SQL: {}", result.sql);
-        assert!(result.sql.contains("d._deleted"), "SQL: {}", result.sql);
+        assert_eq!(
+            result.sql.matches("uniq(d.id)").count(),
+            3,
+            "Project, MergeRequest and Definition should use uniq(id). SQL: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("v1_gl_definition AS d FINAL"),
+            "SQL: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("v1_gl_project AS d FINAL"),
+            "SQL: {}",
+            result.sql
+        );
     }
 
     #[test]

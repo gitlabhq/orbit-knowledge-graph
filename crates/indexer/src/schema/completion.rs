@@ -1,4 +1,4 @@
-//! Migration completion detection and old table cleanup.
+//! Migration completion detection and dead-version GC.
 //!
 //! Runs as a scheduled task in the DispatchIndexing mode. On each tick:
 //!
@@ -7,10 +7,13 @@
 //!    tables. If so, promote the version to `active` and demote the previously
 //!    active version to `retired`.
 //!
-//! 2. **Retention cleanup** — Drop tables for versions outside the
-//!    `max_retained_versions` window that have status `retired`, then mark
-//!    them `dropped`.
+//! 2. **Version GC** — A single SQL query computes the keep-set (active +
+//!    retained retired + in-flight migrating above active) and enumerates
+//!    all `v<N>_*` objects in `system.tables` whose version falls outside
+//!    it. Each candidate is validated against the ontology before being
+//!    dropped; unrecognized objects are logged and left alone.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use arrow::datatypes::UInt64Type;
@@ -23,15 +26,21 @@ use query_engine::compiler::{
 };
 use tracing::{info, warn};
 
+use const_format::concatcp;
+
 use super::metrics::CompletionMetrics;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{
-    SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
+    SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
 };
+
+/// ClickHouse Cloud cluster name. Used for `ON CLUSTER` in commands that
+/// need cross-replica propagation (e.g. `SYSTEM STOP MERGES`).
+const CLICKHOUSE_CLUSTER: &str = "default";
 
 /// NATS KV key used to serialize migration-completion checks across pods.
 const MIGRATION_LOCK_KEY: &str = "schema_migration";
@@ -46,32 +55,43 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
+const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+
 /// SQL to count enabled namespaces from the datalake.
-const COUNT_ENABLED_NAMESPACES: &str = "\
-SELECT count(DISTINCT root_namespace_id) AS ns_count \
+const COUNT_ENABLED_NAMESPACES: &str = concatcp!(
+    "SELECT count(DISTINCT root_namespace_id) AS ns_count \
 FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// SQL to count code-eligible projects in the datalake: projects belonging
 /// to any enabled namespace. The denominator of the code-coverage telemetry
 /// emitted from `is_migration_complete` (the predicate doesn't gate on
 /// coverage; see the doc comment there).
-const COUNT_CODE_ELIGIBLE_PROJECTS: &str = "\
-SELECT count(DISTINCT p.id) AS ns_count \
+const COUNT_CODE_ELIGIBLE_PROJECTS: &str = concatcp!(
+    "SELECT count(DISTINCT p.id) AS ns_count \
 FROM project_namespace_traversal_paths AS p \
 INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
   ON startsWith(p.traversal_path, enabled.traversal_path) \
 WHERE p.deleted = false \
-  AND enabled._siphon_deleted = false";
+  AND enabled.",
+    DEL,
+    " = false"
+);
 
 /// SQL to fetch enabled namespaces' traversal paths from the datalake. Used
 /// to bridge the cluster boundary: the checkpoint table lives in the graph
 /// DB and cannot join to the datalake, so we pull the small enabled-path set
 /// first and pass it as an Array(String) parameter to the graph-side count.
-const FETCH_ENABLED_TRAVERSAL_PATHS: &str = "\
-SELECT DISTINCT traversal_path \
+const FETCH_ENABLED_TRAVERSAL_PATHS: &str = concatcp!(
+    "SELECT DISTINCT traversal_path \
 FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false";
+WHERE ",
+    DEL,
+    " = false"
+);
 
 /// SQL to count distinct projects in the new-prefix code indexing
 /// checkpoint table that fall under at least one currently-enabled
@@ -86,6 +106,30 @@ SELECT count(DISTINCT project_id) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+
+/// Single query that computes the keep-set in SQL and returns every
+/// `v<N>_*` object outside it. The keep-set is: active + newest
+/// `retired_slots` retired + migrating above active. Returns zero rows
+/// if no active version exists (safety guard).
+const LIST_DEAD_VERSION_OBJECTS: &str = "\
+SELECT \
+  name, engine, \
+  toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) AS dead_version \
+FROM system.tables \
+WHERE database = {db:String} \
+  AND match(name, '^v[0-9]+_') \
+  AND toUInt32OrZero(extractAll(name, '^v([0-9]+)_')[1]) NOT IN (\
+      SELECT version FROM gkg_schema_version FINAL WHERE status = 'active' \
+      UNION ALL \
+      SELECT version FROM (\
+          SELECT version FROM gkg_schema_version FINAL \
+          WHERE status = 'retired' ORDER BY version DESC LIMIT {retired_slots:UInt32}) \
+      UNION ALL \
+      SELECT version FROM gkg_schema_version FINAL \
+      WHERE status = 'migrating' \
+        AND version > (SELECT coalesce(max(version), 0) \
+                       FROM gkg_schema_version FINAL WHERE status = 'active')) \
+  AND (SELECT count() FROM gkg_schema_version FINAL WHERE status = 'active') > 0";
 
 /// SQL to read the wall-clock age of the row that marked the given version
 /// as `migrating`. Used to populate the `migrating_age_seconds` gauge so
@@ -170,33 +214,21 @@ impl ScheduledTask for MigrationCompletionChecker {
 
 impl MigrationCompletionChecker {
     async fn run_inner(&self) -> Result<(), TaskError> {
-        // Phase 1: detect completion of any migrating version.
-        // Returns the post-mutation version list if a promotion happened,
-        // so phase 2 doesn't need to re-read (avoids write-visibility lag).
-        let versions_after_promotion = self.check_completion().await?;
-
-        // Phase 2: clean up old retired versions outside retention window.
-        self.cleanup_old_versions(versions_after_promotion).await?;
-
+        self.check_completion().await?;
+        self.reconcile_dead_versions().await?;
         Ok(())
     }
 
     /// Checks whether a `migrating` version has been fully re-indexed and
     /// should be promoted to `active`.
-    ///
-    /// Returns the updated version entries if a promotion happened, so the
-    /// caller can pass them to cleanup without re-reading from ClickHouse.
-    async fn check_completion(&self) -> Result<Option<Vec<VersionEntry>>, TaskError> {
+    async fn check_completion(&self) -> Result<(), TaskError> {
         let migrating = read_migrating_version(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
-            // No migration in progress — keep the age gauge accurate so an
-            // alert on `migrating_age_seconds > N` doesn't fire on the
-            // post-promotion last-recorded value.
             self.metrics.record_migrating_age(0);
-            return Ok(None);
+            return Ok(());
         };
 
         // Surface "is migration stuck?" as a direct gauge. A bounded query
@@ -223,11 +255,11 @@ impl MigrationCompletionChecker {
                 version = migrating_version,
                 "migration not yet complete — namespaces still being indexed"
             );
-            return Ok(None);
+            return Ok(());
         }
 
         // Promote: migrating → active, old active → retired.
-        let mut versions = read_all_versions(&self.graph)
+        let versions = read_all_versions(&self.graph)
             .await
             .map_err(|e| TaskError::new(format!("read all versions: {e}")))?;
 
@@ -240,6 +272,11 @@ impl MigrationCompletionChecker {
                 mark_version_retired(&self.graph, entry.version)
                     .await
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
+                if gkg_server_config::features::enabled(
+                    gkg_server_config::Feature::StopMergesOnRetire,
+                ) {
+                    self.stop_merges_for_version(entry.version).await;
+                }
             }
         }
 
@@ -256,22 +293,12 @@ impl MigrationCompletionChecker {
 
         self.metrics.record_migration_completed();
 
-        // Reflect the mutations in the in-memory list so cleanup doesn't
-        // need to re-read and risk write-visibility lag.
-        for entry in &mut versions {
-            if entry.version == migrating_version {
-                entry.status = "active".to_string();
-            } else if entry.status == "active" {
-                entry.status = "retired".to_string();
-            }
-        }
-
         info!(
             version = migrating_version,
             "schema migration to v{migrating_version} complete"
         );
 
-        Ok(Some(versions))
+        Ok(())
     }
 
     /// Returns `true` if all enabled namespaces have checkpoint entries in both
@@ -479,176 +506,154 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    /// Drops tables for retired versions outside the retention window, then
-    /// marks them `dropped`.
-    async fn cleanup_old_versions(
-        &self,
-        cached_versions: Option<Vec<VersionEntry>>,
-    ) -> Result<(), TaskError> {
-        let versions = match cached_versions {
-            Some(v) => v,
-            None => read_all_versions(&self.graph)
+    /// Stops background merges on all graph tables for a version so the merge
+    /// pool is reserved for the active version. Best-effort: failures are
+    /// logged but never propagated.
+    ///
+    /// `SYSTEM STOP MERGES` is node-local runtime state (unlike DDL which
+    /// auto-replicates), so it is issued `ON CLUSTER` to reach every replica.
+    async fn stop_merges_for_version(&self, version: u32) {
+        let prefix = table_prefix(version);
+        let db = self.graph.database();
+
+        for t in &generate_graph_tables(&self.ontology) {
+            let qualified = format!("{db}.{prefix}{}", t.name);
+            let _ = self
+                .graph
+                .execute(&format!(
+                    "SYSTEM STOP MERGES ON CLUSTER '{CLICKHOUSE_CLUSTER}' {qualified}"
+                ))
                 .await
-                .map_err(|e| TaskError::new(format!("read all versions: {e}")))?,
-        };
+                .inspect_err(
+                    |e| warn!(version, table = %qualified, error = %e, "failed to stop merges"),
+                );
+        }
+    }
 
-        // Keep the top `max_retained_versions` non-dropped entries.
-        let retained: Vec<&VersionEntry> =
-            versions.iter().filter(|v| v.status != "dropped").collect();
+    /// Enumerates dead-version objects via `system.tables` (keep-set computed
+    /// in SQL), validates each against the ontology, and drops recognized
+    /// objects. Unrecognized objects are logged and left alone.
+    async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
+        let retired_slots = self.schema_config.max_retained_versions.saturating_sub(1);
+        let db = self.graph.database();
 
-        let max = self.schema_config.max_retained_versions as usize;
-        if retained.len() <= max {
-            return Ok(());
+        let batches = self
+            .graph
+            .query(LIST_DEAD_VERSION_OBJECTS)
+            .param("db", db)
+            .param("retired_slots", retired_slots)
+            .fetch_arrow()
+            .await
+            .map_err(|e| TaskError::new(format!("list dead version objects: {e}")))?;
+
+        let known_names = ontology_known_names(&self.ontology);
+        let current = *SCHEMA_VERSION;
+
+        // Collect and sort: views first, then dictionaries, then tables.
+        let mut drops: Vec<(u32, String, &'static str)> = Vec::new();
+        for batch in &batches {
+            for i in 0..batch.num_rows() {
+                let name = ArrowUtils::get_column_string(batch, "name", i)
+                    .ok_or_else(|| TaskError::new("missing name".to_string()))?;
+                let engine = ArrowUtils::get_column_string(batch, "engine", i)
+                    .ok_or_else(|| TaskError::new("missing engine".to_string()))?;
+                let version = ArrowUtils::get_column::<arrow::datatypes::UInt32Type>(
+                    batch,
+                    "dead_version",
+                    i,
+                )
+                .ok_or_else(|| TaskError::new("missing dead_version".to_string()))?;
+
+                let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
+                if !known_names.contains(base_name) {
+                    warn!(version, object = %name, "GC: skipping unrecognized object");
+                    continue;
+                }
+
+                let kind = match engine.as_str() {
+                    "MaterializedView" | "View" | "LiveView" | "WindowView" => "VIEW",
+                    "Dictionary" => "DICTIONARY",
+                    _ => "TABLE",
+                };
+                drops.push((version, name, kind));
+            }
         }
 
-        let current_version = retained.first().map(|v| v.version).unwrap_or(0);
-        let to_cleanup: Vec<&VersionEntry> = retained[max..].to_vec();
+        // Fixed drop order: dictionaries, views, tables. Works for the
+        // current ontology shape (dicts source from tables, no cross-type
+        // cycles). A general migration framework should topo-sort using
+        // system.tables loading_dependencies columns instead.
+        drops.sort_by_key(|(_, _, kind)| match *kind {
+            "DICTIONARY" => 0,
+            "VIEW" => 1,
+            _ => 2,
+        });
 
-        for entry in to_cleanup {
-            if entry.status != "retired" {
-                // Only drop tables for retired versions.
+        if gkg_server_config::features::enabled(gkg_server_config::Feature::StopMergesOnRetire) {
+            let dead_versions: HashSet<u32> = drops.iter().map(|(v, _, _)| *v).collect();
+            for version in &dead_versions {
+                self.stop_merges_for_version(*version).await;
+            }
+        }
+
+        let mut succeeded: HashSet<u32> = HashSet::new();
+        let mut failed: HashSet<u32> = HashSet::new();
+
+        for (version, name, kind) in &drops {
+            if let Err(e) = self
+                .graph
+                .execute(&format!("DROP {kind} IF EXISTS {name}"))
+                .await
+            {
+                warn!(version, object = %name, error = %e, "GC: drop failed");
+                failed.insert(*version);
+            } else {
+                succeeded.insert(*version);
+            }
+        }
+
+        for version in &succeeded {
+            if failed.contains(version) {
+                self.metrics.record_cleanup(*version, current, "failure");
                 continue;
             }
-
-            info!(
-                version = entry.version,
-                "dropping tables for retired version outside retention window"
-            );
-
-            match self.drop_version_tables(entry.version).await {
-                Ok(()) => {
-                    mark_version_dropped(&self.graph, entry.version)
-                        .await
-                        .map_err(|e| {
-                            TaskError::new(format!("mark v{} dropped: {e}", entry.version))
-                        })?;
-                    self.metrics
-                        .record_cleanup(entry.version, current_version, "success");
-                    info!(
-                        version = entry.version,
-                        "version tables dropped and marked as dropped"
-                    );
-                }
-                Err(e) => {
-                    self.metrics
-                        .record_cleanup(entry.version, current_version, "failure");
-                    warn!(
-                        version = entry.version,
-                        error = %e,
-                        "failed to drop tables for retired version"
-                    );
-                }
+            if let Err(e) = mark_version_dropped(&self.graph, *version).await {
+                warn!(version, error = %e, "GC: failed to mark dropped");
             }
+            self.metrics.record_cleanup(*version, current, "success");
         }
 
         Ok(())
     }
+}
 
-    /// Drops all materialized views and graph tables for a given schema version.
-    ///
-    /// Materialized views are dropped first because they reference the source
-    /// tables; dropping a table while a view still selects from it would leave
-    /// an orphaned view definition.
-    ///
-    /// TO-table targets are not dropped here separately -- the ontology loader
-    /// validates that every `to_table` references an ontology-tracked table
-    /// (auxiliary, node, or edge), so the table-cleanup loop below handles them.
-    async fn drop_version_tables(&self, version: u32) -> Result<(), String> {
-        let prefix = table_prefix(version);
-
-        // Drop materialized views before their source tables.
-        let views: Vec<String> = generate_graph_materialized_views(&self.ontology)
-            .into_iter()
-            .map(|mv| mv.name)
-            .collect();
-
-        for view_name in &views {
-            let prefixed = format!("{prefix}{view_name}");
-            let ddl = format!("DROP VIEW IF EXISTS {prefixed}");
-
-            info!(
-                version,
-                view = %prefixed,
-                "dropping materialized view"
-            );
-
-            self.graph
-                .execute(&ddl)
-                .await
-                .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
-        }
-
-        let dicts: Vec<String> = generate_graph_dictionaries(&self.ontology)
-            .into_iter()
-            .map(|d| d.name)
-            .collect();
-        for dict_name in &dicts {
-            let prefixed = format!("{prefix}{dict_name}");
-            let ddl = format!("DROP DICTIONARY IF EXISTS {prefixed}");
-
-            info!(version, dictionary = %prefixed, "dropping dictionary");
-
-            self.graph
-                .execute(&ddl)
-                .await
-                .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
-        }
-
-        // Drop statistics MVs, dictionaries, then tables (MVs depend on
-        // both source node tables and stats destination tables).
-        if let Some(stats) = generate_statistics_ddl(&self.ontology) {
-            for mv in &stats.views {
-                let prefixed = format!("{prefix}{}", mv.name);
-                let ddl = format!("DROP VIEW IF EXISTS {prefixed}");
-                info!(version, view = %prefixed, "dropping statistics view");
-                self.graph
-                    .execute(&ddl)
-                    .await
-                    .map_err(|e| format!("DROP VIEW {prefixed}: {e}"))?;
-            }
-            for d in &stats.dictionaries {
-                let prefixed = format!("{prefix}{}", d.name);
-                let ddl = format!("DROP DICTIONARY IF EXISTS {prefixed}");
-                info!(version, dictionary = %prefixed, "dropping statistics dictionary");
-                self.graph
-                    .execute(&ddl)
-                    .await
-                    .map_err(|e| format!("DROP DICTIONARY {prefixed}: {e}"))?;
-            }
-            for t in &stats.tables {
-                let prefixed = format!("{prefix}{}", t.name);
-                let ddl = format!("DROP TABLE IF EXISTS {prefixed}");
-                info!(version, table = %prefixed, "dropping statistics table");
-                self.graph
-                    .execute(&ddl)
-                    .await
-                    .map_err(|e| format!("DROP TABLE {prefixed}: {e}"))?;
-            }
-        }
-
-        let tables: Vec<String> = generate_graph_tables(&self.ontology)
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
-
-        for table_name in &tables {
-            let prefixed = format!("{prefix}{table_name}");
-            let ddl = format!("DROP TABLE IF EXISTS {prefixed}");
-
-            info!(
-                version,
-                table = %prefixed,
-                "dropping table"
-            );
-
-            self.graph
-                .execute(&ddl)
-                .await
-                .map_err(|e| format!("DROP TABLE {prefixed}: {e}"))?;
-        }
-
-        Ok(())
+/// Builds the set of object names the ontology creates (tables, views,
+/// dictionaries, statistics) — without any version prefix. Used to validate
+/// that a `v<N>_*` object found in `system.tables` was created by the
+/// migration system and is safe to drop.
+fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for t in &generate_graph_tables(ontology) {
+        names.insert(t.name.clone());
     }
+    for mv in &generate_graph_materialized_views(ontology) {
+        names.insert(mv.name.clone());
+    }
+    for d in &generate_graph_dictionaries(ontology) {
+        names.insert(d.name.clone());
+    }
+    if let Some(stats) = generate_statistics_ddl(ontology) {
+        for t in &stats.tables {
+            names.insert(t.name.clone());
+        }
+        for mv in &stats.views {
+            names.insert(mv.name.clone());
+        }
+        for d in &stats.dictionaries {
+            names.insert(d.name.clone());
+        }
+    }
+    names
 }
 
 #[cfg(test)]
@@ -757,5 +762,36 @@ mod tests {
 
         // Saturated coverage approaches 1.0 once the backfill catches up.
         assert!((coverage(8600, 8602) - 0.9998).abs() < 0.001);
+    }
+
+    #[test]
+    fn ontology_known_names_includes_tables_views_dicts() {
+        let ont = ontology::Ontology::load_embedded().unwrap();
+        let names = ontology_known_names(&ont);
+        assert!(names.contains("gl_edge"), "should contain edge table");
+        assert!(
+            names.contains("checkpoint"),
+            "should contain checkpoint table"
+        );
+        assert!(!names.is_empty());
+    }
+
+    #[test]
+    fn gc_query_has_safety_guard() {
+        assert!(
+            LIST_DEAD_VERSION_OBJECTS.contains("count()"),
+            "query must abort when no active version exists"
+        );
+    }
+
+    #[test]
+    fn gc_query_excludes_active_retired_and_migrating_above() {
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'active'"));
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'retired'"));
+        assert!(LIST_DEAD_VERSION_OBJECTS.contains("status = 'migrating'"));
+        assert!(
+            LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
+            "migrating > active guard must handle missing active"
+        );
     }
 }

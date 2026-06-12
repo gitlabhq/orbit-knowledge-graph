@@ -175,6 +175,8 @@ pub struct CompilerMetadata {
     pub edge_source_kinds: HashMap<String, Vec<String>>,
     /// Maps relationship kind → valid target entity kinds.
     pub edge_target_kinds: HashMap<String, Vec<String>>,
+    /// Namespace entity (Group/Project) → (tp-dict table, key column) for pinning a neighbors anchor arm to its centers' exact traversal_paths.
+    pub tp_id_lookup: HashMap<String, (String, String)>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -194,6 +196,7 @@ impl Default for CompilerMetadata {
             table_sort_keys: HashMap::new(),
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
+            tp_id_lookup: HashMap::new(),
         }
     }
 }
@@ -580,6 +583,13 @@ pub struct InputRelationship {
     /// Lossless because an edge row's `traversal_path` is its source entity's.
     #[serde(skip)]
     pub scope_prefix: Option<String>,
+    /// Whether every resolved variant of this relationship keeps both endpoints
+    /// in the same namespace. Set by `restrict`. Only scope-preserving FK edges
+    /// link a node to an intrinsic child whose lifecycle is coupled to the
+    /// parent; the FK-chain lowering relies on this to be result-equivalent to
+    /// the edge scan (an independent entity like a runner can outlive its edge).
+    #[serde(skip)]
+    pub scope_preserving: bool,
 }
 
 fn default_hops() -> u32 {

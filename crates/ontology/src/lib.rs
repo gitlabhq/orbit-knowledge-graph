@@ -26,7 +26,8 @@ pub mod query_dsl;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
-    NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
+    NODE_RESERVED_COLUMNS, SIPHON_DELETED_COLUMN, SIPHON_WATERMARK_COLUMN, TRAVERSAL_PATH_COLUMN,
+    VERSION_COLUMN,
 };
 pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
@@ -187,8 +188,8 @@ impl Ontology {
             edge_descriptions: BTreeMap::new(),
             edge_etl_configs: BTreeMap::new(),
             etl_settings: EtlSettings {
-                watermark: "_siphon_replicated_at".to_string(),
-                deleted: "_siphon_deleted".to_string(),
+                watermark: constants::SIPHON_WATERMARK_COLUMN.to_string(),
+                deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
                 order_by: vec![
                     TRAVERSAL_PATH_COLUMN.to_string(),
                     DEFAULT_PRIMARY_KEY.to_string(),
@@ -220,6 +221,29 @@ impl Ontology {
                     name: name.clone(),
                     destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
                     sort_key: self.default_entity_sort_key.clone(),
+                    ..Default::default()
+                },
+            );
+        }
+        self
+    }
+
+    #[must_use]
+    pub fn with_path_scopable_nodes(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let leads_with_tp =
+            self.default_entity_sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN);
+        for name in names {
+            let name = name.into();
+            self.nodes.insert(
+                name.clone(),
+                NodeEntity {
+                    name: name.clone(),
+                    destination_table: format!("{}{}", self.table_prefix, name.to_lowercase()),
+                    sort_key: self.default_entity_sort_key.clone(),
+                    has_traversal_path: leads_with_tp,
                     ..Default::default()
                 },
             );
@@ -271,6 +295,14 @@ impl Ontology {
                 storage: EdgeTableStorage::default(),
             },
         );
+        self
+    }
+
+    #[must_use]
+    pub fn with_edge_variant(mut self, variant: EdgeEntity) -> Self {
+        let kind = variant.relationship_kind.clone();
+        let entry = self.edges.entry(kind).or_default();
+        entry.push(variant);
         self
     }
 
@@ -861,9 +893,10 @@ impl Ontology {
         })
     }
 
-    /// True when `entity` declares a `traversal_path_lookup`, i.e. it is a
-    /// namespace anchor whose `traversal_path` can be resolved from an
-    /// `id`/`full_path` filter. Exactly `Project` and `Group` today.
+    /// True when `entity` declares a `traversal_path_lookup`, i.e. its
+    /// `traversal_path` can be resolved from an `id`/`full_path` filter so a
+    /// query anchored on it can be scope-pruned. `Project`, `Group`, and
+    /// `MergeRequest` today.
     #[must_use]
     pub fn is_anchor(&self, entity: &str) -> bool {
         self.traversal_path_lookups
@@ -893,6 +926,15 @@ impl Ontology {
             return false;
         }
         node.sort_key.first().map(String::as_str) == Some(TRAVERSAL_PATH_COLUMN)
+    }
+
+    #[must_use]
+    pub fn is_table_path_scopable(&self, table: &str) -> bool {
+        let normalized = strip_schema_version_prefix(table);
+        self.nodes
+            .iter()
+            .find(|(_, n)| strip_schema_version_prefix(&n.destination_table) == normalized)
+            .is_some_and(|(name, _)| self.is_path_scopable(name))
     }
 
     /// Returns `(fk_column, anchor_entity)` pairs derived from
@@ -942,6 +984,22 @@ impl Ontology {
                     && v.target_kind == target
                     && v.scope.is_some_and(|s| s.is_scope_preserving())
             })
+        })
+    }
+
+    /// The exact `scope` annotation for a `(kind, source, target)` variant.
+    #[must_use]
+    pub fn edge_scope_for(
+        &self,
+        kind: &str,
+        source_kind: &str,
+        target_kind: &str,
+    ) -> Option<EdgeVariantScope> {
+        self.edges.get(kind).and_then(|variants| {
+            variants
+                .iter()
+                .find(|v| v.source_kind == source_kind && v.target_kind == target_kind)
+                .and_then(|v| v.scope)
         })
     }
 
@@ -1024,6 +1082,23 @@ impl Ontology {
     #[must_use]
     pub fn internal_column_prefix(&self) -> &str {
         &self.internal_column_prefix
+    }
+
+    /// Default datalake watermark column for `argMax` deduplication and
+    /// incremental-pull windowing. Loaded from `schema.yaml`'s
+    /// `default_watermark`; validated against
+    /// [`constants::SIPHON_WATERMARK_COLUMN`] at startup.
+    #[must_use]
+    pub fn default_watermark_column(&self) -> &str {
+        &self.etl_settings.watermark
+    }
+
+    /// Default datalake soft-delete flag column. Loaded from `schema.yaml`'s
+    /// `default_deleted`; validated against
+    /// [`constants::SIPHON_DELETED_COLUMN`] at startup.
+    #[must_use]
+    pub fn default_deleted_column(&self) -> &str {
+        &self.etl_settings.deleted
     }
 
     /// Tables excluded from traversal-path security filters.
@@ -1272,17 +1347,45 @@ impl Ontology {
         direction: DenormDirection,
         column: &str,
     ) -> bool {
-        let Some(etls) = self.get_edge_etl(relationship_kind) else {
-            return true;
-        };
-        etls.iter().any(|etl| {
-            let endpoint = match direction {
-                DenormDirection::Source => &etl.from,
-                DenormDirection::Target => &etl.to,
-            };
-            matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
-                && endpoint.enrich.iter().any(|c| c == column)
-        })
+        if let Some(etls) = self.get_edge_etl(relationship_kind) {
+            return etls.iter().any(|etl| {
+                let endpoint = match direction {
+                    DenormDirection::Source => &etl.from,
+                    DenormDirection::Target => &etl.to,
+                };
+                matches!(endpoint.node_type, EdgeEndpointType::Literal(_))
+                    && endpoint.enrich.iter().any(|c| c == column)
+            });
+        }
+
+        // An FK edge is indexed from the node holding the key, so only that side
+        // is enriched; the other side's tags stay empty. The `any` guard treats
+        // the whole kind as FK-projecting if a single variant declares an
+        // `fk_column`; this is sound only because every FK-bearing edge declares
+        // it on all variants, except the one mixed edge (`has_identifier`), which
+        // carries an ETL block and already returned above. A future mixed edge
+        // without an ETL block would need per-variant projection instead.
+        if let Some(variants) = self.edges.get(relationship_kind)
+            && variants.iter().any(|v| v.fk_column.is_some())
+        {
+            return variants.iter().any(|v| {
+                let Some(fk) = v.fk_column.as_deref() else {
+                    return false;
+                };
+                let holder = match direction {
+                    DenormDirection::Source => &v.source_kind,
+                    DenormDirection::Target => &v.target_kind,
+                };
+                self.node_has_column(holder, fk)
+            });
+        }
+
+        true
+    }
+
+    fn node_has_column(&self, node_kind: &str, column: &str) -> bool {
+        self.get_node(node_kind)
+            .is_some_and(|n| n.fields.iter().any(|f| f.column_name() == Some(column)))
     }
 
     /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
@@ -1529,6 +1632,30 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn denorm_declared_only_on_fk_holding_side() {
+        use crate::entities::DenormDirection;
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        // HAS_DIFF's foreign key (merge_request_id) lives on the diff, so only the
+        // target side projects. Projecting onto the always-empty source side pushes
+        // has(source_tags,'state:merged') and silently drops every merged-MR diff
+        // row (gitlab-org/gitlab#601941). Call edge_projects_column directly so the
+        // guard would fail if that fix were reverted.
+        assert!(
+            !ontology.edge_projects_column("HAS_DIFF", DenormDirection::Source, "state"),
+            "HAS_DIFF must not project MergeRequest.state onto source_tags"
+        );
+        assert!(
+            ontology.edge_projects_column("HAS_DIFF", DenormDirection::Target, "state"),
+            "HAS_DIFF (diff holds merge_request_id) projects on the target side"
+        );
+        assert!(
+            ontology.edge_projects_column("IN_PROJECT", DenormDirection::Source, "state"),
+            "IN_PROJECT (project_id on the MR) projects MergeRequest.state onto source_tags"
+        );
     }
 
     #[test]
@@ -2153,7 +2280,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
@@ -2191,7 +2318,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
@@ -2415,7 +2542,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let err = node_def
@@ -2460,7 +2587,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: "_siphon_deleted".to_string(),
+            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
@@ -2858,7 +2985,7 @@ properties:
     #[test]
     fn is_anchor_tracks_traversal_path_lookups() {
         let o = Ontology::load_embedded().unwrap();
-        for entity in ["Project", "Group"] {
+        for entity in ["Project", "Group", "MergeRequest"] {
             assert!(o.is_anchor(entity), "{entity} declares a lookup");
         }
         for entity in ["WorkItem", "User", "Definition", "Nonexistent"] {

@@ -22,6 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   traversal_path:
@@ -35,30 +36,35 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
+    mutable: false
     description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
+    mutable: false
     description: "Indexed commit SHA."
 
   path:
     type: string
     source: path
     nullable: false
+    mutable: false
     description: "Relative path within the repository."
 
   name:
     type: string
     source: name
     nullable: false
+    mutable: false
     description: "Directory name."
 
 storage:
@@ -75,7 +81,8 @@ storage:
     - {name: path, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
   indexes:
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}

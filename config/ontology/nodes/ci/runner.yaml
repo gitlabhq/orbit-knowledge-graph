@@ -22,12 +22,14 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   runner_type:
     type: enum
     source: runner_type
     nullable: false
+    mutable: false
     description: "Scope: instance, group, or project."
     values:
       1: instance_type
@@ -89,6 +91,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Registration timestamp."
 
   contacted_at:

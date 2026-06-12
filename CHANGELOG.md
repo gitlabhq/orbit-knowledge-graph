@@ -1,3 +1,105 @@
+## [0.74.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.73.2...v0.74.0) (2026-06-09)
+
+### Features
+
+* **compiler:** pathfinding safety limits and mandatory rel_types ([da7a4bc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da7a4bcf971bc54df35a10006ed41c8ed8ddf65f)) by Michael Usachenko
+* **indexer:** log per-phase and per-page timing in SDLC pipeline ([79cf5d8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79cf5d8af3dd1eea71a85d4eb0026d1abfffd4e8)) by Jean-Gabriel Doyon
+* **indexer:** reconcile stale FK-derived graph edges ([8dea5aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8dea5aaed896baf09e93c3c1649b45f3630bf7c8)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **billing:** promote billing logs to info level and fix Option display in JWT log ([f6ef69f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f6ef69f075fd5bfc5d3182ceeb53f9fa9b7de3c0)) by Sharmad Nachnolkar
+
+## [0.73.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.73.1...v0.73.2) (2026-06-09)
+
+### Performance
+
+* **compiler:** recursive cascade anchor nesting with scope-only fallback ([cc98ecf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc98ecf21ffa2c27f686ffadbc75b3284836c89e)) by Michael Usachenko
+
+## [0.73.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.73.0...v0.73.1) (2026-06-09)
+
+### Fixes
+
+* **compiler:** tighten cascade anchor guard to pinned-ids only ([297d1ac](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/297d1ac97b5328e802a545c4dd92162326c8cb4c)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** drop DISTINCT from IN-subquery candidate scans ([8599ece](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8599ece8aa2da56748b2daf17e4e4ef261ef1416)) by Michael Usachenko
+
+## [0.73.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.72.1...v0.73.0) (2026-06-08)
+
+### Features
+
+* **billing:** enrich lifecycle logs with correlation context ([cfc8338](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfc8338a860acd7683af2f00856ed611b6fd88c9)) by Sharmad Nachnolkar
+* **ci:** add daily stale merge-request sweeper ([24f0312](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/24f03121e09c6621ba20d948aa35e4e2860aa230)) by Jean-Gabriel Doyon
+* **profiler:** add --scope-prefix to render production-faithful scoped SQL ([9bc5483](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9bc548394217418c0856b13acc2b8c961385c4d8)) by michaelangeloio
+* **profiler:** warn on duplicate --scope-prefix alias ([5e5414c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e5414c65842331ea0fe431a35b1eb2525fd8b0d)) by Michael Angelo Rivera
+
+### Fixes
+
+* **ci:** run only the sweeper on the stale_mr_sweep schedule ([722460a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/722460a681c1399f95f5f0ce6f8a633ba3729e5b)) by Jean-Gabriel Doyon
+* **indexer:** bound system_notes backfill join to the page to avoid datalake OOM ([891940f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/891940f8da189d37b8395405dcdbeb832e96960d)) by Dmitry Gruzd
+* **indexer:** never consolidate a partitioned pull while a partition is unfinished ([888e242](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/888e24274c8780deb888ef6b9bc44275dbd20ebe)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** anchor multi-entity hops with in-subqueries to enable index/projection use ([b5a23cb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b5a23cbeafffb47222a5735088ab8e166b5cc4c0)) by Michael Usachenko
+* **compiler:** drop redundant center re-scan in FK-center group-by aggregations ([d797b6c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d797b6cc4d5aaa031ba04702ee181828e473f4be)) by Michael Angelo Rivera
+* **compiler:** replace FINAL with LIMIT BY on node filter/narrowing scans ([cda6c9d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cda6c9d837f1ad314cccaa280313192c35cca27e)) by Michael Usachenko
+* **compiler:** resolve group-anchored FK aggregations via node joins ([99549d2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/99549d24f390c637f276d170b3e239128f2e51b4)) by Michael Angelo Rivera
+* **schema:** tighten node bloom filters to 0.001, lower granularity to 1024 ([1d7558d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1d7558dbf1557eadea0a23c4e6900534cc30fc76)) by Michael Usachenko
+
+### Other
+
+* **billing:** add SOX boundary check for gkg-billing dependents ([7a0648c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a0648c61bf7b1e93c5acc7d2375e34028e33569)) by Sharmad Nachnolkar
+* **deps:** update rust-analyzer crates (ra_ap_*) to 0.0.336 ([14d3c69](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/14d3c69162e044bcbadf390274a3990a676d2fa9)) by Jean-Gabriel Doyon
+* **local:** make `glab orbit local` the primary install path ([19014e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/19014e4edc6658b6efa40df78fdc1493742ea746)) by Meg Corren
+* move Orbit to beta ([c4a86e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c4a86e6e84d08fba8ba8929525f1a906e453d9bb)) by Meg Corren
+* use glab CLI for schema fetch and clean up Run a query example ([2c50a8d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2c50a8d08b49e5545a6c912ac8883218031e3147)) by Meg Corren
+
+## [0.72.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.72.0...v0.72.1) (2026-06-08)
+
+### Fixes
+
+* **indexer:** resume interrupted SDLC pulls from window floor, not epoch ([f0d533f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f0d533f3ebc1bfa62e6634e494e0ef0e2e517134)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** lower FK-backed aggregation chains as node joins ([f689a9e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f689a9efd4a1fc6472fc151f9d5edfaf678746d5)) by Michael Angelo Rivera
+* **compiler:** skip reorder projections for neighbors queries ([5c33ecc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5c33ecc5bd4b465424bdba57f868765a85ebc4e3)) by Michael Angelo Rivera
+* **indexer:** restore whole-page bulk writes in SDLC pipeline ([c169d0a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c169d0a1e5154e6b1bc88de0dc213152627fa6fe)) by Jean-Gabriel Doyon
+
+### Other
+
+* **deps:** update rust crate tabled to 0.21 ([8ce1d29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8ce1d29a974c9e4c0516a15f56165034bfbd1894)) by GitLab Renovate Bot
+* **getting-started:** use glab orbit remote status to check Orbit ([e8dc261](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e8dc2614f36770909702fe9f4b2593a731d67b9b)) by Meg Corren
+* **graph-status:** return a generic indexing error message to clients ([b2fb389](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2fb389d073c2fbc5b0cd89eb37e25a6c265534b)) by Jean-Gabriel Doyon
+* **orbit-skill:** split SKILL.md into references to meet length budget ([da78843](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da78843777cda368f77a5ac085e654115747024c)) by Dmitry Gruzd
+
+## [0.72.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.71.0...v0.72.0) (2026-06-07)
+
+### Features
+
+* **profiler:** correlate every query of a run via one correlation id ([6e5b0d6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e5b0d6b3c678258b8fa5e18d005ff4539b76881)) by Michael Angelo Rivera
+* **profiler:** resolve scope prefixes so the profiler matches prod ([3564b8e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3564b8e18acd26696b687e023b9b5a8a64fd582a)) by Michael Angelo Rivera
+
+### Fixes
+
+* **schema:** restore edge reorder projections and tighten bloom filters ([7a8b454](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a8b454cf0e5568bd30d44a66ccf4bef68120b59)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** scope neighbors queries with exact-tp incoming and arm pruning ([31f8550](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/31f855056c883db42afd5a32a2efea1056ac93f7)) by Michael Angelo Rivera
+* **graph_status:** count entities via tp_count projection ([4063277](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4063277133e011894711f7aee1348ae3e78e6567)) by Michael Angelo Rivera
+* **query:** extend traversal_path scope-prune to payload and hub edges ([6a009df](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6a009dfa73d3828e1ba9901344244110c79a9817)) by Michael Angelo Rivera
+* **query:** join FK chains as node joins and fix FK-edge denorm ([421af0f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/421af0f611084439b92eceadfd6cdc586d9adc53)) by Michael Angelo Rivera
+* **query:** scope diff traversals from pinned merge request ids ([2356381](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23563813dcade0359428003ae1eb791a57b5af0d)) by Michael Angelo Rivera
+
+### Other
+
+* **profiler:** per-query metrics, drop dead query_log backfill ([2bd2b9b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bd2b9b3596d485491115602c41a92035b396aa6)) by Michael Angelo Rivera
+* **query-engine:** add categorized query corpus + CI smoke test ([502625b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/502625b71ab8b36a5413c5b2666ef15829d4f2db)) by Michael Angelo Rivera
+
 ## [0.71.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.70.1...v0.71.0) (2026-06-05)
 
 ### Features

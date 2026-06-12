@@ -1,0 +1,152 @@
+name: "HCL cross-file resolution — one Terraform module split across files (var/local/data/resource)"
+
+# A Terraform module is a single DIRECTORY of .tf files that share one flat
+# namespace, so references routinely cross file boundaries (var.x lives in
+# variables.tf but is used in main.tf). Every reference below resolves to a
+# definition in a DIFFERENT file of the same directory. var.* resolution is the
+# capability this suite pins: it scored 0 cross-file before variable FQNs were
+# namespaced to `var.x` (which lets the capped GlobalName strategy admit them).
+
+fixtures:
+  - path: variables.tf
+    content: |
+      variable "region" {
+        type    = string
+        default = "us-east-1"
+      }
+
+      variable "instance_type" {
+        type    = string
+        default = "t3.micro"
+      }
+
+      variable "vpc_cidr" {
+        type    = string
+        default = "10.0.0.0/16"
+      }
+  - path: locals.tf
+    content: |
+      locals {
+        name_prefix = "${var.region}-app"
+        common_tags = {
+          ManagedBy = "terraform"
+          Region    = var.region
+        }
+      }
+  - path: data.tf
+    content: |
+      data "aws_ami" "ubuntu" {
+        most_recent = true
+        owners      = ["099720109477"]
+      }
+  - path: network.tf
+    content: |
+      resource "aws_vpc" "main" {
+        cidr_block = var.vpc_cidr
+        tags       = local.common_tags
+      }
+
+      resource "aws_subnet" "public" {
+        vpc_id     = aws_vpc.main.id
+        cidr_block = "10.0.1.0/24"
+      }
+  - path: main.tf
+    content: |
+      resource "aws_instance" "web" {
+        ami           = data.aws_ami.ubuntu.id
+        instance_type = var.instance_type
+        subnet_id     = aws_subnet.public.id
+        tags          = local.common_tags
+      }
+
+tests:
+  - name: "Module is split across five .tf files in one directory"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }
+      - { row: { path: variables.tf } }
+      - { row: { path: locals.tf } }
+      - { row: { path: data.tf } }
+      - { row: { path: network.tf } }
+      - { row: { path: main.tf } }
+
+  - name: "Variable definitions are namespaced to var.<name>"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Variable'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { row: { fqn: "var.region" } }
+      - { row: { fqn: "var.instance_type" } }
+      - { row: { fqn: "var.vpc_cidr" } }
+
+  # Headline: every var.* edge here crosses a file boundary. On HEAD this query
+  # returned 0 rows (flat Variable fqn == name was excluded by GlobalName).
+  - name: "var.* references resolve ACROSS files"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.definition_type = 'Variable'
+        AND e.edge_kind = 'Calls'
+        AND caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "aws_instance", callee: "var.instance_type" } }
+      - { row: { caller: "aws_vpc", callee: "var.vpc_cidr" } }
+      - { row: { caller: "locals", callee: "var.region" } }
+
+  - name: "aws_instance (main.tf) resolves all four reference kinds cross-file"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_instance'
+        AND e.edge_kind = 'Calls'
+        AND caller.file_path <> callee.file_path
+      RETURN callee.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { unique: type }
+      - { row: { type: "Variable" } }
+      - { row: { type: "Local" } }
+      - { row: { type: "Resource" } }
+      - { row: { type: "DataSource" } }
+
+  - name: "var.instance_type resolves from main.tf to variables.tf"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_instance'
+        AND callee.fqn = 'var.instance_type'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS sf, callee.file_path AS tf
+    assert:
+      - { row_count: 1 }
+      - { row: { sf: main.tf, tf: variables.tf } }
+
+  - name: "locals reference var.region cross-file at both usages"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'locals'
+        AND callee.fqn = 'var.region'
+        AND e.edge_kind = 'Calls'
+        AND caller.file_path <> callee.file_path
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+
+  - name: "Local, DataSource and Resource references also resolve cross-file"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'aws_instance'
+        AND e.edge_kind = 'Calls'
+        AND caller.file_path <> callee.file_path
+        AND callee.fqn IN ['locals.common_tags', 'aws_ami.ubuntu', 'aws_subnet.public']
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 3 }
+      - { row: { callee: "locals.common_tags" } }
+      - { row: { callee: "aws_ami.ubuntu" } }
+      - { row: { callee: "aws_subnet.public" } }

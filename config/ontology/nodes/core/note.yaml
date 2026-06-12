@@ -21,6 +21,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   note:
@@ -33,6 +34,7 @@ properties:
     type: enum
     source: noteable_type
     nullable: false
+    mutable: false
     description: "Type of object the note is attached to."
     enum_type: string
     values:
@@ -51,6 +53,7 @@ properties:
     type: int64
     source: noteable_id
     nullable: true
+    mutable: false
     description: "ID of the attached object. Null for commits."
 
   line_code:
@@ -63,6 +66,7 @@ properties:
     type: timestamp
     source: created_at
     nullable: true
+    mutable: false
     description: "Creation timestamp."
 
   updated_at:
@@ -75,6 +79,7 @@ properties:
     type: string
     source: discussion_id
     nullable: true
+    mutable: false
     description: "Discussion thread ID."
 
   resolved_at:
@@ -99,6 +104,7 @@ properties:
     type: string
     source: commit_id
     nullable: false
+    mutable: false
     description: "Commit SHA for commit notes."
 
   st_diff:
@@ -111,12 +117,14 @@ properties:
     type: int64
     source: project_id
     nullable: true
+    mutable: false
     description: "Owning project ID."
 
   author_id:
     type: int64
     source: author_id
     nullable: true
+    mutable: false
     description: "Author user ID."
 
   traversal_path:
@@ -185,13 +193,13 @@ storage:
     - {name: idx_noteable_type, column: noteable_type, type: "set(14)", granularity: 2}
     - {name: idx_internal, column: internal, type: "minmax", granularity: 1}
     - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_note, column: note, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_note_ngram, column: note, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_discussion_id, column: discussion_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_noteable_id, column: noteable_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_discussion_id, column: discussion_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_noteable_id, column: noteable_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}

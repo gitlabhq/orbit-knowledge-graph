@@ -425,6 +425,7 @@ Increment `offset` by `page_size` for subsequent pages.
 ## More examples
 
 Production-grade query examples — more complex traversals and aggregations —
-live in [`fixtures/queries/sdlc_queries.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/sdlc_queries.yaml)
-in the `gitlab-org/orbit/knowledge-graph` repo. Treat those as the source of
-truth for idiomatic queries.
+live in the categorized corpus under [`fixtures/queries/corpus/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/fixtures/queries/corpus)
+in the `gitlab-org/orbit/knowledge-graph` repo (`sdlc.yaml`, `aggregation.yaml`,
+`code_graph.yaml`, and more). Treat those as the source of truth for idiomatic
+queries.

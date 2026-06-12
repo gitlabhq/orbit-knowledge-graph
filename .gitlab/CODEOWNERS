@@ -10,6 +10,7 @@
 /crates/gkg-server/src/billing_adapter.rs
 /crates/gkg-server/src/main.rs
 /crates/query-engine/pipeline/
+/crates/integration-tests/tests/billing_boundary.rs
 /.gitlab/CODEOWNERS
 
 [Architecture] @gitlab-org/orbit/team

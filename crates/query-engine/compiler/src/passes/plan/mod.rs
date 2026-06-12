@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy};
+pub use edge_chain::{
+    FkShape, Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy,
+};
 pub use hydration::HydrationNodePlan;
 
 /// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
@@ -61,6 +63,9 @@ pub enum PlanBody {
         direction: Direction,
         edge: EdgeTableConfig,
         has_non_denorm: bool,
+        /// (tp source table, key column) when the center is a namespace entity;
+        /// lets the anchor arm pin to the centers' exact traversal_paths.
+        center_tp_lookup: Option<(String, String)>,
     },
     PathFinding(PathFindingBody),
     Hydration(Vec<HydrationNodePlan>),
@@ -87,6 +92,11 @@ pub struct EdgeTableConfig {
     pub source_kinds: Vec<String>,
     /// Valid target entity kinds for the rel_types.
     pub target_kinds: Vec<String>,
+    /// Physical tables a neighbors arm must scan per direction (a center is the
+    /// edge source when outgoing, the target when incoming). Defaults to all
+    /// `tables`; `plan_neighbors` narrows them so empty arms aren't scanned.
+    pub outgoing_tables: Vec<String>,
+    pub incoming_tables: Vec<String>,
 }
 
 impl EdgeTableConfig {
@@ -102,8 +112,8 @@ impl EdgeTableConfig {
                 target_kinds.extend(kinds.iter().cloned());
             }
         }
+        let tables = metadata.resolve_edge_tables(rel_types);
         Self {
-            tables: metadata.resolve_edge_tables(rel_types),
             rel_type_filter: if rel_types.is_empty() {
                 None
             } else {
@@ -111,6 +121,9 @@ impl EdgeTableConfig {
             },
             source_kinds: source_kinds.into_iter().collect(),
             target_kinds: target_kinds.into_iter().collect(),
+            outgoing_tables: tables.clone(),
+            incoming_tables: tables.clone(),
+            tables,
         }
     }
 }

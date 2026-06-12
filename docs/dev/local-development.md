@@ -3,9 +3,27 @@
 Run GKG as native Rust processes connected to NATS, Siphon, PostgreSQL, and
 ClickHouse from your GDK installation.
 
+> Working on `orbit-local`, the ontology, language parsers, or docs only?
+> You don't need GDK or any of the services below. See the
+> [Orbit Local development quickstart](orbit-local-quickstart.md).
+
 ## Prerequisites
 
 1. **[mise](https://mise.jdx.dev/)** for tool version management
+
+1. **[ClickHouse](https://clickhouse.com/docs/install)** installed locally.
+   On macOS, follow the
+   [terminal process instructions](https://clickhouse.com/docs/install/macOS#terminal-process).
+   After downloading, remove the binary from quarantine before running it:
+
+   ```shell
+   xattr -d com.apple.quarantine clickhouse
+   ```
+
+   > **Note:** GDK's ClickHouse listens on port **9001**, not the default 9000.
+   > Always pass `--port 9001` when using `clickhouse client` to connect to the
+   > GDK instance. Running `clickhouse client` without `--port 9001` connects to
+   > a standalone ClickHouse instance if you have one installed.
 
 1. **GDK with required services enabled:**
 
@@ -38,10 +56,12 @@ ClickHouse from your GDK installation.
 
 1. **ClickHouse setup:**
 
-   Create the Rails ClickHouse config from the example and run migrations:
+   Create the Rails ClickHouse config from the example, create the database,
+   and run migrations:
 
    ```shell
    cp $GDK_ROOT/gitlab/config/click_house.yml.example $GDK_ROOT/gitlab/config/click_house.yml
+   clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
    cd $GDK_ROOT/gitlab && bundle exec rake gitlab:clickhouse:migrate
    ```
 
@@ -51,16 +71,19 @@ ClickHouse from your GDK installation.
    clickhouse client --host localhost --port 9001 --query "CREATE DATABASE IF NOT EXISTS \`gkg-development\`"
    ```
 
-   Apply the graph schema (each statement separately since ClickHouse
-   doesn't support multi-statement execution):
+   Apply the graph schema using the helper script (it applies each
+   statement individually since ClickHouse does not support
+   multi-statement DDL execution):
 
    ```shell
-   sed 's/--.*$//' config/graph.sql | tr '\n' ' ' | sed 's/;/;\n/g' | \
-     while IFS= read -r stmt; do
-       [ -n "$stmt" ] && clickhouse client --host localhost --port 9001 \
-         --database gkg-development --query "$stmt"
-     done
+   scripts/apply-graph-schema.sh
    ```
+
+   The script defaults to `localhost:9001` and database
+   `gkg-development`. Override with `--host`, `--port`, or
+   `--database` flags, or set `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`,
+   `CLICKHOUSE_DATABASE` environment variables. Run with `--dry-run`
+   to preview statements without executing.
 
    Or skip both steps and run `mise run dev:setup` later (see [Setup](#setup)).
 
@@ -96,7 +119,7 @@ ClickHouse from your GDK installation.
        queueing:
          driver: "nats"
          url: "localhost:4222"
-         stream_name: "siphon_stream"
+         stream_name: "siphon_stream_main_db"
          temp_stream_name: "siphon_temp_stream_main"
          snapshot_stream_name: "siphon_snapshot_stream_main"
        table_mapping:
@@ -120,7 +143,7 @@ ClickHouse from your GDK installation.
        queueing:
          driver: "nats"
          url: "localhost:4222"
-         stream_name: "siphon_stream"
+         stream_name: "siphon_stream_main_db"
        streams:
          - identifier: namespaces
            subject: namespaces
@@ -160,9 +183,9 @@ ClickHouse from your GDK installation.
        - siphon/consumer.yml
    ```
 
-   Then restart siphon: `gdk restart siphon-producer-main-db siphon-clickhouse-consumer`
+   Then restart siphon: `gdk restart siphon`
 
-   See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/releases/siphon/orbit-stg.yaml.gotmpl)
+   See the [staging Siphon config](https://gitlab.com/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles/-/blob/master/bases/environments/orbit-stg.yaml.gotmpl)
    for the full list of tables used in production.
 
 1. **Enable Knowledge Graph and JWT auth:**
@@ -192,7 +215,14 @@ ClickHouse from your GDK installation.
 
    This creates `$GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret` which the
    dev script reads automatically to configure the GKG webserver's JWT
-   verifying key.
+   verifying key. Verify the file was created:
+
+   ```shell
+   ls $GDK_ROOT/gitlab/.gitlab_knowledge_graph_secret
+   ```
+
+   If the file does not exist, restart Rails again. It may take a second
+   restart for the secret to be generated.
 
    Enable the feature flags:
 
@@ -205,13 +235,18 @@ ClickHouse from your GDK installation.
 
    ```shell
    cd $GDK_ROOT/gitlab
-   bundle exec rails runner "Namespace.where(type: 'Group').find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
+   bundle exec rails runner "Namespace.where(type: 'Group', parent_id: nil).find_each { |ns| Analytics::KnowledgeGraph::EnabledNamespace.find_or_create_by!(root_namespace_id: ns.id) }"
    ```
 
    The Knowledge Graph UI is available at
    `https://<gdk-hostname>:<gdk-port>/dashboard/orbit`.
 
 ## Setup
+
+Clone this repository somewhere accessible (for example, next to your
+`$GDK_ROOT` directory). The `GDK_ROOT` variable in `.env` (see step 2) is how
+GKG locates your GDK installation, so the two directories do not need to be
+adjacent.
 
 1. **Install dependencies:**
 
@@ -317,11 +352,66 @@ Protect the file from being overwritten by adding `siphon/config.yml` to
 
 **ClickHouse connection issues:**
 
+ClickHouse exposes two ports: the **native TCP port** (`9001` in GDK)
+used by `clickhouse client`, and the **HTTP port** (`8123`) used for
+health checks and REST-style queries.
+
 - Verify ClickHouse is running: `gdk status clickhouse`
 - Check HTTP port: `curl "http://localhost:8123/ping"`
+- Check native port: `clickhouse client --host localhost --port 9001 --query "SELECT 1"`
+
+**MEMORY_LIMIT_EXCEEDED errors from ClickHouse:**
+
+- Increase `max_server_memory_usage` (bytes) in `$GDK_ROOT/clickhouse/config.d/gdk.xml` e.g. `4294967296` for 4 GB:
+
+```xml
+<clickhouse>
+  <!-- other existing settings ... -->
+  <max_server_memory_usage>4294967296</max_server_memory_usage>
+</clickhouse>
+```
+
+- Restart ClickHouse: `gdk restart clickhouse`
+
+**403 Forbidden on the /dashboard/orbit page but JWT auth works:**
+
+- The Knowledge Graph UI on the GDK (`/dashboard/orbit`) requires a Premium or Ultimate license.
+- View instructions for configuring a license for the GDK: [Configure a developer license in GDK](https://gitlab-org.gitlab.io/gitlab-development-kit/#configure-developer-license-in-gdk)
 
 **No data in graph:**
 
-- Check siphon services: `gdk status siphon-producer-main-db siphon-clickhouse-consumer`
+- Check siphon services: `gdk status siphon`
 - Verify `siphon_*` tables have data: `clickhouse-client --port 9001 -q "SELECT count() FROM siphon_projects"`
 - Check GKG indexer output in the `mise run dev` terminal
+
+**`mise install` crashes with Rust toolchain errors:**
+
+If `mise install` fails with errors related to parallel Rust toolchain installs,
+reinstall the stable toolchain manually:
+
+```shell
+rustup toolchain uninstall stable
+rustup toolchain install stable
+```
+
+Then re-run `mise install`.
+
+**Datalake connection errors in the indexer:**
+
+If the indexer logs errors like `datalake query failed: client error (Connect)`,
+verify that ClickHouse is running and accessible:
+
+```shell
+gdk status clickhouse
+curl "http://localhost:8123/ping"
+```
+
+Also confirm that the `gitlab_clickhouse_development` database exists and the
+Siphon datalake tables have been created:
+
+```shell
+clickhouse client --host localhost --port 9001 --query "SHOW TABLES FROM gitlab_clickhouse_development"
+```
+
+If the tables are missing, check that Siphon is running (`gdk status siphon`)
+and has been configured correctly (see [Configure Siphon tables](#prerequisites)).

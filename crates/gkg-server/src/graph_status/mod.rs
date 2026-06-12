@@ -341,9 +341,14 @@ fn indexing_status_from_progress(state: IndexingState, p: &IndexingProgress) -> 
         last_started_at: Some(p.last_started_at.to_rfc3339()),
         last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
         last_duration_ms: p.last_duration_ms,
-        last_error: p.last_error.clone(),
+        last_error: p
+            .last_error
+            .as_ref()
+            .map(|_| SANITIZED_INDEXING_ERROR.to_string()),
     }
 }
+
+const SANITIZED_INDEXING_ERROR: &str = "Something went wrong during indexing.";
 
 fn present_domain_response(
     ontology: &Ontology,
@@ -629,7 +634,38 @@ mod tests {
         ];
         let status = aggregate_indexing_status(entities, None);
         assert_eq!(status.state, IndexingState::Error as i32);
-        assert_eq!(status.last_error.as_deref(), Some("scan failure"));
+        assert_eq!(status.last_error.as_deref(), Some(SANITIZED_INDEXING_ERROR));
+    }
+
+    #[test]
+    fn indexing_status_replaces_raw_error_with_generic_message() {
+        let raw = "processing failed: failed to finish write for example_internal_table: failed \
+             to write batch: bad response: Code: 999. DB::NetException: Timeout exceeded while \
+             reading from socket (peer: 192.0.2.1:55555, local: 198.51.100.2:8124, 30000 ms). \
+             (SOCKET_TIMEOUT) (version 0.0.0.0 (official build))";
+        let status =
+            indexing_status_from_progress(IndexingState::Error, &completed_progress(Some(raw)));
+
+        assert_eq!(status.last_error.as_deref(), Some(SANITIZED_INDEXING_ERROR));
+        for leaked in [
+            "example_internal_table",
+            "192.0.2.1",
+            "8124",
+            "0.0.0.0",
+            "Code: 999",
+        ] {
+            assert!(
+                !status.last_error.as_deref().unwrap().contains(leaked),
+                "graph status leaked {leaked:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexing_status_keeps_error_absent_on_success() {
+        let status =
+            indexing_status_from_progress(IndexingState::Indexed, &completed_progress(None));
+        assert!(status.last_error.is_none());
     }
 
     #[test]

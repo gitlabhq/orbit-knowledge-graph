@@ -4,7 +4,6 @@ use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, QuerySummary};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use futures::StreamExt;
-use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use serde_json::Value;
 use thiserror::Error;
@@ -27,25 +26,14 @@ impl From<clickhouse::error::Error> for DatalakeError {
 
 pub(crate) type RecordBatchStream<'a> = BoxStream<'a, Result<RecordBatch, DatalakeError>>;
 
-/// Rows and bytes a page actually returned from the datalake, counted from the
-/// result blocks. The pipeline fills these in as it drains the stream.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ReadStats {
-    pub read_rows: u64,
-    pub read_bytes: u64,
-}
-
 /// ClickHouse's storage-scan figures from the `X-ClickHouse-Summary` header
 /// (its `read_rows`/`read_bytes` fields), the query cost. Greater than or equal
-/// to the rows actually returned ([`ReadStats`]).
+/// to the rows the page actually returned.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct ScanStats {
     pub scanned_rows: u64,
     pub scanned_bytes: u64,
 }
-
-/// Resolves once the page body is drained, since the summary follows it.
-pub(crate) type ScanStatsFuture = BoxFuture<'static, ScanStats>;
 
 #[async_trait]
 pub(crate) trait DatalakeQuery: Send + Sync {
@@ -63,16 +51,17 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 
-    /// Streams a page and yields its scan cost once drained. The default reports
-    /// zero stats; only [`Datalake`] surfaces the real summary.
-    async fn query_arrow_with_scan(
+    /// Buffers a whole page and reports ClickHouse's scan cost from the query
+    /// summary. The default reports zero scan stats; only [`Datalake`] surfaces
+    /// the real summary.
+    async fn query_batches_with_summary(
         &self,
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(RecordBatchStream<'_>, ScanStatsFuture), DatalakeError> {
-        let stream = self.query_arrow(sql, params, max_block_size).await?;
-        Ok((stream, Box::pin(async { ScanStats::default() })))
+    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
+        let batches = self.query_batches(sql, params, max_block_size).await?;
+        Ok((batches, ScanStats::default()))
     }
 }
 
@@ -147,12 +136,12 @@ impl DatalakeQuery for Datalake {
         Ok(batches)
     }
 
-    async fn query_arrow_with_scan(
+    async fn query_batches_with_summary(
         &self,
         sql: &str,
         params: Value,
         max_block_size: Option<u64>,
-    ) -> Result<(RecordBatchStream<'_>, ScanStatsFuture), DatalakeError> {
+    ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let mut query = self.build_query(sql, params);
         if max_block_size.is_some() {
@@ -163,24 +152,27 @@ impl DatalakeQuery for Datalake {
                 RETRY_PREFERRED_BLOCK_SIZE_BYTES,
             );
         }
-        let (stream, summary) = query
+        let (mut stream, summary) = query
             .fetch_arrow_streamed_with_summary(block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
-        let stream = stream
-            .map(|result| result.map_err(|e| DatalakeError::Query(e.to_string())))
-            .boxed();
-        let scan_stats = Box::pin(async move {
-            summary
-                .await
-                .ok()
-                .flatten()
-                .map(scan_stats_from_summary)
-                .unwrap_or_default()
-        });
+        let mut batches = Vec::new();
+        while let Some(result) = stream.next().await {
+            let batch = result.map_err(|e| DatalakeError::Query(e.to_string()))?;
+            if batch.num_rows() > 0 {
+                batches.push(batch);
+            }
+        }
 
-        Ok((stream, scan_stats))
+        let scan_stats = summary
+            .await
+            .ok()
+            .flatten()
+            .map(scan_stats_from_summary)
+            .unwrap_or_default();
+
+        Ok((batches, scan_stats))
     }
 }
 

@@ -82,7 +82,7 @@ impl DuckDbClient {
     ///
     /// The DDL is typically generated from the ontology via
     /// `generate_local_tables` + `emit_duckdb_create_table`, with the
-    /// manifest DDL (`MANIFEST_DDL`) appended.
+    /// manifest DDL appended via the `external_ddl` parameter.
     pub fn initialize_schema(&self, ddl: &str) -> Result<()> {
         self.conn
             .execute_batch(ddl)
@@ -211,6 +211,19 @@ impl DuckDbClient {
         Ok(self
             .conn
             .execute(sql, duckdb::params_from_iter(boxed.iter()))?)
+    }
+
+    /// Execute a SQL query with JSON parameters and return Arrow RecordBatches.
+    ///
+    /// Params are `serde_json::Value`s converted to DuckDB types:
+    /// strings, integers, floats, bools, and nulls.
+    pub fn query_arrow_json(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<Vec<RecordBatch>> {
+        let boxed = json_params_to_sql(params);
+        self.query_arrow_params(sql, &boxed)
     }
 }
 

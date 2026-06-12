@@ -360,31 +360,24 @@ impl fmt::Display for NodeEntity {
     }
 }
 
-/// Namespace scope relationship between the two endpoints of an edge variant.
-///
-/// Controls whether a resolved `traversal_path` prefix can propagate across
-/// this edge during query compilation.
+/// How a resolved `traversal_path` prefix relates to an edge variant's two
+/// endpoints. `namespace_anchor` and `same_namespace` propagate the prefix
+/// across the edge; `prune_to_source`/`prune_to_target` only confine the
+/// edge's own scan to the named endpoint's namespace, without propagating, so
+/// the other endpoint may be a global hub (User/Runner/Label).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EdgeVariantScope {
-    /// Source entity's namespace-of-record FK points to the target, which is a
-    /// namespace anchor (`Project`/`Group`). Enables both prefix propagation
-    /// and anchor FK resolution for scope keys (e.g. `project_id` filter on
-    /// `MergeRequest` resolves to the `Project` anchor's `traversal_path`).
     NamespaceAnchor,
-    /// Both endpoints are guaranteed to live in the same namespace subtree
-    /// (structural containment, project-local association, or intra-repo
-    /// reference). A resolved prefix on either endpoint applies to the other.
     SameNamespace,
+    PruneToSource,
+    PruneToTarget,
 }
 
 impl EdgeVariantScope {
-    /// Whether this scope value allows `traversal_path` prefix propagation.
     #[must_use]
     pub fn is_scope_preserving(self) -> bool {
-        match self {
-            Self::NamespaceAnchor | Self::SameNamespace => true,
-        }
+        matches!(self, Self::NamespaceAnchor | Self::SameNamespace)
     }
 }
 
@@ -407,8 +400,7 @@ pub struct EdgeEntity {
     /// relationship (e.g. "project_id", "author_id"). When present, the
     /// compiler can join node tables directly instead of scanning the edge table.
     pub fk_column: Option<String>,
-    /// Namespace scope relationship. When set, the compiler may propagate a
-    /// resolved `traversal_path` prefix across this edge variant.
+    /// Namespace scope relationship; see [`EdgeVariantScope`].
     pub scope: Option<EdgeVariantScope>,
 }
 
@@ -601,6 +593,10 @@ pub struct Field {
     /// Human-readable description of this field from the ontology YAML.
     pub description: Option<String>,
     pub traversal_path_lookup: Option<TraversalPathLookupSpec>,
+    /// Whether this field can change after creation.
+    pub mutable: bool,
+    /// For enum fields, values that once reached never change (absorbing states).
+    pub terminal_values: Option<Vec<String>>,
 }
 
 impl Default for Field {
@@ -618,6 +614,8 @@ impl Default for Field {
             selectivity: FieldSelectivity::High,
             description: None,
             traversal_path_lookup: None,
+            mutable: true,
+            terminal_values: None,
         }
     }
 }

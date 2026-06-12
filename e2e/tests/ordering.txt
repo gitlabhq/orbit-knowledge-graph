@@ -1,0 +1,6 @@
+# Pabot execution order. Suite 01 runs alone first: it bootstraps credentials,
+# provisions the shared namespace, and proves the pipeline reached steady state.
+# #WAIT is the barrier; every suite NOT listed here (current and future) is
+# auto-discovered by pabot and runs in the parallel pool after the barrier.
+--suite Tests.01 Setup And Smoke
+#WAIT

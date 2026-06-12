@@ -4,7 +4,7 @@ use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
-use treesitter_visit::extract::{child_of_kind, field, field_chain, no_extract, text};
+use treesitter_visit::extract::{Extract, child_of_kind, field, field_chain, no_extract, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -56,6 +56,14 @@ fn python_decorators(node: &N<'_>) -> Vec<String> {
     } else {
         vec![]
     }
+}
+
+fn in_class_body() -> Pred {
+    Pred::Exists(Box::new(
+        Extract::one(Parent, Any)
+            .nav(Parent, Any)
+            .nav(Parent, Kind("class_definition")),
+    ))
 }
 
 fn classify_python_function(node: &N<'_>) -> &'static str {
@@ -122,6 +130,12 @@ impl DslLanguage for PythonDsl {
                 .when(field_kind("right", &["lambda"]))
                 .name_from(field("left"))
                 .no_scope(),
+            scope("assignment", "Field")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .when(field_kind("type", &["type"]).and(in_class_body()))
+                .name_from(field("left"))
+                .metadata(metadata().type_annotation(field("type"))),
         ];
 
         // Inside a class: functions become methods
@@ -144,6 +158,11 @@ impl DslLanguage for PythonDsl {
                 .name_from(field_chain(&["function", "attribute"]))
                 .receiver_chain(&["function", "object"]),
             reference("call").name_from(field("function")),
+            // Instance field access: obj.email
+            reference("attribute")
+                .name_from(field("attribute"))
+                .receiver_chain(&["object"])
+                .when(!parent_is("call")),
             // Bare type references in annotations: x: MyClass, def foo() -> MyClass
             reference("type").name_from(text()),
         ]
@@ -206,6 +225,12 @@ impl DslLanguage for PythonDsl {
 
     fn bindings() -> Vec<BindingRule> {
         vec![
+            binding("typed_parameter", BindingKind::Assignment)
+                .name_from_extract(child_of_kind("identifier"))
+                .typed(vec![field("type")], &[]),
+            binding("typed_default_parameter", BindingKind::Assignment)
+                .name_from(&["name"])
+                .typed(vec![field("type")], &[]),
             binding("assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right")
@@ -468,6 +493,52 @@ mod tests {
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("should have metadata");
         assert_eq!(meta.super_types.len(), 2);
+    }
+
+    #[test]
+    fn class_fields_as_properties() {
+        let result = parse(
+            "@dataclass\nclass User:\n    id: int\n    name: str = \"\"\n\n    def greet(self):\n        return self.name\n",
+        )
+        .unwrap();
+
+        let fields: Vec<_> = result
+            .definitions
+            .iter()
+            .filter(|d| d.kind == DefKind::Property)
+            .map(|d| d.fqn.to_string())
+            .collect();
+        assert!(fields.contains(&"test.User.id".to_string()), "{fields:?}");
+        assert!(fields.contains(&"test.User.name".to_string()), "{fields:?}");
+
+        let id = result.definitions.iter().find(|d| d.name == "id").unwrap();
+        let meta = id.metadata.as_ref().expect("field should have metadata");
+        assert_eq!(meta.type_annotation.as_deref(), Some("test.int"));
+    }
+
+    #[test]
+    fn method_alongside_fields_still_extracted() {
+        let result =
+            parse("class User:\n    id: int\n\n    def greet(self):\n        return self.id\n")
+                .unwrap();
+
+        let greet = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "greet")
+            .expect("method should be extracted");
+        assert_eq!(greet.kind, DefKind::Method);
+    }
+
+    #[test]
+    fn module_level_typed_assignment_is_not_a_property() {
+        let result = parse("X: int = 1\n").unwrap();
+        assert!(
+            result
+                .definitions
+                .iter()
+                .all(|d| d.kind != DefKind::Property)
+        );
     }
 
     #[test]

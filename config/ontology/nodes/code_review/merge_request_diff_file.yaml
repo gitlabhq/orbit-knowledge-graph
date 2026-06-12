@@ -21,66 +21,77 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Synthetic identifier: sipHash64(merge_request_diff_id, relative_order)."
 
   merge_request_id:
     type: int64
     source: merge_request_id
     nullable: false
+    mutable: false
     description: "Parent merge request ID."
 
   merge_request_diff_id:
     type: int64
     source: merge_request_diff_id
     nullable: false
+    mutable: false
     description: "Parent merge request diff ID."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   too_large:
     type: boolean
     source: too_large
     nullable: false
+    mutable: false
     description: "Whether the diff is too large to display."
 
   new_path:
     type: string
     source: new_path
     nullable: false
+    mutable: false
     description: "File path after the change. Differs from old_path only on renames."
 
   old_path:
     type: string
     source: old_path
     nullable: false
+    mutable: false
     description: "File path before the change. Preferred for file lookups."
 
   new_file:
     type: boolean
     source: new_file
     nullable: false
+    mutable: false
     description: "Whether this is a newly added file."
 
   renamed_file:
     type: boolean
     source: renamed_file
     nullable: false
+    mutable: false
     description: "Whether this file was renamed."
 
   deleted_file:
     type: boolean
     source: deleted_file
     nullable: false
+    mutable: false
     description: "Whether this file was deleted."
 
   binary:
     type: boolean
     source: binary
     nullable: true
+    mutable: false
     description: "Whether this is a binary file."
 
   generated:
@@ -149,9 +160,9 @@ etl:
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) diff ON file.merge_request_diff_id = diff.id
   traversal_path_filter: "startsWith(file.traversal_path, {traversal_path:String})"
-  watermark: file._siphon_replicated_at
+  watermark: file.{{watermark_column}}
   table_alias: file
-  deleted: file._siphon_deleted
+  deleted: file.{{deleted_column}}
   order_by: [traversal_path, merge_request_diff_id, relative_order]
   edges:
     merge_request_diff_id:
@@ -186,14 +197,14 @@ storage:
     - {name: idx_renamed_file, column: renamed_file, type: "minmax", granularity: 1}
     - {name: idx_deleted_file, column: deleted_file, type: "minmax", granularity: 1}
     - {name: idx_binary, column: binary, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_new_path, column: new_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_new_path_ngram, column: new_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_old_path, column: old_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_old_path_ngram, column: old_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_merge_request_diff_id, column: merge_request_diff_id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_merge_request_id, column: merge_request_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_merge_request_diff_id, column: merge_request_diff_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
   projections:
     - {type: lightweight, name: by_id, versioned_sort_key: [id]}
     - {type: lightweight, name: by_merge_request_id, versioned_sort_key: [merge_request_id]}

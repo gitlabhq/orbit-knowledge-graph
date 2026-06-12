@@ -6,9 +6,11 @@ variants:
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: VulnerabilityOccurrence, id: id }
     fk_column: finding_id
+    scope: same_namespace
     description: "Vulnerability has canonical vulnerability occurrence."
 
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Finding, id: id }
     fk_column: scan_id
+    scope: same_namespace
     description: "Security scan has finding."

@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "indexer_scenario.schema.json",
+  "title": "GKG indexer integration-test scenario",
+  "description": "Declarative integration-test scenario for the indexer: seed datalake rows, run handlers, assert graph nodes and edges. Executed by integration_testkit::scenario::run_dir.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "description": { "type": "string" },
+    "scope": { "$ref": "#/definitions/scope" },
+    "seed": { "$ref": "#/definitions/seed" },
+    "seed_settings": { "$ref": "#/definitions/seedSettings" },
+    "run": { "$ref": "#/definitions/run" },
+    "expect": { "$ref": "#/definitions/expect" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/step" }
+    }
+  },
+  "definitions": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespace"],
+      "properties": {
+        "organization": { "type": "integer", "default": 1 },
+        "namespace": { "type": "integer" }
+      }
+    },
+    "seed": {
+      "type": "object",
+      "description": "Rows to insert, keyed by table name. 'namespaces' and 'projects' are pseudo-tables that expand to their backing siphon tables; 'gl_*' and checkpoint tables get the schema-version prefix; everything else is a literal table name. Omitted columns use ClickHouse defaults; '_siphon_replicated_at' defaults to a value below the test watermark.",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": { "$ref": "#/definitions/seedRow" }
+      }
+    },
+    "seedSettings": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "ClickHouse INSERT settings applied to every seed insert in the step, e.g. date_time_overflow_behavior: ignore. Their presence switches the step's seed inserts from VALUES to JSONEachRow, where such settings take effect (a VALUES insert saturates an out-of-range Date32 regardless). The { sql: ... } seed-value escape is unavailable in these steps.",
+      "additionalProperties": { "type": ["string", "number", "boolean"] }
+    },
+    "seedRow": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/seedValue" }
+    },
+    "seedValue": {
+      "oneOf": [
+        { "type": ["string", "number", "boolean", "null"] },
+        { "type": "array", "items": { "$ref": "#/definitions/seedValue" } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sql"],
+          "properties": {
+            "sql": {
+              "type": "string",
+              "description": "Raw SQL literal inserted verbatim (escape hatch for tuples and other exotic literals)."
+            }
+          }
+        }
+      ]
+    },
+    "run": {
+      "oneOf": [
+        { "$ref": "#/definitions/handler" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/handler" }
+        }
+      ]
+    },
+    "handler": {
+      "type": "string",
+      "enum": ["namespace", "global", "system_notes"]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "seed": { "$ref": "#/definitions/seed" },
+        "seed_settings": { "$ref": "#/definitions/seedSettings" },
+        "run": { "$ref": "#/definitions/run" },
+        "expect": { "$ref": "#/definitions/expect" }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "object",
+          "description": "Node expectations keyed by unprefixed graph table name (e.g. gl_label).",
+          "additionalProperties": { "$ref": "#/definitions/nodeExpect" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/edgeExpect" }
+        },
+        "totals": {
+          "type": "object",
+          "description": "Exact total row count per table ('and nothing else' assertions).",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "nodeExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Expected row count. Defaults to rows.length when rows are given."
+        },
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/rowMatcher" }
+        }
+      }
+    },
+    "rowMatcher": {
+      "type": "object",
+      "description": "Subset match: only listed columns are compared, order-insensitive; must match exactly one actual row.",
+      "additionalProperties": { "$ref": "#/definitions/matcher" }
+    },
+    "matcher": {
+      "oneOf": [
+        { "type": ["string", "number", "boolean", "null"] },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contains"],
+          "properties": {
+            "contains": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "edgeExpect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "description": "relationship_kind, e.g. IN_PROJECT." },
+        "from": { "type": "string", "description": "source_kind filter, e.g. Label." },
+        "to": { "type": "string", "description": "target_kind filter, e.g. Project." },
+        "traversal_path": {
+          "type": "string",
+          "description": "Every matched edge must carry this traversal_path."
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "rows": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/rowMatcher" }
+        },
+        "source_tags": { "$ref": "#/definitions/tagsById" },
+        "target_tags": { "$ref": "#/definitions/tagsById" }
+      }
+    },
+    "tagsById": {
+      "type": "object",
+      "description": "Expected tag set per source_id/target_id. Requires from: and to:.",
+      "patternProperties": {
+        "^-?[0-9]+$": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

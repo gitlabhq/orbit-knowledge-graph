@@ -11,3 +11,6 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 rust-embed = { workspace = true }
 strum = { workspace = true }
+
+[build-dependencies]
+serde_yaml = { workspace = true }

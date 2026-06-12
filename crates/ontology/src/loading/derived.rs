@@ -40,11 +40,12 @@ impl DerivedYaml {
             }
         };
 
+        let etl = self.etl.into_config(&name, etl_settings)?;
         Ok(DerivedEntity {
             name,
             emits: self.emits,
             transform,
-            etl: self.etl.into_config(etl_settings)?,
+            etl,
         })
     }
 }

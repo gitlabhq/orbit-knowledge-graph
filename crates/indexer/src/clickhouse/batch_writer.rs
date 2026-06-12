@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
-use clickhouse_client::{ArrowClickHouseClient, ArrowStreamInsert};
+use clickhouse_client::ArrowClickHouseClient;
 
-use crate::destination::{BatchWriter, DestinationError, StreamingWriter};
+use crate::destination::{BatchWriter, DestinationError};
 use crate::metrics::EngineMetrics;
 
 pub(crate) struct ClickHouseBatchWriter {
@@ -71,74 +71,6 @@ impl BatchWriter for ClickHouseBatchWriter {
         self.metrics
             .record_write_success(&self.table, elapsed, total_rows, total_bytes);
 
-        Ok(())
-    }
-}
-
-/// Streams batches into one open `INSERT`, reporting accumulated metrics once on `finish`.
-pub(crate) struct ClickHouseStreamingWriter {
-    insert: ArrowStreamInsert,
-    table: String,
-    metrics: Arc<EngineMetrics>,
-    rows: u64,
-    bytes: u64,
-    write_seconds: f64,
-    wrote_any: bool,
-}
-
-impl ClickHouseStreamingWriter {
-    pub(crate) fn new(
-        client: &ArrowClickHouseClient,
-        table: String,
-        metrics: Arc<EngineMetrics>,
-    ) -> Self {
-        let insert = client.open_arrow_stream(&table);
-        Self {
-            insert,
-            table,
-            metrics,
-            rows: 0,
-            bytes: 0,
-            write_seconds: 0.0,
-            wrote_any: false,
-        }
-    }
-}
-
-#[async_trait]
-impl StreamingWriter for ClickHouseStreamingWriter {
-    async fn write_batch(&mut self, batch: &RecordBatch) -> Result<(), DestinationError> {
-        if batch.num_rows() == 0 {
-            return Ok(());
-        }
-        let start = std::time::Instant::now();
-        if let Err(error) = self.insert.write_batch(batch).await {
-            self.metrics.record_write_error(&self.table);
-            return Err(error.into());
-        }
-        self.write_seconds += start.elapsed().as_secs_f64();
-        self.rows += batch.num_rows() as u64;
-        self.bytes += batch.get_array_memory_size() as u64;
-        self.wrote_any = true;
-        Ok(())
-    }
-
-    async fn finish(mut self: Box<Self>) -> Result<(), DestinationError> {
-        let start = std::time::Instant::now();
-        if let Err(error) = self.insert.finish().await {
-            self.metrics.record_write_error(&self.table);
-            return Err(error.into());
-        }
-        self.write_seconds += start.elapsed().as_secs_f64();
-
-        if self.wrote_any {
-            self.metrics.record_write_success(
-                &self.table,
-                self.write_seconds,
-                self.rows,
-                self.bytes,
-            );
-        }
         Ok(())
     }
 }

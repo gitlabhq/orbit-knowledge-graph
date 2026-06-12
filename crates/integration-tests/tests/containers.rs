@@ -7,6 +7,7 @@ mod canary {
 
 mod server {
     pub mod analytics;
+    pub mod corpus_smoke;
     pub mod data_correctness;
     pub mod denormalization;
     pub mod goon_formatter;

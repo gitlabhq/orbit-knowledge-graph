@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
+use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -34,6 +34,8 @@ pub enum CheckpointError {
 pub struct Checkpoint {
     pub watermark: DateTime<Utc>,
     pub cursor_values: Option<Vec<String>>,
+    #[serde(default)]
+    pub resume_floor: Option<DateTime<Utc>>,
 }
 
 #[async_trait]
@@ -50,6 +52,7 @@ pub trait CheckpointStore: Send + Sync {
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError>;
 
     async fn load_by_prefix(
@@ -78,22 +81,27 @@ impl ClickHouseCheckpointStore {
         key: &str,
         watermark: &DateTime<Utc>,
         cursor_values: &Option<Vec<String>>,
+        resume_floor: &Option<DateTime<Utc>>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
-        let cursor_json = serde_json::to_string(cursor_values).map_err(checkpoint_store_error)?;
+        let cursor_json = encode_cursor_column(cursor_values, resume_floor)?;
 
-        self.client
-            .insert_query(&format!(
-                "INSERT INTO {table} (key, watermark, cursor_values) \
-                 VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}})"
-            ))
-            .param("key", key)
-            .param("watermark", formatted_watermark)
-            .param("cursor_values", cursor_json)
-            .execute()
-            .await
-            .map_err(checkpoint_store_error)?;
+        self.insert(
+            &format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version) \
+                 VALUES ({{key:String}}, {{watermark:String}}, {{cursor_values:String}}, {{version:String}})"
+            ),
+            durability,
+        )
+        .param("key", key)
+        .param("watermark", formatted_watermark)
+        .param("cursor_values", cursor_json)
+        .param("version", client_version())
+        .execute()
+        .await
+        .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
@@ -102,22 +110,72 @@ impl ClickHouseCheckpointStore {
         let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
         let formatted_watermark = watermark.format(TIMESTAMP_FORMAT).to_string();
 
-        self.client
-            .insert_query(&format!(
-                "INSERT INTO {table} (key, watermark, cursor_values, _deleted) \
-                 VALUES ({{key:String}}, {{watermark:String}}, '', true)"
-            ))
-            .param("key", key)
-            .param("watermark", formatted_watermark)
-            .execute()
-            .await
-            .map_err(checkpoint_store_error)?;
+        self.insert(
+            &format!(
+                "INSERT INTO {table} (key, watermark, cursor_values, _version, _deleted) \
+                 VALUES ({{key:String}}, {{watermark:String}}, '', {{version:String}}, true)"
+            ),
+            WriteDurability::Durable,
+        )
+        .param("key", key)
+        .param("watermark", formatted_watermark)
+        .param("version", client_version())
+        .execute()
+        .await
+        .map_err(checkpoint_store_error)?;
 
         Ok(())
     }
+
+    // Pinned settings: config `insert_settings` tuning must not downgrade Durable writes.
+    fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
+        let wait_for_flush = match durability {
+            WriteDurability::FireAndForget => "0",
+            WriteDurability::Durable => "1",
+        };
+        self.client
+            .query(sql)
+            .with_setting("async_insert", "1")
+            .with_setting("wait_for_async_insert", wait_for_flush)
+    }
 }
 
-fn parse_cursor_json(raw: &str) -> Result<Option<Vec<String>>, CheckpointError> {
+/// Durable only where a dropped write forces a re-pull from the start: full-load completions and tombstones.
+#[derive(Clone, Copy)]
+pub enum WriteDurability {
+    FireAndForget,
+    Durable,
+}
+
+/// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.
+fn client_version() -> String {
+    Utc::now().format(TIMESTAMP_FORMAT).to_string()
+}
+
+/// The `cursor_values` column as JSON: the sort-key cursor plus the window floor.
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct CursorColumn {
+    #[serde(rename = "c")]
+    cursor: Vec<String>,
+    #[serde(rename = "f", default, skip_serializing_if = "Option::is_none")]
+    floor: Option<DateTime<Utc>>,
+}
+
+fn encode_cursor_column(
+    cursor_values: &Option<Vec<String>>,
+    resume_floor: &Option<DateTime<Utc>>,
+) -> Result<String, CheckpointError> {
+    match cursor_values {
+        None => Ok("null".to_string()),
+        Some(cursor) => serde_json::to_string(&CursorColumn {
+            cursor: cursor.clone(),
+            floor: *resume_floor,
+        })
+        .map_err(checkpoint_store_error),
+    }
+}
+
+fn decode_cursor_column(raw: &str) -> Result<Option<CursorColumn>, CheckpointError> {
     if raw.is_empty() {
         return Ok(None);
     }
@@ -173,9 +231,11 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .next()
             .unwrap_or_default();
 
+        let decoded = decode_cursor_column(&cursor_json)?;
         Ok(Some(Checkpoint {
             watermark,
-            cursor_values: parse_cursor_json(&cursor_json)?,
+            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
+            resume_floor: decoded.and_then(|c| c.floor),
         }))
     }
 
@@ -184,16 +244,23 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         key: &str,
         checkpoint: &Checkpoint,
     ) -> Result<(), CheckpointError> {
-        self.upsert(key, &checkpoint.watermark, &checkpoint.cursor_values)
-            .await
+        self.upsert(
+            key,
+            &checkpoint.watermark,
+            &checkpoint.cursor_values,
+            &checkpoint.resume_floor,
+            WriteDurability::FireAndForget,
+        )
+        .await
     }
 
     async fn save_completed(
         &self,
         key: &str,
         watermark: &DateTime<Utc>,
+        durability: WriteDurability,
     ) -> Result<(), CheckpointError> {
-        self.upsert(key, watermark, &None).await
+        self.upsert(key, watermark, &None, &None, durability).await
     }
 
     async fn load_by_prefix(
@@ -231,12 +298,13 @@ impl CheckpointStore for ClickHouseCheckpointStore {
                 if is_deleted {
                     return None;
                 }
-                Some(parse_cursor_json(&cursor_json).map(|cursor_values| {
+                Some(decode_cursor_column(&cursor_json).map(|decoded| {
                     (
                         key,
                         Checkpoint {
                             watermark,
-                            cursor_values,
+                            cursor_values: decoded.as_ref().map(|c| c.cursor.clone()),
+                            resume_floor: decoded.and_then(|c| c.floor),
                         },
                     )
                 }))
@@ -257,7 +325,8 @@ impl CheckpointStore for ClickHouseCheckpointStore {
             .map(|(key, _)| key)
             .collect();
 
-        self.save_completed(parent_key, watermark).await?;
+        self.save_completed(parent_key, watermark, WriteDurability::Durable)
+            .await?;
 
         for key in partition_keys {
             self.tombstone(&key, watermark).await?;
@@ -275,6 +344,7 @@ mod tests {
         let checkpoint = Checkpoint {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             cursor_values: None,
+            resume_floor: None,
         };
 
         let json = serde_json::to_string(&checkpoint).unwrap();
@@ -289,6 +359,7 @@ mod tests {
         let checkpoint = Checkpoint {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             cursor_values: Some(vec!["1/2/".to_string(), "42".to_string()]),
+            resume_floor: Some("2024-06-15T11:59:30Z".parse().unwrap()),
         };
 
         let json = serde_json::to_string(&checkpoint).unwrap();
@@ -296,5 +367,23 @@ mod tests {
 
         assert_eq!(deserialized, checkpoint);
         assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
+    }
+
+    #[test]
+    fn cursor_column_completed_encodes_as_null() {
+        assert_eq!(encode_cursor_column(&None, &None).unwrap(), "null");
+        assert_eq!(decode_cursor_column("null").unwrap(), None);
+        assert_eq!(decode_cursor_column("").unwrap(), None);
+    }
+
+    #[test]
+    fn cursor_column_roundtrips_cursor_and_floor() {
+        let cursor = Some(vec!["1/2/".to_string(), "42".to_string()]);
+        let floor: Option<DateTime<Utc>> = Some("2024-06-15T11:59:30Z".parse().unwrap());
+
+        let encoded = encode_cursor_column(&cursor, &floor).unwrap();
+        let decoded = decode_cursor_column(&encoded).unwrap().unwrap();
+        assert_eq!(Some(decoded.cursor), cursor);
+        assert_eq!(decoded.floor, floor);
     }
 }

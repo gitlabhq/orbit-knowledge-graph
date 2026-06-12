@@ -1,0 +1,84 @@
+name: "HCL dynamic blocks, for expressions, conditionals"
+
+fixtures:
+  - path: main.tf
+    content: |
+      variable "ports" {
+        type    = list(number)
+        default = [80, 443]
+      }
+
+      variable "tags" {
+        type    = map(string)
+        default = {}
+      }
+
+      variable "is_prod" {
+        type    = bool
+        default = false
+      }
+
+      resource "aws_security_group" "web" {
+        name = "web-sg"
+
+        dynamic "ingress" {
+          for_each = var.ports
+          content {
+            from_port   = ingress.value
+            to_port     = ingress.value
+            protocol    = "tcp"
+            cidr_blocks = ["0.0.0.0/0"]
+          }
+        }
+      }
+
+      locals {
+        upper_tags   = { for k, v in var.tags : k => upper(v) }
+        port_strings = [for p in var.ports : tostring(p)]
+        env_label    = var.is_prod ? "production" : "staging"
+      }
+
+tests:
+  - name: "Dynamic block produces iterator def"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Dynamic'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "ingress" } }
+
+  - name: "Dynamic block ref resolves variable: ingress scope -> ports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'ingress'
+        AND callee.name = 'ports'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "Locals scope refs resolve to variables"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'locals'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: false }
+      - { row: { callee: "tags" } }
+      - { row: { callee: "ports" } }
+      - { row: { callee: "is_prod" } }
+
+  - name: "All definitions present"
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row: { name: "ports", type: "Variable" } }
+      - { row: { name: "tags", type: "Variable" } }
+      - { row: { name: "is_prod", type: "Variable" } }
+      - { row: { name: "ingress", type: "Dynamic" } }
+      - { row: { name: "upper_tags", type: "Local" } }
+      - { row: { name: "port_strings", type: "Local" } }
+      - { row: { name: "env_label", type: "Local" } }

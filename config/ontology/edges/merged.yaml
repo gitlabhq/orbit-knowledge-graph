@@ -4,4 +4,5 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     fk_column: merge_user_id
+    scope: prune_to_target
     description: "User merged a merge request."

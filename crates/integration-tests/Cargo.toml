@@ -38,6 +38,8 @@ rcgen = { workspace = true }
 rustls = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+regex = { workspace = true }
 tar = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true }
@@ -46,6 +48,7 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
+cargo_metadata = { workspace = true }
 reqwest = { workspace = true }
 labkit = { workspace = true, features = ["http"] }
 labkit-events = { workspace = true }

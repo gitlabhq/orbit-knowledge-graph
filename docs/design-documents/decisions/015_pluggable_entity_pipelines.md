@@ -40,12 +40,12 @@ pipeline today, none of which are entity-specific:
 
 | Optimization | Where |
 |---|---|
-| Keyset pagination with DNF cursor predicate (uses the CH sort-key index) | `CursorFilter` (`plan/mod.rs:156`), `Producer::run` loop (`pipeline.rs:455-532`) |
+| Keyset pagination with DNF cursor predicate (uses the CH sort-key index) | `CursorFilter` (`plan/mod.rs`), `run_plan` page loop (`pipeline.rs`) |
 | Watermark windowing + traversal-path scoping pushed into extract SQL | `WatermarkFilter`/`TraversalPathFilter` (`plan/mod.rs:94`, `:122`) |
-| Block-level streaming with bounded read-ahead — next page's read overlaps current page's writes | producer/consumer split over `mpsc` (`pipeline.rs:162-195`) |
-| Adaptive retry: halve `max_block_size` on transient failure down to a floor | `Extractor` (`pipeline.rs:310-356`) |
-| Lazy, per-destination-table streaming writers (no insert opened for an empty table) | `Loader`/`PageWriter` (`pipeline.rs:538-633`) |
-| Page-boundary checkpointing + crash-safe cursor resume | `run_plan`/`consume` (`pipeline.rs:96`), `Cursor` (`plan/mod.rs:19`) |
+| Whole-page read with single-page read-ahead — next page's read overlaps current page's writes | `run_plan` `tokio::join!` (`pipeline.rs`) |
+| Adaptive retry: halve `max_block_size` on transient failure down to a floor | `Pipeline::extract_page` (`pipeline.rs`) |
+| Lazy, per-destination-table bulk writers (no insert opened for an empty table) | `Pipeline::build_writes` (`pipeline.rs`) |
+| Page-boundary checkpointing + crash-safe cursor resume | `run_plan` (`pipeline.rs`), `Cursor` (`plan/mod.rs:19`) |
 | Idempotent re-processing via `ReplacingMergeTree` | graph DDL |
 | Read/write stats + observer wiring | `PipelineStats` (`pipeline.rs:50`), `PipelineContext` (`pipeline.rs:68`) |
 
@@ -79,8 +79,7 @@ pub(in crate::modules::sdlc) trait BlockTransform: Send + Sync {
     fn name(&self) -> &str;
 
     /// Destination tables this transform writes, in output-index order.
-    /// Drives the Loader's per-table streaming writers; the transform never
-    /// opens a writer itself.
+    /// Drives the per-table bulk writers; the transform never opens a writer itself.
     fn outputs(&self) -> &[String];
 
     /// Transform one extracted block into rows for one or more outputs.
@@ -105,10 +104,11 @@ Two design rules the trait enforces:
   it builds the transform, so the transform does *not* need to own pagination,
   checkpointing, or writing to do a second-hop read.
 
-The pipeline stays per-block, preserving the streaming/read-ahead memory bound.
-Per-block granularity also naturally bounds a transform's enrichment `IN`-list to
-one block (`DEFAULT_STREAM_BLOCK_SIZE`, `datalake.rs:71`) rather than a whole
-page; a transform that needs wider batching can buffer internally.
+The pipeline drives the transform per block (the page's blocks are fed through it
+one at a time and the output rows are grouped per destination table before a single
+bulk write). Per-block granularity also naturally bounds a transform's enrichment
+`IN`-list to one block rather than a whole page; a transform that needs wider
+batching can buffer internally.
 
 ### Two implementations of one trait
 
@@ -133,8 +133,8 @@ hand-written entity contributes a `BlockTransform`, nothing else.
 
 ### Output routing
 
-A transform exposes its destination tables via `outputs() -> &[String]`, and the
-`Loader` opens one streaming writer per entry, selected by `TableBatch.output_index`.
+A transform exposes its destination tables via `outputs() -> &[String]`, and
+`build_writes` opens one bulk writer per non-empty entry, selected by `TableBatch.output_index`.
 `DataFusionTransform` keeps its own dict-encoding (`prepare_batches` over each
 `Transformation`'s `dict_encode_columns`); a Rust transform is responsible for
 emitting batches that conform to `config/graph.sql`. Centralizing dict-encoding in

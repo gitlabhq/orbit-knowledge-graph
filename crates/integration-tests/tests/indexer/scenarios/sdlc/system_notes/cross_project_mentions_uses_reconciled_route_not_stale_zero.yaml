@@ -1,0 +1,29 @@
+# siphon_routes is a ReplacingMergeTree whose sort key includes
+# traversal_path, so the stale (0/) and reconciled (1/100/94/) rows for the
+# same PG route id coexist and never collapse under FINAL. The resolver must
+# dedup by PG primary key + argMax(_siphon_replicated_at) and pick the
+# reconciled row. The stale row is listed second so insertion order is
+# adversarial: only argMax (not row order, not FINAL) resolves it.
+description: Cross-project MENTIONS uses the reconciled route, not the stale 0/ row
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: src-group/src-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+    - { id: 2, source_id: 400, source_type: Project, path: src-group/proj-a, namespace_id: 94, traversal_path: "1/100/94/", created_at: "2023-01-01", updated_at: "2024-01-15", _siphon_replicated_at: "2024-01-20 12:05:00" }
+    - { id: 2, source_id: 400, source_type: Project, path: src-group/proj-a, namespace_id: 94, traversal_path: "0/", created_at: "2023-01-01", updated_at: "2024-01-15", _siphon_replicated_at: "2024-01-20 12:00:00" }
+  work_items:
+    - { id: 30, iid: 7, title: WI 7, description: "", project_id: 400, namespace_id: 94, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/94/" }
+  siphon_notes:
+    - { id: 1, note: "mentioned in src-group/proj-a#7", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MENTIONS
+      count: 1
+      rows:
+        - { target_id: 30, traversal_path: "1/100/94/" }

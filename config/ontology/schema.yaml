@@ -37,9 +37,15 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, target_id, relationship_kind]}
+          - type: reorder
+            name: by_source
+            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_target
+            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
@@ -71,13 +77,17 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.01)", granularity: 1}
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
-          - {name: idx_project_id, column: project_id, type: "bloom_filter(0.01)", granularity: 1}
-          - {name: idx_branch, column: branch, type: "bloom_filter(0.01)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_branch, column: branch, type: "bloom_filter(0.001)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_source, versioned_sort_key: [traversal_path, source_id, relationship_kind]}
-          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, project_id, branch, target_id, relationship_kind]}
+          - type: reorder
+            name: by_source
+            order_by: [source_id, relationship_kind, target_id, traversal_path, project_id, branch, source_kind, target_kind]
+          - type: reorder
+            name: by_target
+            order_by: [target_id, relationship_kind, source_id, traversal_path, project_id, branch, source_kind, target_kind]
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, project_id, branch, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
@@ -105,9 +115,15 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.01)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
         projections:
-          - {type: lightweight, name: by_target, versioned_sort_key: [traversal_path, target_id, relationship_kind]}
+          - type: reorder
+            name: by_source
+            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_target
+            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
           - type: aggregate
             name: node_edge_counts
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
@@ -145,11 +161,6 @@ settings:
     - {node: Job, property: type}
     - {node: Job, property: timeout_source}
     - {node: Job, property: scheduling_type}
-    # --- JobMetadata ---
-    - {node: JobMetadata, property: interruptible}
-    - {node: JobMetadata, property: timeout_source}
-    - {node: JobMetadata, property: has_exposed_artifacts}
-    - {node: JobMetadata, property: debug_trace_enabled}
     # --- MergeRequest ---
     - {node: MergeRequest, property: state}
     - {node: MergeRequest, property: merge_status}
@@ -307,7 +318,7 @@ settings:
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
   etl:
-    default_watermark: _siphon_replicated_at
+    default_watermark: _siphon_watermark
     default_deleted: _siphon_deleted
     default_etl_order_by: [traversal_path, id]
 
@@ -333,7 +344,6 @@ domains:
       Pipeline: nodes/ci/pipeline.yaml
       Stage: nodes/ci/stage.yaml
       Job: nodes/ci/job.yaml
-      JobMetadata: nodes/ci/job_metadata.yaml
       Deployment: nodes/ci/deployment.yaml
       Environment: nodes/ci/environment.yaml
       Runner: nodes/ci/runner.yaml
@@ -360,6 +370,14 @@ domains:
       File: nodes/source_code/file.yaml
       Definition: nodes/source_code/definition.yaml
       ImportedSymbol: nodes/source_code/imported_symbol.yaml
+  packages:
+    description: "Entities related to packages published to the package registry."
+    nodes:
+      Package: nodes/packages/package.yaml
+  container_registry:
+    description: "Entities related to container image repositories in the container registry."
+    nodes:
+      ContainerRepository: nodes/container_registry/container_repository.yaml
 edges:
   CONTAINS: edges/contains.yaml
   HAS_DIFF: edges/has_diff.yaml
@@ -418,4 +436,4 @@ edges:
   RUNS_FOR_PROJECT: edges/runs_for_project.yaml
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
-  HAS_METADATA: edges/has_metadata.yaml
+  BUILT_BY: edges/built_by.yaml

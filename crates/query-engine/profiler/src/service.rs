@@ -13,16 +13,25 @@ use shared::{
 };
 use types::ResourceAuthorization;
 
-use gkg_server::pipeline::{HydrationStage, RedactionStage};
+use gkg_server::pipeline::{HydrationStage, PathResolutionStage, PathResolver, RedactionStage};
 
 pub struct ProfilerPipelineService {
     ontology: Arc<Ontology>,
     client: Arc<ArrowClickHouseClient>,
+    resolver: Option<Arc<PathResolver>>,
 }
 
 impl ProfilerPipelineService {
-    pub fn new(ontology: Arc<Ontology>, client: Arc<ArrowClickHouseClient>) -> Self {
-        Self { ontology, client }
+    pub fn new(
+        ontology: Arc<Ontology>,
+        client: Arc<ArrowClickHouseClient>,
+        resolver: Option<Arc<PathResolver>>,
+    ) -> Self {
+        Self {
+            ontology,
+            client,
+            resolver,
+        }
     }
 
     pub async fn run_query(
@@ -34,6 +43,9 @@ impl ProfilerPipelineService {
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));
+        if let Some(resolver) = &self.resolver {
+            server_extensions.insert(Arc::clone(resolver));
+        }
 
         let mut ctx = QueryPipelineContext {
             query_json: query_json.to_string(),
@@ -45,6 +57,8 @@ impl ProfilerPipelineService {
         };
 
         let output = PipelineRunner::start(&mut ctx, &mut obs)
+            .then(&PathResolutionStage)
+            .await?
             .then(&CompilationStage)
             .await?
             .then(&ProfilerExecutor)
@@ -86,8 +100,11 @@ impl PipelineStage for ProfilerExecutor {
         let result_context = compiled.base.result_context.clone();
         let rendered_sql = compiled.base.render();
 
-        let profiling_id = uuid::Uuid::new_v4().to_string();
-        let log_comment = format!("gkg;profiler;profiling_id={profiling_id}");
+        let correlation_id = labkit::correlation::current();
+        let log_comment = match &correlation_id {
+            Some(id) => format!("gkg;profiler;correlation_id={id}"),
+            None => "gkg;profiler".to_string(),
+        };
 
         let mut query = client
             .query(&compiled.base.sql)
@@ -109,7 +126,7 @@ impl PipelineStage for ProfilerExecutor {
             PipelineError::Execution("missing X-ClickHouse-Summary header".into())
         })?;
 
-        let mut execution = QueryExecution {
+        let execution = QueryExecution {
             label: "base".into(),
             rendered_sql,
             query_id: String::new(),
@@ -127,16 +144,6 @@ impl PipelineStage for ProfilerExecutor {
             query_log: None,
             processors: None,
         };
-
-        // Backfill stats from system.query_log using the profiling_id
-        if let Ok(Some(entry)) = client.fetch_query_log(&profiling_id).await {
-            execution.query_id = entry.query_id.clone();
-            execution.stats.read_rows = entry.read_rows;
-            execution.stats.read_bytes = entry.read_bytes;
-            execution.stats.result_rows = entry.result_rows;
-            execution.stats.result_bytes = entry.result_bytes;
-            execution.stats.memory_usage = entry.memory_usage as i64;
-        }
 
         ctx.phases
             .get_or_insert_default::<QueryExecutionLog>()
@@ -179,5 +186,31 @@ impl PipelineStage for MockAuthorizationStage {
             query_result: input.query_result.clone(),
             authorizations,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::{EnvFilter, Layer};
+
+    // The env filter must stay per-layer; as a global registry filter it would
+    // disable the span below its level and current() would return None.
+    #[test]
+    fn correlation_id_resolves_within_profile_span() {
+        let subscriber = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::sink)
+                    .with_filter(EnvFilter::new("error")),
+            )
+            .with(labkit::correlation::CorrelationCaptureLayer::new());
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let id = labkit::correlation::generate_id();
+        let span = labkit::context::span_with_id("profile", &id);
+        let resolved = span.in_scope(labkit::correlation::current);
+
+        assert_eq!(resolved.as_deref(), Some(id.as_str()));
     }
 }

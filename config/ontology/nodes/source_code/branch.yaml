@@ -22,18 +22,21 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Derived ID (hash of project_id + branch name)."
 
   project_id:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   name:
     type: string
     source: name
     nullable: false
+    mutable: false
     description: "Branch name (e.g., main, feature/new-login)."
 
   is_default:
@@ -60,7 +63,8 @@ storage:
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: is_default, type: "Bool", default: "true"}
   indexes:
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:

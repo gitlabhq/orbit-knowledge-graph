@@ -22,6 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
+    mutable: false
     description: "Unique ID."
 
   traversal_path:
@@ -35,42 +36,49 @@ properties:
     type: int64
     source: project_id
     nullable: false
+    mutable: false
     description: "Owning project ID."
 
   branch:
     type: string
     source: branch
     nullable: false
+    mutable: false
     description: "Git branch."
 
   commit_sha:
     type: string
     source: commit_sha
     nullable: false
+    mutable: false
     description: "Indexed commit SHA."
 
   file_path:
     type: string
     source: file_path
     nullable: false
+    mutable: false
     description: "Containing file path."
 
   fqn:
     type: string
     source: fqn
     nullable: false
+    mutable: false
     description: "Fully qualified name (e.g., MyModule::MyClass#my_method)."
 
   name:
     type: string
     source: name
     nullable: false
+    mutable: false
     description: "Short name."
 
   definition_type:
     type: string
     source: definition_type
     nullable: false
+    mutable: false
     description: "Definition kind (e.g., Class, Module, Method, Function, Struct, Enum, Trait, Lambda)."
     selectivity: low
 
@@ -78,36 +86,42 @@ properties:
     type: int64
     source: start_line
     nullable: false
+    mutable: false
     description: "Start line."
 
   end_line:
     type: int64
     source: end_line
     nullable: false
+    mutable: false
     description: "End line."
 
   start_byte:
     type: int64
     source: start_byte
     nullable: false
+    mutable: false
     description: "Start byte offset."
 
   end_byte:
     type: int64
     source: end_byte
     nullable: false
+    mutable: false
     description: "End byte offset."
 
   start_char:
     type: int64
     source: start_char
     nullable: false
+    mutable: false
     description: "Start column."
 
   end_char:
     type: int64
     source: end_char
     nullable: false
+    mutable: false
     description: "End column."
 
   content:
@@ -141,7 +155,8 @@ storage:
     - {name: start_char, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: end_char, type: "Int64", codec: ["Delta(8)", "LZ4"]}
   indexes:
-    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_fqn, column: fqn, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}

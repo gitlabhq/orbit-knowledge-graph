@@ -82,6 +82,22 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
+            scope("var_spec", "Var")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .when(!ancestor_is(&[
+                    "function_declaration",
+                    "method_declaration",
+                    "func_literal",
+                ])),
+            scope("const_spec", "Const")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .when(!ancestor_is(&[
+                    "function_declaration",
+                    "method_declaration",
+                    "func_literal",
+                ])),
         ]
     }
 

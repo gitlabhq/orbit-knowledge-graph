@@ -1,0 +1,1088 @@
+# traversal_path PK-pruning corpus.
+#
+# project/group/namespace scope filters; {{TOKENS}} resolved from a tokens file.
+# Canonical corpus entry: desc / category / suite / query (inline DSL JSON).
+# Placeholders: "$sample" / "$sample:N" bind to real in-scope ids at run time.
+
+proj_node_lookup_by_id:
+  desc: "Project node lookup by numeric id (eq). Rewrite turns id-eq into startsWith(traversal_path,'<prefix>') on the gl_project PK; without the rewrite this is a bloom-filter scan on idx_id."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}},
+      "limit": 1
+    }
+
+proj_node_lookup_by_full_path:
+  desc: "Project node lookup by full_path (eq). Rewrite resolves full_path -> traversal_path prefix via the graph-DB dictionary and emits startsWith(traversal_path,'<prefix>') on the PK; otherwise an idx_full_path bloom scan."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "p", "entity": "Project", "columns": ["id", "name", "full_path", "visibility_level"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}},
+      "limit": 1
+    }
+
+proj_id_mr_in_project_eq:
+  desc: "MergeRequest IN_PROJECT Project, project scoped by id (eq). The project-id filter rewrites to startsWith(traversal_path,'<prefix>') applied to gl_merge_request, gl_project and the IN_PROJECT gl_edge rows."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "limit": 100
+    }
+
+proj_full_path_mr_in_project_eq:
+  desc: "MergeRequest IN_PROJECT Project, project scoped by full_path (eq). Identical traversal to proj_id_mr_in_project_eq; the dict resolves full_path -> same traversal_path prefix; PK rewrite applies to all three tables."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "limit": 100
+    }
+
+proj_id_in_mr_in_project:
+  desc: "MergeRequest IN_PROJECT Project, project scoped by id with op 'in' (single id). Exercises the 'in' operator rewrite; single-element IN should compile to the same single-prefix PK predicate as eq."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "in", "value": [{{PROJECT_ID}}]}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 100
+    }
+
+proj_id_in2_mr_or_of_prefixes:
+  desc: "TWO-element project_id IN across two sibling projects, asserting the OR-of-startsWith multi-prefix PK predicate in the clean project slice (the positive OR-of-prefixes proof)."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "in", "value": [{{PROJECT_ID}}, {{PROJECT_ID_2}}]}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 100
+    }
+
+proj_id_workitem_in_project_eq:
+  desc: "WorkItem IN_PROJECT Project, project scoped by id (eq). gl_work_item PK is (traversal_path, id); the project-id rewrite prunes the WorkItem scan on the PK."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "columns": ["iid", "title", "state", "work_item_type"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "wi", "to": "p"}],
+      "limit": 100
+    }
+
+proj_id_pipeline_in_project_eq:
+  desc: "Pipeline IN_PROJECT Project, project scoped by id (eq). gl_pipeline PK is (traversal_path, id); the project-id rewrite prunes the pipeline scan on the PK."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "pipe", "entity": "Pipeline", "columns": ["id", "status", "source", "ref", "created_at"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+      "order_by": {"node": "pipe", "property": "created_at", "direction": "DESC"},
+      "limit": 100
+    }
+
+proj_full_path_pipeline_source_filter:
+  desc: "Pipeline IN_PROJECT scoped by project full_path WITH the canonical source='merge_request_event' filter (per recipes.md). Gives Pipeline a full_path-scoped case plus a column-filter-plus-prefix interaction."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "pipe", "entity": "Pipeline", "columns": ["id", "status", "source", "ref"], "filters": {"source": {"op": "eq", "value": "merge_request_event"}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
+      "limit": 100
+    }
+
+proj_id_vuln_in_project_eq:
+  desc: "Vulnerability IN_PROJECT Project, project scoped by id (eq). gl_vulnerability PK is (traversal_path, id); the project-id rewrite prunes the vuln scan on the PK. Also exercises the security pass ANDing the user's auth prefix with the resolved scope prefix."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "v", "entity": "Vulnerability", "columns": ["id", "severity", "state", "report_type"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+      "limit": 100
+    }
+
+note_in_project_id:
+  desc: "Note IN_PROJECT Project scoped by id. Proves the rewrite prunes gl_note on its PK; Note is a core scoped entity with no prior coverage."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "n", "entity": "Note", "columns": ["id", "note", "author_id"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "n", "to": "p"}],
+      "limit": 100
+    }
+
+proj_id_mr_count_by_state_agg:
+  desc: "Aggregation. Count MergeRequests by state within PROJECT_ID (scoped by id). group_by mr.state, count(mr). The project-id filter rewrites to startsWith(traversal_path,'<prefix>') and prunes the gl_merge_request scan feeding the aggregate."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+proj_full_path_mr_count_by_state_agg:
+  desc: "Aggregation. Count MergeRequests by state within the project, scoped by full_path (eq). Same aggregate as proj_id_mr_count_by_state_agg but addressed by full_path; dict resolves full_path -> same prefix and prunes on the PK."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+proj_unknown_id_mr_in_project:
+  desc: "Negative/guard. MergeRequest IN_PROJECT Project where the project id is nonexistent. Dict misses, resolves to '0/', scope must be treated as unknown (empty), NOT widened. Proves the rewrite fails closed."
+  category: traversal
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 100
+    }
+
+grp_id_workitem_in_group:
+  desc: "WorkItems IN_GROUP a top-level group, scoped by Group id. Resolver looks up the group's traversal_path via the dictionary and rewrites the Group node_ids filter into startsWith(traversal_path,'<group_prefix>') on the WorkItem PK."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "namespace_id"]},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "limit": 50,
+      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+    }
+
+grp_fullpath_workitem_in_group:
+  desc: "Same WorkItem IN_GROUP query but scoped by Group full_path instead of id. Proves the full_path -> traversal_path resolution yields the identical PK prefix predicate as the id path."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "namespace_id"]},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "limit": 50,
+      "order_by": {"node": "wi", "property": "created_at", "direction": "DESC"}
+    }
+
+grp_id_label_in_group:
+  desc: "Group-level Labels IN_GROUP a top-level group, scoped by Group id. Label is a distinct entity table (gl_label) keyed on (traversal_path, id); confirms the rewrite applies per-entity, not just to WorkItem."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "lbl", "entity": "Label", "columns": ["id", "title", "color", "group_id"]},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "lbl", "to": "g"}],
+      "limit": 50
+    }
+
+grp_id_milestone_in_group:
+  desc: "Group milestones IN_GROUP a top-level group, scoped by Group id. Third distinct IN_GROUP entity (gl_milestone) to show the rewrite is entity-agnostic across the plan domain."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "m", "entity": "Milestone", "filters": {"state": "active"}, "columns": ["id", "iid", "title", "state", "group_id"]},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "m", "to": "g"}],
+      "limit": 50
+    }
+
+grp_id_milestone_count_by_state_agg:
+  desc: "Group-level Milestone aggregation by state scoped by Group id. Adds the aggregation path for Milestone with its correct string state values (active/closed) and confirms IN_GROUP fk=group_id pruning under aggregation."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "m", "entity": "Milestone", "filters": {"state": {"op": "in", "value": ["active", "closed"]}}},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "m", "to": "g"}],
+      "group_by": [{"kind": "property", "node": "m", "property": "state", "alias": "ms_state"}],
+      "aggregations": [{"function": "count", "target": "m", "alias": "ms_count"}],
+      "aggregation_sort": {"column": "ms_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+grp_id_mr_in_project_contains:
+  desc: "MergeRequests in projects under a top-level group. Group CONTAINS Project, MergeRequest IN_PROJECT Project, scoped by Group id. Tests transitive scoping. the group prefix covers every project's subtree."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project"},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "limit": 50,
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"}
+    }
+
+grp_id_count_mrs_aggregation_MOTIVATING:
+  desc: "MOTIVATING CASE. COUNT all merge requests across an entire top-level group (aggregation), scoped by Group id. Group CONTAINS Project, MR IN_PROJECT Project, grouped by project. The headline whole-group MR rollup the PK-pruning feature exists to make fast."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project"},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "group_by": [{"kind": "node", "node": "p"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 50
+    }
+
+subgrp_id_count_mrs_aggregation_deeper_prefix:
+  desc: "COUNT merge requests across a nested SUBGROUP only, scoped by subgroup id. Same motivating aggregation but the resolved prefix is a strict EXTENSION of the parent group's prefix, so it prunes to a deeper, smaller traversal_path subtree."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project"},
+        {"id": "g", "entity": "Group", "node_ids": [{{SUBGROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "group_by": [{"kind": "node", "node": "p"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 50
+    }
+
+subgrp_fullpath_workitem_in_group:
+  desc: "WorkItems IN_GROUP a nested subgroup, scoped by subgroup full_path. Confirms full_path resolution on a non-root namespace yields the deeper prefix and excludes work items that belong to the parent group but not the subgroup."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "namespace_id"]},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{SUBGROUP_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "limit": 50
+    }
+
+subgrp_id_workitem_transitive_contains:
+  desc: "Transitive subgroup descent. Group CONTAINS Group (max_hops 2) down to a nested subgroup, then WorkItem IN_GROUP that subgroup, scoped by the TOP group id. Proves the top-group prefix still prunes across a Group->Group hop."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "namespace_id"]},
+        {"id": "sub", "entity": "Group"},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "IN_GROUP", "from": "wi", "to": "sub"},
+        {"type": "CONTAINS", "from": "g", "to": "sub", "min_hops": 1, "max_hops": 2}
+      ],
+      "limit": 50
+    }
+
+grp_id_vuln_count_by_severity_agg:
+  desc: "Whole-group Vulnerability aggregation grouped by severity, scoped by Group id via CONTAINS+IN_PROJECT. Covers a security-domain entity under aggregation and exercises the auth-prefix AND scope-prefix interaction in the aggregation path."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "v", "entity": "Vulnerability", "filters": {"state": {"op": "in", "value": ["detected", "confirmed"]}}},
+        {"id": "p", "entity": "Project"},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "v", "to": "p"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "group_by": [{"kind": "property", "node": "v", "property": "severity", "alias": "sev"}],
+      "aggregations": [{"function": "count", "target": "v", "alias": "vuln_count"}],
+      "aggregation_sort": {"column": "vuln_count", "direction": "DESC"},
+      "limit": 20
+    }
+
+grp_namespace_id_project_leaf_GAP:
+  desc: "Project scoped by full_path (the SAFE path). Flags that the residual gap is specifically a raw namespace_id filter whose value is a project_namespace_id fed as a Group/namespace scope, NOT this full_path case which prunes correctly to the project's own leaf prefix."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}, "columns": ["id", "iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 50
+    }
+
+grp_unknown_id_no_widen:
+  desc: "Scope by a nonexistent Group id. Dictionary miss must resolve to '0/' (unknown), returning ZERO rows. The rewrite must NOT fall back to an unscoped full-table scan that would leak other groups' data."
+  category: traversal
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+        {"id": "g", "entity": "Group", "node_ids": [{{UNKNOWN_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "limit": 50
+    }
+
+grp_id_count_workitems_aggregation:
+  desc: "Whole-group WorkItem rollup (aggregation) scoped by Group id. count open work items across the group, grouped by work_item_type. Complements the MR motivating case with a plan-domain aggregation to show pruning generalizes across aggregation targets."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "group_by": [{"kind": "property", "node": "wi", "property": "work_item_type", "alias": "wi_type"}],
+      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
+      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "limit": 20
+    }
+
+ns_group_id_resolves_traversal:
+  desc: "namespace_id filter where the id is a real GROUP namespace. Expressed as Group.id eq {{GROUP_ID}} (a Group's id IS its namespace_id). Single-node traversal the feature rewrites into startsWith(traversal_path,'<group-prefix>/') on the gl_group PK."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}},
+      "limit": 50
+    }
+
+ns_group_full_path_resolves_traversal:
+  desc: "Same group scope addressed by full_path. Group.full_path eq {{GROUP_FULL_PATH}}; the feature looks up the namespace by path in the dictionary and rewrites to startsWith(traversal_path,'<prefix>/')."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "g", "entity": "Group", "columns": ["id", "name", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}},
+      "limit": 50
+    }
+
+ns_subgroup_id_scopes_to_subtree:
+  desc: "namespace_id filter where the id is a SUBGROUP (still a Group namespace). Scoping to a subgroup must prune to the subgroup's deeper prefix and must NOT return siblings under the same parent."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path", "traversal_path"], "filters": {"id": {"op": "eq", "value": {{SUBGROUP_ID}}}}},
+      "limit": 50
+    }
+
+ns_project_namespace_id_GAP:
+  desc: "DOCUMENTED RESIDUAL GAP. namespace_id where the id is a PROJECT_NAMESPACE id (a project's leaf namespace, type='Project'). A project's traversal_path leaf == project_namespace_id, NOT project.id; the dict is keyed for group/namespace prefixes. Passing this id as Group.id must NOT widen scope and must stay correct."
+  category: search
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}},
+      "limit": 50
+    }
+
+ns_unknown_id_no_widen:
+  desc: "Unknown / nonexistent namespace_id. Dictionary miss must resolve to '0/' and be treated as unknown, returning 0 rows. Must NOT fall back to an unscoped (full-table) query."
+  category: search
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{UNKNOWN_ID}}}}},
+      "limit": 50
+    }
+
+proj_id_mr_in_project_scoped_traversal:
+  desc: "EDGE multi-node. MergeRequest IN_PROJECT Project, scoped to a single project by Project.id. The feature must push the project scope down to the traversal_path PK of BOTH the MergeRequest node and the Project node (same prefix)."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "limit": 50
+    }
+
+proj_full_path_mr_count_agg_scoped:
+  desc: "EDGE aggregation scoped by Project.full_path. count MergeRequests per project, filtered to one project by full_path. Confirms the rewrite works through the aggregation path and that the count is exact."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": [{"kind": "node", "node": "p"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 10
+    }
+
+multihop_user_authored_mr_in_project_group_scoped:
+  desc: "Intentionally encodes the common mistake (group_id stuffed into Project.id via a bogus id_property filter key). The harness must assert it is REJECTED at runtime ontology validation. The correct group-scoped multi-hop is multihop_group_scope_via_group_node."
+  category: traversal
+  suite: scoping
+  expect: error  # deliberate negative control: id_property is rejected by the ontology allowlist
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "project_id"]},
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}, "id_property": "namespace_id"}}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+      ],
+      "limit": 100
+    }
+
+multihop_group_scope_via_group_node:
+  desc: "MULTI-HOP correctly scoped to a GROUP by adding the Group as a node and joining the leaf Project via CONTAINS. User AUTHORED MergeRequest IN_PROJECT Project, Group CONTAINS Project with Group.id eq {{GROUP_ID}}. The group's traversal_path prefix prunes the whole subtree. Positive counterpart to the rejected case above."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "project_id"]},
+        {"id": "p", "entity": "Project", "columns": ["id", "full_path"]},
+        {"id": "g", "entity": "Group", "columns": ["id", "full_path"], "filters": {"id": {"op": "eq", "value": {{GROUP_ID}}}}}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+        {"type": "CONTAINS", "from": "g", "to": "p"}
+      ],
+      "limit": 100
+    }
+
+edge_rel_scoped_prune_reviewer:
+  desc: "Edge-table-scoped multi-hop (User REVIEWER MergeRequest IN_PROJECT Project) under a project prefix, asserting the gl_edge scan ITSELF prunes on traversal_path. Edge pruning was previously asserted only indirectly via node pruning."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "u", "entity": "User", "columns": ["username"]},
+        {"id": "mr", "entity": "MergeRequest", "columns": ["iid", "title", "state"]},
+        {"id": "p", "entity": "Project", "filters": {"id": {"op": "eq", "value": {{PROJECT_ID}}}}}
+      ],
+      "relationships": [
+        {"type": "REVIEWER", "from": "u", "to": "mr"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+      ],
+      "limit": 100
+    }
+
+path_finding_two_entities_in_project:
+  desc: "PATH_FINDING between two seeded entities within one project. shortest path from a specific MergeRequest to its Project, both pinned by node_ids, scoped within {{PROJECT_ID}}. Confirms the path search frontier is bounded by the project prefix."
+  category: path_finding
+  suite: scoping
+  expect: empty  # bidirectional path-finding frontier OOMs at gitlab-org scope
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "MergeRequest", "node_ids": [{{MR_NODE_ID}}]},
+        {"id": "end", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["IN_PROJECT"]}
+    }
+
+unknown_id_path_finding_no_widen:
+  desc: "PATH_FINDING with an endpoint pinned to a nonexistent id. Proves the path frontier fails closed (dict-miss '0/') and returns no path rather than widening the gl_edge frontier scan."
+  category: path_finding
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "start", "entity": "MergeRequest", "node_ids": [{{MR_NODE_ID}}]},
+        {"id": "end", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}]}
+      ],
+      "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+               "rel_types": ["IN_PROJECT", "CONTAINS"]}
+    }
+
+path_finding_two_projects_in_group_by_full_path:
+  desc: "PATH_FINDING between two seeded projects within the same group, endpoints pinned by full_path (engine resolves prefixes from the dictionary). rel_types is REQUIRED because endpoints use filters, not node_ids."
+  category: path_finding
+  suite: scoping
+  expect: empty  # CONTAINS is parent->child only; sibling projects share a Group parent so no directed path exists via [CONTAINS, IN_PROJECT]
+  query: |
+    {
+      "query_type": "path_finding",
+      "nodes": [
+        {"id": "a", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}},
+        {"id": "b", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_2}}"}}}
+      ],
+      "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3, "rel_types": ["CONTAINS", "IN_PROJECT"]}
+    }
+
+neighbors_project_center_outgoing:
+  desc: "NEIGHBORS of a project-scoped center node. immediate neighbors of Project {{PROJECT_ID}}. The center is pinned by node_ids and the project's traversal_path prefix bounds the gl_edge scan. Uses top-level singular node + neighbors config."
+  category: neighbors
+  suite: scoping
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}], "columns": ["id", "full_path"]},
+      "neighbors": {"node": "p", "direction": "both"},
+      "limit": 100
+    }
+
+unknown_id_neighbors_no_widen:
+  desc: "NEIGHBORS of a nonexistent center id. Proves the neighbors gl_edge scan fails closed ('0/' prefix) and returns zero neighbors rather than scanning the whole edge table."
+  category: neighbors
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}], "columns": ["id", "full_path"]},
+      "neighbors": {"node": "p", "direction": "both"},
+      "limit": 100
+    }
+
+neighbors_group_center_contains_rel_filter:
+  desc: "NEIGHBORS of a GROUP center, restricted to CONTAINS edges. direct children (subgroups + projects) of group {{GROUP_ID}}. Group center pinned by node_ids; rel_types narrows to CONTAINS. Bounded by the group's traversal_path prefix."
+  category: neighbors
+  suite: scoping
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}], "columns": ["id", "full_path"]},
+      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "limit": 100
+    }
+
+proj_id_mr_count:
+  desc: "Total MR count scoped to a single project by project id. Anchors scope on the Project node (node_ids = project.id); the MR node's startsWith(traversal_path, '<proj_prefix>') prunes on the PK. The original slow-query class the rewrite targets."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "limit": 1,
+      "options": {"include_debug_sql": true}
+    }
+
+proj_fullpath_mr_count:
+  desc: "Same total MR count but scope expressed by Project.full_path (eq). Exercises the full_path -> traversal_path prefix resolution path. Result must be identical to proj_id_mr_count for the same project."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "limit": 1,
+      "options": {"include_debug_sql": true}
+    }
+
+proj_id_mr_by_state:
+  desc: "GROUP BY MergeRequest.state within a single project (by id). Verifies grouped aggregation correctness under PK pruning. each state bucket must match per-state truth, and buckets must sum to the proj_id_mr_count total."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "group_by": [{"kind": "property", "node": "mr", "property": "state", "alias": "mr_state"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 10,
+      "options": {"include_debug_sql": true}
+    }
+
+group_id_mr_by_author:
+  desc: "GROUP BY author (User node) of MRs across ALL projects in a group, scoped by group id. The Group anchors the traversal_path prefix; MRs in any descendant project share it, so the join scan prunes on PK. The cross-project 'who authored the most MRs in this group' slow query."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "author", "entity": "User"},
+        {"id": "p", "entity": "Project"},
+        {"id": "g", "entity": "Group", "node_ids": [{{GROUP_ID}}]}
+      ],
+      "relationships": [
+        {"type": "AUTHORED", "from": "author", "to": "mr", "direction": "outgoing"},
+        {"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"},
+        {"type": "CONTAINS", "from": "g", "to": "p", "direction": "outgoing"}
+      ],
+      "group_by": [{"kind": "node", "node": "author", "alias": "author"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 20,
+      "options": {"include_debug_sql": true}
+    }
+
+group_fullpath_wi_by_state:
+  desc: "GROUP BY WorkItem.state for work items directly in a group, scoped by group full_path via the IN_GROUP edge. Exercises group full_path -> prefix resolution and the IN_GROUP scoping path (distinct from IN_PROJECT)."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}}},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g", "direction": "outgoing"}],
+      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "wi_state"}],
+      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
+      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "limit": 10,
+      "options": {"include_debug_sql": true}
+    }
+
+proj_id_mr_orderby_limit_page:
+  desc: "Traversal of MRs in a project by id, ordered by created_at DESC with limit and a first-page cursor. Verifies order_by + limit produce a stable, deterministic top-N under PK pruning. Pairs with the next case to prove paging stability."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "limit": 40,
+      "cursor": {"offset": 0, "page_size": 20},
+      "options": {"include_debug_sql": true}
+    }
+
+proj_id_mr_orderby_limit_page2:
+  desc: "Second page of the exact same scoped+ordered query (offset 20). Proves pagination is stable. page1 and page2 are disjoint, contiguous, and together equal the global ORDER BY created_at DESC top-40 with no gaps, duplicates, or reordering."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "columns": ["id", "iid", "title", "state", "created_at"], "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": [{{PROJECT_ID}}]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+      "limit": 40,
+      "cursor": {"offset": 20, "page_size": 20},
+      "options": {"include_debug_sql": true}
+    }
+
+aggpaging_namespace_id_project_gap:
+  desc: "DOCUMENTED RESIDUAL GAP. Aggregate WorkItem count where the scope is a raw namespace_id filter whose value is a project_namespace_id. Correctness must hold; PK pruning is undefined for the project_namespace_id rewrite. {{PROJECT_NAMESPACE_ID}} placeholder must be substituted with the project_namespace_id, not project.id."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": {"op": "in", "value": ["opened", "closed"]}, "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}}
+      ],
+      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
+      "limit": 1,
+      "options": {"include_debug_sql": true}
+    }
+
+unknown_id_no_widen:
+  desc: "Negative/safety. Aggregate MR count scoped to a Project id that does not exist. Dict lookup misses, yielding '0/' which must be treated as UNKNOWN scope. result must be empty (count 0), NOT a widening to the whole instance. Proves a dict miss never broadens scope."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}}},
+        {"id": "p", "entity": "Project", "node_ids": [{{UNKNOWN_ID}}]}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p", "direction": "outgoing"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "limit": 1,
+      "options": {"include_debug_sql": true}
+    }
+
+unknown_project_id_mr_empty:
+  desc: "Scope MRs to a nonexistent project_id. The rewrite resolves project_id -> project_namespace_id via the dict; a miss yields the '0/' sentinel, so startsWith(traversal_path,'0/') matches nothing. MUST return empty and MUST NOT widen to a full scan."
+  category: traversal
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNKNOWN_ID}}}}, "columns": ["iid", "title", "state", "project_id"]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+unknown_full_path_proj_empty:
+  desc: "Single-node Project scoped by a nonexistent full_path. The rewrite resolves full_path -> the project's own traversal_path prefix; an unresolvable path is a miss => unknown prefix ('0/'). MUST short-circuit to empty, not scan gl_project."
+  category: search
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "this-org/does-not-exist-nowhere"}}, "columns": ["full_path", "name", "visibility_level"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+full_path_trailing_slash:
+  desc: "Scope a Project by its real full_path with a trailing slash appended. full_path in gl_project has no trailing slash; the rewrite must normalize (strip trailing '/') before dict lookup, else it misses and returns empty. Asserts the normalizer, not a leak."
+  category: search
+  suite: scoping
+  expect: empty  # normalizer not implemented today: trailing-slash full_path misses the dict and short-circuits empty (fail-closed)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH}}/"}}, "columns": ["full_path", "name"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+full_path_case_variant:
+  desc: "Scope a Project by an upper/mixed-case variant of its real full_path. GitLab paths are case-sensitive in storage; the rewrite/dict lookup must treat the case variant as a distinct (missing) key. Expect empty, never a widened scan, never an accidental case-insensitive match."
+  category: search
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "p", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "{{PROJECT_FULL_PATH_UPPER}}"}}, "columns": ["full_path", "name"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+project_id_in_multi:
+  desc: "Scope MR-count aggregation to THREE real authorized projects via project_id IN [...]. The rewrite must produce a multi-prefix predicate. OR of startsWith(traversal_path, prefix_i) for each resolved leaf, each PK-prunable. Validates multi-prefix correctness AND that each prefix still prunes."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "in", "value": [{{PROJECT_ID}}, {{PROJECT_ID_2}}, {{PROJECT_ID_3}}]}}, "columns": ["iid", "project_id"]},
+        {"id": "p", "entity": "Project"}
+      ],
+      "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+      "group_by": [{"kind": "node", "node": "p"}],
+      "aggregations": [{"function": "count", "target": "mr", "alias": "mr_count"}],
+      "aggregation_sort": {"column": "mr_count", "direction": "DESC"},
+      "limit": 20,
+      "options": {"include_debug_sql": true}
+    }
+
+org_unscoped_control:
+  desc: "Baseline control. an unscoped User listing (gl_user is a global table with NO traversal_path, in skip_security_filter_for_entities). No scope filter, so the prefix-rewrite feature is a no-op. Establishes the un-rewritten baseline read_rows for comparison."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "u", "entity": "User", "filters": {"state": "active"}, "columns": ["username", "state"]},
+      "limit": 30,
+      "options": {"include_debug_sql": true}
+    }
+
+out_of_scope_project_id_zero_leak:
+  desc: "Scope MRs to a REAL project that exists but is OUTSIDE the calling user's authorized traversal paths. The security pass must AND the resolved scope prefix with the user's authorized prefixes; the conjunction is empty => zero rows, no leak."
+  category: search
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": ["opened", "closed", "merged"]}, "project_id": {"op": "eq", "value": {{UNAUTH_PROJECT_ID}}}}, "columns": ["iid", "title", "project_id"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+out_of_scope_full_path_group:
+  desc: "Two-node WorkItem IN_GROUP Group scoped by a Group full_path the user is NOT authorized for. The rewrite resolves the group's prefix; the security AND with the user's auth prefixes empties it. Exercises the group-prefix path plus an edge join, ensuring the edge table's traversal_path is also ANDed down (no leak via edge join)."
+  category: traversal
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}, "columns": ["iid", "title", "namespace_id"]},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{UNAUTH_GROUP_FULL_PATH}}"}}}
+      ],
+      "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+negsec_namespace_id_project_gap:
+  desc: "DOCUMENTED RESIDUAL GAP. WorkItem.namespace_id eq a value that is a PROJECT namespace's id (project_namespace_id), i.e. the leaf, not a group namespace. The leaf IS a project's traversal_path leaf, so the rewrite CAN resolve it, but this is the one case the design calls out as a gap. {{PROJECT_NAMESPACE_ID}} = projects.project_namespace_id, NOT projects.id."
+  category: search
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened", "namespace_id": {"op": "eq", "value": {{PROJECT_NAMESPACE_ID}}}}, "columns": ["iid", "title", "namespace_id", "project_id"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+unknown_namespace_id_group_empty:
+  desc: "Aggregation (WorkItem count by state) scoped by namespace_id eq a fully nonexistent id. namespace_id dict lookup misses => '0/' sentinel. For an aggregation, Layer 3 redaction cannot run, so the empty result must come purely from the prefix/security predicate. MUST return zero buckets, never a full-table grouped scan."
+  category: aggregation
+  suite: scoping
+  expect: empty  # fail-closed control: must return zero rows (no scope widening)
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "wi", "entity": "WorkItem", "filters": {"namespace_id": {"op": "eq", "value": {{UNKNOWN_ID}}}}}
+      ],
+      "group_by": [{"kind": "property", "node": "wi", "property": "state", "alias": "state"}],
+      "aggregations": [{"function": "count", "target": "wi", "alias": "wi_count"}],
+      "aggregation_sort": {"column": "wi_count", "direction": "DESC"},
+      "limit": 10,
+      "options": {"include_debug_sql": true}
+    }
+
+scoped_group_full_path_neighbors_authz_and:
+  desc: "Neighbors of an AUTHORIZED group selected by full_path, restricted to CONTAINS edges. Positive scoping control. the rewrite resolves the group's prefix and ANDs it with the user's auth prefixes (which include it), returning the group's direct children and pruning to that subtree. Proves the rewrite does the RIGHT thing on an authorized scope."
+  category: neighbors
+  suite: scoping
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "eq", "value": "{{GROUP_FULL_PATH}}"}}, "columns": ["name", "full_path"]},
+      "neighbors": {"node": "g", "direction": "outgoing", "rel_types": ["CONTAINS"]},
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+unauth_group_in_authorized_list_no_leak:
+  desc: "Multi-prefix mix where the scope list contains one AUTHORIZED group full_path and one UNAUTHORIZED group full_path (full_path IN [...]). The rewrite builds two prefixes; the security AND must keep the authorized prefix and empty the unauthorized one. Result includes only the authorized group's projects, no leak."
+  category: traversal
+  suite: scoping
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
+        {"id": "g", "entity": "Group", "filters": {"full_path": {"op": "in", "value": ["{{GROUP_FULL_PATH}}", "{{UNAUTH_GROUP_FULL_PATH}}"]}}}
+      ],
+      "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
+      "limit": 50,
+      "options": {"include_debug_sql": true}
+    }
+
+mr_ids_changed_paths_agg:
+  desc: "Most-changed file paths across pinned MergeRequests: MergeRequest (pinned ids) HAS_LATEST_DIFF -> MergeRequestDiff HAS_FILE -> MergeRequestDiffFile, grouped by old_path. The pinned MR ids resolve to their project traversal_path, which floods across the same_namespace diff edges so both edge dedup scans and the diff-file aggregation seek the project's PK range instead of the whole authorized diff-file subtree."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "mr", "entity": "MergeRequest", "node_ids": "$sample"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
+      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "limit": 40
+    }
+
+pipeline_filter_changed_paths_agg:
+  desc: "Most-changed file paths under a project's failed merge_request_event pipelines: Pipeline (project_id/status/source filters) <-TRIGGERED- MergeRequest -HAS_LATEST_DIFF-> MergeRequestDiff -HAS_FILE-> MergeRequestDiffFile, grouped by old_path. A filter-anchored FK-backed chain lowers to node FK joins (pl.merge_request_id, mr.latest_merge_request_diff_id, f.merge_request_diff_id) rather than edge scans, which is both faster and avoids stale HAS_LATEST_DIFF edge over-counting."
+  category: aggregation
+  suite: scoping
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pl", "entity": "Pipeline", "filters": {"project_id": {"op": "eq", "value": {{PROJECT_ID}}}, "status": {"op": "eq", "value": "failed"}, "source": {"op": "eq", "value": "merge_request_event"}}},
+        {"id": "mr", "entity": "MergeRequest"},
+        {"id": "d", "entity": "MergeRequestDiff"},
+        {"id": "f", "entity": "MergeRequestDiffFile"}
+      ],
+      "relationships": [
+        {"type": "TRIGGERED", "from": "mr", "to": "pl"},
+        {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "d"},
+        {"type": "HAS_FILE", "from": "d", "to": "f"}
+      ],
+      "group_by": [{"kind": "property", "node": "f", "property": "old_path", "alias": "file_path"}],
+      "aggregations": [{"function": "count", "target": "f", "alias": "changes"}],
+      "aggregation_sort": {"column": "changes", "direction": "DESC"},
+      "limit": 60
+    }
+

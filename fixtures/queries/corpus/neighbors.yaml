@@ -1,0 +1,172 @@
+# Neighbors coverage: a many-id Group center (the dashboard query shape), per-direction
+# variants, namespace centers (Group/Project), and code-graph centers (File/Definition).
+# Placeholders resolve to dummy ids under corpus_smoke; the prod A/B harness substitutes
+# real ids.
+
+nb_group_both_many_ids:
+  desc: "Dashboard query: bidirectional neighbors over ~20 Group centers at once."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20", "columns": ["id", "full_path"]},
+      "neighbors": {"node": "g", "direction": "both"},
+      "limit": 500
+    }
+
+nb_group_incoming:
+  desc: "Group center, incoming-only (members, work items, labels pointing at the group)."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20"},
+      "neighbors": {"node": "g", "direction": "incoming"},
+      "limit": 500
+    }
+
+nb_group_outgoing:
+  desc: "Group center, outgoing-only (CONTAINS subgroups and projects)."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "node_ids": "$sample:20"},
+      "neighbors": {"node": "g", "direction": "outgoing"},
+      "limit": 500
+    }
+
+nb_group_single_both:
+  desc: "Single Group center, both directions (control for the many-id variant)."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "g", "entity": "Group", "node_ids": "$sample"},
+      "neighbors": {"node": "g", "direction": "both"},
+      "limit": 500
+    }
+
+nb_project_both:
+  desc: "Project center, both directions, no rel filter."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
+      "neighbors": {"node": "p", "direction": "both"},
+      "limit": 500
+    }
+
+nb_project_incoming:
+  desc: "Project center, incoming (MRs, work items, pipelines pointing at the project)."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
+      "neighbors": {"node": "p", "direction": "incoming"},
+      "limit": 500
+    }
+
+nb_project_outgoing:
+  desc: "Project center, outgoing (CONTAINS files, IN_GROUP namespace)."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "p", "entity": "Project", "node_ids": "$sample:5"},
+      "neighbors": {"node": "p", "direction": "outgoing"},
+      "limit": 500
+    }
+
+nb_file_both:
+  desc: "File center, both directions (DEFINES definitions; CONTAINS from project)."
+  category: neighbors
+  suite: code_graph
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "f", "entity": "File", "node_ids": "$sample:5"},
+      "neighbors": {"node": "f", "direction": "both"},
+      "limit": 200
+    }
+
+nb_file_outgoing_defines:
+  desc: "File outgoing DEFINES: every definition declared in the file."
+  category: neighbors
+  suite: code_graph
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "f", "entity": "File", "node_ids": "$sample:5"},
+      "neighbors": {"node": "f", "direction": "outgoing", "rel_types": ["DEFINES"]},
+      "limit": 200
+    }
+
+nb_definition_both:
+  desc: "Definition center, both directions (CALLS, DEFINES, IMPORTS)."
+  category: neighbors
+  suite: code_graph
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
+      "neighbors": {"node": "d", "direction": "both"},
+      "limit": 200
+    }
+
+nb_definition_calls_outgoing:
+  desc: "Definition outgoing CALLS: direct callees."
+  category: neighbors
+  suite: code_graph
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
+      "neighbors": {"node": "d", "direction": "outgoing", "rel_types": ["CALLS"]},
+      "limit": 200
+    }
+
+nb_definition_callers_incoming:
+  desc: "Definition incoming CALLS: direct callers (find-usages shape)."
+  category: neighbors
+  suite: code_graph
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "d", "entity": "Definition", "node_ids": "$sample:5"},
+      "neighbors": {"node": "d", "direction": "incoming", "rel_types": ["CALLS"]},
+      "limit": 200
+    }
+
+nb_merge_request_both:
+  desc: "MergeRequest center, both directions."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "mr", "entity": "MergeRequest", "node_ids": "$sample:5"},
+      "neighbors": {"node": "mr", "direction": "both"},
+      "limit": 200
+    }
+
+nb_work_item_both:
+  desc: "WorkItem center, both directions."
+  category: neighbors
+  suite: neighbors
+  query: |
+    {
+      "query_type": "neighbors",
+      "node": {"id": "wi", "entity": "WorkItem", "node_ids": "$sample:5"},
+      "neighbors": {"node": "wi", "direction": "both"},
+      "limit": 200
+    }

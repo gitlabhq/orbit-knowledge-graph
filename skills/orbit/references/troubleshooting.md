@@ -110,3 +110,24 @@ Full field reference in [`query_language.md`](query_language.md).
 
 If `glab orbit remote status` shows any component unhealthy, retry with
 exponential backoff. If persistent, escalate in the team Slack channel.
+
+## Iteration budget rules
+
+A single user question should resolve in at most 5 query attempts (see
+[`SKILL.md`](../SKILL.md)). The supporting rules:
+
+1. **Each retry must change something material.** Tweaking only `limit` or
+   `columns` does not count as progress; changing `entity`, the relationship
+   type, or a `filter` does.
+2. **Validation errors (HTTP 400) count toward the budget.** Three consecutive
+   validation errors on the same query shape means the shape is wrong — stop,
+   re-read the relevant recipe, and pick a different shape.
+3. **Empty results are not necessarily a failure.** Confirm with the
+   [known-good probe](#empty-result-body) before assuming the query is wrong.
+4. **When you give up, give up loudly.** Tell the user: "Orbit did not return
+   an answer after 5 attempts. The query shapes I tried were: [...]. Suggested
+   next steps: [...]." A clear give-up is more useful than silently inflating a
+   partial result.
+
+Cost grows linearly in attempts, both in CLI shell-out time and in agent
+context. A hard cap is cheaper than an ambiguous answer.

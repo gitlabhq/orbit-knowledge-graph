@@ -10,13 +10,14 @@ title: Orbit Local
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experiment
+- Status: Beta
 
 {{< /details >}}
 
 {{< history >}}
 
 - [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Changed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) to [beta](https://docs.gitlab.com/policy/development_stages_support/#beta) in GitLab 19.1.
 
 {{< /history >}}
 
@@ -43,8 +44,8 @@ GitLab account, no network connection required.
 | Method | Description |
 |---|---|
 | [The Orbit CLI (`orbit`)](access/cli.md) | Run the `orbit` binary directly to index and query |
-| [The GitLab CLI (`glab`)](access/glab.md) | Drive Orbit Local through `glab orbit local` (planned) |
-| [MCP](access/mcp.md) | Expose the local graph to Claude Code, Codex, and other agents |
+| [The GitLab CLI (`glab`)](access/glab.md) | Drive Orbit Local through `glab orbit local` |
+| [MCP](access/mcp.md) | Planned: will expose the local graph to Claude Code, Codex, and other agents |
 
 ## Billing
 
