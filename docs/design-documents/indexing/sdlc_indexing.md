@@ -158,6 +158,7 @@ CREATE TABLE knowledge_graph_enabled_namespaces (
     active BOOLEAN NOT NULL DEFAULT FALSE,
     last_indexed_at TIMESTAMP NULL,
     _siphon_replicated_at TIMESTAMP NULL,
+    _siphon_watermark TIMESTAMP NULL,
     _siphon_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     ...
 );
@@ -287,11 +288,11 @@ SELECT
     state,
     title,
     traversal_path,
-    _siphon_replicated_at AS _version,
+    _siphon_watermark AS _version,
     _siphon_deleted AS _deleted
 FROM sdlc.issues
-WHERE _siphon_replicated_at > {last_watermark:String}
-  AND _siphon_replicated_at <= {watermark:String}
+WHERE _siphon_watermark > {last_watermark:String}
+  AND _siphon_watermark <= {watermark:String}
   AND traversal_path LIKE {traversal_path:String}
   AND ((traversal_path > {cursor_0:String})
        OR (traversal_path = {cursor_0:String} AND id > {cursor_1:Int64}))

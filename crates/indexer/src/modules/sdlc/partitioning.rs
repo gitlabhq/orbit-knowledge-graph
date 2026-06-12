@@ -465,7 +465,7 @@ mod tests {
                     columns: vec![ExtractColumn::Bare("id".to_string())],
                     source: ExtractSource::Table("siphon_users".to_string()),
                     base_table: "siphon_users".to_string(),
-                    watermark: "_siphon_replicated_at".to_string(),
+                    watermark: "_siphon_watermark".to_string(),
                     deleted: "_siphon_deleted".to_string(),
                     order_by: vec!["id".to_string()],
                     namespaced: false,

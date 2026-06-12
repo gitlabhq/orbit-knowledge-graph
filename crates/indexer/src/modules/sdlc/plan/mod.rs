@@ -365,14 +365,14 @@ mod tests {
         Plan {
             name: "Test".to_string(),
             extract_template: format!(
-                "SELECT id, name, _siphon_replicated_at AS _version, \
+                "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \
                  ORDER BY {sort_key_sql} \
                  LIMIT {{{{batch_size}}}}"
             ),
-            watermark_column: "_siphon_replicated_at".to_string(),
+            watermark_column: "_siphon_watermark".to_string(),
             sort_key,
             batch_size,
             transform: TransformSpec::DataFusion(vec![]),
@@ -546,11 +546,11 @@ mod tests {
         });
         let sql = prepared.to_sql();
         assert!(
-            sql.contains("_siphon_replicated_at > {last_watermark:String}"),
+            sql.contains("_siphon_watermark > {last_watermark:String}"),
             "sql: {sql}"
         );
         assert!(
-            sql.contains("_siphon_replicated_at <= {watermark:String}"),
+            sql.contains("_siphon_watermark <= {watermark:String}"),
             "sql: {sql}"
         );
         let params = prepared.params();
@@ -609,6 +609,6 @@ mod tests {
         // Both filter conditions appear, wrapped in parens and AND-joined.
         assert!(sql.contains(" AND ("), "sql: {sql}");
         assert!(sql.contains("startsWith(traversal_path,"), "sql: {sql}");
-        assert!(sql.contains("_siphon_replicated_at >"), "sql: {sql}");
+        assert!(sql.contains("_siphon_watermark >"), "sql: {sql}");
     }
 }

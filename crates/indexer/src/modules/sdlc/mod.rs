@@ -214,6 +214,6 @@ mod tests {
             "enrichment CTE must prune by traversal_path: {template}"
         );
         assert!(template.contains("ORDER BY traversal_path, id"));
-        assert_eq!(system_note.watermark_column, "sn._siphon_replicated_at");
+        assert_eq!(system_note.watermark_column, "sn._siphon_watermark");
     }
 }

@@ -323,7 +323,7 @@ settings:
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
   etl:
-    default_watermark: _siphon_replicated_at
+    default_watermark: _siphon_watermark
     default_deleted: _siphon_deleted
     default_etl_order_by: [traversal_path, id]
 

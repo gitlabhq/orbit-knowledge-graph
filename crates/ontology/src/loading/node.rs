@@ -1223,7 +1223,7 @@ mod tests {
               type: query
               scope: namespaced
               source: source_table
-              select: "argMax(col, _siphon_replicated_at) AS col"
+              select: "argMax(col, _siphon_watermark) AS col"
               from: source_table
             "#,
         );
@@ -1261,7 +1261,7 @@ mod tests {
         )
         .expect("placeholder should be accepted");
         let etl = node.etl.unwrap();
-        assert_eq!(etl.watermark(), "t._siphon_replicated_at");
+        assert_eq!(etl.watermark(), "t._siphon_watermark");
     }
 
     #[test]
@@ -1288,7 +1288,7 @@ mod tests {
             panic!("expected Query");
         };
         assert!(
-            from.contains("_siphon_replicated_at"),
+            from.contains("_siphon_watermark"),
             "placeholder should be rendered: {from}"
         );
         assert!(
@@ -1413,7 +1413,7 @@ mod tests {
         };
         assert_eq!(
             select,
-            "argMax(_siphon_deleted, _siphon_replicated_at) AS deleted"
+            "argMax(_siphon_deleted, _siphon_watermark) AS deleted"
         );
     }
 
@@ -1446,6 +1446,6 @@ mod tests {
             panic!("expected Query");
         };
         let pj = page_join.expect("page_join should be present");
-        assert_eq!(pj.watermark, "_siphon_replicated_at");
+        assert_eq!(pj.watermark, "_siphon_watermark");
     }
 }

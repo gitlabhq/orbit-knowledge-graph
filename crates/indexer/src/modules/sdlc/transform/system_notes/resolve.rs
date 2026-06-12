@@ -405,7 +405,7 @@ mod tests {
         ] {
             assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
             assert!(
-                sql.contains("argMax(_siphon_deleted, _siphon_replicated_at)"),
+                sql.contains("argMax(_siphon_deleted, _siphon_watermark)"),
                 "missing latest-version _siphon_deleted in: {sql}"
             );
             assert!(
@@ -414,7 +414,7 @@ mod tests {
             );
         }
         assert!(
-            ROUTES_SQL.contains("argMax(traversal_path, _siphon_replicated_at)"),
+            ROUTES_SQL.contains("argMax(traversal_path, _siphon_watermark)"),
             "routes must take the latest traversal_path so a stale 0/ can't win"
         );
     }
