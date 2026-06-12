@@ -58,6 +58,24 @@ There are two intended ways to interact with the graph engine:
 1. Intermediate JSON tools (MCP/HTTP): existing JSON schemas describe graph intents (`traversal`, `neighbors`, `path_finding`, `aggregation`). The server validates input and compiles to parameterized SQL.
 2. Cypher reader (optional): Cypher to SQL translation à la ClickGraph for teams that prefer property‑graph syntax or need Neo4j driver compatibility.
 
+### Compiler pass pipeline
+
+The query compiler transforms a JSON DSL input into parameterized ClickHouse SQL through an ordered pipeline of passes. The canonical pass order is defined in `crates/query-engine/compiler/src/config.rs` (the `clickhouse` pipeline):
+
+| # | Pass | Responsibility |
+|---|---|---|
+| 1 | `validate` | Schema and cross-reference validation of the JSON input against the ontology |
+| 2 | `normalize` | Resolves entity names to table names, coerces filter types, and expands wildcard columns |
+| 3 | `restrict` | Strips `admin_only` fields and validates user-supplied `traversal_path` filters against the JWT-granted scope ([Security](../security.md)) |
+| 4 | `plan` | Translates validated input into a query plan (hop chain, join strategy, FK shape) |
+| 5 | `lower` | Emits the SQL AST from the query plan (edge-chain-first, nodes lazy) |
+| 6 | `enforce` | Injects ID and type columns required for redaction; builds the result context |
+| 7 | `security` | Injects `startsWith(traversal_path, ?)` predicates on all node-table scans, with per-entity role scoping ([Security](../security.md)) |
+| 8 | `check` | Verifies every node-table alias carries a valid `startsWith` predicate traceable to the `SecurityContext` ([Security](../security.md)) |
+| 9 | `hydrate_plan` | Builds the hydration plan for fetching entity properties after the base query |
+| 10 | `settings` | Resolves ClickHouse query-level settings (timeouts, memory limits, cache) for the query type |
+| 11 | `codegen` | Serializes the AST into parameterized ClickHouse SQL |
+
 The planner emits ClickHouse SQL similar to these patterns:
 
 - One‑hop neighbors: equality filter on the edge table’s leading keys, `WHERE organization_id = ? AND branch = ? AND src_id IN (...)` (for code) or `WHERE organization_id = ? AND startsWith(traversal_path, ?) AND src_id IN (...)` (for SDLC), producing O(degree) scans per source.
