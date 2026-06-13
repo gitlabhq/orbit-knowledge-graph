@@ -1,6 +1,6 @@
-name: "Python: Dataclass field references"
+name: "Python: dataclass field references"
 fixtures:
-  - path: test.py
+  - path: main.py
     content: |
       from dataclasses import dataclass
 
@@ -8,13 +8,21 @@ fixtures:
       class User:
           email: str
 
+      @dataclass
+      class Audit:
+          email: str
+
       def greet(u: User):
           print(u.email)
 
 tests:
-  - name: "Field access creates a reference to the field definition"
+  - name: "typed dataclass attribute access resolves to the field definition"
     query: |
-      MATCH (caller:Definition)-[r:DefinitionToDefinition]->(target:Definition)
-      WHERE caller.name = 'greet' AND target.name = 'email' AND r.edge_kind IN ['Calls', 'References']
-      RETURN target.name AS name
-    assert: []
+      MATCH (caller:Definition)-[r:DefinitionToDefinition]->(field:Definition)
+      WHERE caller.fqn = 'main.greet'
+        AND field.name = 'email'
+        AND r.edge_kind IN ['Calls', 'References']
+      RETURN field.fqn AS field, r.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { field: "main.User.email", kind: "Calls" } }
