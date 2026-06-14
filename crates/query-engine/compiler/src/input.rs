@@ -510,6 +510,8 @@ pub enum FilterOp {
     AllTokens,
     /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
     AnyTokens,
+    /// Fuzzy string matching via ClickHouse `ngramDistanceCaseInsensitive`.
+    FuzzyMatch,
 }
 
 fn deserialize_filters<'de, D>(

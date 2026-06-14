@@ -65,6 +65,14 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
             "hasAnyTokens",
             vec![col, Expr::param(ChType::String, str_val())],
         ),
+        Some(FilterOp::FuzzyMatch) => Expr::binary(
+            Op::Lt,
+            Expr::func(
+                "ngramDistanceCaseInsensitive",
+                vec![col, Expr::param(ChType::String, str_val())],
+            ),
+            Expr::param(ChType::Float64, serde_json::Value::from(0.3)),
+        ),
     }
 }
 
