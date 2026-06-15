@@ -1,0 +1,143 @@
+name: "C# enums — members, explicit values, typed base, [Flags] enum"
+
+# Coverage note: csharp.rs maps enum_declaration to definition_type "Enum"
+# (scope("enum_declaration", "Enum")) and enum_member_declaration to "EnumMember"
+# (scope("enum_member_declaration", "EnumMember").no_scope()). csharp/edge_cases.yaml
+# touches a single EnumMember; there was no focused fixture for enum extraction,
+# enum members under a namespace, a byte-typed enum, or a [Flags] enum.
+
+fixtures:
+  - path: Models/Status.cs
+    content: |
+      namespace Models
+      {
+          public enum Status
+          {
+              Pending,
+              Active,
+              Closed
+          }
+      }
+
+  - path: Models/Priority.cs
+    content: |
+      namespace Models
+      {
+          public enum Priority : byte
+          {
+              Low = 1,
+              Medium = 2,
+              High = 3
+          }
+      }
+
+  - path: Models/Permissions.cs
+    content: |
+      using System;
+
+      namespace Models
+      {
+          [Flags]
+          public enum Permissions
+          {
+              None = 0,
+              Read = 1,
+              Write = 2,
+              Execute = 4
+          }
+      }
+
+tests:
+  - name: "Enum Status is extracted as definition_type Enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Models.Status'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Status", type: "Enum" } }
+
+  - name: "byte-typed enum Priority is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Models.Priority'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Enum" } }
+
+  - name: "[Flags] enum Permissions is extracted"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Models.Permissions'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Enum" } }
+
+  - name: "Members of Status are extracted as EnumMember definitions"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      WHERE e.fqn = 'Models.Status'
+        AND m.definition_type = 'EnumMember'
+        AND edge.edge_kind = 'Defines'
+      RETURN m.name AS name
+      ORDER BY m.name
+    assert:
+      - { row_count: 3 }
+      - { unique: name }
+      - { row: { name: "Active" } }
+      - { row: { name: "Closed" } }
+      - { row: { name: "Pending" } }
+
+  - name: "Explicitly-valued members of Priority are extracted as EnumMember"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      WHERE e.fqn = 'Models.Priority'
+        AND m.definition_type = 'EnumMember'
+        AND edge.edge_kind = 'Defines'
+      RETURN m.name AS name
+      ORDER BY m.name
+    assert:
+      - { row_count: 3 }
+      - { unique: name }
+      - { row: { name: "High" } }
+      - { row: { name: "Low" } }
+      - { row: { name: "Medium" } }
+
+  - name: "Members of [Flags] enum Permissions are extracted as EnumMember"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      WHERE e.fqn = 'Models.Permissions'
+        AND m.definition_type = 'EnumMember'
+        AND edge.edge_kind = 'Defines'
+      RETURN m.name AS name
+      ORDER BY m.name
+    assert:
+      - { row_count: 4 }
+      - { unique: name }
+      - { row: { name: "Execute" } }
+      - { row: { name: "None" } }
+      - { row: { name: "Read" } }
+      - { row: { name: "Write" } }
+
+  - name: "Enum defines its member via a Defines edge"
+    query: |
+      MATCH (e:Definition)-[edge:DefinitionToDefinition]->(m:Definition)
+      WHERE e.fqn = 'Models.Status'
+        AND m.definition_type = 'EnumMember'
+        AND m.name = 'Active'
+        AND edge.edge_kind = 'Defines'
+      RETURN m.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines the enum"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'Models/Status.cs'
+        AND d.fqn = 'Models.Status'
+        AND e.edge_kind = 'Defines'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
