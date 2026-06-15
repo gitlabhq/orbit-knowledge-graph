@@ -33,9 +33,9 @@ expect:
     - kind: MENTIONS
       count: 3
       rows:
-        - { source_id: 1000, target_id: 10, target_kind: MergeRequest }
-        - { source_id: 1000, target_id: 20, target_kind: WorkItem }
-        - { source_id: 1000, target_id: 30, target_kind: MergeRequest, traversal_path: "1/100/400/" }
+        - { source_id: 1000, source_kind: MergeRequest, target_id: 10, target_kind: MergeRequest }
+        - { source_id: 1000, source_kind: MergeRequest, target_id: 20, target_kind: WorkItem }
+        - { source_id: 1000, source_kind: MergeRequest, target_id: 30, target_kind: MergeRequest, traversal_path: "1/100/400/" }
     - kind: REOPENED
       count: 1
       rows:

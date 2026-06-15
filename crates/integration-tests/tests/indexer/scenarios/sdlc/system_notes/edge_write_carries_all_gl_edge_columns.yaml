@@ -1,0 +1,28 @@
+# Regression: the system-note edge writer once omitted the denormalized
+# `source_tags`/`target_tags` (and `_version`) columns. Strict ClickHouse
+# (input_format_arrow_allow_missing_columns=0, as in production) rejects such an
+# INSERT, so every system-note write failed, the checkpoint never advanced, and
+# the same notes were re-indexed forever. The edge must land for this to pass.
+description: System-note edge write includes every gl_edge column under strict ClickHouse
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  merge_requests:
+    - { id: 10, iid: 5, title: MR 5, target_project_id: 200, source_project_id: 200, author_id: 1, traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: mentioned in !5, noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MENTIONS
+      count: 1
+      rows:
+        - { source_id: 1000, source_kind: MergeRequest, target_id: 10, target_kind: MergeRequest }
+  totals:
+    gl_edge: 1

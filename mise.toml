@@ -150,6 +150,11 @@ run = "cargo nextest run -p integration-tests --retries 0 -E 'test(code_indexing
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (code indexing)"
 
+[tasks."test:integration:indexer:sdlc:scenario"]
+run = "SCENARIO_FILTER='{{arg(name='filter')}}' cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(scenario_indexing)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run SDLC indexer scenarios matching a folder/name substring, e.g. `mise test:integration:indexer:sdlc:scenario ci/` or `... processes_jobs`"
+
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
 description = "Clean the crates"

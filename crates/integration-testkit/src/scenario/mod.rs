@@ -33,6 +33,10 @@ pub trait ScenarioHandlers: Send + Sync {
 /// Discover and run every scenario under `root` as a concurrent subtest
 /// with its own forked database. Pass an absolute path, e.g.
 /// `concat!(env!("CARGO_MANIFEST_DIR"), "/tests/indexer/scenarios/sdlc")`.
+///
+/// Set `SCENARIO_FILTER` to a substring to run only matching scenarios
+/// (matched against the `<dir>/<relative path>` name, so it selects by
+/// folder, e.g. `ci/`, or by name, e.g. `processes_jobs`).
 pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHandlers>) {
     let root = Path::new(root);
     let mut files = Vec::new();
@@ -43,6 +47,18 @@ pub async fn run_dir(ctx: &TestContext, root: &str, handlers: Arc<dyn ScenarioHa
         "no scenario files found under {}",
         root.display()
     );
+
+    if let Ok(filter) = std::env::var("SCENARIO_FILTER") {
+        let filter = filter.trim();
+        if !filter.is_empty() {
+            files.retain(|file| scenario_name(root, file).contains(filter));
+            assert!(
+                !files.is_empty(),
+                "SCENARIO_FILTER='{filter}' matched no scenarios under {}",
+                root.display()
+            );
+        }
+    }
 
     assert_distinct_database_names(root, &files);
 
