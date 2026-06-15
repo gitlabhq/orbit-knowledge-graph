@@ -555,13 +555,13 @@ mod tests {
             _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             self.queries.lock().unwrap().push(params.clone());
-            if sql == &*ROUTES_SQL {
+            if sql == *ROUTES_SQL {
                 route_batch_from_params(&params).map(|batch| vec![batch])
-            } else if sql == &*PROJECT_PATHS_SQL {
+            } else if sql == *PROJECT_PATHS_SQL {
                 project_paths_batch_from_params(&params).map(|batch| vec![batch])
-            } else if sql == &*MERGE_REQUESTS_SQL {
+            } else if sql == *MERGE_REQUESTS_SQL {
                 entity_batch_from_params(&params, "target_project_id").map(|batch| vec![batch])
-            } else if sql == &*WORK_ITEMS_SQL {
+            } else if sql == *WORK_ITEMS_SQL {
                 entity_batch_from_params(&params, "project_id").map(|batch| vec![batch])
             } else {
                 Ok(Vec::new())
