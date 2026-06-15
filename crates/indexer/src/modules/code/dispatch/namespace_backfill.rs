@@ -38,6 +38,7 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
+/// Enabled namespace ID + traversal path pairs from the datalake.
 static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(

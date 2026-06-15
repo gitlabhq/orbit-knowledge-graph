@@ -54,6 +54,7 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
+/// Count enabled namespaces from the datalake.
 static COUNT_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
@@ -63,6 +64,7 @@ static COUNT_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+/// Count code-eligible projects: projects belonging to any enabled namespace.
 static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
@@ -74,6 +76,7 @@ static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
+/// Fetch enabled namespaces' traversal paths for cross-DB parameter bridging.
 static FETCH_ENABLED_TRAVERSAL_PATHS: LazyLock<String> = LazyLock::new(|| {
     let del = ontology::siphon_deleted_column();
     format!(
