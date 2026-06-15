@@ -15,3 +15,7 @@
 
 [Architecture] @gitlab-org/orbit/team
 /docs/design-documents/decisions/
+
+## Localization
+/docs-locale/ @gitlab-com/localization/maintainers/tech-docs
+/docs-locale/ja-jp/ @gitlab-com/localization/maintainers/tech-docs @gitlab-com/localization/maintainers/japanese
