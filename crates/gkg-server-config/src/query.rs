@@ -390,10 +390,16 @@ mod tests {
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 3);
-        assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
-        assert_eq!(settings[1], ("query_cache_ttl".into(), "60".into()));
-        assert_eq!(settings[2], ("use_query_cache".into(), "1".into()));
+        assert_eq!(settings.len(), 6);
+        assert_eq!(settings[0], ("max_ast_depth".into(), "10000".into()));
+        assert_eq!(settings[1], ("max_ast_elements".into(), "1000000".into()));
+        assert_eq!(
+            settings[2],
+            ("max_expanded_ast_elements".into(), "10000000".into())
+        );
+        assert_eq!(settings[3], ("max_execution_time".into(), "30".into()));
+        assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
+        assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
         Ok(())
     }
 
