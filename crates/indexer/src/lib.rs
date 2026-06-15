@@ -178,7 +178,7 @@ pub async fn run(
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
         info!("initializing Code handlers");
-        modules::code::register_handlers(&registry, config, &ontology, analytics.clone())?;
+        modules::code::register_handlers(&registry, config, &ontology, analytics.clone()).await?;
     } else {
         info!("Code handlers disabled by engine.modules");
     }

@@ -74,6 +74,16 @@ impl LocalRepositoryCache {
         std::env::temp_dir().join(CACHE_DIR_NAME)
     }
 
+    pub async fn purge_all(&self) -> Result<(), RepositoryCacheError> {
+        match tokio::fs::remove_dir_all(&self.base_dir).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        tokio::fs::create_dir_all(&self.base_dir).await?;
+        Ok(())
+    }
+
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
         self.base_dir
             .join(project_id.to_string())
@@ -242,6 +252,44 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(content, "new content");
+    }
+
+    #[tokio::test]
+    async fn purge_all_clears_all_cached_repositories() {
+        let (dir, cache) = create_cache();
+        let archive = build_tar_gz(&[("file.rs", b"content")]);
+
+        let path_1 = cache
+            .extract_archive(1, "main", archive_stream(archive.clone()))
+            .await
+            .unwrap();
+        let path_2 = cache
+            .extract_archive(2, "develop", archive_stream(archive))
+            .await
+            .unwrap();
+        assert!(path_1.exists());
+        assert!(path_2.exists());
+
+        cache.purge_all().await.unwrap();
+
+        assert!(!path_1.exists());
+        assert!(!path_2.exists());
+        let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+        assert!(
+            entries.next_entry().await.unwrap().is_none(),
+            "scratch base dir must be empty after purge"
+        );
+    }
+
+    #[tokio::test]
+    async fn purge_all_recreates_missing_base_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let base = temp_dir.path().join("not-yet-created");
+        let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, CodeMetrics::default());
+
+        cache.purge_all().await.unwrap();
+
+        assert!(base.exists());
     }
 
     #[tokio::test]
