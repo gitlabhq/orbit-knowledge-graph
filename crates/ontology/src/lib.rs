@@ -38,7 +38,9 @@ pub use entities::{
     StatisticsExclude, StorageColumn, StorageIndex, StorageProjection, TraversalPathKind,
     TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
-pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use etl::{
+    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, is_full_query,
+};
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -3112,12 +3114,12 @@ properties:
         let reviewer = &mr_etl.edges()["reviewers"];
         assert_eq!(reviewer[0].relationship_kind, "REVIEWER");
         assert_eq!(reviewer[0].array_field.as_deref(), Some("user_id"));
-        let crate::etl::EtlConfig::Query { select, .. } = mr_etl else {
+        let crate::etl::EtlConfig::Query { from, .. } = mr_etl else {
             panic!("MergeRequest should be a query ETL");
         };
         assert!(
-            select.split(", ").any(|c| c == "reviewers"),
-            "edge-feed array column must be appended to the select: {select}"
+            from.contains("AS reviewers"),
+            "edge-feed array column must be emitted by the full query: {from}"
         );
 
         let note_etl = o.get_node("Note").unwrap().etl.as_ref().unwrap();

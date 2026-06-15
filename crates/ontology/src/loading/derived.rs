@@ -44,14 +44,11 @@ impl DerivedYaml {
             }
         };
 
-        let columns = self
-            .etl
-            .columns()
-            .map(<[String]>::to_vec)
-            .unwrap_or_default();
+        // A derived entity's `query:` file is verbatim and owns its SELECT, so
+        // the loader synthesizes no column list.
         let etl = self
             .etl
-            .into_config(&name, etl_settings, reader, yaml_dir, &columns)?;
+            .into_config(&name, etl_settings, reader, yaml_dir, &[])?;
 
         Ok(DerivedEntity {
             name,

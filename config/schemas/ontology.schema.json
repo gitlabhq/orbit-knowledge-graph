@@ -299,23 +299,12 @@
         "query": {
           "type": "string",
           "pattern": "^[a-z0-9_]+\\.sql$",
-          "description": "Relative path to a complete SELECT statement. Must emit every property source column plus {{watermark_column}} and {{deleted_column}} aliased under those names; hardcoding the configured column names is rejected at load time."
+          "description": "Relative path to the COMPLETE extract query, used verbatim. The file owns its own paging: it must emit every property source column plus the {{watermark_column}}/{{deleted_column}} placeholders aliased to the _version/_deleted output columns, the {traversal_path:String} filter for namespaced entities, the {{filters}} marker, ORDER BY matching the entity's order_by, and LIMIT {{batch_size}}. Hardcoding the configured watermark/deleted column names is rejected at load time."
         },
         "transform": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$",
           "description": "Rust transform that consumes the extract. Only valid on derived entities."
-        },
-        "columns": {
-          "type": "array",
-          "description": "Output columns of `query`. Only valid on derived entities, which have no property list to infer them from.",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1
-        },
-        "page_join": {
-          "$ref": "#/definitions/pageJoin"
         }
       },
       "required": [
@@ -1553,44 +1542,6 @@
       },
       "required": [
         "transform"
-      ],
-      "additionalProperties": false
-    },
-    "pageJoin": {
-      "type": "object",
-      "description": "Engine-owned enrichment joined below the page LIMIT, via `fk_column IN (SELECT id FROM _batch)`. A plain join in the query file would build the join table namespace-wide per batch (#830).",
-      "properties": {
-        "table": {
-          "type": "string"
-        },
-        "alias": {
-          "type": "string"
-        },
-        "fk_column": {
-          "type": "string",
-          "description": "FK on the joined table referencing the base table's id."
-        },
-        "select": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1
-        },
-        "where": {
-          "type": "string",
-          "description": "Extra predicate on the joined table; supports {{deleted_column}}/{{watermark_column}}."
-        },
-        "traversal_path_column": {
-          "type": "string",
-          "description": "traversal_path column on the joined table, used as a pruning hint."
-        }
-      },
-      "required": [
-        "table",
-        "alias",
-        "fk_column",
-        "select"
       ],
       "additionalProperties": false
     }

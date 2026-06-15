@@ -39,21 +39,20 @@ properties:
 #     scope: namespaced
 #     query: project.sql
 #
-# The query file contract:
-#   - emits every declared property's source column, plus
-#     {{watermark_column}} and {{deleted_column}} aliased under those names
-#   - may use the engine parameters {traversal_path:String},
-#     {last_watermark:String}, {watermark:String}
-#   - must use the {{watermark_column}} / {{deleted_column}} placeholders;
+# The query file is the COMPLETE extract, run verbatim — it owns its own
+# paging rather than being wrapped. It must:
+#   - SELECT every declared property's source column, plus
+#     {{watermark_column}} / {{deleted_column}} aliased to the _version /
+#     _deleted output columns
+#   - drive paging itself: the {{filters}} and {{batch_size}} markers, an
+#     ORDER BY matching order_by, and (for namespaced entities) a
+#     startsWith(traversal_path, {traversal_path:String}) filter
+#   - use the {{watermark_column}} / {{deleted_column}} placeholders;
 #     hardcoding the configured column names is rejected at load time so a
 #     rename stays a one-line schema.yaml change
-#   - the engine wraps the statement for traversal scoping, watermark
-#     windowing, and keyset pagination
 #
 # Derived entities (config/ontology/derived/) additionally set:
 #   transform: <rust transform name>
-#   columns: [..]                   # query output columns; derived entities
-#                                   # have no properties to infer them from
 #   emits: [KINDS]                  # relationship kinds the transform writes
 #
 # Edges are NOT declared on nodes. Every producer of a relationship lives in

@@ -9,38 +9,19 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
+/// A `query:` file is the complete extract, run verbatim — it drives its own
+/// paging via these runtime markers (substituted per batch by the indexer)
+/// rather than being wrapped. The loader requires both; the indexer keys the
+/// verbatim-vs-wrapped decision off them.
+pub fn is_full_query(sql: &str) -> bool {
+    sql.contains("{{filters}}") && sql.contains("{{batch_size}}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EtlScope {
     Global,
     Namespaced,
-}
-
-/// A secondary table joined to the page after `LIMIT`, so ClickHouse never
-/// builds a hash table over the entire secondary table. The lowering wraps
-/// the base query in a `_batch` CTE and enriches via
-/// `fk_column IN (SELECT id FROM _batch)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PageJoin {
-    /// Datalake table to join (e.g. `siphon_system_note_metadata`).
-    pub table: String,
-    /// Table alias (e.g. `snm`).
-    pub alias: String,
-    /// FK column on the joined table that references the base table's `id`
-    /// (e.g. `note_id`).
-    pub fk_column: String,
-    /// Columns to select from the joined table (e.g. `["action"]`).
-    pub select: Vec<String>,
-    /// Extra WHERE predicate on the joined table (e.g. `{{deleted_column}} = false`).
-    pub where_clause: Option<String>,
-    /// Watermark column for `argMax` deduplication. Always filled by the
-    /// ontology loader; defaults to the ontology's `default_watermark`.
-    pub watermark: String,
-    /// `traversal_path` column on the joined table. When set on a namespaced
-    /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
-    /// prune by the joined table's leading PK column. A superset of the matched
-    /// rows; correctness still comes from the `IN (_batch)` bound.
-    pub traversal_path_column: Option<String>,
 }
 
 /// Direction of an edge relative to the node defining the FK column.
@@ -99,15 +80,6 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         traversal_path_filter: Option<String>,
-        /// Alias of the main table in the `from` JOIN expression.
-        /// Used to qualify bare column references (e.g. `id`) that would
-        /// otherwise be ambiguous across JOINed tables.
-        table_alias: Option<String>,
-        /// Join pushed below the page `LIMIT` to avoid materializing the
-        /// full joined table in ClickHouse's hash-join build phase.
-        /// When set, the lowering wraps the base query in a `_batch` CTE
-        /// and enriches via `fk IN (SELECT id FROM _batch)`.
-        page_join: Option<Box<PageJoin>>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -140,22 +112,6 @@ impl EtlConfig {
         match self {
             EtlConfig::Table { watermark, .. } => watermark.as_str(),
             EtlConfig::Query { watermark, .. } => watermark.as_str(),
-        }
-    }
-
-    /// Returns the main table alias for Query-type ETLs, if set.
-    /// Table-type ETLs always return `None` (single table, no ambiguity).
-    pub fn table_alias(&self) -> Option<&str> {
-        match self {
-            EtlConfig::Table { .. } => None,
-            EtlConfig::Query { table_alias, .. } => table_alias.as_deref(),
-        }
-    }
-
-    pub fn page_join(&self) -> Option<&PageJoin> {
-        match self {
-            EtlConfig::Table { .. } => None,
-            EtlConfig::Query { page_join, .. } => page_join.as_deref(),
         }
     }
 
@@ -247,8 +203,6 @@ mod tests {
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
-            table_alias: None,
-            page_join: None,
             edges: BTreeMap::new(),
         }
     }

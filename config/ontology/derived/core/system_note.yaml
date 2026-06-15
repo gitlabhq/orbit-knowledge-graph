@@ -10,15 +10,4 @@ etl:
   scope: namespaced
   transform: system_notes
   order_by: [traversal_path, id]
-  columns: [id, note, noteable_id, noteable_type, author_id, project_id, created_at, traversal_path]
   query: system_note.sql
-  # Joined below the page LIMIT; inlining this in system_note.sql would scan
-  # the metadata table namespace-wide per batch (#830).
-  page_join:
-    table: siphon_system_note_metadata
-    alias: snm
-    fk_column: note_id
-    select: [action]
-    where: "snm.{{deleted_column}} = false"
-    # Sorted by (traversal_path, id), so this prunes by the leading PK column.
-    traversal_path_column: traversal_path

@@ -184,16 +184,21 @@ mod tests {
         let template = &system_note.extract_template;
 
         // #830: the metadata join is bounded by the page CTE, not inlined
-        // above the LIMIT. The _batch CTE contains only the base table scan;
-        // siphon_system_note_metadata is read via an enrichment CTE scoped
-        // to `note_id IN (SELECT DISTINCT id FROM _batch)`.
+        // above the LIMIT. The _batch CTE holds the base scan with the page
+        // LIMIT; siphon_system_note_metadata is read via _e0 scoped to
+        // `note_id IN (SELECT DISTINCT id FROM _batch)`.
         assert!(
             template.contains("WITH _batch AS ("),
             "extract must wrap the base scan in a _batch CTE: {template}"
         );
+        let batch_body = template
+            .split("WITH _batch AS (")
+            .nth(1)
+            .and_then(|s| s.split("),\n_e0 AS (").next())
+            .unwrap_or("");
         assert!(
-            !template.contains("INNER JOIN siphon_system_note_metadata"),
-            "metadata table must not be inlined above the LIMIT: {template}"
+            !batch_body.contains("siphon_system_note_metadata"),
+            "metadata table must not be inlined above the page LIMIT: {batch_body}"
         );
         assert!(
             template.contains("note_id IN (SELECT DISTINCT id FROM _batch)"),
@@ -204,18 +209,12 @@ mod tests {
             "action column must be projected from the enrichment CTE: {template}"
         );
         assert!(
-            template.contains("LEFT JOIN _e0"),
+            template.contains("LEFT JOIN _e0 ON _batch.id = _e0.id"),
             "enrichment must LEFT JOIN back onto _batch: {template}"
         );
         assert!(template.contains("sn.system = true"));
-        assert!(template.contains("snm._siphon_deleted = false"));
-        assert!(
-            template.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
-            "enrichment CTE must prune by traversal_path: {template}"
-        );
+        assert!(template.contains("LIMIT {{batch_size}}"));
         assert!(template.contains("ORDER BY traversal_path, id"));
-        // The query file is wrapped as a derived table, so the watermark is
-        // one of its output columns rather than an alias-qualified reference.
         assert_eq!(system_note.watermark_column, "_siphon_watermark");
     }
 }

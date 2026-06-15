@@ -9,7 +9,7 @@ use crate::entities::{
     RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
     VirtualSource,
 };
-use crate::etl::{DEFAULT_TRANSFORM, EtlConfig, EtlScope};
+use crate::etl::{DEFAULT_TRANSFORM, EtlConfig, EtlScope, is_full_query};
 
 use super::{EtlSettings, ReadOntologyFile};
 
@@ -60,43 +60,19 @@ pub(crate) struct EtlYaml {
     /// Plain WHERE on the base table; the only SQL string allowed in YAML.
     #[serde(default)]
     filter: Option<String>,
-    /// Sibling .sql file emitting the property source columns plus the
-    /// watermark/deleted columns; the engine wraps it for scope/window/page.
+    /// Sibling .sql file holding the COMPLETE extract, used verbatim. It owns
+    /// its own paging via the `{{filters}}`/`{{batch_size}}` markers and emits
+    /// the `_version`/`_deleted` output columns itself.
     #[serde(default)]
     query: Option<String>,
     /// Rust transform name; derived entities only.
     #[serde(default)]
     transform: Option<String>,
-    /// Output columns of `query`; derived entities only (no properties to
-    /// infer them from).
-    #[serde(default)]
-    columns: Option<Vec<String>>,
-    /// Engine-owned enrichment joined below the page LIMIT (#830: a plain
-    /// join in `query` would build the join table per batch, namespace-wide).
-    #[serde(default)]
-    page_join: Option<Box<PageJoinYaml>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct PageJoinYaml {
-    table: String,
-    alias: String,
-    fk_column: String,
-    select: Vec<String>,
-    #[serde(default, rename = "where")]
-    where_clause: Option<String>,
-    #[serde(default)]
-    traversal_path_column: Option<String>,
 }
 
 impl EtlYaml {
     pub(crate) fn transform(&self) -> Option<&str> {
         self.transform.as_deref()
-    }
-
-    pub(crate) fn columns(&self) -> Option<&[String]> {
-        self.columns.as_deref()
     }
 }
 
@@ -391,12 +367,6 @@ impl NodeYaml {
             }
             _ => {}
         }
-        if self.etl.as_ref().is_some_and(|e| e.columns().is_some()) {
-            return Err(OntologyError::Validation(format!(
-                "node '{name}' sets etl.columns; output columns are inferred from properties \
-                 (etl.columns is only for derived entities)"
-            )));
-        }
 
         let source_columns: Vec<String> = fields
             .iter()
@@ -443,7 +413,9 @@ impl NodeYaml {
 
 impl EtlYaml {
     /// Lowers the surface onto [`EtlConfig`]: bare → `Table`, `filter` →
-    /// synthesized `Query`, `query:` file → `Query` over a derived table.
+    /// synthesized `Query` over the base table, `query:` file → `Query` whose
+    /// `from` is the file's complete verbatim extract (it owns its own
+    /// paging via the `{{filters}}`/`{{batch_size}}` markers).
     pub(crate) fn into_config(
         self,
         entity_name: &str,
@@ -455,32 +427,20 @@ impl EtlYaml {
         let order_by = self
             .order_by
             .unwrap_or_else(|| etl_settings.order_by.clone());
-        let page_join = self
-            .page_join
-            .map(|pj| convert_page_join(entity_name, *pj, etl_settings))
-            .transpose()?
-            .map(Box::new);
 
         match (self.filter, self.query) {
             (Some(_), Some(_)) => Err(OntologyError::Validation(format!(
                 "entity '{entity_name}': 'filter' and 'query' are mutually exclusive; \
                  move the filter into the query file"
             ))),
-            (None, None) => {
-                if page_join.is_some() {
-                    return Err(OntologyError::Validation(format!(
-                        "entity '{entity_name}': 'page_join' requires 'filter' or 'query'"
-                    )));
-                }
-                Ok(EtlConfig::Table {
-                    scope: self.scope,
-                    source: self.source,
-                    watermark: etl_settings.watermark.clone(),
-                    deleted: etl_settings.deleted.clone(),
-                    order_by,
-                    edges: BTreeMap::new(),
-                })
-            }
+            (None, None) => Ok(EtlConfig::Table {
+                scope: self.scope,
+                source: self.source,
+                watermark: etl_settings.watermark.clone(),
+                deleted: etl_settings.deleted.clone(),
+                order_by,
+                edges: BTreeMap::new(),
+            }),
             (Some(filter), None) => {
                 let filter = render_etl_placeholders(
                     entity_name,
@@ -500,8 +460,6 @@ impl EtlYaml {
                     deleted: etl_settings.deleted.clone(),
                     order_by,
                     traversal_path_filter: None,
-                    table_alias: None,
-                    page_join,
                     edges: BTreeMap::new(),
                 })
             }
@@ -525,52 +483,28 @@ impl EtlYaml {
                     &etl_settings.watermark,
                     &etl_settings.deleted,
                 )?;
-                let select = synthesized_select(entity_name, select_columns)?;
+                if !is_full_query(&sql) {
+                    return Err(OntologyError::Validation(format!(
+                        "entity '{entity_name}': query file '{path}' must be a complete \
+                         extract that drives its own paging with the {{{{filters}}}} and \
+                         {{{{batch_size}}}} markers"
+                    )));
+                }
                 Ok(EtlConfig::Query {
                     scope: self.scope,
                     source: self.source,
-                    select,
-                    from: format!("(\n{sql}\n) AS src"),
+                    select: String::new(),
+                    from: sql,
                     where_clause: None,
                     watermark: etl_settings.watermark.clone(),
                     deleted: etl_settings.deleted.clone(),
                     order_by,
                     traversal_path_filter: None,
-                    table_alias: None,
-                    page_join,
                     edges: BTreeMap::new(),
                 })
             }
         }
     }
-}
-
-fn convert_page_join(
-    entity_name: &str,
-    pj: PageJoinYaml,
-    etl_settings: &EtlSettings,
-) -> Result<crate::etl::PageJoin, OntologyError> {
-    let where_clause = pj
-        .where_clause
-        .map(|w| {
-            render_etl_placeholders(
-                entity_name,
-                "page_join.where",
-                &w,
-                &etl_settings.watermark,
-                &etl_settings.deleted,
-            )
-        })
-        .transpose()?;
-    Ok(crate::etl::PageJoin {
-        table: pj.table,
-        alias: pj.alias,
-        fk_column: pj.fk_column,
-        select: pj.select,
-        where_clause,
-        watermark: etl_settings.watermark.clone(),
-        traversal_path_column: pj.traversal_path_column,
-    })
 }
 
 /// Substitutes the watermark/deleted placeholders; hardcoded names are
@@ -597,7 +531,12 @@ pub(crate) fn render_etl_placeholders(
     let rendered = raw
         .replace("{{watermark_column}}", watermark)
         .replace("{{deleted_column}}", deleted);
-    if rendered.contains("{{") {
+    // {{filters}}/{{batch_size}} are runtime markers a full query owns; the
+    // indexer substitutes them per batch, so they pass through the loader.
+    let leftover = rendered
+        .replace("{{filters}}", "")
+        .replace("{{batch_size}}", "");
+    if leftover.contains("{{") {
         return Err(OntologyError::Validation(format!(
             "entity '{entity}' field '{field}' contains unresolved placeholder '{{{{..}}}}'",
         )));
@@ -956,7 +895,7 @@ mod tests {
         let etl = node.etl.unwrap();
         assert!(matches!(etl, EtlConfig::Table { .. }));
         assert_eq!(etl.source(), "siphon_test");
-        assert_eq!(etl.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
+        assert_eq!(etl.watermark(), crate::constants::siphon_watermark_column());
         assert_eq!(etl.order_by(), ["id"]);
         assert!(etl.edges().is_empty());
     }
@@ -989,7 +928,9 @@ mod tests {
     }
 
     #[test]
-    fn query_file_wraps_sql_as_derived_table() {
+    fn query_file_used_verbatim_as_full_query() {
+        let full_query =
+            "SELECT 1 AS id, traversal_path {{filters}} ORDER BY id LIMIT {{batch_size}}";
         let node = parse_test_node_with_files(
             &node_yaml(
                 r#"
@@ -999,14 +940,33 @@ mod tests {
           query: test.sql
         "#,
             ),
-            &[("nodes/test/test.sql", "SELECT 1 AS id\n")],
+            &[("nodes/test/test.sql", full_query)],
         )
         .expect("query etl should parse");
-        let EtlConfig::Query { select, from, .. } = node.etl.unwrap() else {
+        let EtlConfig::Query { from, .. } = node.etl.unwrap() else {
             panic!("expected Query");
         };
-        assert_eq!(select, "id, name, traversal_path");
-        assert_eq!(from, "(\nSELECT 1 AS id\n) AS src");
+        assert_eq!(from, full_query);
+    }
+
+    #[test]
+    fn query_file_without_paging_markers_is_rejected() {
+        let err = parse_test_node_with_files(
+            &node_yaml(
+                r#"
+        etl:
+          source: siphon_test
+          scope: namespaced
+          query: test.sql
+        "#,
+            ),
+            &[("nodes/test/test.sql", "SELECT 1 AS id")],
+        )
+        .expect_err("a query file without paging markers should fail");
+        assert!(
+            err.to_string().contains("drives its own paging"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -1036,8 +996,9 @@ mod tests {
             ),
             &[(
                 "nodes/test/test.sql",
-                "SELECT id, t.{{watermark_column}} AS {{watermark_column}}, \
-                 t.{{deleted_column}} AS {{deleted_column}} FROM t",
+                "SELECT id, t.{{watermark_column}} AS _version, \
+                 t.{{deleted_column}} AS _deleted FROM t \
+                 WHERE 1=1 {{filters}} ORDER BY id LIMIT {{batch_size}}",
             )],
         )
         .expect("placeholders in sql file should render");
@@ -1045,12 +1006,16 @@ mod tests {
             panic!("expected Query");
         };
         assert!(
-            from.contains("t._siphon_watermark AS _siphon_watermark"),
+            from.contains("t._siphon_watermark AS _version"),
             "got: {from}"
         );
         assert!(
-            !from.contains("{{"),
-            "placeholders must be resolved: {from}"
+            from.contains("{{filters}}") && from.contains("{{batch_size}}"),
+            "runtime markers must pass through: {from}"
+        );
+        assert!(
+            !from.contains("{{watermark_column}}") && !from.contains("{{deleted_column}}"),
+            "column placeholders must be resolved: {from}"
         );
     }
 
@@ -1113,23 +1078,6 @@ mod tests {
         )
         .expect_err("filter+query should fail");
         assert!(err.to_string().contains("mutually exclusive"), "got: {err}");
-    }
-
-    #[test]
-    fn node_rejects_etl_columns() {
-        let err = parse_test_node(&node_yaml(
-            r#"
-        etl:
-          source: siphon_test
-          scope: namespaced
-          columns: [id]
-        "#,
-        ))
-        .expect_err("columns on a node should fail");
-        assert!(
-            err.to_string().contains("only for derived entities"),
-            "got: {err}"
-        );
     }
 
     #[test]

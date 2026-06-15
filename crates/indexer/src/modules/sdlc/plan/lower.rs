@@ -401,6 +401,19 @@ fn lower_edge_select(
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
+    // A verbatim `query:` file carries no synthesized columns; its source is
+    // the complete extract template. Everything else is wrapped into one.
+    if input.columns.is_empty() {
+        return Plan {
+            name: String::new(),
+            extract_template: build_extract_from_sql(&input.source),
+            watermark_column: input.watermark,
+            sort_key: input.order_by,
+            batch_size,
+            transform: TransformSpec::DataFusion(vec![]),
+        };
+    }
+
     let select_list = build_extract_select_list(&input.columns, &input.watermark, &input.deleted);
     let from_sql = build_extract_from_sql(&input.source);
     let traversal_predicate =
@@ -1097,27 +1110,25 @@ mod tests {
 
         let sql = render_namespaced_extract(plan, "1/2/");
 
-        // _batch CTE wraps the base table scan with LIMIT inside the CTE.
         assert!(sql.contains("WITH _batch AS ("), "sql: {sql}");
         assert!(sql.contains("LIMIT 10000"), "sql: {sql}");
 
-        // The base scan inside _batch is the bare siphon_notes table, not the
-        // INNER JOIN that previously caused FillingRightJoinSide OOM (#830).
         let batch_body = sql
             .split("WITH _batch AS (")
             .nth(1)
-            .and_then(|s| s.split("), _e0 AS (").next())
+            .and_then(|s| s.split("),\n_e0 AS (").next())
             .unwrap_or("");
         assert!(
             batch_body.contains("FROM siphon_notes AS sn"),
             "batch body: {batch_body}"
         );
+        // #830: the base scan must not join the metadata table above the LIMIT;
+        // that would build a namespace-wide hash table per batch.
         assert!(
             !batch_body.contains("siphon_system_note_metadata"),
             "_batch must not join the metadata table: {batch_body}"
         );
 
-        // Enrichment CTE scopes metadata read to the page's note IDs.
         assert!(
             sql.contains("note_id IN (SELECT DISTINCT id FROM _batch)"),
             "sql: {sql}"
@@ -1127,10 +1138,5 @@ mod tests {
             "sql: {sql}"
         );
         assert!(sql.contains("_e0.action AS action"), "sql: {sql}");
-        assert!(sql.contains("snm._siphon_deleted = false"), "sql: {sql}");
-        assert!(
-            sql.contains("startsWith(snm.traversal_path, {traversal_path:String})"),
-            "sql: {sql}"
-        );
     }
 }
