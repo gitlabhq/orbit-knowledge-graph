@@ -125,8 +125,6 @@ graph TD
 | `TRIGGERS_PIPELINE`                 | `Job`          | `Pipeline`     | A bridge job (`type='Ci::Bridge'`) triggered the downstream pipeline.                                   |
 | `TRIGGERED_BY_PIPELINE`             | `Job`          | `Pipeline`     | A job runs in a child pipeline whose parent is the upstream pipeline (sourced from `upstream_pipeline_id` on builds). |
 | `RUNS_ON`                           | `Job`          | `Runner`       | The runner that executed the job.                                                                       |
-| `RUNS_FOR_GROUP`                    | `Runner`       | `Group`        | A group runner is registered against a group.                                                           |
-| `RUNS_FOR_PROJECT`                  | `Runner`       | `Project`      | A project runner is registered against a project.                                                       |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem`, `Vulnerability` | `Note` | An entity has notes attached.                                                   |
 | `HAS_LABEL`                         | `WorkItem`, `MergeRequest` | `Label` | An entity has labels applied.                                                              |
 | `IN_MILESTONE`                      | `WorkItem`, `MergeRequest` | `Milestone` | An entity belongs to a milestone.                                                              |

@@ -2521,37 +2521,6 @@ h5_deployment_environment:
       "limit": 10
     }
 
-h6_runner_runs_for_group:
-  desc: "Runner RUNS_FOR_GROUP"
-  category: traversal
-  suite: general
-  expect: empty  # gitlab-org has zero RUNS_FOR_GROUP edges in v56
-  query: |
-    {
-      "query_type": "traversal",
-      "nodes": [
-        {
-          "id": "r",
-          "entity": "Runner"
-        },
-        {
-          "id": "g",
-          "entity": "Group",
-          "filters": {
-            "full_path": "gitlab-org"
-          }
-        }
-      ],
-      "relationships": [
-        {
-          "type": "RUNS_FOR_GROUP",
-          "from": "r",
-          "to": "g"
-        }
-      ],
-      "limit": 20
-    }
-
 h7_mr_diff_difffile_chain:
   desc: "MR Diff DiffFile chain"
   category: traversal

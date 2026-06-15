@@ -392,8 +392,6 @@ edges:
   AUTO_CANCELED_BY: edges/auto_canceled_by.yaml
   TRIGGERED_BY_PIPELINE: edges/triggered_by_pipeline.yaml
   RUNS_ON: edges/runs_on.yaml
-  RUNS_FOR_GROUP: edges/runs_for_group.yaml
-  RUNS_FOR_PROJECT: edges/runs_for_project.yaml
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   BUILT_BY: edges/built_by.yaml
