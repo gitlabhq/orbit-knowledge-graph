@@ -805,8 +805,8 @@ mod tests {
 
     fn test_etl_settings() -> EtlSettings {
         EtlSettings {
-            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
-            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
+            watermark: crate::constants::siphon_watermark_column().to_string(),
+            deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
         }
     }

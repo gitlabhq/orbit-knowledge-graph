@@ -16,13 +16,17 @@
 //! they can be bound via [`ArrowQuery::param`] without string interpolation.
 
 use std::collections::{HashMap, HashSet};
-
-use const_format::concatcp;
+use std::sync::LazyLock;
 
 use super::parse::{RefKind, Reference};
 
-const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
-const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+fn wm() -> &'static str {
+    ontology::siphon_watermark_column()
+}
+
+fn del() -> &'static str {
+    ontology::siphon_deleted_column()
+}
 
 /// The clickhouse crate serializes params into the URL query string, so these
 /// lookup arrays must stay bounded independently of Arrow block size.
@@ -44,70 +48,41 @@ pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<
 /// top-level namespace (the leading sort-key column) so it's a range scan, not
 /// a full datalake scan. v1 therefore resolves only same-top-level references;
 /// cross-top-level is deferred to the dictionary lever (ADR 013).
-pub const ROUTES_SQL: &str = concatcp!(
-    "\
-SELECT \
-    source_id, \
-    path, \
-    traversal_path \
-FROM ( \
-    SELECT \
-        id, \
-        source_id, \
-        path, \
-        argMax(traversal_path, ",
-    WM,
-    ") AS traversal_path, \
-        argMax(",
-    DEL,
-    ", ",
-    WM,
-    ") AS ",
-    DEL,
-    " \
-    FROM siphon_routes \
-    WHERE startsWith(siphon_routes.traversal_path, {root_prefix:String}) \
-      AND path IN {paths:Array(String)} \
-      AND source_type = 'Project' \
-    GROUP BY id, source_id, path \
-) \
-WHERE ",
-    DEL,
-    " = false"
-);
+pub static ROUTES_SQL: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (wm(), del());
+    format!(
+        "SELECT source_id, path, traversal_path \
+         FROM (SELECT id, source_id, path, \
+         argMax(traversal_path, {wm}) AS traversal_path, \
+         argMax({del}, {wm}) AS {del} \
+         FROM siphon_routes \
+         WHERE startsWith(siphon_routes.traversal_path, {{root_prefix:String}}) \
+         AND path IN {{paths:Array(String)}} \
+         AND source_type = 'Project' \
+         GROUP BY id, source_id, path) \
+         WHERE {del} = false"
+    )
+});
 
 /// Reverse routes lookup (project `source_id` -> path), to give each note a
 /// default project path for its unqualified refs. Keyed on `source_id` so it
 /// complements [`ROUTES_SQL`]; same `argMax` dedup and `root_prefix` bounding.
 /// Params: `{root_prefix:String}`, `{source_ids:Array(Int64)}`. Returns
 /// `(source_id, path)`.
-pub const PROJECT_PATHS_SQL: &str = concatcp!(
-    "\
-SELECT \
-    source_id, \
-    path \
-FROM ( \
-    SELECT \
-        id, \
-        source_id, \
-        path, \
-        argMax(",
-    DEL,
-    ", ",
-    WM,
-    ") AS ",
-    DEL,
-    " \
-    FROM siphon_routes \
-    WHERE startsWith(traversal_path, {root_prefix:String}) \
-      AND source_type = 'Project' \
-      AND source_id IN {source_ids:Array(Int64)} \
-    GROUP BY id, source_id, path \
-) \
-WHERE ",
-    DEL,
-    " = false"
-);
+pub static PROJECT_PATHS_SQL: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (wm(), del());
+    format!(
+        "SELECT source_id, path \
+         FROM (SELECT id, source_id, path, \
+         argMax({del}, {wm}) AS {del} \
+         FROM siphon_routes \
+         WHERE startsWith(traversal_path, {{root_prefix:String}}) \
+         AND source_type = 'Project' \
+         AND source_id IN {{source_ids:Array(Int64)}} \
+         GROUP BY id, source_id, path) \
+         WHERE {del} = false"
+    )
+});
 
 /// Batch `(target_project_id, iid)` -> MR id lookup. Same `argMax` dedup and
 /// `root_prefix` bounding as [`ROUTES_SQL`].
@@ -116,63 +91,35 @@ WHERE ",
 /// index-aligned flat arrays and `arrayZip`-ed server-side, because the JSON
 /// param channel serializes a tuple as `[200,5]`, which ClickHouse rejects for
 /// `Array(Tuple(Int64, Int64))`. Returns `(id, target_project_id, iid)`.
-pub const MERGE_REQUESTS_SQL: &str = concatcp!(
-    "\
-SELECT \
-    id, \
-    target_project_id, \
-    iid \
-FROM ( \
-    SELECT \
-        id, \
-        target_project_id, \
-        iid, \
-        argMax(",
-    DEL,
-    ", ",
-    WM,
-    ") AS ",
-    DEL,
-    " \
-    FROM merge_requests \
-    WHERE startsWith(traversal_path, {root_prefix:String}) \
-      AND (target_project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
-    GROUP BY id, target_project_id, iid \
-) \
-WHERE ",
-    DEL,
-    " = false"
-);
+pub static MERGE_REQUESTS_SQL: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (wm(), del());
+    format!(
+        "SELECT id, target_project_id, iid \
+         FROM (SELECT id, target_project_id, iid, \
+         argMax({del}, {wm}) AS {del} \
+         FROM merge_requests \
+         WHERE startsWith(traversal_path, {{root_prefix:String}}) \
+         AND (target_project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
+         GROUP BY id, target_project_id, iid) \
+         WHERE {del} = false"
+    )
+});
 
 /// Like [`MERGE_REQUESTS_SQL`] but keyed on `project_id`. Returns
 /// `(id, project_id, iid)`.
-pub const WORK_ITEMS_SQL: &str = concatcp!(
-    "\
-SELECT \
-    id, \
-    project_id, \
-    iid \
-FROM ( \
-    SELECT \
-        id, \
-        project_id, \
-        iid, \
-        argMax(",
-    DEL,
-    ", ",
-    WM,
-    ") AS ",
-    DEL,
-    " \
-    FROM work_items \
-    WHERE startsWith(traversal_path, {root_prefix:String}) \
-      AND (project_id, iid) IN arrayZip({project_ids:Array(Int64)}, {iids:Array(Int64)}) \
-    GROUP BY id, project_id, iid \
-) \
-WHERE ",
-    DEL,
-    " = false"
-);
+pub static WORK_ITEMS_SQL: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (wm(), del());
+    format!(
+        "SELECT id, project_id, iid \
+         FROM (SELECT id, project_id, iid, \
+         argMax({del}, {wm}) AS {del} \
+         FROM work_items \
+         WHERE startsWith(traversal_path, {{root_prefix:String}}) \
+         AND (project_id, iid) IN arrayZip({{project_ids:Array(Int64)}}, {{iids:Array(Int64)}}) \
+         GROUP BY id, project_id, iid) \
+         WHERE {del} = false"
+    )
+});
 
 /// A row from the `siphon_routes` lookup, keyed by `path`. Decoded from the
 /// `ROUTES_SQL` result in `handler::query_routes`. `ROUTES_SQL` already
@@ -380,17 +327,16 @@ mod tests {
 
     #[test]
     fn resolver_sql_is_bounded_to_source_top_level_namespace() {
-        for sql in [PROJECT_PATHS_SQL, MERGE_REQUESTS_SQL, WORK_ITEMS_SQL] {
+        for sql in [&*PROJECT_PATHS_SQL, &*MERGE_REQUESTS_SQL, &*WORK_ITEMS_SQL] {
             assert!(
                 sql.contains("startsWith(traversal_path, {root_prefix:String})"),
                 "resolver query must be bounded by the source top-level prefix: {sql}"
             );
         }
-        // Raw-column bound: ROUTES_SQL aliases `argMax(...) AS traversal_path`,
-        // so a bare `traversal_path` would bind the aggregate (ILLEGAL_AGGREGATION).
         assert!(
             ROUTES_SQL.contains("startsWith(siphon_routes.traversal_path, {root_prefix:String})"),
-            "routes query must bound on the raw column: {ROUTES_SQL}"
+            "routes query must bound on the raw column: {}",
+            *ROUTES_SQL
         );
     }
 
@@ -398,10 +344,10 @@ mod tests {
     fn resolver_sql_dedups_replacing_merge_tree_by_pg_pkey() {
         // Regression guard for the cross-project `0/` bug (see ROUTES_SQL docs).
         for sql in [
-            ROUTES_SQL,
-            PROJECT_PATHS_SQL,
-            MERGE_REQUESTS_SQL,
-            WORK_ITEMS_SQL,
+            &*ROUTES_SQL,
+            &*PROJECT_PATHS_SQL,
+            &*MERGE_REQUESTS_SQL,
+            &*WORK_ITEMS_SQL,
         ] {
             assert!(sql.contains("GROUP BY id"), "missing GROUP BY id in: {sql}");
             assert!(

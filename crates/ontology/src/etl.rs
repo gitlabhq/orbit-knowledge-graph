@@ -219,8 +219,8 @@ mod tests {
             select: "id, name".to_string(),
             from: "source_table".to_string(),
             where_clause: where_clause.map(String::from),
-            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
-            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
+            watermark: crate::constants::siphon_watermark_column().to_string(),
+            deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
             table_alias: None,
@@ -287,14 +287,14 @@ mod tests {
             scope: EtlScope::Global,
             source: "t".to_string(),
             watermark: "w".to_string(),
-            deleted: crate::constants::SIPHON_DELETED_COLUMN.to_string(),
+            deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
+        assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.deleted(), crate::constants::SIPHON_DELETED_COLUMN);
+        assert_eq!(query.deleted(), crate::constants::siphon_deleted_column());
     }
 
     #[test]
@@ -302,14 +302,20 @@ mod tests {
         let table = EtlConfig::Table {
             scope: EtlScope::Global,
             source: "t".to_string(),
-            watermark: crate::constants::SIPHON_WATERMARK_COLUMN.to_string(),
+            watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: "d".to_string(),
             order_by: vec!["id".to_string()],
             edges: BTreeMap::new(),
         };
-        assert_eq!(table.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
+        assert_eq!(
+            table.watermark(),
+            crate::constants::siphon_watermark_column()
+        );
 
         let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.watermark(), crate::constants::SIPHON_WATERMARK_COLUMN);
+        assert_eq!(
+            query.watermark(),
+            crate::constants::siphon_watermark_column()
+        );
     }
 }

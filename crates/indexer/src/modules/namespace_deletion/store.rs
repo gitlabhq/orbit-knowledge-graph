@@ -10,32 +10,31 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use clickhouse_client::FromArrowColumn;
 
-use const_format::formatcp;
+use std::sync::LazyLock;
 
 use super::lower::{self, DeletionStatement};
 use crate::checkpoint::namespace_position_key;
 
-const WM: &str = ontology::constants::SIPHON_WATERMARK_COLUMN;
-const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+static IS_NAMESPACE_STILL_DELETED: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (
+        ontology::siphon_watermark_column(),
+        ontology::siphon_deleted_column(),
+    );
+    format!(
+        "SELECT argMax({del}, {wm}) AS is_deleted \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE root_namespace_id = {{namespace_id:Int64}}"
+    )
+});
 
-// Datalake tables (siphon_*) are never prefixed — only graph tables are.
-// ClickHouse params (`{x:Type}`) are doubled to escape formatcp's braces.
-const IS_NAMESPACE_STILL_DELETED: &str = formatcp!(
-    "
-SELECT argMax({DEL}, {WM}) AS is_deleted
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE root_namespace_id = {{namespace_id:Int64}}
-"
-);
-
-const ENABLED_NAMESPACE_ROOTS_QUERY: &str = formatcp!(
-    "
-SELECT traversal_path
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE {DEL} = false
-  AND traversal_path != ''
-"
-);
+static ENABLED_NAMESPACE_ROOTS_QUERY: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT traversal_path \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = false AND traversal_path != ''"
+    )
+});
 
 const CURRENT_ROUTES_UNDER_ROOT: &str = r#"
 SELECT DISTINCT traversal_path FROM project_namespace_traversal_paths FINAL
@@ -45,22 +44,20 @@ SELECT DISTINCT traversal_path FROM namespace_traversal_paths FINAL
 WHERE deleted = false AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-// Reads `traversal_path` directly from the enabled-namespaces table
-// (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
-// reconstructing the path with CONCAT.
-const DELETED_NAMESPACES_QUERY: &str = formatcp!(
-    "
-SELECT
-    root_namespace_id AS namespace_id,
-    traversal_path,
-    toString({WM}) AS deleted_at
-FROM siphon_knowledge_graph_enabled_namespaces
-WHERE {DEL} = true
-  AND traversal_path != ''
-  AND {WM} > {{last_watermark:String}}
-  AND {WM} <= {{watermark:String}}
-"
-);
+static DELETED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
+    let (wm, del) = (
+        ontology::siphon_watermark_column(),
+        ontology::siphon_deleted_column(),
+    );
+    format!(
+        "SELECT root_namespace_id AS namespace_id, traversal_path, \
+         toString({wm}) AS deleted_at \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = true AND traversal_path != '' \
+         AND {wm} > {{last_watermark:String}} \
+         AND {wm} <= {{watermark:String}}"
+    )
+});
 
 fn mark_deletion_complete_sql() -> String {
     let table = prefixed_table_name("namespace_deletion_schedule", *SCHEMA_VERSION);
@@ -292,7 +289,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<bool, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(IS_NAMESPACE_STILL_DELETED)
+            .query(&IS_NAMESPACE_STILL_DELETED)
             .param("namespace_id", namespace_id)
             .fetch_arrow()
             .await
@@ -334,7 +331,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     async fn enabled_namespace_roots(&self) -> Result<Vec<String>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(ENABLED_NAMESPACE_ROOTS_QUERY)
+            .query(&ENABLED_NAMESPACE_ROOTS_QUERY)
             .fetch_arrow()
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
@@ -390,7 +387,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
     ) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
-            .query(DELETED_NAMESPACES_QUERY)
+            .query(&DELETED_NAMESPACES_QUERY)
             .param("last_watermark", last_watermark)
             .param("watermark", watermark)
             .fetch_arrow()

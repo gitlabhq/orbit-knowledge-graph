@@ -14,20 +14,18 @@ use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::NamespaceIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
-use const_format::concatcp;
+use std::sync::LazyLock;
+
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
-const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
-
-const ENABLED_NAMESPACE_QUERY: &str = concatcp!(
-    "\
-\nSELECT root_namespace_id, traversal_path\n\
-FROM siphon_knowledge_graph_enabled_namespaces\n\
-WHERE ",
-    DEL,
-    " = false\n\
-  AND traversal_path != ''\n"
-);
+static ENABLED_NAMESPACE_QUERY: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT root_namespace_id, traversal_path \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = false AND traversal_path != ''"
+    )
+});
 
 pub struct NamespaceDispatcher {
     nats: Arc<dyn NatsServices>,
@@ -83,7 +81,7 @@ impl NamespaceDispatcher {
         let query_start = Instant::now();
         let arrow_batches = self
             .datalake
-            .query(ENABLED_NAMESPACE_QUERY)
+            .query(&ENABLED_NAMESPACE_QUERY)
             .fetch_arrow()
             .await
             .map_err(|error| {

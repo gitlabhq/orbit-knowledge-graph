@@ -25,7 +25,7 @@ use query_engine::compiler::{
 };
 use tracing::{info, warn};
 
-use const_format::concatcp;
+use std::sync::LazyLock;
 
 use super::metrics::CompletionMetrics;
 use crate::campaign::CampaignState;
@@ -54,43 +54,34 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
-const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
+static COUNT_ENABLED_NAMESPACES: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT count(DISTINCT root_namespace_id) AS ns_count \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = false"
+    )
+});
 
-/// SQL to count enabled namespaces from the datalake.
-const COUNT_ENABLED_NAMESPACES: &str = concatcp!(
-    "SELECT count(DISTINCT root_namespace_id) AS ns_count \
-FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE ",
-    DEL,
-    " = false"
-);
+static COUNT_CODE_ELIGIBLE_PROJECTS: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT count(DISTINCT p.id) AS ns_count \
+         FROM project_namespace_traversal_paths AS p \
+         INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
+         ON startsWith(p.traversal_path, enabled.traversal_path) \
+         WHERE p.deleted = false AND enabled.{del} = false"
+    )
+});
 
-/// SQL to count code-eligible projects in the datalake: projects belonging
-/// to any enabled namespace. The denominator of the code-coverage telemetry
-/// emitted from `is_migration_complete` (the predicate doesn't gate on
-/// coverage; see the doc comment there).
-const COUNT_CODE_ELIGIBLE_PROJECTS: &str = concatcp!(
-    "SELECT count(DISTINCT p.id) AS ns_count \
-FROM project_namespace_traversal_paths AS p \
-INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
-  ON startsWith(p.traversal_path, enabled.traversal_path) \
-WHERE p.deleted = false \
-  AND enabled.",
-    DEL,
-    " = false"
-);
-
-/// SQL to fetch enabled namespaces' traversal paths from the datalake. Used
-/// to bridge the cluster boundary: the checkpoint table lives in the graph
-/// DB and cannot join to the datalake, so we pull the small enabled-path set
-/// first and pass it as an Array(String) parameter to the graph-side count.
-const FETCH_ENABLED_TRAVERSAL_PATHS: &str = concatcp!(
-    "SELECT DISTINCT traversal_path \
-FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE ",
-    DEL,
-    " = false"
-);
+static FETCH_ENABLED_TRAVERSAL_PATHS: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT DISTINCT traversal_path \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = false"
+    )
+});
 
 /// SQL to count distinct projects in the new-prefix code indexing
 /// checkpoint table that fall under at least one currently-enabled
@@ -325,7 +316,7 @@ impl MigrationCompletionChecker {
 
         // Count enabled namespaces from the datalake (the reference set).
         let enabled_count = self
-            .count_datalake_namespaces(COUNT_ENABLED_NAMESPACES)
+            .count_datalake_namespaces(&COUNT_ENABLED_NAMESPACES)
             .await
             .map_err(|e| format!("count enabled namespaces: {e}"))?;
 
@@ -413,7 +404,7 @@ impl MigrationCompletionChecker {
     /// for the rationale.
     async fn compute_code_coverage(&self, code_table: &str) -> Result<(u64, u64, f64), String> {
         let eligible_projects = self
-            .count_datalake_namespaces(COUNT_CODE_ELIGIBLE_PROJECTS)
+            .count_datalake_namespaces(&COUNT_CODE_ELIGIBLE_PROJECTS)
             .await
             .map_err(|e| format!("count code-eligible projects: {e}"))?;
 
@@ -470,7 +461,7 @@ impl MigrationCompletionChecker {
     async fn fetch_enabled_traversal_paths(&self) -> Result<Vec<String>, String> {
         let batches = self
             .datalake
-            .query(FETCH_ENABLED_TRAVERSAL_PATHS)
+            .query(&FETCH_ENABLED_TRAVERSAL_PATHS)
             .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;

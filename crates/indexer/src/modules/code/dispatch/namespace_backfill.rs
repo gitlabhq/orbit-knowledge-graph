@@ -18,15 +18,12 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
-use const_format::concatcp;
+use std::sync::LazyLock;
+
 use gkg_server_config::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
 
 const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
-const DEL: &str = ontology::constants::SIPHON_DELETED_COLUMN;
 
-/// Project IDs that already have a checkpoint row under a given namespace's
-/// traversal-path scope. Used to filter the dispatch list down to projects
-/// that still need indexing for the current schema version.
 const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
 SELECT DISTINCT project_id
 FROM {table:Identifier} FINAL
@@ -41,19 +38,14 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-/// Enabled namespace ID + traversal path pairs from the datalake. Reads
-/// `traversal_path` directly from the enabled namespaces table
-/// (gitlab-org/gitlab!232941) instead of joining `namespace_traversal_paths`
-/// per namespace.
-const ENABLED_NAMESPACES_QUERY: &str = concatcp!(
-    "\
-\nSELECT root_namespace_id, traversal_path\n\
-FROM siphon_knowledge_graph_enabled_namespaces\n\
-WHERE ",
-    DEL,
-    " = false\n\
-  AND traversal_path != ''\n"
-);
+static ENABLED_NAMESPACES_QUERY: LazyLock<String> = LazyLock::new(|| {
+    let del = ontology::siphon_deleted_column();
+    format!(
+        "SELECT root_namespace_id, traversal_path \
+         FROM siphon_knowledge_graph_enabled_namespaces \
+         WHERE {del} = false AND traversal_path != ''"
+    )
+});
 
 pub struct NamespaceCodeBackfillDispatcher {
     nats: Arc<dyn NatsServices>,
@@ -291,7 +283,7 @@ impl NamespaceCodeBackfillDispatcher {
     async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, String)>, TaskError> {
         let batches = self
             .datalake
-            .query(ENABLED_NAMESPACES_QUERY)
+            .query(&ENABLED_NAMESPACES_QUERY)
             .fetch_arrow()
             .await
             .map_err(|error| {

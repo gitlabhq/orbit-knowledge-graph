@@ -26,8 +26,8 @@ pub mod query_dsl;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
-    NODE_RESERVED_COLUMNS, SIPHON_DELETED_COLUMN, SIPHON_WATERMARK_COLUMN, TRAVERSAL_PATH_COLUMN,
-    VERSION_COLUMN,
+    NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN, siphon_deleted_column,
+    siphon_watermark_column,
 };
 pub use entities::{
     AuxiliaryColumn, AuxiliaryDictionary, AuxiliaryTable, DataType, DenormDirection,
@@ -188,8 +188,8 @@ impl Ontology {
             edge_descriptions: BTreeMap::new(),
             edge_etl_configs: BTreeMap::new(),
             etl_settings: EtlSettings {
-                watermark: constants::SIPHON_WATERMARK_COLUMN.to_string(),
-                deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
+                watermark: String::new(),
+                deleted: String::new(),
                 order_by: vec![
                     TRAVERSAL_PATH_COLUMN.to_string(),
                     DEFAULT_PRIMARY_KEY.to_string(),
@@ -1086,16 +1086,14 @@ impl Ontology {
 
     /// Default datalake watermark column for `argMax` deduplication and
     /// incremental-pull windowing. Loaded from `schema.yaml`'s
-    /// `default_watermark`; validated against
-    /// [`constants::SIPHON_WATERMARK_COLUMN`] at startup.
+    /// `default_watermark`.
     #[must_use]
     pub fn default_watermark_column(&self) -> &str {
         &self.etl_settings.watermark
     }
 
     /// Default datalake soft-delete flag column. Loaded from `schema.yaml`'s
-    /// `default_deleted`; validated against
-    /// [`constants::SIPHON_DELETED_COLUMN`] at startup.
+    /// `default_deleted`.
     #[must_use]
     pub fn default_deleted_column(&self) -> &str {
         &self.etl_settings.deleted
@@ -2284,7 +2282,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
+            deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
@@ -2322,7 +2320,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
+            deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
@@ -2546,7 +2544,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
+            deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let err = node_def
@@ -2591,7 +2589,7 @@ properties:
         let default_sort_key = vec!["traversal_path".to_string(), "id".to_string()];
         let etl_settings = EtlSettings {
             watermark: "_siphon_replicated_at".to_string(),
-            deleted: constants::SIPHON_DELETED_COLUMN.to_string(),
+            deleted: constants::siphon_deleted_column().to_string(),
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def

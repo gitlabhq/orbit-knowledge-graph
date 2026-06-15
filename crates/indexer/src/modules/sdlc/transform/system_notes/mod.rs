@@ -301,7 +301,7 @@ async fn resolve_default_projects(
     for source_ids in lookup_chunks(&project_ids, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix, "source_ids": source_ids });
         let batches = datalake
-            .query_batches(PROJECT_PATHS_SQL, params, None)
+            .query_batches(&PROJECT_PATHS_SQL, params, None)
             .await
             .map_err(|e| HandlerError::Processing(format!("project paths query failed: {e}")))?;
 
@@ -335,14 +335,14 @@ async fn resolve_plan(
     let (mr_entities, wi_entities) = tokio::try_join!(
         query_entities(
             datalake,
-            MERGE_REQUESTS_SQL,
+            &MERGE_REQUESTS_SQL,
             &mr_pairs,
             root_prefix,
             resolve_lookup_batch_size
         ),
         query_entities(
             datalake,
-            WORK_ITEMS_SQL,
+            &WORK_ITEMS_SQL,
             &wi_pairs,
             root_prefix,
             resolve_lookup_batch_size
@@ -376,7 +376,7 @@ async fn query_routes(
     for paths in lookup_chunks(paths, resolve_lookup_batch_size) {
         let params = json!({ "root_prefix": root_prefix, "paths": paths });
         let batches = datalake
-            .query_batches(ROUTES_SQL, params, None)
+            .query_batches(&ROUTES_SQL, params, None)
             .await
             .map_err(|e| HandlerError::Processing(format!("routes query failed: {e}")))?;
 
@@ -555,18 +555,16 @@ mod tests {
             _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             self.queries.lock().unwrap().push(params.clone());
-            match sql {
-                ROUTES_SQL => route_batch_from_params(&params).map(|batch| vec![batch]),
-                PROJECT_PATHS_SQL => {
-                    project_paths_batch_from_params(&params).map(|batch| vec![batch])
-                }
-                MERGE_REQUESTS_SQL => {
-                    entity_batch_from_params(&params, "target_project_id").map(|batch| vec![batch])
-                }
-                WORK_ITEMS_SQL => {
-                    entity_batch_from_params(&params, "project_id").map(|batch| vec![batch])
-                }
-                _ => Ok(Vec::new()),
+            if sql == &*ROUTES_SQL {
+                route_batch_from_params(&params).map(|batch| vec![batch])
+            } else if sql == &*PROJECT_PATHS_SQL {
+                project_paths_batch_from_params(&params).map(|batch| vec![batch])
+            } else if sql == &*MERGE_REQUESTS_SQL {
+                entity_batch_from_params(&params, "target_project_id").map(|batch| vec![batch])
+            } else if sql == &*WORK_ITEMS_SQL {
+                entity_batch_from_params(&params, "project_id").map(|batch| vec![batch])
+            } else {
+                Ok(Vec::new())
             }
             .map_err(DatalakeError::ArrowDecode)
         }
@@ -821,7 +819,7 @@ mod tests {
 
         let entities = query_entities(
             &datalake,
-            WORK_ITEMS_SQL,
+            &WORK_ITEMS_SQL,
             &pairs,
             "1/",
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
