@@ -183,6 +183,11 @@ run = 'cargo run --release --bin orbit -- index ${usage_repo_path?} --stats'
 description = "Index a local repository"
 usage = 'arg "<repo_path>"'
 
+[tasks."local:query"]
+run = 'cargo run --release --bin orbit -- sql "${@}"'
+description = "Run a raw SQL query against the local DuckDB graph (~/.orbit/graph.duckdb)"
+usage = 'arg "<sql>"'
+
 [tasks."diff:branch"]
 run = "git diff --unified=0 origin/${usage_base:-main}...HEAD $(xargs < .gitdiffignore) > git_diff_full.txt"
 description = "Diff current branch against an origin branch (default: main)"
