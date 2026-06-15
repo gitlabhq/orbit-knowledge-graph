@@ -36,8 +36,8 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
     gl_code_edge:
       sort_key: [traversal_path, relationship_kind, project_id, branch, source_id, target_id, source_kind, target_kind]
       columns:
@@ -64,10 +64,10 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
-          - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
-          - {name: idx_branch, column: branch, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_branch, column: branch, type: "bloom_filter(0.0001)", granularity: 1}
     gl_ci_edge:
       sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
       columns:
@@ -90,8 +90,8 @@ settings:
           - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
           - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
         indexes:
-          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.001)", granularity: 1}
-          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.001)", granularity: 1}
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
   denormalization:
     # --- Branch ---
     - {node: Branch, property: is_default}
