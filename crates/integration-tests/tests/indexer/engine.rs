@@ -206,7 +206,6 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
-                gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
             );
 
             match client.execute("SELECT 1").await {
@@ -244,7 +243,7 @@ impl TestContext {
                     url: self.clickhouse_endpoint.clone(),
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
-                    query_settings: std::collections::HashMap::new(),
+                    session_settings: std::collections::HashMap::new(),
                     insert_settings: std::collections::HashMap::new(),
                     profiling: Default::default(),
                     ..Default::default()
@@ -275,7 +274,6 @@ impl TestContext {
             Some(PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
 
         let batches = client

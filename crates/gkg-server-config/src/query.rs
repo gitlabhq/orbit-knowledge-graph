@@ -393,11 +393,11 @@ mod tests {
         assert_eq!(settings.len(), 6);
         assert_eq!(settings[0], ("max_ast_depth".into(), "10000".into()));
         assert_eq!(settings[1], ("max_ast_elements".into(), "1000000".into()));
+        assert_eq!(settings[2], ("max_execution_time".into(), "30".into()));
         assert_eq!(
-            settings[2],
+            settings[3],
             ("max_expanded_ast_elements".into(), "10000000".into())
         );
-        assert_eq!(settings[3], ("max_execution_time".into(), "30".into()));
         assert_eq!(settings[4], ("query_cache_ttl".into(), "60".into()));
         assert_eq!(settings[5], ("use_query_cache".into(), "1".into()));
         Ok(())

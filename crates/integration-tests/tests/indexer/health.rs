@@ -76,7 +76,6 @@ async fn start_infra() -> Infra {
         Some(CH_PASS),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
-        gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
     );
 
     // Wait for ClickHouse to accept queries

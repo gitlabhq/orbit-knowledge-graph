@@ -57,7 +57,6 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         )
     }
 
@@ -116,7 +115,6 @@ async fn setup_database(host: &str, port: u16) {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
-            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
 
         match client.execute("SELECT 1").await {
@@ -170,7 +168,7 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         url: format!("http://{host}:{port}"),
         username: TEST_USERNAME.to_string(),
         password: Some(TEST_PASSWORD.to_string()),
-        query_settings: std::collections::HashMap::new(),
+        session_settings: std::collections::HashMap::new(),
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
         ..Default::default()
@@ -329,7 +327,7 @@ async fn connection_failure_returns_error() {
         url: "http://127.0.0.1:19000".to_string(),
         username: "default".to_string(),
         password: None,
-        query_settings: std::collections::HashMap::new(),
+        session_settings: std::collections::HashMap::new(),
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
         ..Default::default()

@@ -8,14 +8,22 @@ pub trait ClickHouseConfigurationExt {
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     fn build_client(&self) -> ArrowClickHouseClient {
+        let mut session_settings = std::collections::HashMap::from([
+            ("use_query_condition_cache".into(), "true".into()),
+            ("join_use_nulls".into(), "0".into()),
+            ("query_plan_join_swap_table".into(), "auto".into()),
+            ("optimize_aggregation_in_order".into(), "1".into()),
+            ("max_query_size".into(), self.max_query_size.to_string()),
+        ]);
+        session_settings.extend(self.session_settings.clone());
+
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &self.query_settings,
+            &session_settings,
             &self.insert_settings,
-            self.max_query_size,
         )
     }
 }
@@ -57,7 +65,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
             ..Default::default()
@@ -73,7 +81,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
             ..Default::default()
@@ -90,7 +98,7 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
             ..Default::default()
@@ -107,7 +115,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
             ..Default::default()
@@ -134,7 +142,7 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
             ..Default::default()

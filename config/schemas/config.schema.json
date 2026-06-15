@@ -47,7 +47,7 @@
           "processors": false,
           "query_log": false
         },
-        "query_settings": {},
+        "session_settings": {},
         "url": "http://127.0.0.1:8123",
         "username": "default"
       }
@@ -126,7 +126,7 @@
           "processors": false,
           "query_log": false
         },
-        "query_settings": {},
+        "session_settings": {},
         "url": "http://127.0.0.1:8123",
         "username": "default"
       }
@@ -368,7 +368,7 @@
             "query_log": false
           }
         },
-        "query_settings": {
+        "session_settings": {
           "type": "object",
           "additionalProperties": {
             "type": "string"

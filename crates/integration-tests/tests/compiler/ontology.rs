@@ -862,7 +862,7 @@ fn hydration_uses_parameterized_ids() {
                 "confidential".into(),
                 "created_at".into(),
             ])),
-            node_ids: vec![100, 200, 300],
+            node_ids: vec![7777, 8888, 9999],
             ..InputNode::default()
         }],
         limit: 3,
@@ -870,7 +870,6 @@ fn hydration_uses_parameterized_ids() {
     };
 
     let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
-    // Hydration SQL uses ClickHouse array literals — check raw strings.
     let parameterized = &result.base.sql;
 
     assert!(
@@ -878,12 +877,12 @@ fn hydration_uses_parameterized_ids() {
         "IDs should be parameterized"
     );
     assert!(
-        !parameterized.contains("100"),
+        !parameterized.contains("7777"),
         "literal IDs should not appear in parameterized SQL"
     );
 
     let rendered = result.base.render();
-    assert!(rendered.contains("100") && rendered.contains("200") && rendered.contains("300"));
+    assert!(rendered.contains("7777") && rendered.contains("8888") && rendered.contains("9999"));
 }
 
 #[test]

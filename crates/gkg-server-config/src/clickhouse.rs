@@ -24,7 +24,7 @@ pub struct ClickHouseConfiguration {
     #[serde(default = "default_max_query_size")]
     pub max_query_size: u64,
     #[serde(default)]
-    pub query_settings: HashMap<String, String>,
+    pub session_settings: HashMap<String, String>,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
     /// parameterized `INSERT VALUES`).
     ///
@@ -63,7 +63,7 @@ impl Default for ClickHouseConfiguration {
             username: "default".to_string(),
             password: None,
             max_query_size: DEFAULT_MAX_QUERY_SIZE,
-            query_settings: HashMap::new(),
+            session_settings: HashMap::new(),
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }

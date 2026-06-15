@@ -27,7 +27,7 @@ datalake:
   database: default
   username: default
   # password: ""
-  query_settings:
+  session_settings:
     max_execution_time: "900"
 
 graph:
@@ -35,7 +35,7 @@ graph:
   database: default
   username: default
   # password: ""
-  query_settings:
+  session_settings:
     optimize_on_insert: "0"
   insert_settings:
     async_insert: "1"
