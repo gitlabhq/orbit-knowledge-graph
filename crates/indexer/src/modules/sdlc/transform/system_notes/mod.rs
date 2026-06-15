@@ -20,10 +20,13 @@ pub(crate) mod vendored;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow::array::{Array, Int64Array, StringArray};
+use arrow::array::{
+    Array, Int64Array, ListBuilder, StringArray, StringBuilder, TimestampMicrosecondArray,
+};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::json;
 use tracing::warn;
 
@@ -455,6 +458,11 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
     let mut target_kinds = Vec::with_capacity(len);
     let mut deleted = Vec::with_capacity(len);
 
+    // Strict ClickHouse rejects an INSERT omitting a no-DEFAULT column, so emit the
+    // denormalized tag columns as empty lists even though system notes project no tags.
+    let mut source_tags = ListBuilder::new(StringBuilder::new());
+    let mut target_tags = ListBuilder::new(StringBuilder::new());
+
     for e in edges {
         traversal_paths.push(e.traversal_path.as_str());
         relationship_kinds.push(e.relationship_kind);
@@ -463,12 +471,15 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
         target_ids.push(e.target_id);
         target_kinds.push(e.target_kind);
         deleted.push(false);
+        source_tags.append(true);
+        target_tags.append(true);
     }
 
-    // `_version` is omitted: `gl_edge._version` is `DEFAULT now64(6)`, and an
-    // `INSERT ... FORMAT ArrowStream` maps columns by name, so the server stamps
-    // it. The edge dedups on the ReplacingMergeTree sort key (not `_version`),
-    // so a Rust-side timestamp bought nothing.
+    let source_tags = source_tags.finish();
+    let target_tags = target_tags.finish();
+    let version_micros = Utc::now().timestamp_micros();
+    let versions = TimestampMicrosecondArray::from(vec![version_micros; len]).with_timezone("UTC");
+
     let schema = Arc::new(Schema::new(vec![
         Field::new("traversal_path", DataType::Utf8, false),
         Field::new("relationship_kind", DataType::Utf8, false),
@@ -476,6 +487,9 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
         Field::new("source_kind", DataType::Utf8, false),
         Field::new("target_id", DataType::Int64, false),
         Field::new("target_kind", DataType::Utf8, false),
+        Field::new("source_tags", source_tags.data_type().clone(), false),
+        Field::new("target_tags", target_tags.data_type().clone(), false),
+        Field::new("_version", versions.data_type().clone(), false),
         Field::new("_deleted", DataType::Boolean, false),
     ]));
 
@@ -488,6 +502,9 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
             Arc::new(StringArray::from(source_kinds)),
             Arc::new(Int64Array::from(target_ids)),
             Arc::new(StringArray::from(target_kinds)),
+            Arc::new(source_tags),
+            Arc::new(target_tags),
+            Arc::new(versions),
             Arc::new(arrow::array::BooleanArray::from(deleted)),
         ],
     )

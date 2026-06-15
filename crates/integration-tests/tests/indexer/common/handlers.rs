@@ -16,9 +16,14 @@ use indexer::types::{Envelope, Event, Subscription};
 use integration_testkit::TestContext;
 
 pub fn handler_context(ctx: &TestContext) -> HandlerContext {
-    let destination =
-        ClickHouseDestination::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
-            .expect("failed to create destination");
+    // Match prod ClickHouse, which rejects an INSERT omitting a column; the testcontainer is lenient.
+    let mut config = ctx.config.clone();
+    config.insert_settings.insert(
+        "input_format_arrow_allow_missing_columns".to_string(),
+        "0".to_string(),
+    );
+    let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
+        .expect("failed to create destination");
     let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
         Arc::new(destination),
