@@ -69,7 +69,6 @@ properties:
 
 storage:
   settings:
-    allow_part_offset_column_in_projections: "1"
     index_granularity: "1024"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
@@ -87,8 +86,3 @@ storage:
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_path_ngram, column: path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-  projections:
-    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
-    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
-    - {type: lightweight, name: by_branch, versioned_sort_key: [branch]}
-    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

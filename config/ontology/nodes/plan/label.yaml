@@ -94,7 +94,6 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
-    allow_part_offset_column_in_projections: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
@@ -114,8 +113,3 @@ storage:
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_group_id, column: group_id, type: "bloom_filter(0.001)", granularity: 1}
-  projections:
-    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
-    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
-    - {type: lightweight, name: by_group_id, versioned_sort_key: [group_id]}
-    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

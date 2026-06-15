@@ -111,7 +111,6 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
-    allow_part_offset_column_in_projections: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   
   columns:
@@ -131,9 +130,3 @@ storage:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
     - {name: idx_pipeline_id, column: pipeline_id, type: "bloom_filter(0.001)", granularity: 1}
-  projections:
-    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
-    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
-    - {type: lightweight, name: by_pipeline_id, versioned_sort_key: [pipeline_id]}
-    - {type: lightweight, name: by_pipeline, versioned_sort_key: [traversal_path, pipeline_id, id]}
-    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

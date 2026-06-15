@@ -227,10 +227,6 @@ fn settings(ctx: &mut impl CompilerCtx) -> Result<()> {
     if query_plan.hops.len() >= 3 {
         config.compiler_derived.join_order_algorithm = Some("dpsize".into());
     }
-    if input.query_type == QueryType::Neighbors {
-        config.compiler_derived.disable_projections = true;
-    }
-
     // Pathfinding safety net: enforce hard limits on fan-out-prone queries
     // regardless of config. These are compiler-side floors; the config can
     // only tighten them further.
