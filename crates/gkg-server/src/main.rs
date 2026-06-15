@@ -212,8 +212,10 @@ async fn run_webserver(
             .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
     );
 
+    let versioned_progress_bucket = indexer::nats::versioning::NATS_VERSIONER
+        .bucket(indexer::indexing_status::INDEXING_PROGRESS_BUCKET);
     nats.ensure_kv_bucket_exists(
-        indexer::indexing_status::INDEXING_PROGRESS_BUCKET,
+        &versioned_progress_bucket,
         nats_client::KvBucketConfig::default(),
     )
     .await?;

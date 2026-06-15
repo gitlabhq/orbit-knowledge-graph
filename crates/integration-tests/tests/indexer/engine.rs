@@ -21,6 +21,7 @@ use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
+use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
@@ -580,7 +581,7 @@ async fn dlq_message_count(nats_url: &str) -> u64 {
         .expect("connect to NATS");
     let jetstream = async_nats::jetstream::new(nats_client);
     let mut dlq_stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("DLQ stream should exist");
     let info = dlq_stream.info().await.expect("DLQ stream info");
@@ -593,7 +594,7 @@ async fn last_dlq_envelope(nats_url: &str) -> DeadLetterEnvelope {
         .expect("connect to NATS");
     let jetstream = async_nats::jetstream::new(nats_client);
     let mut dlq_stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("DLQ stream should exist");
     let last_seq = dlq_stream

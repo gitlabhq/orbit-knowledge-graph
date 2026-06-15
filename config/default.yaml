@@ -21,6 +21,7 @@ nats:
   stream_max_age_secs: 14400
   # stream_max_bytes: null
   # stream_max_messages: null
+  # consumer_inactive_threshold_secs: 3600
 
 datalake:
   url: "http://127.0.0.1:8123"

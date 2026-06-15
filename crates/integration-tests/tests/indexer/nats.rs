@@ -11,6 +11,7 @@ use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
+use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
@@ -83,8 +84,11 @@ async fn create_test_stream(url: &str) {
 
     jetstream
         .create_stream(async_nats::jetstream::stream::Config {
-            name: TEST_STREAM.to_string(),
-            subjects: vec![format!("{TEST_SUBJECT}.>"), TEST_SUBJECT.to_string()],
+            name: NATS_VERSIONER.stream(TEST_STREAM),
+            subjects: vec![
+                NATS_VERSIONER.subject(&format!("{TEST_SUBJECT}.>")),
+                NATS_VERSIONER.subject(TEST_SUBJECT),
+            ],
             ..Default::default()
         })
         .await
@@ -164,7 +168,7 @@ async fn get_dead_letter(
 ) -> async_nats::jetstream::message::StreamMessage {
     let jetstream = jetstream_client(url).await;
     let stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("dead letter stream should exist");
 
@@ -177,12 +181,12 @@ async fn get_dead_letter(
 async fn dead_letter_subject_counts(url: &str) -> BTreeMap<String, usize> {
     let jetstream = jetstream_client(url).await;
     let stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("dead letter stream should exist");
 
     let mut subjects = stream
-        .info_with_subjects("dlq.dlq_source_stream.>")
+        .info_with_subjects(&NATS_VERSIONER.subject("dlq.dlq_source_stream.>"))
         .await
         .expect("failed to fetch dead letter subjects");
 
@@ -229,8 +233,9 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         .await
         .expect("failed to publish second dead letter");
 
-    let first_subject = "dlq.dlq_source_stream.code.task.indexing.requested.278964.bWFzdGVy";
-    let first_dead_letter = get_dead_letter(&url, first_subject).await;
+    let first_subject = NATS_VERSIONER
+        .subject("dlq.dlq_source_stream.code.task.indexing.requested.278964.bWFzdGVy");
+    let first_dead_letter = get_dead_letter(&url, &first_subject).await;
     assert_eq!(first_dead_letter.subject.to_string(), first_subject);
     let first_payload: DeadLetterEnvelope =
         serde_json::from_slice(&first_dead_letter.payload).expect("failed to parse dead letter");
@@ -239,8 +244,9 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.278964.bWFzdGVy"
     );
 
-    let second_subject = "dlq.dlq_source_stream.code.task.indexing.requested.80602550.bWFpbg";
-    let second_dead_letter = get_dead_letter(&url, second_subject).await;
+    let second_subject = NATS_VERSIONER
+        .subject("dlq.dlq_source_stream.code.task.indexing.requested.80602550.bWFpbg");
+    let second_dead_letter = get_dead_letter(&url, &second_subject).await;
     assert_eq!(second_dead_letter.subject.to_string(), second_subject);
     let second_payload: DeadLetterEnvelope =
         serde_json::from_slice(&second_dead_letter.payload).expect("failed to parse dead letter");
@@ -249,17 +255,15 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.80602550.bWFpbg"
     );
 
-    let wildcard_subject = "dlq.dlq_source_stream.code.task.indexing.requested.*.*";
+    let wildcard_subject =
+        NATS_VERSIONER.subject("dlq.dlq_source_stream.code.task.indexing.requested.*.*");
     let subject_counts = dead_letter_subject_counts(&url).await;
     assert_eq!(
         subject_counts,
-        BTreeMap::from([
-            (first_subject.to_string(), 1),
-            (second_subject.to_string(), 1),
-        ])
+        BTreeMap::from([(first_subject.clone(), 1), (second_subject.clone(), 1),])
     );
     assert!(
-        !subject_counts.contains_key(wildcard_subject),
+        !subject_counts.contains_key(&wildcard_subject),
         "dead letters should not be stored under the wildcard subscription subject"
     );
 }
@@ -359,8 +363,8 @@ async fn multiple_streams() {
 
     let broker = connect_broker(&default_config(&url)).await;
 
-    let subscription_a = Subscription::new("stream_a", "a.events");
-    let subscription_b = Subscription::new("stream_b", "b.events");
+    let subscription_a = Subscription::new("stream_a", "a.events").manage_stream(false);
+    let subscription_b = Subscription::new("stream_b", "b.events").manage_stream(false);
 
     let mut messages_a = broker
         .subscribe(&subscription_a, Arc::new(EngineMetrics::new()))
@@ -401,11 +405,13 @@ async fn auto_creates_stream_with_configured_settings() {
         .await
         .expect("failed to ensure streams");
 
-    assert_stream_has_subjects(&url, "auto_created_stream", &["auto.events"]).await;
+    let vs = NATS_VERSIONER.stream("auto_created_stream");
+    let vs_subject = NATS_VERSIONER.subject("auto.events");
+    assert_stream_has_subjects(&url, &vs, &[&vs_subject]).await;
 
     let jetstream = jetstream_client(&url).await;
     let mut stream = jetstream
-        .get_stream("auto_created_stream")
+        .get_stream(&vs)
         .await
         .expect("stream should exist");
     let info = stream.info().await.expect("failed to get stream info");
@@ -430,7 +436,7 @@ async fn skips_creation_when_disabled() {
         .await
         .expect("ensure_streams should succeed even when disabled");
 
-    assert_stream_not_exists(&url, "should_not_exist").await;
+    assert_stream_not_exists(&url, &NATS_VERSIONER.stream("should_not_exist")).await;
 }
 
 #[tokio::test]
@@ -476,8 +482,11 @@ async fn updates_stream_config_during_rolling_update() {
         .await
         .expect("new broker should update stream config while old consumer is active");
 
-    let updated = stream_config(&url, TEST_STREAM).await;
-    assert_stream_has_subjects(&url, TEST_STREAM, &[TEST_SUBJECT, "test.new_subject"]).await;
+    let vs = NATS_VERSIONER.stream(TEST_STREAM);
+    let updated = stream_config(&url, &vs).await;
+    let vs_subject = NATS_VERSIONER.subject(TEST_SUBJECT);
+    let vs_new_subject = NATS_VERSIONER.subject("test.new_subject");
+    assert_stream_has_subjects(&url, &vs, &[&vs_subject, &vs_new_subject]).await;
     assert_eq!(
         updated.max_age,
         Duration::from_secs(7200),
