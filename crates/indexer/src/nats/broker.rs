@@ -169,7 +169,9 @@ impl NatsBroker {
         envelope: &Envelope,
         error: &str,
     ) -> Result<(), NatsError> {
-        let dead_letter = DeadLetterEnvelope::new(original_subscription, envelope, error);
+        let (resolved_stream, _) = resolve_names(original_subscription);
+        let dead_letter =
+            DeadLetterEnvelope::new(&resolved_stream, original_subscription, envelope, error);
 
         let payload = serde_json::to_vec(&dead_letter)
             .map(Bytes::from)
@@ -177,7 +179,11 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = NATS_VERSIONER.subject(&dead_letter_subject(original_subscription, envelope));
+        let subject = NATS_VERSIONER.subject(&dead_letter_subject(
+            &resolved_stream,
+            original_subscription,
+            envelope,
+        ));
         let ack_future = self
             .inner
             .jetstream()

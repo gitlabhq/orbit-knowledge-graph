@@ -1,9 +1,18 @@
 use std::sync::LazyLock;
 
+use tracing::{info, warn};
+
+use crate::dead_letter::DEAD_LETTER_STREAM;
+use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
+use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::schema::version::SCHEMA_VERSION;
+use crate::topic::INDEXER_STREAM;
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(*SCHEMA_VERSION));
+
+const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
+const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
 
 pub struct NatsVersioner {
     version: u32,
@@ -28,6 +37,31 @@ impl NatsVersioner {
 
     pub fn tag(&self) -> String {
         format!("v{}", self.version)
+    }
+}
+
+pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
+    let v = NatsVersioner::new(version);
+    let jetstream = async_nats::jetstream::new(nats_client.clone());
+
+    for base in MANAGED_STREAMS {
+        let name = v.stream(base);
+        match jetstream.delete_stream(&name).await {
+            Ok(_) => info!(version, stream = %name, "deleted versioned stream"),
+            Err(e) => {
+                warn!(version, stream = %name, error = %e, "failed to delete versioned stream")
+            }
+        }
+    }
+
+    for base in MANAGED_BUCKETS {
+        let name = v.bucket(base);
+        match jetstream.delete_key_value(&name).await {
+            Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
+            Err(e) => {
+                warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket")
+            }
+        }
     }
 }
 
@@ -80,6 +114,19 @@ mod tests {
         assert_eq!(
             NATS_VERSIONER.stream("GKG_INDEXER"),
             format!("GKG_INDEXER_V{v}")
+        );
+    }
+
+    #[test]
+    fn managed_streams_covers_all_gkg_streams() {
+        assert_eq!(MANAGED_STREAMS, &["GKG_INDEXER", "GKG_DEAD_LETTERS"]);
+    }
+
+    #[test]
+    fn managed_buckets_covers_all_gkg_buckets() {
+        assert_eq!(
+            MANAGED_BUCKETS,
+            &["indexing_locks", "orbit_indexing_progress"]
         );
     }
 }

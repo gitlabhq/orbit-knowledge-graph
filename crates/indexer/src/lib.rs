@@ -357,6 +357,7 @@ pub async fn run_dispatcher(
             config.schedule.tasks.migration_completion.clone(),
             metrics,
             campaign.clone(),
+            services.nats_client.clone(),
         )),
     ];
 

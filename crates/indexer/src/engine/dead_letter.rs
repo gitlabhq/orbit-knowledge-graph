@@ -19,7 +19,12 @@ pub struct DeadLetterEnvelope {
 }
 
 impl DeadLetterEnvelope {
-    pub fn new(original_subscription: &Subscription, envelope: &Envelope, error: &str) -> Self {
+    pub fn new(
+        resolved_stream: &str,
+        original_subscription: &Subscription,
+        envelope: &Envelope,
+        error: &str,
+    ) -> Self {
         let original_payload = serde_json::from_slice(&envelope.payload).unwrap_or_else(|_| {
             serde_json::Value::String(String::from_utf8_lossy(&envelope.payload).into_owned())
         });
@@ -27,7 +32,7 @@ impl DeadLetterEnvelope {
 
         Self {
             original_subject: original_subject.to_string(),
-            original_stream: original_subscription.stream.to_string(),
+            original_stream: resolved_stream.to_string(),
             original_payload,
             original_message_id: envelope.id.0.to_string(),
             original_timestamp: envelope.timestamp,
@@ -38,21 +43,25 @@ impl DeadLetterEnvelope {
     }
 }
 
-pub fn dead_letter_subject(subscription: &Subscription, envelope: &Envelope) -> String {
-    dead_letter_subject_for_subject(
-        &subscription.stream,
-        original_subject(subscription, envelope),
-    )
+pub fn dead_letter_subject(
+    resolved_stream: &str,
+    subscription: &Subscription,
+    envelope: &Envelope,
+) -> String {
+    dead_letter_subject_for_subject(resolved_stream, original_subject(subscription, envelope))
 }
 
 fn dead_letter_subject_for_subject(stream: &str, subject: &str) -> String {
     format!("{}.{}.{}", DEAD_LETTER_SUBJECT_PREFIX, stream, subject)
 }
 
-pub fn dead_letter_subscription(subscription: &Subscription) -> Subscription {
+pub fn dead_letter_subscription(
+    resolved_stream: &str,
+    subscription: &Subscription,
+) -> Subscription {
     Subscription::new(
         DEAD_LETTER_STREAM,
-        dead_letter_subject_for_subject(&subscription.stream, &subscription.subject),
+        dead_letter_subject_for_subject(resolved_stream, &subscription.subject),
     )
 }
 
@@ -86,8 +95,8 @@ mod tests {
         let envelope = envelope_with_subject("code.task.indexing.requested.278964.bWFzdGVy");
 
         assert_eq!(
-            dead_letter_subject(&subscription, &envelope),
-            "dlq.GKG_INDEXER.code.task.indexing.requested.278964.bWFzdGVy"
+            dead_letter_subject("GKG_INDEXER_V69", &subscription, &envelope),
+            "dlq.GKG_INDEXER_V69.code.task.indexing.requested.278964.bWFzdGVy"
         );
     }
 
@@ -95,12 +104,14 @@ mod tests {
     fn dead_letter_envelope_records_delivered_message_subject() {
         let subscription = Subscription::new("GKG_INDEXER", "code.task.indexing.requested.*.*");
         let envelope = envelope_with_subject("code.task.indexing.requested.278964.bWFzdGVy");
-        let dead_letter = DeadLetterEnvelope::new(&subscription, &envelope, "failed");
+        let dead_letter =
+            DeadLetterEnvelope::new("GKG_INDEXER_V69", &subscription, &envelope, "failed");
 
         assert_eq!(
             dead_letter.original_subject,
             "code.task.indexing.requested.278964.bWFzdGVy"
         );
+        assert_eq!(dead_letter.original_stream, "GKG_INDEXER_V69");
     }
 
     #[test]
@@ -109,7 +120,7 @@ mod tests {
         let envelope = envelope_with_subject("");
 
         assert_eq!(
-            dead_letter_subject(&subscription, &envelope),
+            dead_letter_subject("siphon_db", &subscription, &envelope),
             "dlq.siphon_db.tables.merge_requests"
         );
     }
@@ -117,7 +128,7 @@ mod tests {
     #[test]
     fn dead_letter_subscription_points_to_dlq_stream() {
         let subscription = Subscription::new("siphon_db", "tables.users");
-        let dlq = dead_letter_subscription(&subscription);
+        let dlq = dead_letter_subscription("siphon_db", &subscription);
         assert_eq!(&*dlq.stream, DEAD_LETTER_STREAM);
         assert_eq!(&*dlq.subject, "dlq.siphon_db.tables.users");
         assert!(dlq.manage_stream);

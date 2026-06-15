@@ -11,7 +11,7 @@ use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
-use indexer::nats::versioning::NATS_VERSIONER;
+use indexer::nats::versioning::{NATS_VERSIONER, NatsVersioner, cleanup_version};
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
@@ -603,4 +603,64 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
         "subscribing to a `>` subject must produce a legal durable name; got: {:?}",
         result.err(),
     );
+}
+
+#[tokio::test]
+async fn cleanup_version_deletes_streams_and_kv_buckets() {
+    let (_container, url) = start_nats_container().await;
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect to NATS");
+    let jetstream = async_nats::jetstream::new(client.clone());
+
+    let version = 999;
+    let v = NatsVersioner::new(version);
+
+    let stream_names = ["GKG_INDEXER", "GKG_DEAD_LETTERS"].map(|s| v.stream(s));
+    let bucket_names = ["indexing_locks", "orbit_indexing_progress"].map(|b| v.bucket(b));
+
+    for name in &stream_names {
+        jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: name.clone(),
+                subjects: vec![format!("{name}.>")],
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|e| panic!("failed to create stream {name}: {e}"));
+    }
+    for name in &bucket_names {
+        jetstream
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: name.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
+    }
+
+    cleanup_version(&client, version).await;
+
+    for name in &stream_names {
+        assert!(
+            jetstream.get_stream(name).await.is_err(),
+            "stream {name} should have been deleted by cleanup_version",
+        );
+    }
+    for name in &bucket_names {
+        assert!(
+            jetstream.get_key_value(name).await.is_err(),
+            "KV bucket {name} should have been deleted by cleanup_version",
+        );
+    }
+}
+
+#[tokio::test]
+async fn cleanup_version_is_idempotent() {
+    let (_container, url) = start_nats_container().await;
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect to NATS");
+
+    cleanup_version(&client, 888).await;
 }
