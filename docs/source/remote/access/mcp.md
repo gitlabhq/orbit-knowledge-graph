@@ -36,6 +36,9 @@ supports the Model Context Protocol.
 - You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
   personal access tokens with `read_api` scope also work).
 - Your auth has access to the groups you want to query.
+- If your MCP client connects directly over native HTTP (not through
+  `mcp-remote`), its OAuth request must include the `mcp_orbit` scope. See the
+  Gemini CLI example below.
 
 ## MCP tools
 
@@ -99,8 +102,61 @@ as a local command.
 > in a single array. Using a separate `args` field or omitting `type` causes a
 > `ConfigInvalidError`.
 
+**Gemini CLI** — supports the Orbit endpoint over native HTTP transport. Add to
+`~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "gitlab-orbit": {
+      "url": "https://gitlab.com/api/v4/orbit/mcp",
+      "type": "http",
+      "timeout": 5000,
+      "oauth": {
+        "enabled": true,
+        "scopes": ["mcp_orbit"]
+      }
+    }
+  }
+}
+```
+
+You can also generate this with `gemini mcp add gitlab-orbit https://gitlab.com/api/v4/orbit/mcp -t http -s user`,
+then add the `oauth.scopes` block by hand.
+
+> [!note]
+> Native HTTP MCP clients must request the `mcp_orbit` OAuth scope explicitly.
+> Without `oauth.scopes: ["mcp_orbit"]`, authentication fails even if you're
+> already signed in to GitLab elsewhere. If a client on native HTTP transport
+> can't authenticate, add this scope to its MCP server config.
+>
+> Older Gemini CLI configs may use `httpUrl` instead of `url` + `type: "http"`.
+> `httpUrl` still works but is deprecated; use `url` + `type` for new setups.
+
+**Antigravity** — the Antigravity IDE and CLI read the same MCP config at
+`~/.gemini/config/mcp_config.json`. Antigravity does not yet run the MCP OAuth
+flow for remote servers (a native `serverUrl` entry sends `initialize` without
+a token and fails with `Unauthorized`), so wrap the endpoint with `mcp-remote`:
+
+```json
+{
+  "mcpServers": {
+    "gitlab-orbit": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://gitlab.com/api/v4/orbit/mcp"]
+    }
+  }
+}
+```
+
+> [!note]
+> No `oauth` block is needed here. `mcp-remote` discovers the `mcp_orbit`
+> scope from the endpoint's OAuth metadata and opens your browser to authorize
+> on first use.
+
 Authentication uses your existing `glab auth login` session - no token to copy or
-paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
+paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI,
+Antigravity.
 
 > [!note]
 > A planned `glab orbit setup` subcommand will install the Orbit skill and
