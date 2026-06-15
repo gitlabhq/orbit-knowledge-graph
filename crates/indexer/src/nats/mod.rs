@@ -38,6 +38,7 @@
 mod broker;
 mod message;
 mod services;
+pub mod versioning;
 
 pub use broker::NatsBroker;
 pub use message::{
