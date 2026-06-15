@@ -62,7 +62,7 @@ pub struct QueryConfig {
     pub max_rows_in_set: Option<u64>,
 
     /// ClickHouse `max_ast_elements`. Limits AST node count after parsing.
-    /// Default: 500,000 (10x ClickHouse default of 50,000).
+    /// Default: 1,000,000 (20x ClickHouse default, matches Siphon).
     #[serde(
         default = "default_max_ast_elements",
         skip_serializing_if = "Option::is_none"
@@ -70,7 +70,7 @@ pub struct QueryConfig {
     pub max_ast_elements: Option<u64>,
 
     /// ClickHouse `max_expanded_ast_elements`. Limits AST node count after
-    /// alias/macro expansion. Default: 5,000,000 (10x ClickHouse default).
+    /// alias/macro expansion. Default: 10,000,000 (20x ClickHouse default).
     #[serde(
         default = "default_max_expanded_ast_elements",
         skip_serializing_if = "Option::is_none"
@@ -145,8 +145,8 @@ impl CompilerDerivedSettings {
     }
 }
 
-const DEFAULT_MAX_AST_ELEMENTS: u64 = 500_000;
-const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 5_000_000;
+const DEFAULT_MAX_AST_ELEMENTS: u64 = 1_000_000;
+const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 10_000_000;
 const DEFAULT_MAX_AST_DEPTH: u64 = 10_000;
 
 fn default_max_execution_time() -> Option<u64> {
