@@ -97,6 +97,7 @@ impl ClickHouseConfig {
             self.password.as_deref(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         )
     }
 }

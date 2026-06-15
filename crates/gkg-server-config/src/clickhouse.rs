@@ -5,6 +5,11 @@ use std::collections::HashMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Default `max_query_size` in bytes (10 MiB). Applied as a session-level
+/// setting because it controls the parse buffer and must be set before
+/// the SQL text is read.
+pub const DEFAULT_MAX_QUERY_SIZE: u64 = 10 * 1024 * 1024;
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ClickHouseConfiguration {
@@ -13,6 +18,11 @@ pub struct ClickHouseConfiguration {
     pub username: String,
     #[serde(default)]
     pub password: Option<String>,
+    /// ClickHouse `max_query_size` in bytes. Controls the parse buffer;
+    /// must be a session-level setting (cannot go in the SQL SETTINGS clause).
+    /// Default: 10 MiB.
+    #[serde(default = "default_max_query_size")]
+    pub max_query_size: u64,
     #[serde(default)]
     pub query_settings: HashMap<String, String>,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
@@ -24,6 +34,10 @@ pub struct ClickHouseConfiguration {
     pub insert_settings: HashMap<String, String>,
     #[serde(default)]
     pub profiling: ProfilingConfig,
+}
+
+fn default_max_query_size() -> u64 {
+    DEFAULT_MAX_QUERY_SIZE
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -48,6 +62,7 @@ impl Default for ClickHouseConfiguration {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            max_query_size: DEFAULT_MAX_QUERY_SIZE,
             query_settings: HashMap::new(),
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),

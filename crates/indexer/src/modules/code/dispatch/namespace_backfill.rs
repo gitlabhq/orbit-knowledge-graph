@@ -499,6 +499,7 @@ mod tests {
             None,
             empty,
             empty,
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
         let datalake = ArrowClickHouseClient::new(
             "http://localhost:0",
@@ -507,6 +508,7 @@ mod tests {
             None,
             empty,
             empty,
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
         NamespaceCodeBackfillDispatcher::new(
             nats,

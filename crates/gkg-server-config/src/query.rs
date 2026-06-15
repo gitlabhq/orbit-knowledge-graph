@@ -61,6 +61,30 @@ pub struct QueryConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_rows_in_set: Option<u64>,
 
+    /// ClickHouse `max_ast_elements`. Limits AST node count after parsing.
+    /// Default: 500,000 (10x ClickHouse default of 50,000).
+    #[serde(
+        default = "default_max_ast_elements",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_ast_elements: Option<u64>,
+
+    /// ClickHouse `max_expanded_ast_elements`. Limits AST node count after
+    /// alias/macro expansion. Default: 5,000,000 (10x ClickHouse default).
+    #[serde(
+        default = "default_max_expanded_ast_elements",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_expanded_ast_elements: Option<u64>,
+
+    /// ClickHouse `max_ast_depth`. Limits AST nesting depth.
+    /// Default: 10,000 (10x ClickHouse default of 1,000).
+    #[serde(
+        default = "default_max_ast_depth",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_ast_depth: Option<u64>,
+
     /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
@@ -121,11 +145,24 @@ impl CompilerDerivedSettings {
     }
 }
 
+const DEFAULT_MAX_AST_ELEMENTS: u64 = 500_000;
+const DEFAULT_MAX_EXPANDED_AST_ELEMENTS: u64 = 5_000_000;
+const DEFAULT_MAX_AST_DEPTH: u64 = 10_000;
+
 fn default_max_execution_time() -> Option<u64> {
     Some(DEFAULT_MAX_EXECUTION_TIME)
 }
 fn default_query_cache_ttl() -> Option<u32> {
     Some(DEFAULT_QUERY_CACHE_TTL)
+}
+fn default_max_ast_elements() -> Option<u64> {
+    Some(DEFAULT_MAX_AST_ELEMENTS)
+}
+fn default_max_expanded_ast_elements() -> Option<u64> {
+    Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS)
+}
+fn default_max_ast_depth() -> Option<u64> {
+    Some(DEFAULT_MAX_AST_DEPTH)
 }
 
 impl Default for QueryConfig {
@@ -136,6 +173,9 @@ impl Default for QueryConfig {
             max_bytes_to_read: None,
             max_rows_to_read: None,
             max_rows_in_set: None,
+            max_ast_elements: Some(DEFAULT_MAX_AST_ELEMENTS),
+            max_expanded_ast_elements: Some(DEFAULT_MAX_EXPANDED_AST_ELEMENTS),
+            max_ast_depth: Some(DEFAULT_MAX_AST_DEPTH),
             use_query_cache: None,
             query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
             compiler_derived: CompilerDerivedSettings::default(),
@@ -154,6 +194,9 @@ impl QueryConfig {
             max_bytes_to_read: None,
             max_rows_to_read: None,
             max_rows_in_set: None,
+            max_ast_elements: None,
+            max_expanded_ast_elements: None,
+            max_ast_depth: None,
             use_query_cache: None,
             query_cache_ttl: None,
             compiler_derived: CompilerDerivedSettings::default(),
@@ -171,6 +214,11 @@ impl QueryConfig {
             max_bytes_to_read: overrides.max_bytes_to_read.or(self.max_bytes_to_read),
             max_rows_to_read: overrides.max_rows_to_read.or(self.max_rows_to_read),
             max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
+            max_ast_elements: overrides.max_ast_elements.or(self.max_ast_elements),
+            max_expanded_ast_elements: overrides
+                .max_expanded_ast_elements
+                .or(self.max_expanded_ast_elements),
+            max_ast_depth: overrides.max_ast_depth.or(self.max_ast_depth),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
             // compiler_derived is never merged from YAML overrides — it's

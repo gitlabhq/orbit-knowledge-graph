@@ -284,6 +284,7 @@ mod tests {
             None,
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
         let sampler = ParameterSampler::new(client, 100);
         assert_eq!(sampler.sample_size, 100);

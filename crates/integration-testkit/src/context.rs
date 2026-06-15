@@ -181,6 +181,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
         admin
             .execute(&format!("CREATE DATABASE IF NOT EXISTS `{name}`"))
@@ -329,6 +330,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
 
         for attempt in 1..=MAX_CONNECTION_ATTEMPTS {
@@ -352,6 +354,7 @@ impl TestContext {
             Some(TEST_PASSWORD),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
         );
 
         for schema_sql in schema_sqls {

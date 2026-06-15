@@ -38,6 +38,7 @@ impl ArrowClickHouseClient {
         password: Option<&str>,
         query_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
+        max_query_size: u64,
     ) -> Self {
         let mut client = Client::default()
             .with_url(url)
@@ -48,7 +49,8 @@ impl ArrowClickHouseClient {
             .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0")
             .with_setting("query_plan_join_swap_table", "auto")
-            .with_setting("optimize_aggregation_in_order", "1");
+            .with_setting("optimize_aggregation_in_order", "1")
+            .with_setting("max_query_size", &max_query_size.to_string());
 
         if let Some(password) = password {
             client = client.with_password(password);

@@ -407,6 +407,7 @@ async fn main() -> Result<()> {
         cli.ch_password.as_deref(),
         &custom_settings,
         &std::collections::HashMap::new(),
+        gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
     ));
 
     let profiling_config = ProfilingConfig {

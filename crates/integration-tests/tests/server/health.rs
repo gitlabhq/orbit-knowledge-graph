@@ -42,6 +42,7 @@ async fn live_returns_ok() {
         None,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
     );
     let router = create_router(client, None, ready_watcher());
 
@@ -77,6 +78,7 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         None,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
     );
     let router = create_router(client, None, ready_watcher());
 

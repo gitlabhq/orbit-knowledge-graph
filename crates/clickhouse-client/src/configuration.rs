@@ -15,6 +15,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             self.password.as_deref(),
             &self.query_settings,
             &self.insert_settings,
+            self.max_query_size,
         )
     }
 }
@@ -59,6 +60,7 @@ mod tests {
             query_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
+            ..Default::default()
         };
 
         assert!(config.validate().is_ok());
@@ -74,6 +76,7 @@ mod tests {
             query_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
+            ..Default::default()
         };
 
         let result = config.validate();
@@ -90,6 +93,7 @@ mod tests {
             query_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
+            ..Default::default()
         };
 
         let result = config.validate();
@@ -106,6 +110,7 @@ mod tests {
             query_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
+            ..Default::default()
         };
 
         let result = config.validate();
@@ -132,6 +137,7 @@ mod tests {
             query_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
+            ..Default::default()
         };
 
         let client = config.build_client();
