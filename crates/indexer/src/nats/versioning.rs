@@ -35,93 +35,51 @@ impl NatsVersioner {
 mod tests {
     use super::*;
 
-    #[test]
-    fn stream_names_v67() {
-        let v = NatsVersioner::new(67);
-        assert_eq!(v.stream("GKG_INDEXER"), "GKG_INDEXER_V67");
-        assert_eq!(v.stream("GKG_DEAD_LETTERS"), "GKG_DEAD_LETTERS_V67");
-    }
+    fn check_versioner(version: u32) {
+        let v = NatsVersioner::new(version);
 
-    #[test]
-    fn stream_names_v69() {
-        let v = NatsVersioner::new(69);
-        assert_eq!(v.stream("GKG_INDEXER"), "GKG_INDEXER_V69");
-        assert_eq!(v.stream("GKG_DEAD_LETTERS"), "GKG_DEAD_LETTERS_V69");
-    }
+        assert_eq!(v.stream("GKG_INDEXER"), format!("GKG_INDEXER_V{version}"));
+        assert_eq!(
+            v.stream("GKG_DEAD_LETTERS"),
+            format!("GKG_DEAD_LETTERS_V{version}")
+        );
 
-    #[test]
-    fn bucket_names_v67() {
-        let v = NatsVersioner::new(67);
-        assert_eq!(v.bucket("indexing_locks"), "indexing_locks_v67");
+        assert_eq!(
+            v.bucket("indexing_locks"),
+            format!("indexing_locks_v{version}")
+        );
         assert_eq!(
             v.bucket("orbit_indexing_progress"),
-            "orbit_indexing_progress_v67"
+            format!("orbit_indexing_progress_v{version}")
         );
-    }
 
-    #[test]
-    fn bucket_names_v69() {
-        let v = NatsVersioner::new(69);
-        assert_eq!(v.bucket("indexing_locks"), "indexing_locks_v69");
-        assert_eq!(
-            v.bucket("orbit_indexing_progress"),
-            "orbit_indexing_progress_v69"
-        );
-    }
-
-    #[test]
-    fn subjects_v67() {
-        let v = NatsVersioner::new(67);
         assert_eq!(
             v.subject("sdlc.global.indexing.requested"),
-            "v67.sdlc.global.indexing.requested"
+            format!("v{version}.sdlc.global.indexing.requested")
         );
         assert_eq!(
             v.subject("code.task.indexing.requested.278964.bWFzdGVy"),
-            "v67.code.task.indexing.requested.278964.bWFzdGVy"
+            format!("v{version}.code.task.indexing.requested.278964.bWFzdGVy")
         );
-        assert_eq!(v.subject("dlq.>"), "v67.dlq.>");
+        assert_eq!(v.subject("dlq.>"), format!("v{version}.dlq.>"));
+
+        assert_eq!(v.tag(), format!("v{version}"));
     }
 
     #[test]
-    fn subjects_v69() {
-        let v = NatsVersioner::new(69);
-        assert_eq!(
-            v.subject("sdlc.global.indexing.requested"),
-            "v69.sdlc.global.indexing.requested"
-        );
-        assert_eq!(
-            v.subject("code.task.indexing.requested.278964.bWFzdGVy"),
-            "v69.code.task.indexing.requested.278964.bWFzdGVy"
-        );
-        assert_eq!(v.subject("dlq.>"), "v69.dlq.>");
-    }
-
-    #[test]
-    fn tag_v67() {
-        assert_eq!(NatsVersioner::new(67).tag(), "v67");
-    }
-
-    #[test]
-    fn tag_v69() {
-        assert_eq!(NatsVersioner::new(69).tag(), "v69");
+    fn versioner_formats_all_entity_types() {
+        check_versioner(67);
+        check_versioner(69);
     }
 
     #[test]
     fn global_versioner_uses_schema_version() {
         let v = *SCHEMA_VERSION;
+        check_versioner(v);
+
         assert_eq!(
             NATS_VERSIONER.stream("GKG_INDEXER"),
             format!("GKG_INDEXER_V{v}")
         );
-        assert_eq!(
-            NATS_VERSIONER.bucket("indexing_locks"),
-            format!("indexing_locks_v{v}")
-        );
-        assert_eq!(
-            NATS_VERSIONER.subject("sdlc.global.indexing.requested"),
-            format!("v{v}.sdlc.global.indexing.requested")
-        );
-        assert_eq!(NATS_VERSIONER.tag(), format!("v{v}"));
     }
 }

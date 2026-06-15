@@ -405,13 +405,13 @@ async fn auto_creates_stream_with_configured_settings() {
         .await
         .expect("failed to ensure streams");
 
-    let vs = NATS_VERSIONER.stream("auto_created_stream");
-    let vs_subject = NATS_VERSIONER.subject("auto.events");
-    assert_stream_has_subjects(&url, &vs, &[&vs_subject]).await;
+    let versioned_stream = NATS_VERSIONER.stream("auto_created_stream");
+    let versioned_subject = NATS_VERSIONER.subject("auto.events");
+    assert_stream_has_subjects(&url, &versioned_stream, &[&versioned_subject]).await;
 
     let jetstream = jetstream_client(&url).await;
     let mut stream = jetstream
-        .get_stream(&vs)
+        .get_stream(&versioned_stream)
         .await
         .expect("stream should exist");
     let info = stream.info().await.expect("failed to get stream info");
@@ -482,11 +482,16 @@ async fn updates_stream_config_during_rolling_update() {
         .await
         .expect("new broker should update stream config while old consumer is active");
 
-    let vs = NATS_VERSIONER.stream(TEST_STREAM);
-    let updated = stream_config(&url, &vs).await;
-    let vs_subject = NATS_VERSIONER.subject(TEST_SUBJECT);
-    let vs_new_subject = NATS_VERSIONER.subject("test.new_subject");
-    assert_stream_has_subjects(&url, &vs, &[&vs_subject, &vs_new_subject]).await;
+    let versioned_stream = NATS_VERSIONER.stream(TEST_STREAM);
+    let updated = stream_config(&url, &versioned_stream).await;
+    let versioned_subject = NATS_VERSIONER.subject(TEST_SUBJECT);
+    let versioned_new_subject = NATS_VERSIONER.subject("test.new_subject");
+    assert_stream_has_subjects(
+        &url,
+        &versioned_stream,
+        &[&versioned_subject, &versioned_new_subject],
+    )
+    .await;
     assert_eq!(
         updated.max_age,
         Duration::from_secs(7200),
