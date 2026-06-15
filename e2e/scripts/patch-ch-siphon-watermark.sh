@@ -15,10 +15,16 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
+# Default to _siphon_replicated_at (matching fixtures/siphon.sql), NOT now():
+# ADD COLUMN does not materialize existing snapshot rows, so a now() default is
+# recomputed at read time and pins their watermark to the current instant. That
+# races the indexer's max(_siphon_watermark) checkpoint forward each cycle, so
+# rows replicated mid-test fall below the floor and never index. Replicated-at
+# is a stored, monotonic value, so the checkpoint reflects real replication time.
 add_watermark() {
   log "Adding _siphon_watermark to datalake.$1"
   ch_query "ALTER TABLE datalake.\`$1\` \
-    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT now()"
+    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at"
 }
 
 for table in $(ch_query "SELECT name FROM system.tables \
