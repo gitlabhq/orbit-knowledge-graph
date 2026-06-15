@@ -206,6 +206,7 @@ impl TestContext {
                 Some(PASSWORD),
                 &std::collections::HashMap::new(),
                 &std::collections::HashMap::new(),
+                gkg_server_config::DEFAULT_MAX_QUERY_SIZE,
             );
 
             match client.execute("SELECT 1").await {
