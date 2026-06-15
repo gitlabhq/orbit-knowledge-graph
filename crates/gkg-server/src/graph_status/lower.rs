@@ -133,8 +133,6 @@ fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
         };
     }
 
-    // uniq(id) with no FINAL/_deleted is served by the tp_count projection,
-    // reading HyperLogLog state instead of merging the namespace.
     Query {
         select: vec![
             SelectExpr::new(Expr::string(&node.name), "entity"),

@@ -135,7 +135,6 @@ properties:
 
 storage:
   settings:
-    allow_part_offset_column_in_projections: "1"
     index_granularity: "1024"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
@@ -155,8 +154,8 @@ storage:
     - {name: start_char, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: end_char, type: "Int64", codec: ["Delta(8)", "LZ4"]}
   indexes:
-    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_fqn, column: fqn, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
@@ -164,8 +163,3 @@ storage:
     - {name: idx_file_path, column: file_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_file_path_ngram, column: file_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_definition_type, column: definition_type, type: "set(20)", granularity: 2}
-  projections:
-    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
-    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
-    - {type: lightweight, name: by_branch, versioned_sort_key: [branch]}
-    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

@@ -102,11 +102,6 @@ pub struct CompilerDerivedSettings {
     /// enables dynamic-programming join reordering for queries with 3+
     /// JOINs. Experimental in ClickHouse 26.x.
     pub join_order_algorithm: Option<String>,
-    /// ClickHouse `optimize_use_projections = 0`. Set for neighbors: the reorder
-    /// projections degrade to a generic-exclusion search once the auth-scope
-    /// traversal_path filter is ANDed onto the id predicate, costing far more CPU
-    /// than the base-PK scan.
-    pub disable_projections: bool,
 }
 
 impl CompilerDerivedSettings {
@@ -121,9 +116,6 @@ impl CompilerDerivedSettings {
                 "query_plan_optimize_join_order_algorithm".into(),
                 format!("'{algo}'"),
             ));
-        }
-        if self.disable_projections {
-            out.push(("optimize_use_projections".into(), "0".into()));
         }
         out
     }
@@ -438,25 +430,5 @@ aggregation:
         };
         let invalid = settings.validate_keys(valid);
         assert_eq!(invalid, vec!["bogus_type"]);
-    }
-
-    #[test]
-    fn compiler_derived_renders_disable_projections() {
-        let derived = CompilerDerivedSettings {
-            disable_projections: true,
-            ..Default::default()
-        };
-        assert!(
-            derived
-                .to_clickhouse_settings()
-                .contains(&("optimize_use_projections".to_string(), "0".to_string())),
-            "disable_projections must emit optimize_use_projections = 0"
-        );
-        assert!(
-            CompilerDerivedSettings::default()
-                .to_clickhouse_settings()
-                .is_empty(),
-            "default derived settings emit nothing"
-        );
     }
 }

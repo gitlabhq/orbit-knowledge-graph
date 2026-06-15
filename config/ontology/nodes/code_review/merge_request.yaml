@@ -532,7 +532,6 @@ etl:
 storage:
   primary_key: [traversal_path, id]
   settings:
-    allow_part_offset_column_in_projections: "1"
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
@@ -590,7 +589,7 @@ storage:
     - {name: idx_created_at, column: created_at, type: "minmax", granularity: 1}
     - {name: idx_updated_at, column: updated_at, type: "minmax", granularity: 1}
     - {name: idx_merged_at, column: merged_at, type: "minmax", granularity: 1}
-    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
@@ -600,28 +599,13 @@ storage:
     - {name: idx_target_branch, column: target_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_target_branch_ngram, column: target_branch, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
-    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_merge_user_id, column: merge_user_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_source_project_id, column: source_project_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_updated_by_id, column: updated_by_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_last_edited_by_id, column: last_edited_by_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.001)", granularity: 1}
-    - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.001)", granularity: 1}
-  projections:
-    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
-    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
-    - {type: lightweight, name: by_author_id, versioned_sort_key: [author_id]}
-    - {type: lightweight, name: by_merge_user_id, versioned_sort_key: [merge_user_id]}
-    - {type: lightweight, name: by_milestone_id, versioned_sort_key: [milestone_id]}
-    - {type: lightweight, name: by_source_project_id, versioned_sort_key: [source_project_id]}
-    - {type: lightweight, name: by_updated_by_id, versioned_sort_key: [updated_by_id]}
-    - {type: lightweight, name: by_last_edited_by_id, versioned_sort_key: [last_edited_by_id]}
-    - {type: lightweight, name: by_closed_by_id, versioned_sort_key: [closed_by_id]}
-    - {type: lightweight, name: by_head_pipeline_id, versioned_sort_key: [head_pipeline_id]}
-    - {type: lightweight, name: by_latest_merge_request_diff_id, versioned_sort_key: [latest_merge_request_diff_id]}
-    - {type: lightweight, name: by_state_id, versioned_sort_key: [state, id]}
-    - {type: lightweight, name: by_project_state, versioned_sort_key: [traversal_path, project_id, state, id]}
-    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_author_id, column: author_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_merge_user_id, column: merge_user_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_milestone_id, column: milestone_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_source_project_id, column: source_project_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_updated_by_id, column: updated_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_last_edited_by_id, column: last_edited_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_closed_by_id, column: closed_by_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_head_pipeline_id, column: head_pipeline_id, type: "bloom_filter(0.0001)", granularity: 1}
+    - {name: idx_latest_merge_request_diff_id, column: latest_merge_request_diff_id, type: "bloom_filter(0.0001)", granularity: 1}
