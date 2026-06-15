@@ -41,7 +41,7 @@ pub use repository::{
 };
 pub use stale_data_cleaner::{ClickHouseStaleDataCleaner, StaleDataCleaner};
 
-pub fn register_handlers(
+pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
@@ -70,11 +70,15 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+    let local_cache = LocalRepositoryCache::new(
         LocalRepositoryCache::default_dir(),
         code_indexing_task_config.pipeline.max_file_size_bytes,
         metrics.clone(),
-    ));
+    );
+    if let Err(error) = local_cache.purge_all().await {
+        tracing::warn!(%error, "failed to purge repository cache on startup");
+    }
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(local_cache);
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache);
 
