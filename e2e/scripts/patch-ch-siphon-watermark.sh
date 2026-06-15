@@ -22,7 +22,8 @@ add_watermark() {
 }
 
 for table in $(ch_query "SELECT name FROM system.tables \
-  WHERE database = 'datalake' AND name LIKE 'siphon\_%' FORMAT TSV"); do
+  WHERE database = 'datalake' AND name LIKE 'siphon\_%' \
+    AND engine NOT IN ('MaterializedView', 'View', 'Dictionary', 'Null') FORMAT TSV"); do
   add_watermark "$table"
 done
 
