@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Workaround until siphon.image.tag ships the _siphon_watermark column.
-# gkg!1729 made the SDLC indexer query `_siphon_watermark`, but siphon
-# 0.0.99-beta does not emit it, so every datalake query fails Code 47
-# UNKNOWN_IDENTIFIER and the indexer writes zero nodes. Add the column to every
-# siphon CDC table plus the non-siphon_-prefixed ontology source tables.
+# Create the _siphon_watermark column the SDLC indexer queries (gkg!1729).
+# Siphon 0.0.100-beta handles the column but does NOT create it: it omits it
+# from every insert so ClickHouse fills the DEFAULT. We add it to every siphon
+# CDC table plus the non-siphon_-prefixed ontology source tables.
 set -euo pipefail
 
 # shellcheck source=lib.sh
@@ -15,16 +14,18 @@ ch_query() {
     sh -c 'clickhouse-client --user default --password "$CLICKHOUSE_PASSWORD"'
 }
 
-# Default to _siphon_replicated_at (matching fixtures/siphon.sql), NOT now():
-# ADD COLUMN does not materialize existing snapshot rows, so a now() default is
-# recomputed at read time and pins their watermark to the current instant. That
-# races the indexer's max(_siphon_watermark) checkpoint forward each cycle, so
-# rows replicated mid-test fall below the floor and never index. Replicated-at
-# is a stored, monotonic value, so the checkpoint reflects real replication time.
+# Default now64() matches what siphon expects ClickHouse to manage. The
+# MATERIALIZE is essential: ADD COLUMN leaves pre-existing snapshot rows
+# un-stored, so a now() default is recomputed at read time and pins their
+# watermark to the current instant, racing the indexer checkpoint forward and
+# stranding rows replicated mid-run. MATERIALIZE writes a concrete value to
+# those rows so the watermark is stable, exactly as it is for rows siphon
+# inserts after the column exists.
 add_watermark() {
   log "Adding _siphon_watermark to datalake.$1"
   ch_query "ALTER TABLE datalake.\`$1\` \
-    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at"
+    ADD COLUMN IF NOT EXISTS \`_siphon_watermark\` DateTime64(6, 'UTC') DEFAULT now64(6, 'UTC')"
+  ch_query "ALTER TABLE datalake.\`$1\` MATERIALIZE COLUMN \`_siphon_watermark\`"
 }
 
 for table in $(ch_query "SELECT name FROM system.tables \
