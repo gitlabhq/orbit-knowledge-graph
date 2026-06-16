@@ -1279,6 +1279,31 @@ impl Ontology {
             })
     }
 
+    /// Returns the sorted, deduplicated list of columns on a node entity that
+    /// carry a `text(...)` storage index, and therefore support the
+    /// `token_match`, `all_tokens`, and `any_tokens` query operators.
+    ///
+    /// This is the same `text(`-index signal that [`Ontology::text_index_tokenizer`]
+    /// keys off and that the compiler's token-operator validation enforces, so
+    /// the returned set is exactly the set of properties for which token
+    /// operators are accepted.
+    #[must_use]
+    pub fn text_indexed_columns(&self, entity_name: &str) -> Vec<&str> {
+        let Some(node) = self.nodes.get(entity_name) else {
+            return vec![];
+        };
+        let mut columns: Vec<&str> = node
+            .storage
+            .indexes
+            .iter()
+            .filter(|idx| idx.index_type.starts_with("text("))
+            .map(|idx| idx.column.as_str())
+            .collect();
+        columns.sort_unstable();
+        columns.dedup();
+        columns
+    }
+
     /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
     pub fn default_entity_sort_key(&self) -> &[String] {
@@ -3240,5 +3265,56 @@ properties:
             Some("1/9970/15846663/")
         );
         assert!(!got.contains_key("wi"), "tainted via CLOSES");
+    }
+
+    fn assert_text_indexed_columns_consistent(ontology: &Ontology) {
+        for node in ontology.nodes() {
+            let columns = ontology.text_indexed_columns(&node.name);
+
+            for column in &columns {
+                assert!(
+                    ontology.text_index_tokenizer(&node.name, column).is_some(),
+                    "{}.{column} is reported text-indexed but has no tokenizer",
+                    node.name
+                );
+            }
+
+            // Reverse direction: every `text(...)` storage index on the node
+            // must surface through the accessor, so the generated doc table can
+            // never omit a column for which the validator accepts token ops.
+            for idx in &node.storage.indexes {
+                if idx.index_type.starts_with("text(") {
+                    assert!(
+                        columns.contains(&idx.column.as_str()),
+                        "{}.{} carries a text() index but is missing from text_indexed_columns",
+                        node.name,
+                        idx.column
+                    );
+                }
+            }
+
+            assert!(
+                columns.windows(2).all(|w| w[0] < w[1]),
+                "{} text-indexed columns must be sorted and deduplicated: {columns:?}",
+                node.name
+            );
+        }
+
+        assert!(ontology.text_indexed_columns("Nonexistent").is_empty());
+    }
+
+    #[test]
+    fn text_indexed_columns_match_tokenizer_lookups() {
+        let fixture = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert_text_indexed_columns_consistent(&fixture);
+
+        // The generator renders `load_embedded()`, so lock the guarantee against
+        // the real shipped ontology too, not just the test fixtures.
+        let embedded = Ontology::load_embedded().expect("should load embedded ontology");
+        assert_text_indexed_columns_consistent(&embedded);
+
+        let mr = embedded.text_indexed_columns("MergeRequest");
+        assert!(mr.contains(&"title"));
+        assert!(mr.contains(&"description"));
     }
 }

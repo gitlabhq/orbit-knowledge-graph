@@ -248,6 +248,16 @@ dashboards-check:
   script:
     - mise run dashboards:check
 
+query-language-docs-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run docs:query-language:check
+
 ddl-freshness-check:
   stage: lint
   extends:

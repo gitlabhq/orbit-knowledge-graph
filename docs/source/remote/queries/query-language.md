@@ -196,6 +196,10 @@ Token operators work only on properties with text indexes.
 The following properties support `token_match`, `all_tokens`, and `any_tokens`.
 Using these operators on other properties falls back to a full string scan, which is slower.
 
+<!-- The table below is generated from the ontology's `text(...)` storage indexes. -->
+<!-- Do not edit it by hand: run `mise run docs:query-language` and commit. CI fails on drift. -->
+<!-- BEGIN GENERATED: text-indexed-properties -->
+
 | Entity | Text-indexed properties |
 |--------|------------------------|
 | `Branch` | `name` |
@@ -204,7 +208,7 @@ Using these operators on other properties falls back to a full string scan, whic
 | `Directory` | `name`, `path` |
 | `Environment` | `environment_type`, `name` |
 | `File` | `name`, `path` |
-| `Finding` | `name` |
+| `Finding` | `description`, `name` |
 | `Group` | `description`, `name` |
 | `ImportedSymbol` | `file_path`, `import_path` |
 | `Job` | `name`, `ref` |
@@ -220,9 +224,11 @@ Using these operators on other properties falls back to a full string scan, whic
 | `User` | `name`, `username` |
 | `Vulnerability` | `description`, `title` |
 | `VulnerabilityIdentifier` | `external_id`, `external_type`, `name` |
-| `VulnerabilityOccurrence` | `name` |
+| `VulnerabilityOccurrence` | `description`, `name` |
 | `VulnerabilityScanner` | `external_id`, `name` |
 | `WorkItem` | `description`, `title` |
+
+<!-- END GENERATED: text-indexed-properties -->
 
 ## Columns and virtual columns
 

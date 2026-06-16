@@ -383,6 +383,14 @@ description = "Regenerate dashboards/orbit/*.dashboard.json from jsonnet sources
 run = "cargo xtask dashboards --check"
 description = "Fail if the committed dashboards are out of date"
 
+[tasks."docs:query-language"]
+run = "cargo xtask query-docs"
+description = "Regenerate the ontology-derived tables in docs/source/remote/queries/query-language.md"
+
+[tasks."docs:query-language:check"]
+run = "cargo xtask query-docs --check"
+description = "Fail if the query-language.md text-indexed properties table is out of date"
+
 [tasks."schema:generate:ddl"]
 depends = ["schema:generate:ddl:remote", "schema:generate:ddl:local"]
 description = "Regenerate both ClickHouse and DuckDB DDL from ontology"

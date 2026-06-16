@@ -66,5 +66,13 @@ pre-commit:
         - "crates/gkg-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
         - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+    - name: query-language-docs-check
+      run: mise run docs:query-language:check
+      glob:
+        - "config/ontology/**/*.yaml"
+        - "crates/xtask/src/query_docs.rs"
+        - "crates/ontology/src/lib.rs"
+        - "docs/source/remote/queries/query-language.md"
+        - "skills/orbit/references/query_language.md"
     - name: secrets-detection
       run: .lefthook/gitleaks.sh pre-commit
