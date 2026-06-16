@@ -211,7 +211,9 @@ impl Engine {
         runtime: Arc<EngineRuntime>,
         max_inflight: usize,
     ) -> Result<(), EngineError> {
-        let topic_name = format!("{}.{}", subscription.stream, subscription.subject);
+        let (resolved_stream, resolved_subject) =
+            crate::nats::versioning::NATS_VERSIONER.resolve_stream_and_subject(&subscription);
+        let topic_name = format!("{resolved_stream}.{resolved_subject}");
         info!(topic = %topic_name, max_inflight, "topic listener starting");
 
         let mut messages = self
