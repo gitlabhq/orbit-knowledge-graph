@@ -43,6 +43,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - GOON format version bumped when GOON encoder or shared formatter code changes (`goon-format-version-check`)
 - Skill version bumped when files under `skills/<name>/` change (`skill-version-bump-check`)
 - Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
+- Query-language text-indexed properties table regenerated in sync with the ontology (`query-language-docs-check`)
 - Vendored Iglu schemas match pinned versions and live Iglu server (`iglu-schema-check`)
 - Vendored system-note action list matches upstream Rails `ICON_TYPES` at the pinned SHA (`system-note-actions-check`)
 
@@ -68,6 +69,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Query DSL version | `config/QUERY_DSL_VERSION` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
+| Query language reference (text-indexed properties table is generated) | `docs/source/remote/queries/query-language.md` (regenerate the ontology-derived table with `mise docs:query-language`; CI gate `query-language-docs-check`) |
 | Query test fixtures | `fixtures/queries/` |
 | Query corpus (categorized YAML) | `fixtures/queries/corpus/` (smoke-tested in CI: `corpus_smoke`) |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
