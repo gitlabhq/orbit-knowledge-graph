@@ -35,7 +35,7 @@ pub use engine::{
     SiphonCodeIndexingTaskDispatcherConfig, StaleEdgeReconciliationConfig, SubscriptionConfig,
     TableCleanupConfig,
 };
-pub use features::{Feature, FeaturesConfig};
+pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
 pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};

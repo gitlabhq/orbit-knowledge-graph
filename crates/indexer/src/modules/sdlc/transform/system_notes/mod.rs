@@ -39,6 +39,10 @@ use crate::modules::sdlc::transform::{
 };
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
+/// Registry key for this transform; also the `etl.transform` value in
+/// `config/ontology/derived/core/system_note.yaml`.
+pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
+
 use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
@@ -84,7 +88,7 @@ impl SystemNotesTransform {
 #[async_trait]
 impl BlockTransform for SystemNotesTransform {
     fn name(&self) -> &str {
-        "system_notes"
+        TRANSFORM_NAME
     }
 
     fn outputs(&self) -> &[String] {
@@ -145,7 +149,7 @@ pub(in crate::modules::sdlc) fn register(
             resolve_lookup_batch_size,
         ))
     });
-    registry.register("system_notes", factory);
+    registry.register(TRANSFORM_NAME, factory);
 }
 
 // ---------------------------------------------------------------------------

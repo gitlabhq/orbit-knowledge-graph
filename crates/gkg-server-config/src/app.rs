@@ -105,7 +105,9 @@ impl AppConfig {
                 config::Environment::with_prefix("GKG")
                     .prefix_separator("_")
                     .separator("__")
-                    .try_parsing(true),
+                    .try_parsing(true)
+                    .with_list_parse_key("features.system_notes.namespaces")
+                    .list_separator(","),
             )
             .build()
             .map_err(ConfigError::Config)?;
@@ -321,6 +323,8 @@ handlers:
             .env("GKG_GRAPH__DATABASE", "env_graph_db")
             .env("GKG_DATALAKE__DATABASE", "env_datalake_db")
             .env("GKG_NATS__URL", "nats://env-host:4222")
+            .env("GKG_FEATURES__SYSTEM_NOTES__ENABLED", "true")
+            .env("GKG_FEATURES__SYSTEM_NOTES__NAMESPACES", "9970,1234")
             .output()
             .expect("failed to spawn subprocess");
 
@@ -357,6 +361,15 @@ handlers:
             values["nats_url"], "nats://env-host:4222",
             "GKG_NATS__URL should override config/default.yaml"
         );
+        assert_eq!(
+            values["system_notes_enabled"], true,
+            "GKG_FEATURES__SYSTEM_NOTES__ENABLED should override config/default.yaml"
+        );
+        assert_eq!(
+            values["system_notes_namespaces"],
+            serde_json::json!([9970, 1234]),
+            "GKG_FEATURES__SYSTEM_NOTES__NAMESPACES should parse as a comma-separated list"
+        );
     }
 
     /// Subprocess helper: loads config with real process env vars and prints
@@ -379,6 +392,8 @@ handlers:
                 "graph_database": config.graph.database,
                 "datalake_database": config.datalake.database,
                 "nats_url": config.nats.url,
+                "system_notes_enabled": config.features.system_notes.enabled,
+                "system_notes_namespaces": config.features.system_notes.namespaces,
             })
         );
     }

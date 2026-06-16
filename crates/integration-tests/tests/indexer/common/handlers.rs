@@ -118,7 +118,10 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     static ENABLE_SYSTEM_NOTES: Once = Once::new();
     ENABLE_SYSTEM_NOTES.call_once(|| {
         gkg_server_config::features::init(gkg_server_config::FeaturesConfig {
-            system_notes: true,
+            system_notes: gkg_server_config::FeatureScope {
+                enabled: true,
+                ..Default::default()
+            },
             ..Default::default()
         });
     });
