@@ -629,7 +629,7 @@
       "additionalProperties": false
     },
     "FeatureScope": {
-      "description": "A flag that can be scoped to specific root namespaces. `enabled` is the\nmaster switch; `namespaces` narrows an enabled flag to those root namespace\nids (empty = every namespace). Because `enabled: false` is off everywhere, a\npopulated `namespaces` list is simply inert when `enabled` is false.",
+      "description": "A feature flag scoped to root namespaces: `enabled` toggles it, an empty\n`namespaces` list means every namespace, otherwise only those ids.",
       "type": "object",
       "properties": {
         "enabled": {

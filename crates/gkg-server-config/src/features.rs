@@ -19,10 +19,8 @@ pub enum Feature {
     StopMergesOnRetire,
 }
 
-/// A flag that can be scoped to specific root namespaces. `enabled` is the
-/// master switch; `namespaces` narrows an enabled flag to those root namespace
-/// ids (empty = every namespace). Because `enabled: false` is off everywhere, a
-/// populated `namespaces` list is simply inert when `enabled` is false.
+/// A feature flag scoped to root namespaces: `enabled` toggles it, an empty
+/// `namespaces` list means every namespace, otherwise only those ids.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct FeatureScope {
