@@ -70,8 +70,8 @@ pub fn init(features: FeaturesConfig) {
         .expect("gkg_server_config::features::init called twice");
 }
 
-/// Off until [`init`] has run. True when the feature is enabled for at least
-/// one namespace; gate a specific namespace with [`enabled_for`].
+/// Off until [`init`] has run. Reads only the `enabled` flag, ignoring any
+/// `namespaces` allowlist; gate a specific namespace with [`enabled_for`].
 pub fn enabled(feature: Feature) -> bool {
     FEATURES
         .get()

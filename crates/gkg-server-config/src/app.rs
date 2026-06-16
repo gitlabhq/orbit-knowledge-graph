@@ -106,6 +106,8 @@ impl AppConfig {
                     .prefix_separator("_")
                     .separator("__")
                     .try_parsing(true)
+                    // Each scoped flag needs its own entry, or its namespaces
+                    // env var parses as a string instead of a list.
                     .with_list_parse_key("features.system_notes.namespaces")
                     .list_separator(","),
             )
