@@ -54,11 +54,7 @@ fn dead_letter_subject_for_subject(stream: &str, subject: &str) -> String {
 pub fn dead_letter_subscription(subscription: &Subscription) -> Subscription {
     let (resolved_stream, _) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
     let base = dead_letter_subject_for_subject(&resolved_stream, &subscription.subject);
-    Subscription::new(
-        NATS_VERSIONER.stream(DEAD_LETTER_STREAM),
-        NATS_VERSIONER.subject(&base),
-    )
-    .manage_stream(false)
+    Subscription::new(DEAD_LETTER_STREAM, &*base)
 }
 
 fn original_subject<'a>(subscription: &'a Subscription, envelope: &'a Envelope) -> &'a str {
@@ -131,9 +127,12 @@ mod tests {
         let mut subscription = Subscription::new("siphon_db", "tables.users");
         subscription.manage_stream = false;
         let dlq = dead_letter_subscription(&subscription);
-        assert_eq!(&*dlq.stream, format!("GKG_DEAD_LETTERS_V{v}"));
-        assert_eq!(&*dlq.subject, format!("v{v}.dlq.siphon_db.tables.users"));
-        assert!(!dlq.manage_stream);
+
+        let (resolved_stream, resolved_subject) = NATS_VERSIONER.resolve_stream_and_subject(&dlq);
+
+        assert_eq!(resolved_stream, format!("GKG_DEAD_LETTERS_V{v}"));
+        assert_eq!(resolved_subject, format!("v{v}.dlq.siphon_db.tables.users"));
+        assert!(dlq.manage_stream);
     }
 
     #[test]
