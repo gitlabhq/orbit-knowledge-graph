@@ -89,8 +89,5 @@ helmfile --file helmfile.yaml.gotmpl sync
 # upstream 60-300s. Must run after GitLab CH migrations created the dicts.
 "$E2E_DIR/scripts/patch-ch-dicts.sh"
 
-# Add the _siphon_watermark column the SDLC indexer expects until siphon emits it.
-"$E2E_DIR/scripts/patch-ch-siphon-watermark.sh"
-
 log "Setup complete (SHA: $E2E_SHA)"
 log "Run: E2E_SHA=$E2E_SHA scripts/test.sh"
