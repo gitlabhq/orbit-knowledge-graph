@@ -150,6 +150,8 @@ pub(crate) struct SsaEngine<'a> {
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
+    /// Reused across reads so the iterative walk doesn't allocate per call.
+    read_work: Vec<(BlockId, Phase)>,
 }
 
 impl<'a> SsaEngine<'a> {
@@ -161,6 +163,7 @@ impl<'a> SsaEngine<'a> {
             incomplete_phis: FxHashMap::default(),
             stats: SsaStats::default(),
             tracer: super::super::trace::leaked_noop_tracer(),
+            read_work: Vec::new(),
         }
     }
 
@@ -543,8 +546,12 @@ impl<'a> SsaEngine<'a> {
             return v;
         }
 
+        // Borrow the reusable work stack out of `self` for the walk, then
+        // return it (with its grown capacity) for the next read.
+        let mut work = std::mem::take(&mut self.read_work);
         self.resolve_postorder(
             start,
+            &mut work,
             |this, block| {
                 if this
                     .current_value(variable, block)
@@ -581,6 +588,7 @@ impl<'a> SsaEngine<'a> {
                 this.write_variable_interned(variable, block, val);
             },
         );
+        self.read_work = work;
 
         self.current_value(variable, start)
             .unwrap_or(SsaValue::Opaque)
@@ -600,10 +608,12 @@ impl<'a> SsaEngine<'a> {
     fn resolve_postorder(
         &mut self,
         start: BlockId,
+        work: &mut Vec<(BlockId, Phase)>,
         mut enter: impl FnMut(&mut Self, BlockId) -> Visit,
         mut exit: impl FnMut(&mut Self, BlockId),
     ) {
-        let mut work = vec![(start, Phase::Enter)];
+        work.clear();
+        work.push((start, Phase::Enter));
         while let Some(&(block, phase)) = work.last() {
             match phase {
                 Phase::Enter => match enter(self, block) {
