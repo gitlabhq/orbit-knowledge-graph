@@ -95,13 +95,7 @@
     },
     "features": {
       "$ref": "#/$defs/FeaturesConfig",
-      "default": {
-        "stop_merges_on_retire": false,
-        "system_notes": {
-          "enabled": false,
-          "namespaces": []
-        }
-      }
+      "default": {}
     },
     "gitlab": {
       "$ref": "#/$defs/GitlabConfig",
@@ -648,22 +642,11 @@
       "additionalProperties": false
     },
     "FeaturesConfig": {
-      "description": "Feature flag states, deserialized from the `features:` config section.\nEvery flag defaults to off; an unknown key is a config error.",
+      "description": "An unrecognized key fails deserialization as an unknown [`Feature`] variant,\nrather than being silently ignored.",
       "type": "object",
-      "properties": {
-        "stop_merges_on_retire": {
-          "type": "boolean",
-          "default": false
-        },
-        "system_notes": {
-          "$ref": "#/$defs/FeatureScope",
-          "default": {
-            "enabled": false,
-            "namespaces": []
-          }
-        }
-      },
-      "additionalProperties": false
+      "additionalProperties": {
+        "$ref": "#/$defs/FeatureScope"
+      }
     },
     "GitlabConfig": {
       "type": "object",

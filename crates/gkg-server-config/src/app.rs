@@ -364,9 +364,16 @@ handlers:
             "GKG_FEATURES__SYSTEM_NOTES__ENABLED should override config/default.yaml"
         );
         assert_eq!(
-            values["system_notes_namespaces"],
-            serde_json::json!([9970, 1234]),
-            "GKG_FEATURES__SYSTEM_NOTES__NAMESPACES should parse as a comma-separated list"
+            values["system_notes_for_9970"], true,
+            "GKG_FEATURES__SYSTEM_NOTES__NAMESPACES should parse the comma-separated list"
+        );
+        assert_eq!(
+            values["system_notes_for_1234"], true,
+            "second list entry should parse"
+        );
+        assert_eq!(
+            values["system_notes_for_5555"], false,
+            "a namespace outside the list should not be enabled"
         );
     }
 
@@ -384,14 +391,17 @@ handlers:
             }
         };
 
+        use crate::features::Feature;
         println!(
             "{}",
             serde_json::json!({
                 "graph_database": config.graph.database,
                 "datalake_database": config.datalake.database,
                 "nats_url": config.nats.url,
-                "system_notes_enabled": config.features.system_notes.enabled,
-                "system_notes_namespaces": config.features.system_notes.namespaces,
+                "system_notes_enabled": config.features.is_enabled(Feature::SystemNotes),
+                "system_notes_for_9970": config.features.is_enabled_for(Feature::SystemNotes, Some(9970)),
+                "system_notes_for_1234": config.features.is_enabled_for(Feature::SystemNotes, Some(1234)),
+                "system_notes_for_5555": config.features.is_enabled_for(Feature::SystemNotes, Some(5555)),
             })
         );
     }

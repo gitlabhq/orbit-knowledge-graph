@@ -117,13 +117,13 @@ pub async fn system_notes_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     // and init panics if called twice, so guard it for the subtests sharing a run.
     static ENABLE_SYSTEM_NOTES: Once = Once::new();
     ENABLE_SYSTEM_NOTES.call_once(|| {
-        gkg_server_config::features::init(gkg_server_config::FeaturesConfig {
-            system_notes: gkg_server_config::FeatureScope {
+        gkg_server_config::features::init(gkg_server_config::FeaturesConfig::from_iter([(
+            gkg_server_config::Feature::SystemNotes,
+            gkg_server_config::FeatureScope {
                 enabled: true,
                 ..Default::default()
             },
-            ..Default::default()
-        });
+        )]));
     });
 
     let config = create_test_indexer_config(&ctx.config);

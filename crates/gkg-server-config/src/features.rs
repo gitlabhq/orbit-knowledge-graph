@@ -5,13 +5,14 @@
 //! anywhere via [`enabled`]. Every flag defaults to off, including before
 //! [`init`] runs (so unit tests that never load config see all flags off).
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// Each variant maps to one field of [`FeaturesConfig`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum Feature {
     /// SystemNotes derived-entity indexing (system-note reference edges).
     SystemNotes,
@@ -64,28 +65,27 @@ impl FeatureScope {
     }
 }
 
-/// Feature flag states, deserialized from the `features:` config section.
-/// Every flag defaults to off; an unknown key is a config error.
+/// An unrecognized key fails deserialization as an unknown [`Feature`] variant,
+/// rather than being silently ignored.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
-pub struct FeaturesConfig {
-    pub system_notes: FeatureScope,
-    pub stop_merges_on_retire: bool,
-}
+#[serde(transparent)]
+pub struct FeaturesConfig(HashMap<Feature, FeatureScope>);
 
 impl FeaturesConfig {
-    fn is_enabled(&self, feature: Feature) -> bool {
-        match feature {
-            Feature::SystemNotes => self.system_notes.enabled,
-            Feature::StopMergesOnRetire => self.stop_merges_on_retire,
-        }
+    pub(crate) fn is_enabled(&self, feature: Feature) -> bool {
+        self.0.get(&feature).is_some_and(|scope| scope.enabled)
     }
 
-    fn is_enabled_for(&self, feature: Feature, namespace_id: Option<i64>) -> bool {
-        match feature {
-            Feature::SystemNotes => self.system_notes.enabled_for(namespace_id),
-            Feature::StopMergesOnRetire => self.stop_merges_on_retire,
-        }
+    pub(crate) fn is_enabled_for(&self, feature: Feature, namespace_id: Option<i64>) -> bool {
+        self.0
+            .get(&feature)
+            .is_some_and(|scope| scope.enabled_for(namespace_id))
+    }
+}
+
+impl FromIterator<(Feature, FeatureScope)> for FeaturesConfig {
+    fn from_iter<I: IntoIterator<Item = (Feature, FeatureScope)>>(iter: I) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 
@@ -120,13 +120,17 @@ mod tests {
     use super::*;
 
     fn scoped(enabled: bool, namespaces: Vec<i64>) -> FeaturesConfig {
-        FeaturesConfig {
-            system_notes: FeatureScope {
+        FeaturesConfig::from_iter([(
+            Feature::SystemNotes,
+            FeatureScope {
                 enabled,
                 namespaces,
             },
-            ..Default::default()
-        }
+        )])
+    }
+
+    fn namespaces_of(features: &FeaturesConfig, feature: Feature) -> &[i64] {
+        &features.0.get(&feature).expect("flag present").namespaces
     }
 
     #[test]
@@ -161,32 +165,38 @@ mod tests {
     }
 
     #[test]
+    fn absent_flag_is_off() {
+        let features = FeaturesConfig::default();
+        assert!(!features.is_enabled(Feature::SystemNotes));
+        assert!(!features.is_enabled_for(Feature::SystemNotes, Some(9970)));
+    }
+
+    #[test]
     fn deserializes_scoped_flag_from_yaml() {
         let features: FeaturesConfig =
             serde_yaml::from_str("system_notes:\n  enabled: true\n  namespaces: [9970]").unwrap();
-        assert!(features.system_notes.enabled);
-        assert_eq!(features.system_notes.namespaces, vec![9970]);
+        assert!(features.is_enabled(Feature::SystemNotes));
+        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970]);
     }
 
     #[test]
     fn parses_namespaces_from_comma_separated_string() {
         let features: FeaturesConfig =
             serde_yaml::from_str("system_notes:\n  namespaces: \"9970, 1234\"").unwrap();
-        assert_eq!(features.system_notes.namespaces, vec![9970, 1234]);
+        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970, 1234]);
     }
 
     #[test]
     fn parses_single_namespace_scalar() {
         let features: FeaturesConfig =
             serde_yaml::from_str("system_notes:\n  namespaces: 9970").unwrap();
-        assert_eq!(features.system_notes.namespaces, vec![9970]);
+        assert_eq!(namespaces_of(&features, Feature::SystemNotes), [9970]);
     }
 
     #[test]
-    fn omitted_flag_defaults_off() {
+    fn omitted_block_defaults_off() {
         let features: FeaturesConfig = serde_yaml::from_str("{}").unwrap();
-        assert!(!features.system_notes.enabled);
-        assert!(features.system_notes.namespaces.is_empty());
+        assert!(!features.is_enabled(Feature::SystemNotes));
     }
 
     #[test]
