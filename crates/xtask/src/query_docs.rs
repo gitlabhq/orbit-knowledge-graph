@@ -102,6 +102,10 @@ fn process_doc(path: &Path, table: &str, check: bool) -> Result<bool> {
 
 /// Renders the markdown table body (without the surrounding marker comments).
 fn render_table(ontology: &Ontology) -> Result<String> {
+    // Node-only by design: the validator's token-op gate keys off
+    // `text_index_tokenizer`, which is itself node-only, and no edge YAML
+    // carries a `text(...)` index. If an edge ever gains one, extend both this
+    // iteration and the validator lookup together so the docs can't omit it.
     let mut rows: Vec<(&str, Vec<&str>)> = ontology
         .nodes()
         .filter_map(|node| {
@@ -139,10 +143,15 @@ fn render_table(ontology: &Ontology) -> Result<String> {
 
 /// Replaces the content between the BEGIN/END markers with `table`, leaving the
 /// markers (and a blank line of padding) in place. Fails if either marker is
-/// missing, duplicated, or out of order so a botched edit can't silently
-/// disable the gate. A duplicate marker pair is the dangerous case: `find()`
-/// would only ever rewrite the first region, so a stale second region would
-/// survive while `--check` reports "up to date".
+/// missing or duplicated so a botched edit can't silently disable the gate. A
+/// duplicate marker pair is the dangerous case: `find()` would only ever
+/// rewrite the first region, so a stale second region would survive while
+/// `--check` reports "up to date".
+///
+/// END is searched only after BEGIN's end position, so an END that precedes
+/// BEGIN (or one embedded inside the region) can never be mistaken for the
+/// closing marker — it falls through to the missing-marker error instead of
+/// silently truncating the replacement.
 fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
     let begin_count = doc.matches(BEGIN_MARKER).count();
     let end_count = doc.matches(END_MARKER).count();
@@ -155,14 +164,12 @@ fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
     let begin = doc
         .find(BEGIN_MARKER)
         .ok_or_else(|| anyhow!("missing `{BEGIN_MARKER}` marker in doc"))?;
-    let end = doc
-        .find(END_MARKER)
-        .ok_or_else(|| anyhow!("missing `{END_MARKER}` marker in doc"))?;
-    if end < begin {
-        bail!("`{END_MARKER}` appears before `{BEGIN_MARKER}`");
-    }
-
     let after_begin = begin + BEGIN_MARKER.len();
+    let end = doc[after_begin..]
+        .find(END_MARKER)
+        .map(|offset| after_begin + offset)
+        .ok_or_else(|| anyhow!("missing `{END_MARKER}` marker after `{BEGIN_MARKER}` in doc"))?;
+
     let mut out = String::with_capacity(doc.len());
     out.push_str(&doc[..after_begin]);
     out.push('\n');
@@ -173,6 +180,12 @@ fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
     Ok(out)
 }
 
+/// Prints a positional (line-index) comparison, not an LCS diff: when a row is
+/// inserted or removed every following line reads as changed. That is adequate
+/// here because the generated region is a sorted table — drift is almost always
+/// an in-place edit or an added/removed adjacent row — and a real diff crate is
+/// not worth the dependency for a CI hint. The authoritative output is the
+/// "run `mise run docs:query-language`" instruction, not this preview.
 fn print_diff(before: &str, after: &str) {
     let before_lines: Vec<&str> = before.lines().collect();
     let after_lines: Vec<&str> = after.lines().collect();
@@ -245,5 +258,23 @@ mod tests {
 
         let two_end = format!("{BEGIN_MARKER}\nbody\n{END_MARKER}\n{END_MARKER}\n");
         assert!(replace_marked_region(&two_end, "x").is_err());
+    }
+
+    #[test]
+    fn replace_marked_region_rejects_end_before_begin() {
+        let reversed = format!("{END_MARKER}\nbody\n{BEGIN_MARKER}\n");
+        assert!(
+            replace_marked_region(&reversed, "x").is_err(),
+            "an END that precedes BEGIN must not be accepted as the closing marker"
+        );
+    }
+
+    #[test]
+    fn render_table_bails_below_min_entities() {
+        let empty = Ontology::new();
+        assert!(
+            render_table(&empty).is_err(),
+            "an ontology with no text-indexed entities must trip the MIN_ENTITIES floor"
+        );
     }
 }
