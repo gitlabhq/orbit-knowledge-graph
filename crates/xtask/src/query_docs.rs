@@ -139,8 +139,19 @@ fn render_table(ontology: &Ontology) -> Result<String> {
 
 /// Replaces the content between the BEGIN/END markers with `table`, leaving the
 /// markers (and a blank line of padding) in place. Fails if either marker is
-/// missing or out of order so a botched edit can't silently disable the gate.
+/// missing, duplicated, or out of order so a botched edit can't silently
+/// disable the gate. A duplicate marker pair is the dangerous case: `find()`
+/// would only ever rewrite the first region, so a stale second region would
+/// survive while `--check` reports "up to date".
 fn replace_marked_region(doc: &str, table: &str) -> Result<String> {
+    let begin_count = doc.matches(BEGIN_MARKER).count();
+    let end_count = doc.matches(END_MARKER).count();
+    if begin_count > 1 || end_count > 1 {
+        bail!(
+            "expected exactly one `{BEGIN_MARKER}` / `{END_MARKER}` pair, found {begin_count} begin and {end_count} end markers"
+        );
+    }
+
     let begin = doc
         .find(BEGIN_MARKER)
         .ok_or_else(|| anyhow!("missing `{BEGIN_MARKER}` marker in doc"))?;
@@ -221,5 +232,18 @@ mod tests {
         assert!(replace_marked_region("no markers here", "x").is_err());
         let only_begin = format!("{BEGIN_MARKER}\nbody\n");
         assert!(replace_marked_region(&only_begin, "x").is_err());
+    }
+
+    #[test]
+    fn replace_marked_region_rejects_duplicate_markers() {
+        let two_begin =
+            format!("{BEGIN_MARKER}\nbody\n{END_MARKER}\n\n{BEGIN_MARKER}\nstale\n{END_MARKER}\n");
+        assert!(
+            replace_marked_region(&two_begin, "x").is_err(),
+            "a second marker pair must fail loudly, not be silently ignored"
+        );
+
+        let two_end = format!("{BEGIN_MARKER}\nbody\n{END_MARKER}\n{END_MARKER}\n");
+        assert!(replace_marked_region(&two_end, "x").is_err());
     }
 }

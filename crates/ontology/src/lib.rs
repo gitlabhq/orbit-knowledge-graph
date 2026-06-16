@@ -3267,12 +3267,10 @@ properties:
         assert!(!got.contains_key("wi"), "tainted via CLOSES");
     }
 
-    #[test]
-    fn text_indexed_columns_match_tokenizer_lookups() {
-        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
-
+    fn assert_text_indexed_columns_consistent(ontology: &Ontology) {
         for node in ontology.nodes() {
             let columns = ontology.text_indexed_columns(&node.name);
+
             for column in &columns {
                 assert!(
                     ontology.text_index_tokenizer(&node.name, column).is_some(),
@@ -3280,6 +3278,21 @@ properties:
                     node.name
                 );
             }
+
+            // Reverse direction: every `text(...)` storage index on the node
+            // must surface through the accessor, so the generated doc table can
+            // never omit a column for which the validator accepts token ops.
+            for idx in &node.storage.indexes {
+                if idx.index_type.starts_with("text(") {
+                    assert!(
+                        columns.contains(&idx.column.as_str()),
+                        "{}.{} carries a text() index but is missing from text_indexed_columns",
+                        node.name,
+                        idx.column
+                    );
+                }
+            }
+
             assert!(
                 columns.windows(2).all(|w| w[0] < w[1]),
                 "{} text-indexed columns must be sorted and deduplicated: {columns:?}",
@@ -3287,10 +3300,21 @@ properties:
             );
         }
 
-        let mr = ontology.text_indexed_columns("MergeRequest");
+        assert!(ontology.text_indexed_columns("Nonexistent").is_empty());
+    }
+
+    #[test]
+    fn text_indexed_columns_match_tokenizer_lookups() {
+        let fixture = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert_text_indexed_columns_consistent(&fixture);
+
+        // The generator renders `load_embedded()`, so lock the guarantee against
+        // the real shipped ontology too, not just the test fixtures.
+        let embedded = Ontology::load_embedded().expect("should load embedded ontology");
+        assert_text_indexed_columns_consistent(&embedded);
+
+        let mr = embedded.text_indexed_columns("MergeRequest");
         assert!(mr.contains(&"title"));
         assert!(mr.contains(&"description"));
-
-        assert!(ontology.text_indexed_columns("Nonexistent").is_empty());
     }
 }
