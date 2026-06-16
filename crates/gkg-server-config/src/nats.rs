@@ -117,7 +117,7 @@ pub struct NatsConfiguration {
     /// Inactive threshold for versioned dispatch consumers in seconds.
     /// After this duration with no activity, NATS auto-deletes the consumer.
     /// Used for Siphon dispatch consumers during blue-green deployments.
-    /// Defaults to 3600 (1 hour).
+    /// Clamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).
     #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
     pub consumer_inactive_threshold_secs: u64,
 }
