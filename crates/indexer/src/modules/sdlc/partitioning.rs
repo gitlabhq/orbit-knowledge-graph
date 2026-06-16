@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::handler::HandlerError;
 
@@ -99,11 +99,24 @@ impl PartitionStrategy {
         let cuts = parse_cut_tuples(&batches, self.key_columns.len());
 
         if cuts.len() < self.count as usize {
-            debug!(
-                ?cuts,
-                count = self.count,
-                "skipping partitioning: too few buckets to fill all partitions"
-            );
+            let probe_rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
+            if probe_rows == 0 {
+                debug!(
+                    count = self.count,
+                    "scope under partition_min_rows; running single-threaded"
+                );
+            } else {
+                // Any returned row already cleared the probe's `total_rows >= min_rows` gate, so
+                // too-few-cuts despite probe_rows > 0 is the silent single-threaded fallback (#869).
+                warn!(
+                    batches = batches.len(),
+                    probe_rows,
+                    cuts = cuts.len(),
+                    count = self.count,
+                    table = %self.datalake_table,
+                    "partition probe cleared min_rows but yielded too few cuts; load will run single-threaded"
+                );
+            }
             return Ok(Vec::new());
         }
         Ok(self.assignments_between(&cuts))
@@ -195,9 +208,13 @@ fn probe_params(traversal_path: Option<&str>) -> Value {
 }
 
 fn parse_cut_tuples(batches: &[RecordBatch], key_len: usize) -> Vec<Vec<String>> {
-    let Some(batch) = batches.first() else {
-        return Vec::new();
-    };
+    batches
+        .iter()
+        .flat_map(|batch| parse_batch_cuts(batch, key_len))
+        .collect()
+}
+
+fn parse_batch_cuts(batch: &RecordBatch, key_len: usize) -> Vec<Vec<String>> {
     let columns: Vec<&StringArray> = (0..key_len)
         .filter_map(|i| {
             batch
@@ -231,12 +248,17 @@ mod tests {
     struct ProbeDatalake {
         rows: Vec<Vec<String>>,
         key_len: usize,
+        rows_per_batch: usize,
         captured_sql: Mutex<String>,
         captured_params: Mutex<Value>,
     }
 
     impl ProbeDatalake {
         fn new(rows: Vec<Vec<&str>>) -> Self {
+            Self::chunked(rows, usize::MAX)
+        }
+
+        fn chunked(rows: Vec<Vec<&str>>, rows_per_batch: usize) -> Self {
             let key_len = rows.first().map(Vec::len).unwrap_or(0);
             Self {
                 rows: rows
@@ -244,6 +266,7 @@ mod tests {
                     .map(|r| r.into_iter().map(String::from).collect())
                     .collect(),
                 key_len,
+                rows_per_batch,
                 captured_sql: Mutex::new(String::new()),
                 captured_params: Mutex::new(Value::Null),
             }
@@ -285,7 +308,11 @@ mod tests {
             if self.rows.is_empty() {
                 return Ok(vec![]);
             }
-            Ok(vec![build_probe_batch(&self.rows, self.key_len)])
+            Ok(self
+                .rows
+                .chunks(self.rows_per_batch.max(1))
+                .map(|chunk| build_probe_batch(chunk, self.key_len))
+                .collect())
         }
     }
 
@@ -357,6 +384,26 @@ mod tests {
         assert_eq!(ranges[4].lower_bound, Some(keys(&["1/9970/z/", "0"])));
         assert_eq!(ranges[4].upper_bound, None);
         assert_eq!(ranges[2].key_columns, keys(&["traversal_path", "id"]));
+    }
+
+    #[tokio::test]
+    async fn cuts_spanning_multiple_batches_still_partition() {
+        let datalake = ProbeDatalake::chunked(
+            vec![
+                vec!["1/9970/a/", "0"],
+                vec!["1/9970/b/", "100"],
+                vec!["1/9970/c/", "200"],
+                vec!["1/9970/d/", "300"],
+                vec!["1/9970/e/", "400"],
+            ],
+            2,
+        );
+        let ranges = strategy(&["traversal_path", "id"], 5, 0)
+            .compute_ranges(&datalake, Some("1/9970/"))
+            .await
+            .unwrap();
+
+        assert_eq!(ranges.len(), 5);
     }
 
     #[tokio::test]
