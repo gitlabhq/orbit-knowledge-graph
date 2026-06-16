@@ -947,6 +947,7 @@ impl Destination for FailingDestination {
     async fn new_batch_writer(
         &self,
         _table: &str,
+        _durability: indexer::checkpoint::WriteDurability,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
         Ok(Box::new(FailingBatchWriter))
     }

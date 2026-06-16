@@ -32,9 +32,9 @@ impl ClickHouseBatchWriter {
     pub(crate) fn new(
         client: ArrowClickHouseClient,
         table: String,
+        insert_sql: String,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
-        let insert_sql = client.build_insert_sql(&table);
         Self {
             client,
             table,

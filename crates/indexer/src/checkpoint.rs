@@ -140,8 +140,11 @@ impl ClickHouseCheckpointStore {
     }
 }
 
-/// Durable only where a dropped write forces a re-pull from the start: full-load completions and tombstones.
-#[derive(Clone, Copy)]
+/// Whether a write blocks until ClickHouse confirms the async insert flushed. `Durable` is
+/// mandatory where a dropped write is unrecoverable (checkpoint completions, SDLC incremental
+/// pages — the watermark advances with no NATS retry); `FireAndForget` trades it for throughput
+/// where loss re-pulls (full load, code indexing).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteDurability {
     FireAndForget,
     Durable,

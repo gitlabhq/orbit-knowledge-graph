@@ -88,22 +88,34 @@ impl ArrowClickHouseClient {
         q
     }
 
-    /// Builds a ` SETTINGS k=v, ...` SQL fragment from `insert_settings`.
-    /// Returns an empty string when no insert settings are configured.
-    fn insert_settings_clause(&self) -> String {
-        if self.insert_settings.is_empty() {
+    /// `overrides` are merged over `insert_settings`; sorted so the emitted SQL is deterministic.
+    fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
+        if self.insert_settings.is_empty() && overrides.is_empty() {
             return String::new();
         }
-        let pairs: Vec<String> = self
-            .insert_settings
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
+        let mut merged: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+        for (k, v) in &self.insert_settings {
+            merged.insert(k, v);
+        }
+        for &(k, v) in overrides {
+            merged.insert(k, v);
+        }
+        let pairs: Vec<String> = merged.iter().map(|(k, v)| format!("{k}={v}")).collect();
         format!(" SETTINGS {}", pairs.join(", "))
     }
 
     pub fn build_insert_sql(&self, table: &str) -> String {
-        let settings_clause = self.insert_settings_clause();
+        self.build_insert_sql_with_overrides(table, &[])
+    }
+
+    /// Layers `overrides` over the configured `insert_settings` so a caller can pin
+    /// per-write settings (e.g. `wait_for_async_insert`) regardless of config.
+    pub fn build_insert_sql_with_overrides(
+        &self,
+        table: &str,
+        overrides: &[(&str, &str)],
+    ) -> String {
+        let settings_clause = self.insert_settings_clause(overrides);
         format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream")
     }
 
@@ -153,7 +165,7 @@ impl ArrowClickHouseClient {
             writer.finish().map_err(ClickHouseError::ArrowEncode)?;
         }
 
-        let settings_clause = self.insert_settings_clause();
+        let settings_clause = self.insert_settings_clause(&[]);
         let sql = format!("INSERT INTO {table}{settings_clause} FORMAT ArrowStream");
         let mut insert = self.client.insert_formatted_with(&sql);
         insert
@@ -540,4 +552,55 @@ async fn flush_drain(
             .map_err(ClickHouseError::Insert)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn client_with_settings(insert_settings: HashMap<String, String>) -> ArrowClickHouseClient {
+        ArrowClickHouseClient::new(
+            "http://localhost:8123",
+            "default",
+            "default",
+            None,
+            &HashMap::new(),
+            &insert_settings,
+        )
+    }
+
+    #[test]
+    fn no_settings_emits_no_clause() {
+        let client = client_with_settings(HashMap::new());
+        assert_eq!(
+            client.build_insert_sql("t"),
+            "INSERT INTO t FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
+    fn config_settings_sort_for_deterministic_sql() {
+        let client = client_with_settings(HashMap::from([
+            ("wait_for_async_insert".to_string(), "0".to_string()),
+            ("async_insert".to_string(), "1".to_string()),
+        ]));
+        assert_eq!(
+            client.build_insert_sql("t"),
+            "INSERT INTO t SETTINGS async_insert=1, wait_for_async_insert=0 FORMAT ArrowStream"
+        );
+    }
+
+    #[test]
+    fn overrides_win_over_config() {
+        let client = client_with_settings(HashMap::from([(
+            "wait_for_async_insert".to_string(),
+            "0".to_string(),
+        )]));
+        let overrides = [("async_insert", "1"), ("wait_for_async_insert", "1")];
+        assert_eq!(
+            client.build_insert_sql_with_overrides("t", &overrides),
+            "INSERT INTO t SETTINGS async_insert=1, wait_for_async_insert=1 FORMAT ArrowStream"
+        );
+    }
 }
