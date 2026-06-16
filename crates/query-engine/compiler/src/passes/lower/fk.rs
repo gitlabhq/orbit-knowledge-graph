@@ -1,7 +1,7 @@
 //! Emit FK-derived traversals as node joins on FK columns (no `gl_edge` scans).
 //! `Star` scans one center with `FINAL` + candidate-CTE narrowing; `Chain` joins
-//! a linear chain end-to-end with `LIMIT 1 BY` scans. Both synthesize the per-hop
-//! edge columns the formatter expects.
+//! a linear chain end-to-end with `FINAL` scans. Both synthesize the per-hop edge
+//! columns the formatter expects.
 
 use ontology::constants::*;
 use std::collections::{HashMap, HashSet};
@@ -394,25 +394,15 @@ fn emit_join_target_candidate_ctes(
     Ok(())
 }
 
-/// Latest-row, `_deleted`-filtered `SELECT *` scan. `scope_prefix` is the tighter
-/// project/group prefix that lets ClickHouse seek the node PK to a contiguous range.
-fn node_scan(np: &NodePlan, plan: &Plan, scope_prefix: Option<&str>) -> Result<TableRef> {
+/// Latest-row, `_deleted`-filtered `SELECT *` scan using `FINAL` for streaming
+/// dedup. `scope_prefix` is the tighter project/group prefix that lets
+/// ClickHouse seek the node PK to a contiguous range.
+fn node_scan(np: &NodePlan, _plan: &Plan, scope_prefix: Option<&str>) -> Result<TableRef> {
     let alias = &np.alias;
     let table = np
         .table
         .as_deref()
         .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' has no table")))?;
-    let sort_key = plan
-        .table_sort_keys
-        .get(table)
-        .ok_or_else(|| QueryError::Lowering(format!("no sort key for node table '{table}'")))?;
-
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
 
     let mut where_parts = latest_node_predicates(alias, np);
     if np.has_traversal_path
@@ -430,10 +420,8 @@ fn node_scan(np: &NodePlan, plan: &Plan, scope_prefix: Option<&str>) -> Result<T
     Ok(TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
-            from: TableRef::scan(table, alias),
+            from: TableRef::scan_final(table, alias),
             where_clause: Expr::conjoin(where_parts),
-            order_by,
-            limit_by: Some((1, limit_by_cols)),
             ..Default::default()
         },
         alias,
