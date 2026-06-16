@@ -106,8 +106,7 @@ impl PartitionStrategy {
                     "scope under partition_min_rows; running single-threaded"
                 );
             } else {
-                // Any returned row already cleared the probe's `total_rows >= min_rows` gate, so
-                // too-few-cuts despite probe_rows > 0 is the silent single-threaded fallback (#869).
+                // Any returned row already cleared the probe's `total_rows >= min_rows` gate, so too-few-cuts here is the silent single-threaded fallback (#869).
                 warn!(
                     batches = batches.len(),
                     probe_rows,
