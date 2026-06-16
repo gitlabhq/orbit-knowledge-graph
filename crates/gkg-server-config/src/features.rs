@@ -25,7 +25,56 @@ pub enum Feature {
 #[serde(default, deny_unknown_fields)]
 pub struct FeatureScope {
     pub enabled: bool,
+    #[serde(deserialize_with = "deserialize_namespaces")]
     pub namespaces: Vec<i64>,
+}
+
+/// Accepts a YAML/JSON list, or the comma-separated string a `GKG_*` env var
+/// delivers (e.g. `9970,1234`), so scoped flags are settable via env without
+/// per-key config-source wiring.
+fn deserialize_namespaces<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct Namespaces;
+
+    impl<'de> serde::de::Visitor<'de> for Namespaces {
+        type Value = Vec<i64>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("namespace ids as a list or comma-separated string")
+        }
+
+        fn visit_i64<E>(self, id: i64) -> Result<Self::Value, E> {
+            Ok(vec![id])
+        }
+
+        fn visit_u64<E>(self, id: u64) -> Result<Self::Value, E> {
+            Ok(vec![id as i64])
+        }
+
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(|id| id.parse().map_err(E::custom))
+                .collect()
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut ids = Vec::new();
+            while let Some(id) = seq.next_element()? {
+                ids.push(id);
+            }
+            Ok(ids)
+        }
+    }
+
+    deserializer.deserialize_any(Namespaces)
 }
 
 impl FeatureScope {
@@ -137,6 +186,20 @@ mod tests {
         let features: FeaturesConfig =
             serde_yaml::from_str("system_notes:\n  enabled: true\n  namespaces: [9970]").unwrap();
         assert!(features.system_notes.enabled);
+        assert_eq!(features.system_notes.namespaces, vec![9970]);
+    }
+
+    #[test]
+    fn parses_namespaces_from_comma_separated_string() {
+        let features: FeaturesConfig =
+            serde_yaml::from_str("system_notes:\n  namespaces: \"9970, 1234\"").unwrap();
+        assert_eq!(features.system_notes.namespaces, vec![9970, 1234]);
+    }
+
+    #[test]
+    fn parses_single_namespace_scalar() {
+        let features: FeaturesConfig =
+            serde_yaml::from_str("system_notes:\n  namespaces: 9970").unwrap();
         assert_eq!(features.system_notes.namespaces, vec![9970]);
     }
 
