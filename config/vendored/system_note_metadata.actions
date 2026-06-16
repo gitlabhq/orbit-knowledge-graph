@@ -1,7 +1,7 @@
 # Vendored copy of Rails SystemNoteMetadata::ICON_TYPES action values.
 #
 # Source: app/models/system_note_metadata.rb (CE) and
-#         app/models/ee/system_note_metadata.rb (EE) in gitlab-org/gitlab
+#         ee/app/models/ee/system_note_metadata.rb (EE) in gitlab-org/gitlab
 # Pinned: ea52f8c3adc370db76545ecd82728710f2609800 (refs/heads/master, captured 2026-06-12)
 #
 # To update: replace the list below with the combined %w[] bodies from the CE
