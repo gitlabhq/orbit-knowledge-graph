@@ -1599,12 +1599,9 @@ mod tests {
             let compiled = compile(query, &ONTOLOGY, &security_ctx())
                 .unwrap_or_else(|err| panic!("{name} should compile: {err}"));
             let sql = compiled.base.render();
-            // Node JOINs in FK-star aggregations use LIMIT BY; other query
-            // types (traversal, path_finding, neighbors) keep FINAL on
-            // their primary scans and may use LIMIT BY on node JOINs.
             assert!(
-                sql.contains(" FINAL") || sql.contains("LIMIT 1 BY"),
-                "{name} should use FINAL or LIMIT BY for node-table dedup, got:\n{sql}"
+                sql.contains(" FINAL"),
+                "{name} should use FINAL for node-table dedup, got:\n{sql}"
             );
             if name == "traversal" || name == "path_finding" || name == "neighbors" {
                 assert!(
