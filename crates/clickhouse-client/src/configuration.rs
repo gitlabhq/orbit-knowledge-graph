@@ -59,7 +59,6 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         assert!(config.validate().is_ok());
@@ -75,7 +74,6 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         let result = config.validate();
@@ -92,7 +90,6 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         let result = config.validate();
@@ -109,7 +106,6 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         let result = config.validate();
@@ -136,7 +132,6 @@ mod tests {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         let client = config.build_client();

@@ -246,7 +246,6 @@ impl TestContext {
                     session_settings: std::collections::HashMap::new(),
                     insert_settings: std::collections::HashMap::new(),
                     profiling: Default::default(),
-                    ..Default::default()
                 },
                 Arc::new(EngineMetrics::default()),
             )

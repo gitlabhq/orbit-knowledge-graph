@@ -171,7 +171,6 @@ fn create_config(host: &str, port: u16) -> ClickHouseConfiguration {
         session_settings: std::collections::HashMap::new(),
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
-        ..Default::default()
     }
 }
 
@@ -330,7 +329,6 @@ async fn connection_failure_returns_error() {
         session_settings: std::collections::HashMap::new(),
         insert_settings: std::collections::HashMap::new(),
         profiling: Default::default(),
-        ..Default::default()
     };
 
     let destination = ClickHouseDestination::new(config, Arc::new(EngineMetrics::default()))
