@@ -568,20 +568,21 @@ impl<'a> SsaEngine<'a> {
                     this.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
                     return Visit::Leaf;
                 }
-                let preds = this.blocks[block.0].predecessors.clone();
-                if preds.is_empty() {
+                if this.blocks[block.0].predecessors.is_empty() {
                     this.write_variable_interned(variable, block, SsaValue::Opaque);
                     return Visit::Leaf;
                 }
                 // In-progress sentinel; a predecessor already marked is an
                 // ancestor on the stack (a cycle) and must not be re-pushed.
                 this.write_variable_interned(variable, block, SsaValue::Marker);
-                Visit::Branch(
-                    preds
-                        .into_iter()
-                        .filter(|&p| this.current_value(variable, p).is_none())
-                        .collect(),
-                )
+                let mut to_visit = SmallVec::new();
+                for i in 0..this.blocks[block.0].predecessors.len() {
+                    let p = this.blocks[block.0].predecessors[i];
+                    if this.current_value(variable, p).is_none() {
+                        to_visit.push(p);
+                    }
+                }
+                Visit::Branch(to_visit)
             },
             |this, block| {
                 let val = this.combine_predecessors(variable, block);
