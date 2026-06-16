@@ -152,6 +152,10 @@ pub struct Ontology {
     pub(crate) materialized_views: Vec<MaterializedViewDefinition>,
     pub(crate) statistics: Option<StatisticsConfig>,
     pub(crate) traversal_path_lookups: Vec<TraversalPathLookup>,
+    /// Regex patterns for `v<N>_*` objects that the GC sweep must never drop.
+    /// Matched against the base name (after stripping the `v<N>_` prefix).
+    /// Empty by default: everything outside the keep-set is dropped.
+    pub(crate) gc_preserve_patterns: Vec<String>,
 }
 
 impl Default for Ontology {
@@ -207,6 +211,7 @@ impl Ontology {
             materialized_views: Vec::new(),
             statistics: None,
             traversal_path_lookups: Vec::new(),
+            gc_preserve_patterns: Vec::new(),
         }
     }
 
@@ -1242,6 +1247,11 @@ impl Ontology {
     #[must_use]
     pub fn traversal_path_lookups(&self) -> &[TraversalPathLookup] {
         &self.traversal_path_lookups
+    }
+
+    #[must_use]
+    pub fn gc_preserve_patterns(&self) -> &[String] {
+        &self.gc_preserve_patterns
     }
 
     #[must_use]

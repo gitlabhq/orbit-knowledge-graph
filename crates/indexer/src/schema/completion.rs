@@ -10,8 +10,9 @@
 //! 2. **Version GC** — A single SQL query computes the keep-set (active +
 //!    retained retired + in-flight migrating above active) and enumerates
 //!    all `v<N>_*` objects in `system.tables` whose version falls outside
-//!    it. Each candidate is validated against the ontology before being
-//!    dropped; unrecognized objects are logged and left alone.
+//!    it. Ontology-known objects are always dropped. Objects not in the
+//!    ontology (rename-orphans, removed entities) are also dropped unless
+//!    their base name matches a `gc_preserve_patterns` regex.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -524,8 +525,9 @@ impl MigrationCompletionChecker {
     }
 
     /// Enumerates dead-version objects via `system.tables` (keep-set computed
-    /// in SQL), validates each against the ontology, and drops recognized
-    /// objects. Unrecognized objects are logged and left alone.
+    /// in SQL). Ontology-known objects are always dropped. Objects not in the
+    /// ontology are also dropped unless they match a `gc_preserve_patterns`
+    /// regex.
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
         let retired_slots = self.schema_config.max_retained_versions.saturating_sub(1);
         let db = self.graph.database();
@@ -540,9 +542,9 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("list dead version objects: {e}")))?;
 
         let known_names = ontology_known_names(&self.ontology);
+        let preserve = compile_preserve_patterns(self.ontology.gc_preserve_patterns());
         let current = *SCHEMA_VERSION;
 
-        // Collect and sort: views first, then dictionaries, then tables.
         let mut drops: Vec<(u32, String, &'static str)> = Vec::new();
         for batch in &batches {
             for i in 0..batch.num_rows() {
@@ -558,8 +560,10 @@ impl MigrationCompletionChecker {
                 .ok_or_else(|| TaskError::new("missing dead_version".to_string()))?;
 
                 let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
-                if !known_names.contains(base_name) {
-                    warn!(version, object = %name, "GC: skipping unrecognized object");
+                if !known_names.contains(base_name)
+                    && matches_preserve_pattern(base_name, &preserve)
+                {
+                    info!(version, object = %name, "GC: preserving (matches gc_preserve_patterns)");
                     continue;
                 }
 
@@ -636,6 +640,25 @@ fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
         names.insert(d.name.clone());
     }
     names
+}
+
+/// Returns `true` if `name` matches any of the preserve `patterns` (regexes).
+fn matches_preserve_pattern(name: &str, patterns: &[regex::Regex]) -> bool {
+    patterns.iter().any(|re| re.is_match(name))
+}
+
+/// Compiles `gc_preserve_patterns` strings into regexes. Invalid patterns
+/// are logged and skipped so a typo cannot disable the entire GC sweep.
+fn compile_preserve_patterns(raw: &[String]) -> Vec<regex::Regex> {
+    raw.iter()
+        .filter_map(|p| {
+            regex::Regex::new(p)
+                .inspect_err(|e| {
+                    warn!(pattern = %p, error = %e, "gc_preserve_patterns: invalid regex, skipping")
+                })
+                .ok()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -775,5 +798,25 @@ mod tests {
             LIST_DEAD_VERSION_OBJECTS.contains("coalesce(max(version), 0)"),
             "migrating > active guard must handle missing active"
         );
+    }
+
+    #[test]
+    fn preserve_pattern_empty_never_matches() {
+        assert!(!matches_preserve_pattern("gl_edge_v2", &[]));
+    }
+
+    #[test]
+    fn preserve_pattern_regex_match() {
+        let patterns =
+            compile_preserve_patterns(&["^keep_.*".to_string(), "^special_table$".to_string()]);
+        assert!(matches_preserve_pattern("keep_this", &patterns));
+        assert!(matches_preserve_pattern("special_table", &patterns));
+        assert!(!matches_preserve_pattern("gl_edge", &patterns));
+    }
+
+    #[test]
+    fn compile_preserve_patterns_skips_invalid() {
+        let patterns = compile_preserve_patterns(&["^valid$".to_string(), "[invalid".to_string()]);
+        assert_eq!(patterns.len(), 1);
     }
 }
