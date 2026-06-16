@@ -1194,6 +1194,17 @@
       "domain": "indexer.scheduler"
     },
     {
+      "otel_name": "gkg.scheduler.task.requests.received",
+      "prom_name": "gkg_scheduler_task_requests_received_total",
+      "description": "Candidate requests derived from source events before dedup, per task.",
+      "kind": "counter",
+      "labels": [
+        "task"
+      ],
+      "stability": "stable",
+      "domain": "indexer.scheduler"
+    },
+    {
       "otel_name": "gkg.scheduler.task.requests.skipped",
       "prom_name": "gkg_scheduler_task_requests_skipped_total",
       "description": "Requests skipped because an equivalent request was already in flight.",

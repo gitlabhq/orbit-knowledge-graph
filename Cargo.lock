@@ -5993,6 +5993,7 @@ dependencies = [
  "nats-client",
  "ontology",
  "opentelemetry",
+ "opentelemetry_sdk",
  "parking_lot",
  "prost 0.14.4",
  "query-engine",

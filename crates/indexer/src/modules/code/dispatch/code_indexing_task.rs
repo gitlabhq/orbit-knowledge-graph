@@ -82,6 +82,7 @@ impl SiphonCodeIndexingTaskDispatcher {
         let subscription = self.siphon_subscription();
         let dispatch_id = Uuid::new_v4();
         let campaign_id = self.campaign.current();
+        let mut received: u64 = 0;
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
@@ -99,8 +100,9 @@ impl SiphonCodeIndexingTaskDispatcher {
                 break;
             }
 
-            let requests =
+            let (requests, received_in_batch) =
                 self.collect_latest_requests(&messages, dispatch_id, campaign_id.clone())?;
+            received += received_in_batch;
 
             for request in requests.into_values() {
                 let envelope = Envelope::new(&request).map_err(|error| {
@@ -144,14 +146,15 @@ impl SiphonCodeIndexingTaskDispatcher {
             }
         }
 
-        if dispatched > 0 || skipped > 0 {
+        if received > 0 {
+            self.metrics.record_requests_received(self.name(), received);
             self.metrics
                 .record_requests_published(self.name(), dispatched);
             self.metrics.record_requests_skipped(self.name(), skipped);
 
             info!(
-                dispatched,
-                skipped, "dispatched code indexing task requests"
+                received,
+                dispatched, skipped, "dispatched code indexing task requests"
             );
         }
 
@@ -163,8 +166,9 @@ impl SiphonCodeIndexingTaskDispatcher {
         messages: &[crate::nats::NatsMessage],
         dispatch_id: Uuid,
         campaign_id: Option<String>,
-    ) -> Result<HashMap<ProjectBranch, CodeIndexingTaskRequest>, TaskError> {
+    ) -> Result<(HashMap<ProjectBranch, CodeIndexingTaskRequest>, u64), TaskError> {
         let mut latest: HashMap<ProjectBranch, CodeIndexingTaskRequest> = HashMap::new();
+        let mut received: u64 = 0;
 
         for message in messages {
             let replication_events = decode_logical_replication_events(&message.envelope.payload)
@@ -208,6 +212,7 @@ impl SiphonCodeIndexingTaskDispatcher {
                     .to_string();
 
                 let key = (project_id, branch.clone());
+                received += 1;
 
                 let request = CodeIndexingTaskRequest {
                     task_id,
@@ -229,7 +234,7 @@ impl SiphonCodeIndexingTaskDispatcher {
             }
         }
 
-        Ok(latest)
+        Ok((latest, received))
     }
 }
 
@@ -246,8 +251,50 @@ mod tests {
     use crate::topic::CodeIndexingTaskRequest;
     use siphon_proto::replication_event::Operation;
 
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData, ResourceMetrics};
+    use opentelemetry_sdk::metrics::{InMemoryMetricExporter, PeriodicReader, SdkMeterProvider};
+
     fn test_metrics() -> ScheduledTaskMetrics {
         ScheduledTaskMetrics::with_meter(&crate::testkit::test_meter())
+    }
+
+    fn create_dispatcher_with_metrics(
+        nats: Arc<MockNatsServices>,
+        metrics: ScheduledTaskMetrics,
+    ) -> SiphonCodeIndexingTaskDispatcher {
+        SiphonCodeIndexingTaskDispatcher::new(
+            nats,
+            metrics,
+            SiphonCodeIndexingTaskDispatcherConfig::default(),
+            Arc::new(crate::campaign::CampaignState::new()),
+        )
+    }
+
+    fn metrics_with_exporter() -> (
+        ScheduledTaskMetrics,
+        SdkMeterProvider,
+        InMemoryMetricExporter,
+    ) {
+        let exporter = InMemoryMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter.clone()).build();
+        let provider = SdkMeterProvider::builder().with_reader(reader).build();
+        let metrics = ScheduledTaskMetrics::with_meter(&provider.meter("test"));
+        (metrics, provider, exporter)
+    }
+
+    fn counter_sum(metrics: &[ResourceMetrics], name: &str) -> u64 {
+        metrics
+            .iter()
+            .flat_map(|rm| rm.scope_metrics().flat_map(|sm| sm.metrics()))
+            .filter(|m| m.name() == name)
+            .filter_map(|m| match m.data() {
+                AggregatedMetrics::U64(MetricData::Sum(sum)) => {
+                    Some(sum.data_points().map(|point| point.value()).sum::<u64>())
+                }
+                _ => None,
+            })
+            .sum()
     }
 
     fn create_dispatcher(nats: Arc<MockNatsServices>) -> SiphonCodeIndexingTaskDispatcher {
@@ -419,6 +466,34 @@ mod tests {
 
         let published = nats.get_published();
         assert_eq!(published.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn received_counts_events_before_dedup_collapse() {
+        let nats = Arc::new(MockNatsServices::new());
+        let payload = build_replication_events(vec![
+            code_indexing_task_columns(1, 42, "refs/heads/main", "old_sha", "/org/project-42")
+                .build(),
+            code_indexing_task_columns(2, 42, "refs/heads/main", "new_sha", "/org/project-42")
+                .build(),
+            code_indexing_task_columns(3, 99, "refs/heads/main", "sha", "/org/project-99").build(),
+        ]);
+        nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
+
+        let (metrics, provider, exporter) = metrics_with_exporter();
+        let dispatcher = create_dispatcher_with_metrics(Arc::clone(&nats), metrics);
+        dispatcher.run().await.unwrap();
+        provider.force_flush().unwrap();
+
+        let recorded = exporter.get_finished_metrics().unwrap();
+        assert_eq!(
+            counter_sum(&recorded, "gkg.scheduler.task.requests.received"),
+            3
+        );
+        assert_eq!(
+            counter_sum(&recorded, "gkg.scheduler.task.requests.published"),
+            2
+        );
     }
 
     #[tokio::test]

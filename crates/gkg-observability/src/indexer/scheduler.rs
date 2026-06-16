@@ -29,6 +29,14 @@ pub const DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
+pub const REQUESTS_RECEIVED: MetricSpec = MetricSpec::counter(
+    "gkg.scheduler.task.requests.received",
+    "Candidate requests derived from source events before dedup, per task.",
+    None,
+    &[labels::TASK],
+    DOMAIN,
+);
+
 pub const REQUESTS_PUBLISHED: MetricSpec = MetricSpec::counter(
     "gkg.scheduler.task.requests.published",
     "Requests successfully published to NATS per task.",
@@ -65,6 +73,7 @@ pub const ERRORS: MetricSpec = MetricSpec::counter(
 pub const CATALOG: &[&MetricSpec] = &[
     &RUNS,
     &DURATION,
+    &REQUESTS_RECEIVED,
     &REQUESTS_PUBLISHED,
     &REQUESTS_SKIPPED,
     &QUERY_DURATION,

@@ -58,6 +58,7 @@ zstd = "0.13.3"
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
+opentelemetry_sdk = { version = "0.32", features = ["metrics", "testing"] }
 reqwest = { workspace = true, features = ["stream", "rustls"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }

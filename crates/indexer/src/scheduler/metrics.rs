@@ -7,6 +7,7 @@ use gkg_observability::indexer::scheduler;
 pub struct ScheduledTaskMetrics {
     runs: Counter<u64>,
     duration: Histogram<f64>,
+    requests_received: Counter<u64>,
     requests_published: Counter<u64>,
     requests_skipped: Counter<u64>,
     query_duration: Histogram<f64>,
@@ -23,6 +24,7 @@ impl ScheduledTaskMetrics {
         Self {
             runs: scheduler::RUNS.build_counter_u64(meter),
             duration: scheduler::DURATION.build_histogram_f64(meter),
+            requests_received: scheduler::REQUESTS_RECEIVED.build_counter_u64(meter),
             requests_published: scheduler::REQUESTS_PUBLISHED.build_counter_u64(meter),
             requests_skipped: scheduler::REQUESTS_SKIPPED.build_counter_u64(meter),
             query_duration: scheduler::QUERY_DURATION.build_histogram_f64(meter),
@@ -38,6 +40,13 @@ impl ScheduledTaskMetrics {
         self.runs.add(1, &labels);
         self.duration.record(
             duration,
+            &[KeyValue::new(scheduler::labels::TASK, task.to_owned())],
+        );
+    }
+
+    pub fn record_requests_received(&self, task: &str, count: u64) {
+        self.requests_received.add(
+            count,
             &[KeyValue::new(scheduler::labels::TASK, task.to_owned())],
         );
     }
