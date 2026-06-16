@@ -392,20 +392,23 @@ impl NatsBroker {
             )
         };
 
-        let consumer_config = ConsumerConfig {
+        let mut consumer_config = ConsumerConfig {
             filter_subject,
             ack_wait: self.config.ack_wait(),
             max_deliver: -1,
             durable_name: Some(durable_name.clone()),
             // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
             max_ack_pending: max_ack_pending_to_i64(subscription.max_ack_pending),
-            // New: historical data comes from the datalake backfill, not replay.
-            // If this consumer is auto-deleted after inactive_threshold and recreated,
-            // events from the gap are skipped by design.
-            deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
-            inactive_threshold: self.config.consumer_inactive_threshold(),
             ..Default::default()
         };
+
+        if !subscription.manage_stream {
+            // Unmanaged (Siphon) streams: historical data comes from the datalake backfill,
+            // not replay. If this consumer is auto-deleted after inactive_threshold and
+            // recreated, events from the gap are skipped by design.
+            consumer_config.deliver_policy = async_nats::jetstream::consumer::DeliverPolicy::New;
+            consumer_config.inactive_threshold = self.config.consumer_inactive_threshold();
+        }
 
         let consumer = stream
             .get_or_create_consumer(&durable_name, consumer_config)

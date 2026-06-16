@@ -57,9 +57,13 @@ impl NatsVersioner {
     }
 }
 
-pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
+pub async fn cleanup_version(
+    nats_client: &async_nats::Client,
+    version: u32,
+) -> Result<(), CleanupError> {
     let v = NatsVersioner::new(version);
     let jetstream = async_nats::jetstream::new(nats_client.clone());
+    let mut errors: Vec<String> = Vec::new();
 
     for base in MANAGED_STREAMS {
         let name = v.stream(base);
@@ -76,11 +80,14 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
             }
             Err(e) => {
                 warn!(version, stream = %name, error = %e, "failed to delete versioned stream");
+                errors.push(format!("stream {name}: {e}"));
             }
         }
     }
 
     for base in MANAGED_BUCKETS {
+        // KV buckets are stored as JetStream streams with a KV_ prefix (NATS convention).
+        // We delete the underlying stream directly to reuse the not-found error handling.
         let name = format!("KV_{}", v.bucket(base));
         match jetstream.delete_stream(&name).await {
             Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
@@ -95,10 +102,28 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
             }
             Err(e) => {
                 warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket");
+                errors.push(format!("bucket {name}: {e}"));
             }
         }
     }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CleanupError(errors))
+    }
 }
+
+#[derive(Debug)]
+pub struct CleanupError(Vec<String>);
+
+impl std::fmt::Display for CleanupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "failed to clean up NATS entities: {}", self.0.join(", "))
+    }
+}
+
+impl std::error::Error for CleanupError {}
 
 #[cfg(test)]
 mod tests {

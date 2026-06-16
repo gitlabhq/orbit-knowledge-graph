@@ -645,7 +645,9 @@ async fn cleanup_version_deletes_streams_and_kv_buckets() {
             .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
     }
 
-    cleanup_version(&client, version).await;
+    cleanup_version(&client, version)
+        .await
+        .expect("cleanup_version failed");
 
     for name in &stream_names {
         assert!(
@@ -668,5 +670,7 @@ async fn cleanup_version_is_idempotent() {
         .await
         .expect("failed to connect to NATS");
 
-    cleanup_version(&client, 888).await;
+    cleanup_version(&client, 888)
+        .await
+        .expect("cleanup_version failed unexpectedly for non-existent version");
 }
