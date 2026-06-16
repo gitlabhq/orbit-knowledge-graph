@@ -99,9 +99,9 @@ The CDC events from NATS are consumed and written into ClickHouse, which allows 
 
 #### Graph Schema Design
 
-We are going to transform the data from ClickHouse to a graph-like format by designing a set of tables:
+The data is transformed from ClickHouse to a graph-like format using the following table design:
 
-- **Nodes**: We will define a table schema for each node type. For example, `namespaces`, `projects`, `issues`, `merge_requests`, `pipelines`, `runners`, `vulnerabilities`, etc. Each node table will contain:
+- **Nodes**: A table schema is defined for each node type. For example, `namespaces`, `projects`, `issues`, `merge_requests`, `pipelines`, `runners`, `vulnerabilities`, etc. Each node table contains:
   - The tenant ID
   - A unique identifier (typically the primary key from the source table)
   - Core attributes relevant to that entity type
@@ -115,7 +115,7 @@ We are going to transform the data from ClickHouse to a graph-like format by des
 
 #### Transformation and Loading Logic
 
-The transformation from CDC data to the graph schema will be handled by the ETL Indexer, a Rust-based pipeline designed to transform data into the desired format efficiently.
+The transformation from CDC data to the graph schema is handled by the ETL Indexer, a Rust-based pipeline that transforms data into the desired format efficiently.
 
 ##### Core components
 
@@ -128,16 +128,14 @@ The transformation from CDC data to the graph schema will be handled by the ETL 
 
 ##### Data storage
 
-The Knowledge Graph data is going to be stored in separate ClickHouse database.
+The Knowledge Graph data is stored in a separate ClickHouse database.
 
-- For `.com` this will probably be in a separate instance.
-- For small dedicated environments and self-hosted instances, this can be done in the same instance as the main ClickHouse database. This choice ultimately depends on what the operators think is best for their environment.
+- On `.com` this runs in a separate instance.
+- For small dedicated environments and self-hosted instances, this can run in the same instance as the main ClickHouse database. This choice depends on what the operators think is best for their environment.
 
 ##### Namespace Knowledge Graph access detection
 
-The first step is to detect which top-level namespaces have access to the Knowledge Graph. This can be done following an approach similar to the one used for Zoekt, where they have a `zoekt_enabled_namespaces` tables that stores the namespaces that are enabled for Zoekt.
-
-We will create a similar table for the Knowledge Graph in the main PostgreSQL database, called `knowledge_graph_enabled_namespaces`, which will store the namespaces that are enabled for the Knowledge Graph and various metadata about the namespaces. This table will then be replicated into ClickHouse database for the Knowledge Graph.
+The first step is to detect which top-level namespaces have access to the Knowledge Graph. Following a similar approach to Zoekt's `zoekt_enabled_namespaces` table, the `knowledge_graph_enabled_namespaces` table in the main PostgreSQL database stores the namespaces that are enabled for the Knowledge Graph and various metadata about the namespaces. Siphon replicates this table into ClickHouse for the Knowledge Graph.
 
 ```sql
 -- PostgreSQL
@@ -164,7 +162,7 @@ CREATE TABLE knowledge_graph_enabled_namespaces (
 );
 ```
 
-If the table is not present, we will assume that no namespaces have access to the Knowledge Graph.
+If the table is not present, the indexer assumes that no namespaces have access to the Knowledge Graph.
 
 ```sql
 --- ClickHouse
@@ -175,9 +173,9 @@ SELECT * FROM knowledge_graph_enabled_namespaces;
 
 **Indexing job creation**
 
-The `gkg-indexer` will be responsible for getting the namespace data for the Knowledge Graph. Periodically, a cron job will run to trigger the indexing process for the namespaces that are due for indexing. If a namespace is due for indexing, the cron job will create a job message and publish it to the appropriate NATS JetStream subject.
+The `gkg-indexer` is responsible for getting the namespace data for the Knowledge Graph. A cron-based scheduler (`ScheduledTask`) periodically triggers the indexing process for namespaces that are due for indexing. If a namespace is due for indexing, the scheduler creates a job message and publishes it to the appropriate NATS JetStream subject.
 
-It is important to differentiate between initial and incremental indexing when publishing the jobs. We want to have workers with different priorities for each type of indexing. This will prevent resource starvation by big initial indexing jobs and ensure that the indexing process remains efficient.
+It is important to differentiate between initial and incremental indexing when publishing the jobs. Workers have different priorities for each type of indexing. This prevents resource starvation by big initial indexing jobs and ensures that the indexing process remains efficient.
 
 Example NATS JetStream stream: `GKG_INDEXER`
 
@@ -205,59 +203,29 @@ SET last_indexed_at = {started_at}, result = 'success | error', ...
 WHERE id = '{namespace_id}';
 ```
 
-On top of that, we will keep a record of the indexing job in the Knowledge Graph ClickHouse database. Each time a job is completed, an entry will be created in the `knowledge_graph_indexing_jobs` table.
-
-```sql
--- ClickHouse
-CREATE TABLE knowledge_graph_indexing_job_events (
-    id UUID PRIMARY KEY,
-    namespace_id UUID NOT NULL,
-    type ENUM('initial', 'incremental') NOT NULL,
-    status ENUM('started', 'completed', 'error') NOT NULL DEFAULT 'started',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    ...
-);
-
--- ClickHouse
--- Job started event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'started', NOW());
-
--- Job completed event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'completed', NOW());
-
--- Job error event
-INSERT INTO knowledge_graph_indexing_jobs (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
-```
-
-**Note:** From time to time we will need to re-create the table to get rid of the bloat. This triggered by a dedicated cron job that will be run periodically.
+**Planned:** A `knowledge_graph_indexing_job_events` table would record individual job lifecycle events (started, completed, error) in the Knowledge Graph ClickHouse database for observability. This is not yet implemented; job-level observability currently relies on structured logging and OpenTelemetry metrics. If implemented, the table may need periodic re-creation to remove bloat, triggered by a dedicated cron job.
 
 **Handling errors**
 
-If the worker encounters a recoverable error, it should continue indexing the remaining data. The worker will update the database to reflect the error and the date of the last indexing alongside relevant metadata.
+If the worker encounters a recoverable error, it continues indexing the remaining data. The worker updates the database to reflect the error and the date of the last indexing alongside relevant metadata.
 
 ```sql
 -- ClickHouse
 UPDATE knowledge_graph_enabled_namespaces
 SET last_indexed_at = NOW(), result = 'partial_success', ...
 WHERE id = '{namespace_id}';
-
--- ClickHouse
-INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'completed', NOW());
 ```
 
-If the worker encounters a non-recoverable error, it will update the database to reflect the error and the date of the last indexing alongside relevant metadata.
+If the worker encounters a non-recoverable error, it updates the database to reflect the error and the date of the last indexing alongside relevant metadata.
 
 ```sql
 -- ClickHouse
 UPDATE knowledge_graph_enabled_namespaces
 SET last_indexed_at = NOW(), result = 'error', ...
 WHERE id = '{namespace_id}';
-
--- ClickHouse
-INSERT INTO knowledge_graph_indexing_job_events (namespace_id, type, status, created_at) VALUES ('{namespace_id}', '{type}', 'error', NOW());
 ```
 
-If the worker fails unexpectedly, the unacked message will be redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle will re-create the request. This leverages eventual consistency which is acceptable since we're not aiming for real-time consistency.
+If the worker fails unexpectedly, the unacked message is redelivered by NATS to another worker. If the message exceeds `max_deliver`, the outcome depends on the subscription's `dead_letter_on_exhaustion` setting: subscriptions with `dead_letter_on_exhaustion: true` (e.g. Siphon CDC) publish the message to the `GKG_DEAD_LETTERS` stream for inspection and replay, while subscriptions with `dead_letter_on_exhaustion: false` (internal dispatch, the default) term-ack the message since the next dispatch cycle re-creates the request. This leverages eventual consistency which is acceptable since the system does not aim for real-time consistency.
 
 ##### ETL
 
@@ -272,7 +240,9 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
 1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
 3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
-4. Read each page out of the datalake in full, buffering its Arrow blocks in memory. ClickHouse's `max_block_size` only governs how the result is chunked on the wire; the page-level enrichment (CTEs, `argMax … GROUP BY`) runs server-side over the full page. ClickHouse's Arrow output encodes `String` columns with 32-bit offsets, so a single block whose String column exceeds 2GB fails the page (error code 1002) — possible on wide-text rows (e.g. MR diffs) when the datalake server profile lets a block grow that large. The happy path pays nothing for this; on such a failure the page is retried with a smaller `max_block_size` and `preferred_block_size_bytes` pinned to byte-cap each block (see `Pipeline::extract_page`). The retry re-reads from the page's start cursor, which is idempotent (point 7).
+4. Read each page out of the datalake in full, buffering its Arrow blocks in memory. ClickHouse's `max_block_size` only governs how the result is chunked on the wire; the page-level enrichment (CTEs, `argMax … GROUP BY`) runs server-side over the full page.
+   ClickHouse's Arrow output encodes `String` columns with 32-bit offsets, so a single block whose String column exceeds 2GB fails the page (error code 1002) — possible on wide-text rows (e.g. MR diffs) when the datalake server profile lets a block grow that large.
+   The happy path pays nothing for this; on such a failure the page is retried with a smaller `max_block_size` and `preferred_block_size_bytes` pinned to byte-cap each block (see `Pipeline::extract_page`). The retry re-reads from the page's start cursor, which is idempotent (point 7).
 5. Transform the whole page in-memory with DataFusion SQL (a row-wise projection: mapping source columns to graph columns, resolving FK edges, applying type discriminators), grouping the output rows by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
 6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. `engine.handlers.entity_handler.stream_block_size` (rows per wire block on the read side) is tunable per deployment.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
@@ -325,31 +295,34 @@ Rows deleted in the source database have `_siphon_deleted` set to `true`. The ex
 
 Edge tables are `ReplacingMergeTree` keyed on `(traversal_path, relationship_kind, source_id, target_id, …)`. For an FK-derived edge whose FK column is *mutable* — a "latest"/"who did X last" pointer such as `HAS_LATEST_DIFF` (`latest_merge_request_diff_id`) — a changed FK value writes a new edge row with a different `target_id`. Because `target_id` is part of the dedup identity, the prior row keeps a distinct identity and is never replaced or tombstoned, so the owner accumulates one live edge per historical FK value. The before-image needed to tombstone the old edge at write time is unavailable (the datalake `siphon_*` tables are collapsed current-state), so this is reconciled out-of-band instead.
 
-`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column. A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op. The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology. This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
+`StaleEdgeReconciliation` is a `ScheduledTask` in `DispatchIndexing` mode (default every 15 minutes). It runs one idempotent `INSERT … SELECT` per `(relationship_kind, FK-owner)` variant: a CTE selects the owner nodes changed since the last cursor (`_version >= cursor`, read `FINAL`), joins them to live edges of that kind, and tombstones (`_deleted = true`) any edge whose endpoint no longer equals the owner's current FK column.
+A dual `IN` on `(traversal_path, owner-id)` prunes the edge scan to the changed set via the primary key, so cost tracks churn rather than table size; the cursor advances only on full success, and re-tombstoning an already-stale edge is a no-op.
+The swept set is derived entirely from the ontology: an edge is reconciled iff its mapping is marked `mutable: true` (the FK can change, so the edge can orphan); immutable FKs (`project_id`, `author_id`) leave it unset and are never swept. The metadata for each variant (owner table, graph column, edge table, direction, endpoint kinds) is likewise derived from the ontology.
+This runs directly in the dispatcher rather than dispatching to indexer workers — it is one cheap global sweep, not per-namespace fan-out, and keeps the load off the high-throughput insert path.
 
 ##### Zero-downtime schema changes
 
 **Main PostgreSQL to Lake**
 
-The Knowledge Graph `gkg-indexer` will need to account for schema changes in the main ClickHouse database which we use as a data lake. There are many reasons why the main CLickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
+The Knowledge Graph `gkg-indexer` accounts for schema changes in the main ClickHouse database used as a data lake. The main ClickHouse database tables may change over time; new columns may be added, columns may be renamed or dropped, etc. If the `gkg-indexer` is not aware of the schema changes, it could lead to service interruptions in production due to queries failing.
 
-We will explicitly define the schema, containing which tables and columns are needed for the Knowledge Graph. For some columns, we will expose additional metadata where needed, such as Integer-to-Enum mappings (for example: issue status). The schema will be in a JSON document, generated by a Ruby script from the current PostgreSQL schema and Rails models.
+The schema is explicitly defined in the ontology YAML (`config/ontology/nodes/` and `config/ontology/edges/`), specifying which tables and columns are needed for the Knowledge Graph. For some columns, additional metadata is exposed where needed, such as Integer-to-Enum mappings (for example: issue status).
 
-We will write a CI job that detects schema changes by comparing the existing and a newly generated schema. This ensures that the schema is always up to date with the current version of GitLab. If a drift is detected, replace the current schema file with the new one.
+A CI job (`ddl-freshness-check`) detects schema drift by comparing the committed `config/graph.sql` against the DDL regenerated from the ontology. This ensures that the schema is always in sync with the ontology definition.
 
-In the Knowledge Graph, we will use this schema file to create the Knowledge Graph ClickHouse tables and build the indexing queries.
+The indexer uses the ontology to create the Knowledge Graph ClickHouse tables and build the indexing queries.
 
 **Lake to Graph**
 
-The Knowledge Graph schema is going to be declared in the `gkg-indexer` codebase. The schema needs to be versioned and the migrations need to be applied to the Knowledge Graph database.
+The Knowledge Graph schema is declared in `config/graph.sql` (generated from the ontology) and versioned via `config/SCHEMA_VERSION`. All graph tables are prefixed with `v<N>_` (e.g. `v58_gl_issue`) so that multiple schema versions can coexist during migration. Migrations are applied to the Knowledge Graph database by the dispatcher at boot via `schema::migration::run_if_needed()`.
 
-The schema will need to be backward compatible with the previous version until the schema migration is complete for every namespace. A migration will be considered complete when the `schema_version` column is updated to the new version and all the data has been migrated or back-filled to the new schema.
+The schema is backward compatible with the previous version until the schema migration is complete for every namespace. A migration is considered complete when `MigrationCompletionChecker` detects that all enabled namespaces have been re-indexed into new-prefix tables, then promotes the new version to `active` and retires the old one.
 
-There are multiple type of schema changes we will need to account for:
+There are multiple types of schema changes the system accounts for:
 
 **New node/relationship type**
 
-If we need to add a new entity type to the Knowledge Graph, we create a new table to the database and add the new entity type to the schema. The table will be filled on the next indexing job for the namespace.
+To add a new entity type to the Knowledge Graph, the new type is defined in the ontology YAML, and the DDL is regenerated. The migration orchestrator creates the new table at dispatcher boot. The table is filled on the next indexing job for each namespace.
 
 ```sql
 CREATE TABLE database_b.<table_name> (
@@ -360,7 +333,7 @@ CREATE TABLE database_b.<table_name> (
 
 **New/Drop column**
 
-If we need to add a new column to an existing entity type, we add the new column to the schema and the table. The column will be filled on the next indexing job for the namespace.
+To add a new column to an existing entity type, the column is added to the ontology and the DDL is regenerated. The column is filled on the next indexing job for each namespace.
 
 ```sql
 ALTER TABLE database_b.<table_name> ADD COLUMN <column_name> <column_type>;
@@ -369,23 +342,23 @@ ALTER TABLE database_b.<table_name> DROP COLUMN <column_name>;
 
 **Major re-structure of an existing entity type**
 
-If we introduce a change to a table that is not backward compatible or may cause downtime, we will use multi-step migration process which will be handled by the `gkg-indexer`.
+For changes to a table that are not backward compatible or may cause downtime, the system uses a prefix-based multi-step migration process handled by the dispatcher.
 
-We will start by creating a shadow table with the new schema. This shadow table will be backfilled with the data from the existing table. The previous table will still be available and used to serve queries. Once the shadow table is backfilled, we will `EXCHANGE` the shadow table to the new table name and drop the previous table.
+The dispatcher creates new-prefix tables (e.g. `v59_gl_issue`) with the updated schema. The previous-prefix tables remain available to serve queries. The normal dispatch cycle re-indexes every namespace into the new-prefix tables. Once `MigrationCompletionChecker` confirms all namespaces are re-indexed, the new version is promoted to `active`, the old version is retired, and dead-version GC drops the obsolete tables.
 
 **Initial schema creation**
 
-The initial schema creation can be handled by the `gkg-indexer` or in the CI/CD pipeline via a custom migration tool which will be responsible for creating the schema.
+The initial schema creation is handled by the dispatcher at boot. When no active schema version exists, `schema::migration::run_if_needed()` creates all graph tables with the current version prefix.
 
 **Schema updates**
 
-The schema updates will be handled by the `gkg-indexer` or in the CI/CD pipeline via a custom migration tool which will be responsible for applying the schema changes to the database. The indexer will then be responsible for backfilling the data to the new schema on the next indexing job for the namespace.
+Schema updates are handled by the dispatcher at boot via `schema::migration::run_if_needed()`, which creates new-prefix tables and marks the new version as `migrating`. The indexer then backfills the data to the new schema on the next indexing job for each namespace.
 
 **Schema update coordination**
 
-When indexing requires a schema update, we need to coordinate the schema update to the `gkg-webserver` so it can refresh its schema cache. We will use NATS KV to coordinate the schema update process. When a migration is complete for a namespace, we will use NATS KV subscriptions from the `gkg-webserver` to invalidate the schema version for the namespace. This will trigger a schema refresh and the subsequent queries will use the new schema version.
+When indexing requires a schema update, the `gkg-webserver` must detect the new version so it can serve queries from the correct tables. The `SchemaWatcher` in the webserver polls the `gkg_schema_version` control table in ClickHouse at a configurable interval. When the active version transitions (e.g. from pending to ready, or outdated), the webserver updates its internal state accordingly. If the active version exceeds the binary's embedded version, the watcher requests a graceful shutdown so the pod restarts with a newer binary.
 
-The system will not perform any breaking action on the schema until all namespaces have been migrated to the latest version.
+The system does not perform any breaking action on the schema until all namespaces have been migrated to the latest version.
 
 **Closing notes**
 
