@@ -8,10 +8,11 @@
 #       echo "skipping"; exit 0
 #   fi
 #
-# Checks four places (in order):
+# Checks (in order):
 #   1. SKIP_<UPPER_NAME> env var (set to "1")
 #   2. CI_MERGE_REQUEST_DESCRIPTION (set at pipeline creation)
-#   3. Commit messages in the MR range (fallback when description is stale)
+#   3. CI_MERGE_REQUEST_TITLE
+#   4. Commit messages in the MR range (fallback when description is stale)
 
 ci_skip_requested() {
     local check_name="$1"
@@ -30,11 +31,9 @@ ci_skip_requested() {
 
     # Commit messages in the MR range. This is the reliable fallback
     # when the description was edited after the pipeline started.
-    # Deepen the shallow CI clone so the three-dot range actually has commits.
+    # Fetch the merge base so the three-dot range resolves in shallow clones.
     if [[ -n "${BASE_REF:-}" ]]; then
-        if git rev-parse --is-shallow-repository 2>/dev/null | grep -q true; then
-            git fetch --deepen=100 2>/dev/null || true
-        fi
+        git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1 2>/dev/null || true
         # Buffer git log output before grepping to avoid SIGPIPE.
         # grep -q closes the pipe on first match, which SIGPIPEs the
         # producer (exit 141). Under set -o pipefail the pipeline takes
