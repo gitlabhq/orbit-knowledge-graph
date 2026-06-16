@@ -1003,7 +1003,7 @@
           "type": "integer",
           "format": "uint64",
           "default": 3600,
-          "minimum": 60
+          "minimum": 0
         },
         "consumer_name": {
           "description": "Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).\n\n**Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.\nMessages are only delivered while connected. Good for transient workers or testing.\n\n**Durable consumers** (`Some(\"name\")`): Persist across restarts. NATS tracks the\nlast acknowledged message, so reconnecting consumers resume where they left off.\nRequired for reliable message processing.\n\nFor horizontal scaling, give all instances the same `consumer_name`. NATS will\ndistribute messages across them (each message delivered to exactly one instance).",

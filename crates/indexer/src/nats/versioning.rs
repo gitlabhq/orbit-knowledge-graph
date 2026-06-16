@@ -86,23 +86,11 @@ pub async fn cleanup_version(
     }
 
     for base in MANAGED_BUCKETS {
-        // KV buckets are stored as JetStream streams with a KV_ prefix (NATS convention).
-        // We delete the underlying stream directly to reuse the not-found error handling.
-        let name = format!("KV_{}", v.bucket(base));
-        match jetstream.delete_stream(&name).await {
+        let name = v.bucket(base);
+        match jetstream.delete_key_value(&name).await {
             Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    DeleteStreamErrorKind::JetStream(js_err)
-                        if js_err.kind() == ErrorCode::STREAM_NOT_FOUND
-                ) =>
-            {
-                debug!(version, bucket = %name, "versioned KV bucket does not exist, skipping");
-            }
             Err(e) => {
-                warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket");
-                errors.push(format!("bucket {name}: {e}"));
+                debug!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket, will retry on next tick");
             }
         }
     }
@@ -133,19 +121,22 @@ mod tests {
     fn check_versioner(version: u32) {
         let v = NatsVersioner::new(version);
 
-        assert_eq!(v.stream("GKG_INDEXER"), format!("GKG_INDEXER_V{version}"));
         assert_eq!(
-            v.stream("GKG_DEAD_LETTERS"),
-            format!("GKG_DEAD_LETTERS_V{version}")
+            v.stream(INDEXER_STREAM),
+            format!("{INDEXER_STREAM}_V{version}")
+        );
+        assert_eq!(
+            v.stream(DEAD_LETTER_STREAM),
+            format!("{DEAD_LETTER_STREAM}_V{version}")
         );
 
         assert_eq!(
-            v.bucket("indexing_locks"),
-            format!("indexing_locks_v{version}")
+            v.bucket(INDEXING_LOCKS_BUCKET),
+            format!("{INDEXING_LOCKS_BUCKET}_v{version}")
         );
         assert_eq!(
-            v.bucket("orbit_indexing_progress"),
-            format!("orbit_indexing_progress_v{version}")
+            v.bucket(INDEXING_PROGRESS_BUCKET),
+            format!("{INDEXING_PROGRESS_BUCKET}_v{version}")
         );
 
         assert_eq!(
@@ -173,8 +164,8 @@ mod tests {
         check_versioner(v);
 
         assert_eq!(
-            NATS_VERSIONER.stream("GKG_INDEXER"),
-            format!("GKG_INDEXER_V{v}")
+            NATS_VERSIONER.stream(INDEXER_STREAM),
+            format!("{INDEXER_STREAM}_V{v}")
         );
     }
 
