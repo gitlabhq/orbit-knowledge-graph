@@ -747,10 +747,8 @@ mod tests {
 
     #[test]
     fn preserve_pattern_regex_match() {
-        let patterns = compile_preserve_patterns(&[
-            "^keep_.*".to_string(),
-            "^special_table$".to_string(),
-        ]);
+        let patterns =
+            compile_preserve_patterns(&["^keep_.*".to_string(), "^special_table$".to_string()]);
         assert!(matches_preserve_pattern("keep_this", &patterns));
         assert!(matches_preserve_pattern("special_table", &patterns));
         assert!(!matches_preserve_pattern("gl_edge", &patterns));
@@ -758,10 +756,7 @@ mod tests {
 
     #[test]
     fn compile_preserve_patterns_skips_invalid() {
-        let patterns = compile_preserve_patterns(&[
-            "^valid$".to_string(),
-            "[invalid".to_string(),
-        ]);
+        let patterns = compile_preserve_patterns(&["^valid$".to_string(), "[invalid".to_string()]);
         assert_eq!(patterns.len(), 1);
     }
 
