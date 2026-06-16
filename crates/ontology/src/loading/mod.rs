@@ -659,6 +659,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    ontology.gc_preserve_patterns = schema.settings.gc_preserve_patterns;
+
     // Validate storage columns match declared properties.
     validate_storage_columns(&ontology)?;
     validate_auxiliary_dictionaries(&ontology)?;

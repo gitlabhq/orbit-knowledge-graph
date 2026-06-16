@@ -67,6 +67,8 @@ pub(super) struct SettingsYaml {
     pub materialized_views: Vec<MaterializedViewYaml>,
     #[serde(default)]
     pub auxiliary_dictionaries: Vec<AuxiliaryDictionaryYaml>,
+    #[serde(default)]
+    pub gc_preserve_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

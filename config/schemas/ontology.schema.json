@@ -820,6 +820,12 @@
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
+        },
+        "gc_preserve_patterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Regex patterns for versioned objects (matched against the base name after stripping the v<N>_ prefix) that the dead-version GC sweep must never drop. Empty by default: everything outside the keep-set is dropped.",
+          "default": []
         }
       },
       "required": ["table_prefix", "default_edge_table", "default_entity_sort_key", "edge_tables", "internal_column_prefix", "etl"],

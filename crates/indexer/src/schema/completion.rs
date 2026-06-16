@@ -10,8 +10,8 @@
 //! 2. **Version GC** — A single SQL query computes the keep-set (active +
 //!    retained retired + in-flight migrating above active) and enumerates
 //!    all `v<N>_*` objects in `system.tables` whose version falls outside
-//!    it. Each candidate is validated against the ontology before being
-//!    dropped; unrecognized objects are logged and left alone.
+//!    it. Every candidate is dropped unless its base name matches a
+//!    `gc_preserve_patterns` regex from the ontology.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -20,9 +20,7 @@ use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
-use query_engine::compiler::{
-    generate_graph_dictionaries, generate_graph_materialized_views, generate_graph_tables,
-};
+use query_engine::compiler::generate_graph_tables;
 use tracing::{info, warn};
 
 use std::sync::LazyLock;
@@ -524,8 +522,8 @@ impl MigrationCompletionChecker {
     }
 
     /// Enumerates dead-version objects via `system.tables` (keep-set computed
-    /// in SQL), validates each against the ontology, and drops recognized
-    /// objects. Unrecognized objects are logged and left alone.
+    /// in SQL) and drops everything outside the keep-set. Objects whose base
+    /// name matches a `gc_preserve_patterns` glob are skipped.
     async fn reconcile_dead_versions(&self) -> Result<(), TaskError> {
         let retired_slots = self.schema_config.max_retained_versions.saturating_sub(1);
         let db = self.graph.database();
@@ -539,10 +537,9 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| TaskError::new(format!("list dead version objects: {e}")))?;
 
-        let known_names = ontology_known_names(&self.ontology);
+        let preserve = compile_preserve_patterns(self.ontology.gc_preserve_patterns());
         let current = *SCHEMA_VERSION;
 
-        // Collect and sort: views first, then dictionaries, then tables.
         let mut drops: Vec<(u32, String, &'static str)> = Vec::new();
         for batch in &batches {
             for i in 0..batch.num_rows() {
@@ -558,8 +555,8 @@ impl MigrationCompletionChecker {
                 .ok_or_else(|| TaskError::new("missing dead_version".to_string()))?;
 
                 let base_name = name.strip_prefix(&format!("v{version}_")).unwrap_or(&name);
-                if !known_names.contains(base_name) {
-                    warn!(version, object = %name, "GC: skipping unrecognized object");
+                if matches_preserve_pattern(base_name, &preserve) {
+                    info!(version, object = %name, "GC: preserving (matches gc_preserve_patterns)");
                     continue;
                 }
 
@@ -572,10 +569,8 @@ impl MigrationCompletionChecker {
             }
         }
 
-        // Fixed drop order: dictionaries, views, tables. Works for the
-        // current ontology shape (dicts source from tables, no cross-type
-        // cycles). A general migration framework should topo-sort using
-        // system.tables loading_dependencies columns instead.
+        // Fixed drop order: dictionaries first (they source from tables),
+        // then views, then tables.
         drops.sort_by_key(|(_, _, kind)| match *kind {
             "DICTIONARY" => 0,
             "VIEW" => 1,
@@ -620,22 +615,21 @@ impl MigrationCompletionChecker {
     }
 }
 
-/// Builds the set of object names the ontology creates (tables, views,
-/// dictionaries) — without any version prefix. Used to validate that a
-/// `v<N>_*` object found in `system.tables` was created by the migration
-/// system and is safe to drop.
-fn ontology_known_names(ontology: &ontology::Ontology) -> HashSet<String> {
-    let mut names = HashSet::new();
-    for t in &generate_graph_tables(ontology) {
-        names.insert(t.name.clone());
-    }
-    for mv in &generate_graph_materialized_views(ontology) {
-        names.insert(mv.name.clone());
-    }
-    for d in &generate_graph_dictionaries(ontology) {
-        names.insert(d.name.clone());
-    }
-    names
+/// Returns `true` if `name` matches any of the preserve `patterns` (regexes).
+fn matches_preserve_pattern(name: &str, patterns: &[regex::Regex]) -> bool {
+    patterns.iter().any(|re| re.is_match(name))
+}
+
+/// Compiles `gc_preserve_patterns` strings into regexes. Invalid patterns
+/// are logged and skipped so a typo cannot disable the entire GC sweep.
+fn compile_preserve_patterns(raw: &[String]) -> Vec<regex::Regex> {
+    raw.iter()
+        .filter_map(|p| {
+            regex::Regex::new(p)
+                .inspect_err(|e| warn!(pattern = %p, error = %e, "gc_preserve_patterns: invalid regex, skipping"))
+                .ok()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -747,15 +741,28 @@ mod tests {
     }
 
     #[test]
-    fn ontology_known_names_includes_tables_views_dicts() {
-        let ont = ontology::Ontology::load_embedded().unwrap();
-        let names = ontology_known_names(&ont);
-        assert!(names.contains("gl_edge"), "should contain edge table");
-        assert!(
-            names.contains("checkpoint"),
-            "should contain checkpoint table"
-        );
-        assert!(!names.is_empty());
+    fn preserve_pattern_empty_never_matches() {
+        assert!(!matches_preserve_pattern("gl_edge_v2", &[]));
+    }
+
+    #[test]
+    fn preserve_pattern_regex_match() {
+        let patterns = compile_preserve_patterns(&[
+            "^keep_.*".to_string(),
+            "^special_table$".to_string(),
+        ]);
+        assert!(matches_preserve_pattern("keep_this", &patterns));
+        assert!(matches_preserve_pattern("special_table", &patterns));
+        assert!(!matches_preserve_pattern("gl_edge", &patterns));
+    }
+
+    #[test]
+    fn compile_preserve_patterns_skips_invalid() {
+        let patterns = compile_preserve_patterns(&[
+            "^valid$".to_string(),
+            "[invalid".to_string(),
+        ]);
+        assert_eq!(patterns.len(), 1);
     }
 
     #[test]

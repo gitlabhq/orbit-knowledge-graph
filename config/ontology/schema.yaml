@@ -277,6 +277,7 @@ settings:
         - {name: traversal_path, type: string}
       layout: {kind: hashed}
       lifetime: {min: 60, max: 300}
+  gc_preserve_patterns: []
   etl:
     default_watermark: _siphon_watermark
     default_deleted: _siphon_deleted
