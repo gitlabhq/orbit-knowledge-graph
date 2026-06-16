@@ -66,7 +66,6 @@ impl TestContext {
             session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
-            ..Default::default()
         };
 
         Self {
@@ -224,7 +223,6 @@ impl TestContext {
                 session_settings: std::collections::HashMap::new(),
                 insert_settings: std::collections::HashMap::new(),
                 profiling: Default::default(),
-                ..Default::default()
             },
             url: self.url.clone(),
             schema_sqls: Arc::clone(&self.schema_sqls),
