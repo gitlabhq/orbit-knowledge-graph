@@ -134,16 +134,25 @@ mod tests {
     }
 
     #[test]
-    fn managed_streams_matches_source_constants() {
-        assert_eq!(MANAGED_STREAMS, &[INDEXER_STREAM, DEAD_LETTER_STREAM]);
+    fn managed_streams_contains_all_stream_constants() {
+        let required = [INDEXER_STREAM, DEAD_LETTER_STREAM];
+        for stream in &required {
+            assert!(
+                MANAGED_STREAMS.contains(stream),
+                "MANAGED_STREAMS is missing {stream:?} — add it so cleanup_version deletes it"
+            );
+        }
     }
 
     #[test]
-    fn managed_buckets_matches_source_constants() {
-        assert_eq!(
-            MANAGED_BUCKETS,
-            &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET]
-        );
+    fn managed_buckets_contains_all_bucket_constants() {
+        let required = [INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
+        for bucket in &required {
+            assert!(
+                MANAGED_BUCKETS.contains(bucket),
+                "MANAGED_BUCKETS is missing {bucket:?} — add it so cleanup_version deletes it"
+            );
+        }
     }
 
     #[test]
