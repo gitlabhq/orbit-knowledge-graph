@@ -8,20 +8,12 @@ pub trait ClickHouseConfigurationExt {
 
 impl ClickHouseConfigurationExt for ClickHouseConfiguration {
     fn build_client(&self) -> ArrowClickHouseClient {
-        let mut session_settings = std::collections::HashMap::from([
-            ("use_query_condition_cache".into(), "true".into()),
-            ("join_use_nulls".into(), "0".into()),
-            ("query_plan_join_swap_table".into(), "auto".into()),
-            ("optimize_aggregation_in_order".into(), "1".into()),
-        ]);
-        session_settings.extend(self.session_settings.clone());
-
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &session_settings,
+            &self.session_settings,
             &self.insert_settings,
         )
     }
