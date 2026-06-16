@@ -54,7 +54,11 @@ fn dead_letter_subject_for_subject(stream: &str, subject: &str) -> String {
 pub fn dead_letter_subscription(subscription: &Subscription) -> Subscription {
     let (resolved_stream, _) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
     let base = dead_letter_subject_for_subject(&resolved_stream, &subscription.subject);
-    Subscription::new(DEAD_LETTER_STREAM, NATS_VERSIONER.subject(&base))
+    Subscription::new(
+        NATS_VERSIONER.stream(DEAD_LETTER_STREAM),
+        NATS_VERSIONER.subject(&base),
+    )
+    .manage_stream(false)
 }
 
 fn original_subject<'a>(subscription: &'a Subscription, envelope: &'a Envelope) -> &'a str {
@@ -127,8 +131,23 @@ mod tests {
         let mut subscription = Subscription::new("siphon_db", "tables.users");
         subscription.manage_stream = false;
         let dlq = dead_letter_subscription(&subscription);
-        assert_eq!(&*dlq.stream, DEAD_LETTER_STREAM);
+        assert_eq!(&*dlq.stream, format!("GKG_DEAD_LETTERS_V{v}"));
         assert_eq!(&*dlq.subject, format!("v{v}.dlq.siphon_db.tables.users"));
-        assert!(dlq.manage_stream);
+        assert!(!dlq.manage_stream);
+    }
+
+    #[test]
+    fn dead_letter_subscription_does_not_double_version() {
+        let v = *SCHEMA_VERSION;
+        let subscription = Subscription::new("GKG_INDEXER", "sdlc.global.indexing.requested");
+        let dlq = dead_letter_subscription(&subscription);
+
+        let (resolved_stream, resolved_subject) = NATS_VERSIONER.resolve_stream_and_subject(&dlq);
+
+        assert_eq!(resolved_stream, format!("GKG_DEAD_LETTERS_V{v}"));
+        assert!(
+            !resolved_subject.contains(&format!("v{v}.v{v}")),
+            "subject was double-versioned: {resolved_subject}"
+        );
     }
 }

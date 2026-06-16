@@ -399,6 +399,9 @@ impl NatsBroker {
             durable_name: Some(durable_name.clone()),
             // ConsumerConfig::max_ack_pending uses 0 to mean "NATS server default" (currently 1000).
             max_ack_pending: max_ack_pending_to_i64(subscription.max_ack_pending),
+            // New: historical data comes from the datalake backfill, not replay.
+            // If this consumer is auto-deleted after inactive_threshold and recreated,
+            // events from the gap are skipped by design.
             deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
             inactive_threshold: self.config.consumer_inactive_threshold(),
             ..Default::default()

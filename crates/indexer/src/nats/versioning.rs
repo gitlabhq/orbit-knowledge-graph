@@ -81,9 +81,18 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
     }
 
     for base in MANAGED_BUCKETS {
-        let name = v.bucket(base);
-        match jetstream.delete_key_value(&name).await {
+        let name = format!("KV_{}", v.bucket(base));
+        match jetstream.delete_stream(&name).await {
             Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    DeleteStreamErrorKind::JetStream(js_err)
+                        if js_err.kind() == ErrorCode::STREAM_NOT_FOUND
+                ) =>
+            {
+                debug!(version, bucket = %name, "versioned KV bucket does not exist, skipping");
+            }
             Err(e) => {
                 warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket");
             }
