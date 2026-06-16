@@ -29,52 +29,31 @@ pub struct FeatureScope {
     pub namespaces: Vec<i64>,
 }
 
-/// Accepts a YAML/JSON list, or the comma-separated string a `GKG_*` env var
-/// delivers (e.g. `9970,1234`), so scoped flags are settable via env without
-/// per-key config-source wiring.
+/// A list (YAML/JSON), a single id, or the comma-separated string a `GKG_*`
+/// env var delivers (e.g. `9970,1234`) — so scoped flags are settable via env
+/// without per-key config-source wiring.
 fn deserialize_namespaces<'de, D>(deserializer: D) -> Result<Vec<i64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    struct Namespaces;
-
-    impl<'de> serde::de::Visitor<'de> for Namespaces {
-        type Value = Vec<i64>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("namespace ids as a list or comma-separated string")
-        }
-
-        fn visit_i64<E>(self, id: i64) -> Result<Self::Value, E> {
-            Ok(vec![id])
-        }
-
-        fn visit_u64<E>(self, id: u64) -> Result<Self::Value, E> {
-            Ok(vec![id as i64])
-        }
-
-        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-            value
-                .split(',')
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(|id| id.parse().map_err(E::custom))
-                .collect()
-        }
-
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(
-            self,
-            mut seq: A,
-        ) -> Result<Self::Value, A::Error> {
-            let mut ids = Vec::new();
-            while let Some(id) = seq.next_element()? {
-                ids.push(id);
-            }
-            Ok(ids)
-        }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Namespaces {
+        List(Vec<i64>),
+        One(i64),
+        CommaSeparated(String),
     }
 
-    deserializer.deserialize_any(Namespaces)
+    Ok(match Namespaces::deserialize(deserializer)? {
+        Namespaces::List(ids) => ids,
+        Namespaces::One(id) => vec![id],
+        Namespaces::CommaSeparated(csv) => csv
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| id.parse().map_err(serde::de::Error::custom))
+            .collect::<Result<_, _>>()?,
+    })
 }
 
 impl FeatureScope {
