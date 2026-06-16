@@ -185,8 +185,9 @@ async fn dead_letter_subject_counts(url: &str) -> BTreeMap<String, usize> {
         .await
         .expect("dead letter stream should exist");
 
+    let versioned_stream = NATS_VERSIONER.stream(DLQ_SOURCE_STREAM);
     let mut subjects = stream
-        .info_with_subjects(&NATS_VERSIONER.subject("dlq.dlq_source_stream.>"))
+        .info_with_subjects(&NATS_VERSIONER.subject(&format!("dlq.{versioned_stream}.>")))
         .await
         .expect("failed to fetch dead letter subjects");
 
@@ -233,8 +234,11 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         .await
         .expect("failed to publish second dead letter");
 
-    let first_subject = NATS_VERSIONER
-        .subject("dlq.dlq_source_stream.code.task.indexing.requested.278964.bWFzdGVy");
+    let versioned_stream = NATS_VERSIONER.stream(DLQ_SOURCE_STREAM);
+
+    let first_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{versioned_stream}.code.task.indexing.requested.278964.bWFzdGVy"
+    ));
     let first_dead_letter = get_dead_letter(&url, &first_subject).await;
     assert_eq!(first_dead_letter.subject.to_string(), first_subject);
     let first_payload: DeadLetterEnvelope =
@@ -244,8 +248,9 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.278964.bWFzdGVy"
     );
 
-    let second_subject = NATS_VERSIONER
-        .subject("dlq.dlq_source_stream.code.task.indexing.requested.80602550.bWFpbg");
+    let second_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{versioned_stream}.code.task.indexing.requested.80602550.bWFpbg"
+    ));
     let second_dead_letter = get_dead_letter(&url, &second_subject).await;
     assert_eq!(second_dead_letter.subject.to_string(), second_subject);
     let second_payload: DeadLetterEnvelope =
@@ -255,8 +260,9 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.80602550.bWFpbg"
     );
 
-    let wildcard_subject =
-        NATS_VERSIONER.subject("dlq.dlq_source_stream.code.task.indexing.requested.*.*");
+    let wildcard_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{versioned_stream}.code.task.indexing.requested.*.*"
+    ));
     let subject_counts = dead_letter_subject_counts(&url).await;
     assert_eq!(
         subject_counts,
