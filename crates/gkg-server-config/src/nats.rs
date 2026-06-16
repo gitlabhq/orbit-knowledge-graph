@@ -119,6 +119,7 @@ pub struct NatsConfiguration {
     /// Used for Siphon dispatch consumers during blue-green deployments.
     /// Clamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).
     #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
+    #[schemars(range(min = 60))]
     pub consumer_inactive_threshold_secs: u64,
 }
 
