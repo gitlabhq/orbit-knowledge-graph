@@ -1,10 +1,11 @@
 # Vendored copy of Rails SystemNoteMetadata::ICON_TYPES action values.
 #
-# Source: app/models/system_note_metadata.rb in gitlab-org/gitlab
+# Source: app/models/system_note_metadata.rb (CE) and
+#         ee/app/models/ee/system_note_metadata.rb (EE) in gitlab-org/gitlab
 # Pinned: ea52f8c3adc370db76545ecd82728710f2609800 (refs/heads/master, captured 2026-06-12)
 #
-# To update: replace the list below with the %w[] body from the Rails file at a
-# newer commit, then update the "Pinned:" line above.
+# To update: replace the list below with the combined %w[] bodies from the CE
+# and EE Rails files at a newer commit, then update the "Pinned:" line above.
 #
 # ICON_TYPES is generated at build time from this file by crates/indexer/build.rs.
 # One action per line; lines starting with # are ignored.
@@ -65,3 +66,29 @@ custom_field
 duo_agent_started
 duo_agent_completed
 duo_agent_failed
+# EE actions (ee/app/models/ee/system_note_metadata.rb)
+weight
+published
+epic_issue_added
+issue_added_to_epic
+epic_issue_removed
+issue_removed_from_epic
+epic_issue_moved
+issue_changed_epic
+epic_date_changed
+relate_epic
+unrelate_epic
+vulnerability_confirmed
+vulnerability_dismissed
+vulnerability_resolved
+vulnerability_detected
+iteration
+paging_started
+progress
+checkin_reminder
+approvals_reset
+notify_service
+vulnerability_severity_changed
+work_item_status
+duo_code_review_started
+duo_mention_started

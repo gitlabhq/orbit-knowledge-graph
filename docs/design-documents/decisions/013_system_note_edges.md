@@ -33,9 +33,9 @@ This ADR proposes a Rust extraction handler running inside the SDLC indexer, wit
 
 ## Decision
 
-Build a dedicated Rust system-notes handler at `crates/indexer/src/modules/sdlc/handler/system_notes/`. Read `siphon_notes` joined to `siphon_system_note_metadata` on `note_id` (Mode A) or fall back to body-text filtering (Mode B) when the join target is unavailable. Parse the Rails `TYPES_WITH_CROSS_REFERENCES` subset (10 actions) plus `commit` (Markdown SHA list) and `merge` (auto-merge inline SHA, MR-ref fallback).
+Build a dedicated Rust system-notes handler at `crates/indexer/src/modules/sdlc/transform/system_notes/`. Read `siphon_notes` joined to `siphon_system_note_metadata` on `note_id` (Mode A) or fall back to body-text filtering (Mode B) when the join target is unavailable. Parse the Rails `TYPES_WITH_CROSS_REFERENCES` subset plus selected EE cross-reference actions, `commit` (Markdown SHA list), and `merge` (auto-merge inline SHA, MR-ref fallback).
 
-Resolve targets with two batched IN-list queries against `siphon_routes` and the entity tables (`siphon_merge_requests`, `siphon_issues`, `siphon_work_items`). Emit `MENTIONS`, `RELATED_TO` (supplemental), `ADDS_COMMIT`, `MERGED_AT_COMMIT`, `CLOSED` (supplemental), `MERGED` (supplemental), and a new `REOPENED` edge kind via the standard `gl_edge` writer.
+Resolve targets with two batched IN-list queries against `siphon_routes` and the entity tables (`siphon_merge_requests`, `siphon_issues`, `siphon_work_items`). Emit `MENTIONS`, `CONTAINS` (supplemental), `RELATED_TO` (supplemental), `ADDS_COMMIT`, `MERGED_AT_COMMIT`, `CLOSED` (supplemental), `MERGED` (supplemental), and a new `REOPENED` edge kind via the standard `gl_edge` writer.
 
 Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/check-goon-format-version.sh`. Ship behind a feature flag with staging benchmarks 2–5 (lookup latency, end-to-end pass, edge-density gain) as the gate to GA.
 
@@ -46,6 +46,7 @@ Vendor Rails' `ICON_TYPES` constant with a CI drift check modeled on `scripts/ch
 | `MENTIONS` | MergeRequest / WorkItem / Commit → same (cross-typed) | `cross_reference` | GFM ref after `"mentioned in "` |
 | `RELATED_TO` (supplement) | WorkItem <-> WorkItem | `relate`, `unrelate` | GFM ref after `"marked … as related to"` / `"removed the relation with"` |
 | `MENTIONS` (parent/child) | WorkItem → WorkItem | `relate_to_parent`, `relate_to_child`, `unrelate_from_parent`, `unrelate_from_child` | GFM ref + relation type |
+| `CONTAINS` (supplement) | WorkItem → WorkItem | `epic_issue_added`, `issue_added_to_epic`, `epic_issue_moved`, hierarchy-shaped `task` notes | GFM ref for the epic/issue or parent task |
 | `MENTIONS` (lifecycle moves) | WorkItem → WorkItem | `moved`, `cloned`, `duplicate` | GFM ref after verb phrase |
 | `ADDS_COMMIT` | MergeRequest → Commit | `commit` | Markdown list of SHAs |
 | `MERGED_AT_COMMIT` | MergeRequest → Commit | `merge` (auto-merge variant) | SHA inline |
@@ -58,7 +59,7 @@ Explicit non-goals: `@`-mention edges (separate `*_user_mentions` tables, tracke
 ### Handler architecture
 
 ```plaintext
-crates/indexer/src/modules/sdlc/handler/system_notes/
+crates/indexer/src/modules/sdlc/transform/system_notes/
   mod.rs            // SystemNotesPipeline: impl EntityPipeline + registration
   extract.rs        // SQL for the JOIN(siphon_notes ⋈ siphon_system_note_metadata)
   parse.rs          // Regex + per-action dispatch (lifted verbatim from xtask POC)
@@ -147,7 +148,7 @@ ADR 013's system-notes pipeline is fully compatible with this model: it register
 
 Three-layer defence:
 
-1. **Vendored constant.** `crates/indexer/src/modules/sdlc/handler/system_notes/vendored/icon_types.rs` carries a literal copy of upstream Rails `ICON_TYPES` (61 values at the time of writing), pinned to a SHA and documented in a header comment.
+1. **Vendored constant.** `crates/indexer/src/modules/sdlc/transform/system_notes/vendored/icon_types.rs` carries a literal copy of upstream Rails `ICON_TYPES` (61 values at the time of writing), pinned to a SHA and documented in a header comment.
 2. **CI drift check.** `scripts/check-system-note-actions.sh` mirrors the working pattern of `scripts/check-goon-format-version.sh` (ADR 012, the analogous "upstream owns the source of truth, we vendor a copy" problem): the script fetches the upstream `system_note_metadata.rb`, diffs the `ICON_TYPES` array against the vendored constant, and fails with an explicit message listing values present upstream but missing locally. Wired into lefthook pre-commit and into the `lint` CI stage.
 3. **Runtime safety.** The handler's dispatch is `match action { ... _ => log_and_drop }`, never `panic!`. Unknown actions surface as a new metric `gkg.indexer.sdlc.system_notes.unknown_action_total{action}` registered in `crates/gkg-observability/src/indexer/sdlc.rs`; cardinality is bounded by `ICON_TYPES` size (~60–100), so a label dimension is safe. See the [metrics step](#implementation-plan) of the implementation plan for the full instrument list.
 
@@ -155,11 +156,11 @@ Three-layer defence:
 
 1. **(Parallel, lead time):** File a Siphon-side issue against `gitlab-org/analytics-section/siphon` requesting `system_note_metadata` replication; loop in `@ahegyi @arun.sori`. Specify: skip index on `action`, primary key `(traversal_path, note_id)`, mirror Rails `db/structure.sql` exactly. This work item can run in parallel with ADR review; it does not block "Accepted".
 2. Add `siphon_system_note_metadata` to `fixtures/siphon.sql`. The DDL bytes from MR !1109 are reusable; the two fixture-only bugs the author hit there (stray `;` inside a SQL comment that broke the integration-testkit's naive `split(';')` schema runner, and a `USING(note_id)` clause that should be `ON sn.id = snm.note_id`) are documented in the research package and fixed in this round.
-3. Vendor `crates/indexer/src/modules/sdlc/handler/system_notes/vendored/icon_types.rs` from upstream Rails at a pinned SHA.
+3. Vendor `crates/indexer/src/modules/sdlc/transform/system_notes/vendored/icon_types.rs` from upstream Rails at a pinned SHA.
 4. Add the CI drift check `scripts/check-system-note-actions.sh` + lefthook hook (model: `scripts/check-goon-format-version.sh`).
 5. Add new edge YAML: `config/ontology/edges/{mentions.yaml, adds_commit.yaml, merged_at_commit.yaml, reopened.yaml}`. `RELATED_TO`, `CLOSED`, `MERGED` get a documented comment that the system-notes handler is an additional emitter; no YAML schema change.
 6. Register the new edge kinds in `config/ontology/schema.yaml`.
-7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/handler/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration: insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341, now merged). The single shared handler routes by `entity_kind` automatically.
+7. Implement `SystemNotesPipeline` at `crates/indexer/src/modules/sdlc/transform/system_notes/`, lifting `parser.rs` and `resolver.rs` verbatim from the POC at `crates/xtask/src/system_notes_bench/`. The type implements `EntityPipeline` (the trait introduced by a stacked follow-up to !1341, per ADR 014's "Handler and pipeline" section). Registration: insert into the `HashMap<String, Arc<dyn EntityPipeline>>` held by `EntityIndexingHandler` with key `"SystemNote"`, via `modules/sdlc/mod.rs::register_entity_handlers` (added by !1341, now merged). The single shared handler routes by `entity_kind` automatically.
 
     Custom-pipeline precedent: ADR 014 names SystemNotes specifically as the motivating example for the `EntityPipeline` extension point. Custom-handler precedent in the existing codebase: `crates/indexer/src/modules/code/`.
 8. Metrics. Hook into the existing `gkg.indexer.sdlc.*` catalog (`crates/gkg-observability/src/indexer/sdlc.rs`) wherever an instrument already fits; add two narrowly-scoped new instruments. This directly addresses the review request to "hook ourselves in the existing metrics":
@@ -254,8 +255,8 @@ Both fixes are localised to `crates/xtask/src/system_notes_bench/`; the parser a
 
 | Layer | Where | Covers |
 |---|---|---|
-| Unit (Rust regex) | `handler/system_notes/parse.rs` tests | All 16 action variants, namespace-prefixed refs (1–20 segments), shorthand refs, commit SHAs (7–40 hex), malformed bodies, lifecycle no-ops |
-| Unit (dispatch) | `handler/system_notes/mod.rs` tests | Action → edge-kind mapping, unknown action → log + drop, target-type resolution |
+| Unit (Rust regex) | `transform/system_notes/parse.rs` tests | All 16 action variants, namespace-prefixed refs (1–20 segments), shorthand refs, commit SHAs (7–40 hex), malformed bodies, lifecycle no-ops |
+| Unit (dispatch) | `transform/system_notes/mod.rs` tests | Action → edge-kind mapping, unknown action → log + drop, target-type resolution |
 | Unit (POC, lifted) | `crates/xtask/src/system_notes_bench/{parser,resolver,golden}.rs` | 43/43 tests, carried over verbatim into the production handler |
 | Snapshot | `tests/snapshots/system_note_bodies.rs` | Real production-style note bodies pinned in fixtures |
 | Integration | `crates/integration-tests/tests/indexer/sdlc/notes.rs` | Full extract → transform → write against ClickHouse testcontainers, per-action assertions, lifecycle + cross-reference |
