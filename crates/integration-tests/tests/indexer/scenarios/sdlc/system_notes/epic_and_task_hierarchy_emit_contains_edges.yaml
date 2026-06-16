@@ -1,0 +1,57 @@
+# Routes the four EE/CE containment actions (epic_issue_added,
+# issue_added_to_epic, epic_issue_moved, task) to parent -> child CONTAINS
+# edges. proj-a (1/100/200/) and proj-b (1/100/300/) are siblings under the
+# same top-level namespace 1/100/, which v1 reference resolution requires
+# (resolution is bounded to the source's top-level namespace).
+#
+# The issue_added_to_epic and task rows are the cross-namespace guard: the
+# noteable (child) lives in proj-a while the resolved reference (parent) lives
+# in proj-b, so the emitted edge's traversal_path must be the CHILD's
+# (1/100/200/), not the resolved parent's (1/100/300/). A regression that
+# partitioned these edges under the resolved entity would land them in the
+# wrong namespace; the per-row traversal_path assertions below catch it.
+#
+# Note rows carry _siphon_replicated_at == created_at so the watermark window
+# selects them.
+description: Epic/task containment actions emit parent -> child CONTAINS edges, child-partitioned
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: grp/proj-a, namespace_id: 100, traversal_path: "1/100/200/" }
+    - { id: 2, source_id: 300, source_type: Project, path: grp/proj-b, namespace_id: 100, traversal_path: "1/100/300/" }
+  work_items:
+    - { id: 6060, iid: 60, title: child issue (epic_issue_added ref), description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+    - { id: 5050, iid: 50, title: parent epic (issue_added_to_epic ref), description: "", project_id: 300, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/300/" }
+    - { id: 8080, iid: 80, title: child issue (epic_issue_moved ref), description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+    - { id: 7070, iid: 70, title: parent task (task ref), description: "", project_id: 300, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/300/" }
+  siphon_notes:
+    - { id: 1, note: added issue grp/proj-a#60, noteable_type: Epic, noteable_id: 9001, author_id: 1, project_id: 300, system: true, internal: false, traversal_path: "1/100/300/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note: added to epic grp/proj-b#50, noteable_type: Issue, noteable_id: 9002, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note: moved issue grp/proj-a#80 from another epic, noteable_type: Epic, noteable_id: 9003, author_id: 1, project_id: 300, system: true, internal: false, traversal_path: "1/100/300/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+    - { id: 4, note: added parent task grp/proj-b#70, noteable_type: WorkItem, noteable_id: 9004, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: epic_issue_added, namespace_id: 100, traversal_path: "1/100/300/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+    - { id: 2, note_id: 2, action: issue_added_to_epic, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
+    - { id: 3, note_id: 3, action: epic_issue_moved, namespace_id: 100, traversal_path: "1/100/300/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
+    - { id: 4, note_id: 4, action: task, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: CONTAINS
+      from: WorkItem
+      to: WorkItem
+      count: 4
+      rows:
+        # epic_issue_added: noteable=epic (parent), ref=child issue; child partition.
+        - { source_id: 9001, target_id: 6060, traversal_path: "1/100/200/" }
+        # issue_added_to_epic: noteable=issue (child), ref=parent epic; child partition (1/100/200/, not the parent's 1/100/300/).
+        - { source_id: 5050, target_id: 9002, traversal_path: "1/100/200/" }
+        # epic_issue_moved: noteable=epic (parent), ref=child issue; child partition.
+        - { source_id: 9003, target_id: 8080, traversal_path: "1/100/200/" }
+        # task: noteable=child task, ref=parent task; child partition (1/100/200/, not the parent's 1/100/300/).
+        - { source_id: 7070, target_id: 9004, traversal_path: "1/100/200/" }
+  totals:
+    gl_edge: 4

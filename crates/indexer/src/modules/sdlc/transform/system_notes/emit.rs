@@ -13,6 +13,8 @@
 //! to keep the call sites grep-friendly and to make the unit tests below
 //! cheap.
 
+use tracing::warn;
+
 use super::parse::{Action, RefKind, Reference};
 use super::resolve::ResolvedTarget;
 
@@ -103,6 +105,34 @@ pub struct NoteRow {
     pub references: Vec<Reference>,
 }
 
+/// Resolve a containment note into `(source_id, target_id, traversal_path)`
+/// with the edge always pointing parent → child and partitioned under the
+/// child's route row.
+///
+/// `epic_issue_added`/`epic_issue_moved` author the note on the parent (epic),
+/// so the resolved reference is the child; `issue_added_to_epic`/`task` author
+/// it on the child, so the noteable is the child and the reference is the
+/// parent. The `traversal_path` always comes from the child row, which matters
+/// when an issue in one namespace is added to an epic in another (the edge
+/// must land in the child's partition).
+///
+/// Returns `None` for any action the caller hasn't routed to this path, so a
+/// future action added to the match arm above without updating this function
+/// is skipped (log-and-drop) rather than crashing the worker.
+fn contains_endpoints(row: &NoteRow, resolved: &ResolvedTarget) -> Option<(i64, i64, String)> {
+    match row.action {
+        Action::EpicIssueAdded | Action::EpicIssueMoved => Some((
+            row.noteable_id,
+            resolved.id,
+            resolved.traversal_path.clone(),
+        )),
+        Action::IssueAddedToEpic | Action::Task => {
+            Some((resolved.id, row.noteable_id, row.traversal_path.clone()))
+        }
+        _ => None,
+    }
+}
+
 /// Emit edges for a batch of parsed notes given a target resolver. The
 /// resolver receives each [`Reference`] plus the source row's
 /// `default_project` (for same-project shorthand) and returns `None` for any
@@ -172,19 +202,19 @@ where
                     if resolved.id == row.noteable_id {
                         continue;
                     }
-                    let (source_id, target_id) = match row.action {
-                        Action::EpicIssueAdded | Action::EpicIssueMoved => {
-                            (row.noteable_id, resolved.id)
-                        }
-                        Action::IssueAddedToEpic | Action::Task => (resolved.id, row.noteable_id),
-                        _ => unreachable!(),
-                    };
-                    let traversal_path = match row.action {
-                        Action::EpicIssueAdded | Action::EpicIssueMoved => {
-                            resolved.traversal_path.clone()
-                        }
-                        Action::IssueAddedToEpic | Action::Task => row.traversal_path.clone(),
-                        _ => unreachable!(),
+                    // Skip (don't `unreachable!`) on an unexpected action: a
+                    // panic here would crash-loop the worker on one bad row.
+                    // See "no panics in the indexer data path" in AGENTS.md.
+                    let Some((source_id, target_id, traversal_path)) =
+                        contains_endpoints(row, &resolved)
+                    else {
+                        warn!(
+                            action = ?row.action,
+                            noteable_id = row.noteable_id,
+                            reference_id = resolved.id,
+                            "system_notes: unexpected action in CONTAINS arm, skipping row"
+                        );
+                        continue;
                     };
                     edges.push(EmittedEdge {
                         traversal_path,
@@ -406,6 +436,16 @@ mod tests {
         assert_eq!(edges[0].source_id, 100);
         assert_eq!(edges[0].target_id, 456);
         assert_eq!(edges[0].traversal_path, "1/2/");
+    }
+
+    #[test]
+    fn contains_endpoints_returns_none_for_unrouted_action() {
+        let row = row_for(Action::CrossReference, "x", NoteableKind::WorkItem, 100);
+        let resolved = ResolvedTarget {
+            id: 456,
+            traversal_path: "9/9/".to_string(),
+        };
+        assert_eq!(contains_endpoints(&row, &resolved), None);
     }
 
     #[test]

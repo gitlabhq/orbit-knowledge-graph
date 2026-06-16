@@ -181,6 +181,28 @@ in `Cargo.toml`). Scaffold-era `#[allow(dead_code)]` markers must not survive in
   issue. Prefer `#[expect(dead_code, reason = "…")]`, which fails once the code becomes used and so
   self-cleans.
 
+### No panics in the indexer data path
+
+`handle`/transform/`emit` code processes untrusted production rows one at a time, so a `panic!`,
+`unreachable!`, `unwrap`, or `expect` on a data-dependent branch can crash-loop the worker: one
+malformed or unexpected row takes down every row behind it. Prefer **log-and-skip**
+(`tracing::warn!` with enough context to debug — the unexpected value plus the relevant ids — then
+`continue`) over panicking. Compute branch-dependent values in one fallible step that returns
+`Option`/`Result` and skip on the unexpected case, rather than mirroring a match in two places and
+needing an `unreachable!()` fallthrough in each (see the `contains_endpoints` helper in
+`modules/sdlc/transform/system_notes/emit.rs`, the motivating case from !1559). Panicking is only
+acceptable on a genuine programmer invariant that no production data can reach.
+
+### New edge/action routing needs an end-to-end YAML scenario
+
+When you route a new action (or noteable/edge kind) to a `gl_edge`, add an integration scenario
+under `tests/integration-tests/tests/indexer/scenarios/sdlc/...` (run by `scenario_indexing`), not
+just `emit.rs`/`parse.rs` unit tests. Seed the real siphon rows and assert the emitted `gl_edge`
+rows — direction and `traversal_path`. Include any cross-namespace / `traversal_path` invariant
+(e.g. a child in one namespace under a parent in another) so the partition-side property is guarded
+end-to-end; unit tests that reuse one traversal path cannot catch a target-vs-source partition bug.
+See `epic_and_task_hierarchy_emit_contains_edges.yaml` (!1559).
+
 ### Concurrency
 
 - `max_concurrent_workers`: Global limit (default 16)
