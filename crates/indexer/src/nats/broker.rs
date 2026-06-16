@@ -46,20 +46,6 @@ pub struct NatsBroker {
     cancellation_token: CancellationToken,
 }
 
-fn resolve_names(subscription: &Subscription) -> (String, String) {
-    if subscription.manage_stream {
-        (
-            NATS_VERSIONER.stream(&subscription.stream),
-            NATS_VERSIONER.subject(&subscription.subject),
-        )
-    } else {
-        (
-            subscription.stream.to_string(),
-            subscription.subject.to_string(),
-        )
-    }
-}
-
 impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
         let inner = NatsClient::connect(config).await?;
@@ -169,9 +155,7 @@ impl NatsBroker {
         envelope: &Envelope,
         error: &str,
     ) -> Result<(), NatsError> {
-        let (resolved_stream, _) = resolve_names(original_subscription);
-        let dead_letter =
-            DeadLetterEnvelope::new(&resolved_stream, original_subscription, envelope, error);
+        let dead_letter = DeadLetterEnvelope::new(original_subscription, envelope, error);
 
         let payload = serde_json::to_vec(&dead_letter)
             .map(Bytes::from)
@@ -179,11 +163,7 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = NATS_VERSIONER.subject(&dead_letter_subject(
-            &resolved_stream,
-            original_subscription,
-            envelope,
-        ));
+        let subject = dead_letter_subject(original_subscription, envelope);
         let ack_future = self
             .inner
             .jetstream()
@@ -281,7 +261,7 @@ impl NatsBroker {
         subscription: &Subscription,
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
-        let (_stream_name, subject) = resolve_names(subscription);
+        let (_stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
 
         let ack_future = self
             .inner
@@ -312,7 +292,7 @@ impl NatsBroker {
         subscription: &Subscription,
         metrics: Arc<EngineMetrics>,
     ) -> Result<NatsSubscription, NatsError> {
-        let (stream_name, subject) = resolve_names(subscription);
+        let (stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
 
         let stream = self.inner.get_stream(&stream_name).await?;
         let consumer = self
@@ -400,7 +380,7 @@ impl NatsBroker {
         subscription: &Subscription,
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError> {
-        let (stream_name, filter_subject) = resolve_names(subscription);
+        let (stream_name, filter_subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
 
         let stream = self.inner.get_stream(&stream_name).await?;
 

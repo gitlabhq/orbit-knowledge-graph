@@ -7,6 +7,7 @@ use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
 use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::schema::version::SCHEMA_VERSION;
 use crate::topic::INDEXER_STREAM;
+use crate::types::Subscription;
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(*SCHEMA_VERSION));
@@ -38,6 +39,20 @@ impl NatsVersioner {
     pub fn tag(&self) -> String {
         format!("v{}", self.version)
     }
+
+    pub fn resolve_stream_and_subject(&self, subscription: &Subscription) -> (String, String) {
+        if subscription.manage_stream {
+            (
+                self.stream(&subscription.stream),
+                self.subject(&subscription.subject),
+            )
+        } else {
+            (
+                subscription.stream.to_string(),
+                subscription.subject.to_string(),
+            )
+        }
+    }
 }
 
 pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
@@ -68,7 +83,6 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dead_letter::{DEAD_LETTER_SUBJECT_PREFIX, dead_letter_subscription};
     use crate::types::Subscription;
 
     fn check_versioner(version: u32) {
@@ -133,35 +147,25 @@ mod tests {
     }
 
     #[test]
-    fn versioned_dead_letter_subject_matches_dlq_stream_filter() {
+    fn resolve_stream_and_subject_versions_managed_subscriptions() {
         let v = NatsVersioner::new(69);
+        let subscription = Subscription::new("GKG_INDEXER", "sdlc.global.indexing.requested");
 
-        let dlq_filter = v.subject(&format!("{DEAD_LETTER_SUBJECT_PREFIX}.>"));
-        assert_eq!(dlq_filter, "v69.dlq.>");
+        let (stream, subject) = v.resolve_stream_and_subject(&subscription);
 
-        let resolved_stream = v.stream(INDEXER_STREAM);
-        let subscription = Subscription::new(INDEXER_STREAM, "code.task.indexing.requested.*.*");
-        let dlq = dead_letter_subscription(&resolved_stream, &subscription);
-
-        let dlq_subject = v.subject(&dlq.subject);
-
-        assert_eq!(
-            dlq_subject,
-            "v69.dlq.GKG_INDEXER_V69.code.task.indexing.requested.*.*"
-        );
-        assert!(dlq_subject.starts_with("v69.dlq."));
+        assert_eq!(stream, "GKG_INDEXER_V69");
+        assert_eq!(subject, "v69.sdlc.global.indexing.requested");
     }
 
     #[test]
-    fn versioned_dead_letter_subject_for_unmanaged_stream() {
+    fn resolve_stream_and_subject_preserves_unmanaged_subscriptions() {
         let v = NatsVersioner::new(69);
+        let mut subscription = Subscription::new("siphon_db", "tables.merge_requests");
+        subscription.manage_stream = false;
 
-        let subscription = Subscription::new("siphon_db", "tables.merge_requests");
-        let dlq = dead_letter_subscription("siphon_db", &subscription);
+        let (stream, subject) = v.resolve_stream_and_subject(&subscription);
 
-        let dlq_subject = v.subject(&dlq.subject);
-
-        assert_eq!(dlq_subject, "v69.dlq.siphon_db.tables.merge_requests");
-        assert!(dlq_subject.starts_with("v69.dlq."));
+        assert_eq!(stream, "siphon_db");
+        assert_eq!(subject, "tables.merge_requests");
     }
 }

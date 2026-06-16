@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::types::{Envelope, Subscription};
+use crate::nats::versioning::NATS_VERSIONER;
 
 pub const DEAD_LETTER_STREAM: &str = "GKG_DEAD_LETTERS";
 pub const DEAD_LETTER_SUBJECT_PREFIX: &str = "dlq";
@@ -19,12 +20,8 @@ pub struct DeadLetterEnvelope {
 }
 
 impl DeadLetterEnvelope {
-    pub fn new(
-        resolved_stream: &str,
-        original_subscription: &Subscription,
-        envelope: &Envelope,
-        error: &str,
-    ) -> Self {
+    pub fn new(original_subscription: &Subscription, envelope: &Envelope, error: &str) -> Self {
+        let (resolved_stream, _) = NATS_VERSIONER.resolve_stream_and_subject(original_subscription);
         let original_payload = serde_json::from_slice(&envelope.payload).unwrap_or_else(|_| {
             serde_json::Value::String(String::from_utf8_lossy(&envelope.payload).into_owned())
         });
@@ -32,7 +29,7 @@ impl DeadLetterEnvelope {
 
         Self {
             original_subject: original_subject.to_string(),
-            original_stream: resolved_stream.to_string(),
+            original_stream: resolved_stream,
             original_payload,
             original_message_id: envelope.id.0.to_string(),
             original_timestamp: envelope.timestamp,
@@ -43,26 +40,21 @@ impl DeadLetterEnvelope {
     }
 }
 
-pub fn dead_letter_subject(
-    resolved_stream: &str,
-    subscription: &Subscription,
-    envelope: &Envelope,
-) -> String {
-    dead_letter_subject_for_subject(resolved_stream, original_subject(subscription, envelope))
+pub fn dead_letter_subject(subscription: &Subscription, envelope: &Envelope) -> String {
+    let (resolved_stream, _) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
+    let base =
+        dead_letter_subject_for_subject(&resolved_stream, original_subject(subscription, envelope));
+    NATS_VERSIONER.subject(&base)
 }
 
 fn dead_letter_subject_for_subject(stream: &str, subject: &str) -> String {
     format!("{}.{}.{}", DEAD_LETTER_SUBJECT_PREFIX, stream, subject)
 }
 
-pub fn dead_letter_subscription(
-    resolved_stream: &str,
-    subscription: &Subscription,
-) -> Subscription {
-    Subscription::new(
-        DEAD_LETTER_STREAM,
-        dead_letter_subject_for_subject(resolved_stream, &subscription.subject),
-    )
+pub fn dead_letter_subscription(subscription: &Subscription) -> Subscription {
+    let (resolved_stream, _) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
+    let base = dead_letter_subject_for_subject(&resolved_stream, &subscription.subject);
+    Subscription::new(DEAD_LETTER_STREAM, NATS_VERSIONER.subject(&base))
 }
 
 fn original_subject<'a>(subscription: &'a Subscription, envelope: &'a Envelope) -> &'a str {
@@ -76,6 +68,7 @@ fn original_subject<'a>(subscription: &'a Subscription, envelope: &'a Envelope) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::version::SCHEMA_VERSION;
     use bytes::Bytes;
     use std::sync::Arc;
 
@@ -91,46 +84,51 @@ mod tests {
 
     #[test]
     fn dead_letter_subject_uses_delivered_message_subject() {
+        let v = *SCHEMA_VERSION;
         let subscription = Subscription::new("GKG_INDEXER", "code.task.indexing.requested.*.*");
         let envelope = envelope_with_subject("code.task.indexing.requested.278964.bWFzdGVy");
 
         assert_eq!(
-            dead_letter_subject("GKG_INDEXER_V69", &subscription, &envelope),
-            "dlq.GKG_INDEXER_V69.code.task.indexing.requested.278964.bWFzdGVy"
+            dead_letter_subject(&subscription, &envelope),
+            format!("v{v}.dlq.GKG_INDEXER_V{v}.code.task.indexing.requested.278964.bWFzdGVy")
         );
     }
 
     #[test]
-    fn dead_letter_envelope_records_delivered_message_subject() {
+    fn dead_letter_envelope_records_resolved_stream() {
+        let v = *SCHEMA_VERSION;
         let subscription = Subscription::new("GKG_INDEXER", "code.task.indexing.requested.*.*");
         let envelope = envelope_with_subject("code.task.indexing.requested.278964.bWFzdGVy");
-        let dead_letter =
-            DeadLetterEnvelope::new("GKG_INDEXER_V69", &subscription, &envelope, "failed");
+        let dead_letter = DeadLetterEnvelope::new(&subscription, &envelope, "failed");
 
         assert_eq!(
             dead_letter.original_subject,
             "code.task.indexing.requested.278964.bWFzdGVy"
         );
-        assert_eq!(dead_letter.original_stream, "GKG_INDEXER_V69");
+        assert_eq!(dead_letter.original_stream, format!("GKG_INDEXER_V{v}"));
     }
 
     #[test]
-    fn dead_letter_subject_falls_back_to_subscription_for_local_envelopes() {
-        let subscription = Subscription::new("siphon_db", "tables.merge_requests");
+    fn dead_letter_subject_falls_back_to_subscription_for_unmanaged_streams() {
+        let v = *SCHEMA_VERSION;
+        let mut subscription = Subscription::new("siphon_db", "tables.merge_requests");
+        subscription.manage_stream = false;
         let envelope = envelope_with_subject("");
 
         assert_eq!(
-            dead_letter_subject("siphon_db", &subscription, &envelope),
-            "dlq.siphon_db.tables.merge_requests"
+            dead_letter_subject(&subscription, &envelope),
+            format!("v{v}.dlq.siphon_db.tables.merge_requests")
         );
     }
 
     #[test]
     fn dead_letter_subscription_points_to_dlq_stream() {
-        let subscription = Subscription::new("siphon_db", "tables.users");
-        let dlq = dead_letter_subscription("siphon_db", &subscription);
+        let v = *SCHEMA_VERSION;
+        let mut subscription = Subscription::new("siphon_db", "tables.users");
+        subscription.manage_stream = false;
+        let dlq = dead_letter_subscription(&subscription);
         assert_eq!(&*dlq.stream, DEAD_LETTER_STREAM);
-        assert_eq!(&*dlq.subject, "dlq.siphon_db.tables.users");
+        assert_eq!(&*dlq.subject, format!("v{v}.dlq.siphon_db.tables.users"));
         assert!(dlq.manage_stream);
     }
 }
