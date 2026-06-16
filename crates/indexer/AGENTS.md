@@ -60,10 +60,10 @@ comparing checkpoint entries against enabled namespaces), promotes the `migratin
 
 A single SQL query then enumerates all `v<N>_*` objects in `system.tables` whose version falls
 outside a keep-set computed in the same query (active + newest retired within
-`max_retained_versions` + migrating above active). Every candidate is dropped unless its base
-name (after stripping the `v<N>_` prefix) matches a `gc_preserve_patterns` regex from the
-ontology settings. This catches rename-orphans (e.g. `v56_gl_edge_v2`) and zombie-migrating
-tables that the old ontology-name-based approach left behind.
+`max_retained_versions` + migrating above active). Ontology-known objects are always dropped. Objects not in the ontology
+(rename-orphans like `v56_gl_edge_v2`, removed entities) are also dropped unless their base name
+(after stripping the `v<N>_` prefix) matches a `gc_preserve_patterns` regex from the ontology
+settings.
 
 ### Stale FK-edge reconciliation
 
