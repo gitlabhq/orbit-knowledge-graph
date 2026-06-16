@@ -1,6 +1,8 @@
 use std::sync::LazyLock;
 
-use tracing::{info, warn};
+use async_nats::jetstream::ErrorCode;
+use async_nats::jetstream::context::DeleteStreamErrorKind;
+use tracing::{debug, info, warn};
 
 use crate::dead_letter::DEAD_LETTER_STREAM;
 use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
@@ -63,8 +65,17 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
         let name = v.stream(base);
         match jetstream.delete_stream(&name).await {
             Ok(_) => info!(version, stream = %name, "deleted versioned stream"),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    DeleteStreamErrorKind::JetStream(js_err)
+                        if js_err.kind() == ErrorCode::STREAM_NOT_FOUND
+                ) =>
+            {
+                debug!(version, stream = %name, "versioned stream does not exist, skipping");
+            }
             Err(e) => {
-                warn!(version, stream = %name, error = %e, "failed to delete versioned stream")
+                warn!(version, stream = %name, error = %e, "failed to delete versioned stream");
             }
         }
     }
@@ -74,7 +85,7 @@ pub async fn cleanup_version(nats_client: &async_nats::Client, version: u32) {
         match jetstream.delete_key_value(&name).await {
             Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
             Err(e) => {
-                warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket")
+                warn!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket");
             }
         }
     }

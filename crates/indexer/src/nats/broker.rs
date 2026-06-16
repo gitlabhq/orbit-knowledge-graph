@@ -261,7 +261,7 @@ impl NatsBroker {
         subscription: &Subscription,
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
-        let (_stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
+        let (stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
 
         let ack_future = self
             .inner
@@ -270,8 +270,7 @@ impl NatsBroker {
             .await
             .map_err(|e| {
                 NatsError::Publish(format!(
-                    "failed to publish to '{subject}' (stream '{}'): {e}",
-                    subscription.stream
+                    "failed to publish to '{subject}' (stream '{stream_name}'): {e}",
                 ))
             })?;
 
@@ -281,8 +280,7 @@ impl NatsBroker {
                 Err(NatsError::PublishDuplicate)
             }
             Err(e) => Err(NatsError::Publish(format!(
-                "publish ack failed for '{subject}' (stream '{}'): {e}",
-                subscription.stream
+                "publish ack failed for '{subject}' (stream '{stream_name}'): {e}",
             ))),
         }
     }
