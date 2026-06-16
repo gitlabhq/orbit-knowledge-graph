@@ -55,11 +55,8 @@ pub(crate) struct SsaStats {
     pub reads: u64,
     pub local_hits: u64,
     pub recursive_lookups: u64,
-    pub unsealed_hits: u64,
-    pub dead_end_hits: u64,
     pub phis_created: u64,
     pub phis_trivial: u64,
-    pub markers_elided: u64,
     pub writes: u64,
     pub blocks_created: u64,
 }
@@ -122,6 +119,14 @@ struct PhiNode<'a> {
 struct Block {
     predecessors: SmallVec<[BlockId; 2]>,
     sealed: bool,
+}
+
+/// Visit state for the iterative reaching-def walk: `Enter` schedules a
+/// block's predecessors, `Exit` combines them once they are resolved.
+#[derive(Clone, Copy)]
+enum Phase {
+    Enter,
+    Exit,
 }
 
 // ── SSA Resolver ────────────────────────────────────────────────
@@ -356,86 +361,10 @@ impl<'a> SsaEngine<'a> {
             return value.clone();
         }
 
-        // Global value numbering
+        // Global value numbering — resolved iteratively (see read_variable_iter)
+        // so a deep predecessor chain can't overflow the worker stack.
         self.stats.recursive_lookups += 1;
-        self.read_variable_recursive(variable, block)
-    }
-
-    fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
-        let val;
-        let sealed = self.blocks[block.0].sealed;
-        let num_preds = self.blocks[block.0].predecessors.len();
-
-        if !sealed {
-            // Incomplete CFG: defer with operandless phi (Algorithm 4)
-            self.stats.unsealed_hits += 1;
-            let phi_id = self.new_phi(block, variable);
-            self.incomplete_phis
-                .entry(block)
-                .or_default()
-                .insert(variable, phi_id);
-            val = SsaValue::Phi(phi_id);
-        } else if num_preds == 0 {
-            self.stats.dead_end_hits += 1;
-            val = SsaValue::Opaque;
-        } else if num_preds == 1 {
-            let pred = self.blocks[block.0].predecessors[0];
-            val = self.read_variable_internal(variable, pred);
-        } else {
-            // Marker algorithm (Section 3.3): mark block before recursing.
-            // Only place a phi if we detect a cycle (hit the marker) or
-            // find different values from predecessors.
-            val = self.read_variable_marker(variable, block);
-        }
-
-        self.write_variable_interned(variable, block, val.clone());
-        val
-    }
-
-    /// Marker algorithm: mark block, collect values from predecessors,
-    /// only create a phi if values differ or a cycle was detected.
-    fn read_variable_marker(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
-        // Place a marker sentinel so recursive lookups that reach this
-        // block again will detect the cycle. Distinct from Opaque so
-        // genuine dead-end values aren't misidentified as cycles.
-        self.write_variable_interned(variable, block, SsaValue::Marker);
-
-        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
-        let mut same: Option<SsaValue<'a>> = None;
-        let mut need_phi = false;
-
-        for &pred in &preds {
-            let pred_val = self.read_variable_internal(variable, pred);
-            if pred_val == SsaValue::Marker {
-                need_phi = true;
-                continue;
-            }
-            match &same {
-                None => same = Some(pred_val),
-                Some(s) if *s == pred_val => {}
-                Some(_) => {
-                    need_phi = true;
-                    // Still need to collect remaining operands for the phi
-                    break;
-                }
-            }
-        }
-
-        if !need_phi {
-            // All predecessors agree (or only one non-cycle predecessor).
-            // No phi needed — zero temporary allocations.
-            self.stats.markers_elided += 1;
-            return same.unwrap_or(SsaValue::Opaque);
-        }
-
-        // Different values or cycle detected: fall back to phi creation.
-        // Re-collect all operands properly with cycle-breaking phi.
-        // `add_phi_operands` finishes with `try_remove_trivial_phi`, so
-        // the value we return here is already the replacement when the
-        // phi collapsed.
-        let phi_id = self.new_phi(block, variable);
-        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
-        self.add_phi_operands(variable, phi_id)
+        self.read_variable_iter(variable, block)
     }
 
     /// Internal write that takes an already-interned name.
@@ -496,8 +425,29 @@ impl<'a> SsaEngine<'a> {
     }
 
     /// Remove trivial phi: if it references only one real value (plus itself),
-    /// replace it with that value.
+    /// replace it with that value. The cascade onto dependent phis runs through
+    /// an explicit work stack rather than recursion, so a long phi chain can't
+    /// overflow. Returns the replacement for `phi_id` (the value the caller
+    /// asked about); cascade replacements are applied in place.
     fn try_remove_trivial_phi(&mut self, phi_id: PhiId) -> SsaValue<'a> {
+        let mut work = vec![phi_id];
+        let mut result = SsaValue::Phi(phi_id);
+        let mut captured = false;
+        while let Some(pid) = work.pop() {
+            let outcome = self.simplify_one_phi(pid, &mut work);
+            if pid == phi_id && !captured {
+                result = outcome;
+                captured = true;
+            }
+        }
+        result
+    }
+
+    /// Simplify a single phi. If trivial, rewrite it out of every user's
+    /// operands and push those users onto `work` for re-checking; returns the
+    /// replacement value. If non-trivial, returns `Phi(phi_id)` and pushes
+    /// nothing.
+    fn simplify_one_phi(&mut self, phi_id: PhiId, work: &mut Vec<PhiId>) -> SsaValue<'a> {
         // Witness cache fast path: if both witnesses are still distinct
         // and neither is the phi itself, the phi is non-trivial.
         let w = &self.phis[phi_id.0].witnesses;
@@ -568,12 +518,191 @@ impl<'a> SsaEngine<'a> {
             }
         }
 
-        // Recursively try to simplify users
-        for user_id in phi_users {
-            self.try_remove_trivial_phi(user_id);
-        }
+        // Re-check users without recursing.
+        work.extend(phi_users);
 
         replacement
+    }
+
+    /// Iterative twin of [`Self::read_variable_recursive`]. Walks the
+    /// predecessor graph with an explicit work stack instead of the call
+    /// stack, so a chain thousands of blocks deep can't overflow. Same Braun
+    /// marker scheme: write `Marker` on `Enter` to break cycles, combine the
+    /// resolved predecessors on `Exit`.
+    fn read_variable_iter(&mut self, variable: &'a str, start: BlockId) -> SsaValue<'a> {
+        let resolved = |this: &Self, b: BlockId| {
+            this.current_def
+                .get(&variable)
+                .and_then(|m| m.get(&b))
+                .cloned()
+        };
+
+        if let Some(v) = resolved(self, start)
+            && v != SsaValue::Marker
+        {
+            return v;
+        }
+
+        let mut work: Vec<(BlockId, Phase)> = vec![(start, Phase::Enter)];
+        while let Some(&(block, phase)) = work.last() {
+            match phase {
+                Phase::Enter => {
+                    if let Some(v) = resolved(self, block)
+                        && v != SsaValue::Marker
+                    {
+                        work.pop();
+                        continue;
+                    }
+                    if !self.blocks[block.0].sealed {
+                        let phi_id = self.new_phi(block, variable);
+                        self.incomplete_phis
+                            .entry(block)
+                            .or_default()
+                            .insert(variable, phi_id);
+                        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
+                        work.pop();
+                        continue;
+                    }
+                    let preds = self.blocks[block.0].predecessors.clone();
+                    if preds.is_empty() {
+                        self.write_variable_interned(variable, block, SsaValue::Opaque);
+                        work.pop();
+                        continue;
+                    }
+                    // In-progress sentinel, then schedule unresolved predecessors.
+                    // A predecessor already marked is an ancestor on the stack
+                    // (a cycle) and must not be re-pushed.
+                    self.write_variable_interned(variable, block, SsaValue::Marker);
+                    if let Some(slot) = work.last_mut() {
+                        slot.1 = Phase::Exit;
+                    }
+                    for &p in &preds {
+                        if resolved(self, p).is_none() {
+                            work.push((p, Phase::Enter));
+                        }
+                    }
+                }
+                Phase::Exit => {
+                    work.pop();
+                    // Every predecessor is resolved (or a marked ancestor) by now,
+                    // so reuse the shared operand builder: a phi only when the
+                    // predecessors disagree, otherwise the single agreed value.
+                    let mut same: Option<SsaValue<'a>> = None;
+                    let mut need_phi = false;
+                    for &p in &self.blocks[block.0].predecessors.clone() {
+                        let pv = resolved(self, p).unwrap_or(SsaValue::Opaque);
+                        if pv == SsaValue::Marker {
+                            need_phi = true;
+                            continue;
+                        }
+                        match &same {
+                            None => same = Some(pv),
+                            Some(s) if *s == pv => {}
+                            Some(_) => need_phi = true,
+                        }
+                    }
+
+                    let val = if need_phi {
+                        let phi_id = self.new_phi(block, variable);
+                        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
+                        self.add_phi_operands(variable, phi_id)
+                    } else {
+                        same.unwrap_or(SsaValue::Opaque)
+                    };
+                    self.write_variable_interned(variable, block, val);
+                }
+            }
+        }
+
+        resolved(self, start).unwrap_or(SsaValue::Opaque)
+    }
+
+    /// Recursive reference implementation, kept only to differentially test the
+    /// iterative production path. This is the original Braun marker algorithm,
+    /// self-contained so the oracle never routes through the code it checks.
+    #[cfg(test)]
+    pub(crate) fn read_variable_stateless_recursive(
+        &mut self,
+        variable: &'a str,
+        block: BlockId,
+    ) -> ReachingDefs<'a> {
+        let mut value = self.read_ref(variable, block);
+        let mut depth = 0;
+        while let SsaValue::Alias(target) = &value {
+            depth += 1;
+            if depth > 8 {
+                break;
+            }
+            let target_value = self.read_ref(target, block);
+            if matches!(target_value, SsaValue::Opaque | SsaValue::Marker) {
+                break;
+            }
+            value = target_value;
+        }
+        self.resolve_value(&value)
+    }
+
+    #[cfg(test)]
+    fn read_ref(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        if let Some(block_defs) = self.current_def.get(&variable)
+            && let Some(value) = block_defs.get(&block)
+        {
+            return value.clone();
+        }
+        self.read_recursive_ref(variable, block)
+    }
+
+    #[cfg(test)]
+    fn read_recursive_ref(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        let val;
+        let sealed = self.blocks[block.0].sealed;
+        let num_preds = self.blocks[block.0].predecessors.len();
+        if !sealed {
+            let phi_id = self.new_phi(block, variable);
+            self.incomplete_phis
+                .entry(block)
+                .or_default()
+                .insert(variable, phi_id);
+            val = SsaValue::Phi(phi_id);
+        } else if num_preds == 0 {
+            val = SsaValue::Opaque;
+        } else if num_preds == 1 {
+            let pred = self.blocks[block.0].predecessors[0];
+            val = self.read_ref(variable, pred);
+        } else {
+            val = self.read_marker_ref(variable, block);
+        }
+        self.write_variable_interned(variable, block, val.clone());
+        val
+    }
+
+    #[cfg(test)]
+    fn read_marker_ref(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        self.write_variable_interned(variable, block, SsaValue::Marker);
+        let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
+        let mut same: Option<SsaValue<'a>> = None;
+        let mut need_phi = false;
+        for &pred in &preds {
+            let pred_val = self.read_ref(variable, pred);
+            if pred_val == SsaValue::Marker {
+                need_phi = true;
+                continue;
+            }
+            match &same {
+                None => same = Some(pred_val),
+                Some(s) if *s == pred_val => {}
+                Some(_) => {
+                    need_phi = true;
+                    break;
+                }
+            }
+        }
+        if !need_phi {
+            return same.unwrap_or(SsaValue::Opaque);
+        }
+        let phi_id = self.new_phi(block, variable);
+        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
+        self.add_phi_operands(variable, phi_id)
     }
 
     /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
@@ -1133,5 +1262,114 @@ mod tests {
             "SCC with multiple external values must not be collapsed: got {:?}",
             result.values
         );
+    }
+
+    fn xorshift(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    struct CfgSpec {
+        preds: Vec<Vec<usize>>,
+        writes: Vec<(usize, u32)>,
+    }
+
+    fn gen_cfg(seed: u64) -> CfgSpec {
+        let mut s = seed | 1;
+        let n = 3 + (xorshift(&mut s) % 38) as usize;
+        let mut preds = vec![Vec::new(); n];
+        // Forward spine: every block has an earlier predecessor, so it is
+        // reachable from the entry and the backbone is acyclic.
+        for (i, block_preds) in preds.iter_mut().enumerate().skip(1) {
+            block_preds.push((xorshift(&mut s) % i as u64) as usize);
+        }
+        // Back-edges: a later block flowing back to an earlier one. The earlier
+        // block becomes a multi-predecessor loop header, so every cycle carries
+        // a marker-bearing block and the recursive reference still terminates —
+        // matching the structured CFGs the DSL actually emits.
+        for (i, block_preds) in preds.iter_mut().enumerate().take(n - 1).skip(1) {
+            if xorshift(&mut s).is_multiple_of(3) {
+                let span = (n - 1 - i) as u64;
+                let later = i + 1 + (xorshift(&mut s) % span) as usize;
+                block_preds.push(later);
+            }
+        }
+        let mut writes = vec![(0usize, 0u32)];
+        let extra = (xorshift(&mut s) % 4) as usize;
+        for j in 0..extra {
+            let b = (xorshift(&mut s) % n as u64) as usize;
+            writes.push((b, (j + 1) as u32));
+        }
+        CfgSpec { preds, writes }
+    }
+
+    fn build_engine(spec: &CfgSpec) -> (SsaEngine<'static>, Vec<BlockId>) {
+        let mut ssa = SsaEngine::new();
+        let ids: Vec<BlockId> = (0..spec.preds.len()).map(|_| ssa.add_block()).collect();
+        for (i, ps) in spec.preds.iter().enumerate() {
+            for &p in ps {
+                ssa.add_predecessor(ids[i], ids[p]);
+            }
+        }
+        for &(b, v) in &spec.writes {
+            ssa.write_variable("v", ids[b], SsaValue::LocalDef(v));
+        }
+        for id in &ids {
+            ssa.seal_block(*id);
+        }
+        (ssa, ids)
+    }
+
+    fn value_set(defs: &ReachingDefs<'_>) -> std::collections::BTreeSet<String> {
+        defs.values.iter().map(|v| v.trace_display()).collect()
+    }
+
+    // The iterative read walk must produce the same reaching defs as the
+    // recursive one on every CFG, including cycles and phi merges.
+    #[test]
+    fn iterative_matches_recursive_on_random_cfgs() {
+        for seed in 1..400u64 {
+            let spec = gen_cfg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            for query in 0..spec.preds.len() {
+                let (mut rec, rec_ids) = build_engine(&spec);
+                let (mut itr, itr_ids) = build_engine(&spec);
+                let want = value_set(&rec.read_variable_stateless_recursive("v", rec_ids[query]));
+                let got = value_set(&itr.read_variable_stateless("v", itr_ids[query]));
+                assert_eq!(
+                    want, got,
+                    "seed {seed}, query block {query}: recursive vs iterative disagree"
+                );
+            }
+        }
+    }
+
+    // 8k try/except joins (~16k-deep walk) on a 512 KiB stack: the recursive
+    // path overflows here, the iterative one stays flat and resolves correctly.
+    #[test]
+    fn iterative_resolves_deep_chain_without_overflow() {
+        let values = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let mut ssa = SsaEngine::new();
+                let entry = ssa.add_block();
+                ssa.seal_block(entry);
+                ssa.write_variable("np", entry, SsaValue::LocalDef(0));
+                let mut pre = entry;
+                for _ in 0..8_000 {
+                    let arm_a = ssa.add_sealed_successor(pre);
+                    let arm_b = ssa.add_sealed_successor(pre);
+                    pre = ssa.add_sealed_join([arm_a, arm_b, pre]);
+                }
+                ssa.read_variable_stateless("np", pre).values.to_vec()
+            })
+            .unwrap()
+            .join()
+            .expect("iterative read overflowed the stack");
+
+        assert_eq!(values.as_slice(), &[SsaValue::LocalDef(0)]);
     }
 }
