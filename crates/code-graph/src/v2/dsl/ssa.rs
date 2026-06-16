@@ -129,6 +129,13 @@ enum Phase {
     Exit,
 }
 
+/// What a block needs on the way down a [`SsaEngine::resolve_postorder`] walk:
+/// nothing (its value is already written), or these predecessors visited first.
+enum Visit {
+    Leaf,
+    Branch(SmallVec<[BlockId; 2]>),
+}
+
 // ── SSA Resolver ────────────────────────────────────────────────
 
 /// Parser-level SSA engine (Braun et al. algorithm).
@@ -530,91 +537,116 @@ impl<'a> SsaEngine<'a> {
     /// marker scheme: write `Marker` on `Enter` to break cycles, combine the
     /// resolved predecessors on `Exit`.
     fn read_variable_iter(&mut self, variable: &'a str, start: BlockId) -> SsaValue<'a> {
-        let resolved = |this: &Self, b: BlockId| {
-            this.current_def
-                .get(&variable)
-                .and_then(|m| m.get(&b))
-                .cloned()
-        };
-
-        if let Some(v) = resolved(self, start)
+        if let Some(v) = self.current_value(variable, start)
             && v != SsaValue::Marker
         {
             return v;
         }
 
-        let mut work: Vec<(BlockId, Phase)> = vec![(start, Phase::Enter)];
+        self.resolve_postorder(
+            start,
+            |this, block| {
+                if this
+                    .current_value(variable, block)
+                    .is_some_and(|v| v != SsaValue::Marker)
+                {
+                    return Visit::Leaf;
+                }
+                if !this.blocks[block.0].sealed {
+                    let phi_id = this.new_phi(block, variable);
+                    this.incomplete_phis
+                        .entry(block)
+                        .or_default()
+                        .insert(variable, phi_id);
+                    this.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
+                    return Visit::Leaf;
+                }
+                let preds = this.blocks[block.0].predecessors.clone();
+                if preds.is_empty() {
+                    this.write_variable_interned(variable, block, SsaValue::Opaque);
+                    return Visit::Leaf;
+                }
+                // In-progress sentinel; a predecessor already marked is an
+                // ancestor on the stack (a cycle) and must not be re-pushed.
+                this.write_variable_interned(variable, block, SsaValue::Marker);
+                Visit::Branch(
+                    preds
+                        .into_iter()
+                        .filter(|&p| this.current_value(variable, p).is_none())
+                        .collect(),
+                )
+            },
+            |this, block| {
+                let val = this.combine_predecessors(variable, block);
+                this.write_variable_interned(variable, block, val);
+            },
+        );
+
+        self.current_value(variable, start)
+            .unwrap_or(SsaValue::Opaque)
+    }
+
+    fn current_value(&self, variable: &str, block: BlockId) -> Option<SsaValue<'a>> {
+        self.current_def
+            .get(variable)
+            .and_then(|m| m.get(&block))
+            .cloned()
+    }
+
+    /// Post-order walk over the predecessor graph using an explicit work stack,
+    /// so a chain thousands of blocks deep can't overflow. `enter` resolves a
+    /// leaf or returns the predecessors to visit first; `exit` runs once they
+    /// are resolved.
+    fn resolve_postorder(
+        &mut self,
+        start: BlockId,
+        mut enter: impl FnMut(&mut Self, BlockId) -> Visit,
+        mut exit: impl FnMut(&mut Self, BlockId),
+    ) {
+        let mut work = vec![(start, Phase::Enter)];
         while let Some(&(block, phase)) = work.last() {
             match phase {
-                Phase::Enter => {
-                    if let Some(v) = resolved(self, block)
-                        && v != SsaValue::Marker
-                    {
+                Phase::Enter => match enter(self, block) {
+                    Visit::Leaf => {
                         work.pop();
-                        continue;
                     }
-                    if !self.blocks[block.0].sealed {
-                        let phi_id = self.new_phi(block, variable);
-                        self.incomplete_phis
-                            .entry(block)
-                            .or_default()
-                            .insert(variable, phi_id);
-                        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
-                        work.pop();
-                        continue;
+                    Visit::Branch(preds) => {
+                        work.last_mut().unwrap().1 = Phase::Exit;
+                        work.extend(preds.into_iter().map(|p| (p, Phase::Enter)));
                     }
-                    let preds = self.blocks[block.0].predecessors.clone();
-                    if preds.is_empty() {
-                        self.write_variable_interned(variable, block, SsaValue::Opaque);
-                        work.pop();
-                        continue;
-                    }
-                    // In-progress sentinel, then schedule unresolved predecessors.
-                    // A predecessor already marked is an ancestor on the stack
-                    // (a cycle) and must not be re-pushed.
-                    self.write_variable_interned(variable, block, SsaValue::Marker);
-                    if let Some(slot) = work.last_mut() {
-                        slot.1 = Phase::Exit;
-                    }
-                    for &p in &preds {
-                        if resolved(self, p).is_none() {
-                            work.push((p, Phase::Enter));
-                        }
-                    }
-                }
+                },
                 Phase::Exit => {
                     work.pop();
-                    // Every predecessor is resolved (or a marked ancestor) by now,
-                    // so reuse the shared operand builder: a phi only when the
-                    // predecessors disagree, otherwise the single agreed value.
-                    let mut same: Option<SsaValue<'a>> = None;
-                    let mut need_phi = false;
-                    for &p in &self.blocks[block.0].predecessors.clone() {
-                        let pv = resolved(self, p).unwrap_or(SsaValue::Opaque);
-                        if pv == SsaValue::Marker {
-                            need_phi = true;
-                            continue;
-                        }
-                        match &same {
-                            None => same = Some(pv),
-                            Some(s) if *s == pv => {}
-                            Some(_) => need_phi = true,
-                        }
-                    }
-
-                    let val = if need_phi {
-                        let phi_id = self.new_phi(block, variable);
-                        self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
-                        self.add_phi_operands(variable, phi_id)
-                    } else {
-                        same.unwrap_or(SsaValue::Opaque)
-                    };
-                    self.write_variable_interned(variable, block, val);
+                    exit(self, block);
                 }
             }
         }
+    }
 
-        resolved(self, start).unwrap_or(SsaValue::Opaque)
+    /// Combine a block's resolved predecessors: the single agreed value, or a
+    /// phi when they disagree (or a cycle marker is present).
+    fn combine_predecessors(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        let mut same: Option<SsaValue<'a>> = None;
+        let mut need_phi = false;
+        for &p in &self.blocks[block.0].predecessors.clone() {
+            let pv = self.current_value(variable, p).unwrap_or(SsaValue::Opaque);
+            if pv == SsaValue::Marker {
+                need_phi = true;
+                continue;
+            }
+            match &same {
+                None => same = Some(pv),
+                Some(s) if *s == pv => {}
+                Some(_) => need_phi = true,
+            }
+        }
+        if need_phi {
+            let phi_id = self.new_phi(block, variable);
+            self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
+            self.add_phi_operands(variable, phi_id)
+        } else {
+            same.unwrap_or(SsaValue::Opaque)
+        }
     }
 
     /// Recursive reference implementation, kept only to differentially test the
