@@ -133,6 +133,18 @@ fn contains_endpoints(row: &NoteRow, resolved: &ResolvedTarget) -> Option<(i64, 
     }
 }
 
+/// Map a lifecycle action to its `User → Noteable` edge kind. Returns `None`
+/// for any non-lifecycle action so the caller can log-and-skip rather than
+/// `unreachable!`-panic if the outer match arm and this mapping ever drift.
+fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
+    match action {
+        Action::Closed => Some(edge_kinds::CLOSED),
+        Action::Reopened => Some(edge_kinds::REOPENED),
+        Action::Merged => Some(edge_kinds::MERGED),
+        _ => None,
+    }
+}
+
 /// Emit edges for a batch of parsed notes given a target resolver. The
 /// resolver receives each [`Reference`] plus the source row's
 /// `default_project` (for same-project shorthand) and returns `None` for any
@@ -163,11 +175,16 @@ where
                 if !declared_target {
                     continue;
                 }
-                let kind = match row.action {
-                    Action::Closed => edge_kinds::CLOSED,
-                    Action::Reopened => edge_kinds::REOPENED,
-                    Action::Merged => edge_kinds::MERGED,
-                    _ => unreachable!(),
+                // Skip (don't `unreachable!`) on an unexpected action: a
+                // panic here would crash-loop the worker on one bad row.
+                // See "no panics in the indexer data path" in AGENTS.md.
+                let Some(kind) = lifecycle_edge_kind(row.action) else {
+                    warn!(
+                        action = ?row.action,
+                        noteable_id = row.noteable_id,
+                        "system_notes: unexpected action in lifecycle arm, skipping row"
+                    );
+                    continue;
                 };
                 edges.push(EmittedEdge {
                     traversal_path: row.traversal_path.clone(),
@@ -446,6 +463,23 @@ mod tests {
             traversal_path: "9/9/".to_string(),
         };
         assert_eq!(contains_endpoints(&row, &resolved), None);
+    }
+
+    #[test]
+    fn lifecycle_edge_kind_maps_actions_and_skips_non_lifecycle() {
+        assert_eq!(
+            lifecycle_edge_kind(Action::Closed),
+            Some(edge_kinds::CLOSED)
+        );
+        assert_eq!(
+            lifecycle_edge_kind(Action::Reopened),
+            Some(edge_kinds::REOPENED)
+        );
+        assert_eq!(
+            lifecycle_edge_kind(Action::Merged),
+            Some(edge_kinds::MERGED)
+        );
+        assert_eq!(lifecycle_edge_kind(Action::CrossReference), None);
     }
 
     #[test]

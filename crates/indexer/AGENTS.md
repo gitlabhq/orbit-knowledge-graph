@@ -196,7 +196,7 @@ acceptable on a genuine programmer invariant that no production data can reach.
 ### New edge/action routing needs an end-to-end YAML scenario
 
 When you route a new action (or noteable/edge kind) to a `gl_edge`, add an integration scenario
-under `tests/integration-tests/tests/indexer/scenarios/sdlc/...` (run by `scenario_indexing`), not
+under `crates/integration-tests/tests/indexer/scenarios/sdlc/...` (run by `scenario_indexing`), not
 just `emit.rs`/`parse.rs` unit tests. Seed the real siphon rows and assert the emitted `gl_edge`
 rows — direction and `traversal_path`. Include any cross-namespace / `traversal_path` invariant
 (e.g. a child in one namespace under a parent in another) so the partition-side property is guarded
