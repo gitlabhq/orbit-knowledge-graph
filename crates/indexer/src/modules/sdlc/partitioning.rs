@@ -100,13 +100,8 @@ impl PartitionStrategy {
 
         if cuts.len() < self.count as usize {
             let probe_rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
-            if probe_rows == 0 {
-                debug!(
-                    count = self.count,
-                    "scope under partition_min_rows; running single-threaded"
-                );
-            } else {
-                // Any returned row already cleared the probe's `total_rows >= min_rows` gate, so too-few-cuts here is the silent single-threaded fallback (#869).
+            if probe_rows > 0 && self.min_rows > 0 {
+                // Returned rows cleared the probe's `total_rows >= min_rows` gate, so too-few-cuts on a real scope is the silent single-threaded fallback (#869).
                 warn!(
                     batches = batches.len(),
                     probe_rows,
@@ -114,6 +109,12 @@ impl PartitionStrategy {
                     count = self.count,
                     table = %self.datalake_table,
                     "partition probe cleared min_rows but yielded too few cuts; load will run single-threaded"
+                );
+            } else {
+                debug!(
+                    probe_rows,
+                    count = self.count,
+                    "not partitioning: too few cuts to fill all partitions"
                 );
             }
             return Ok(Vec::new());
