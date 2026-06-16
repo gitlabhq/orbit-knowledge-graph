@@ -38,7 +38,6 @@
       "default": {
         "database": "default",
         "insert_settings": {},
-        "max_query_size": 10485760,
         "password": null,
         "profiling": {
           "enabled": false,
@@ -117,7 +116,6 @@
       "default": {
         "database": "default",
         "insert_settings": {},
-        "max_query_size": 10485760,
         "password": null,
         "profiling": {
           "enabled": false,
@@ -343,13 +341,6 @@
             "type": "string"
           },
           "default": {}
-        },
-        "max_query_size": {
-          "description": "ClickHouse `max_query_size` in bytes. Controls the parse buffer;\nmust be a session-level setting (cannot go in the SQL SETTINGS clause).\nDefault: 10 MiB.",
-          "type": "integer",
-          "format": "uint64",
-          "default": 10485760,
-          "minimum": 0
         },
         "password": {
           "type": [

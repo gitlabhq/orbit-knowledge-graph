@@ -13,7 +13,6 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             ("join_use_nulls".into(), "0".into()),
             ("query_plan_join_swap_table".into(), "auto".into()),
             ("optimize_aggregation_in_order".into(), "1".into()),
-            ("max_query_size".into(), self.max_query_size.to_string()),
         ]);
         session_settings.extend(self.session_settings.clone());
 
