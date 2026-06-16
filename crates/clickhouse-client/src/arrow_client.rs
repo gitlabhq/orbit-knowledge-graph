@@ -36,7 +36,7 @@ impl ArrowClickHouseClient {
         database: &str,
         username: &str,
         password: Option<&str>,
-        query_settings: &std::collections::HashMap<String, String>,
+        session_settings: &std::collections::HashMap<String, String>,
         insert_settings: &std::collections::HashMap<String, String>,
     ) -> Self {
         let mut client = Client::default()
@@ -54,7 +54,7 @@ impl ArrowClickHouseClient {
             client = client.with_password(password);
         }
 
-        for (k, v) in query_settings {
+        for (k, v) in session_settings {
             client = client.with_setting(k, v);
         }
 

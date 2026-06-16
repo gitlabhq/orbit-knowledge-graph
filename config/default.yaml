@@ -27,16 +27,18 @@ datalake:
   database: default
   username: default
   # password: ""
-  query_settings:
+  session_settings:
     max_execution_time: "900"
+    max_query_size: "10485760"
 
 graph:
   url: "http://127.0.0.1:8123"
   database: default
   username: default
   # password: ""
-  query_settings:
+  session_settings:
     optimize_on_insert: "0"
+    max_query_size: "10485760"
   insert_settings:
     async_insert: "1"
     wait_for_async_insert: "1"

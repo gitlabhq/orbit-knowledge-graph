@@ -14,7 +14,7 @@ pub struct ClickHouseConfiguration {
     #[serde(default)]
     pub password: Option<String>,
     #[serde(default)]
-    pub query_settings: HashMap<String, String>,
+    pub session_settings: HashMap<String, String>,
     /// Settings applied to INSERT operations only (both bulk Arrow IPC and
     /// parameterized `INSERT VALUES`).
     ///
@@ -48,7 +48,7 @@ impl Default for ClickHouseConfiguration {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: HashMap::new(),
+            session_settings: HashMap::new(),
             insert_settings: HashMap::new(),
             profiling: ProfilingConfig::default(),
         }

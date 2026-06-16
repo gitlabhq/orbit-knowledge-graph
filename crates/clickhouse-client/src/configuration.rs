@@ -13,7 +13,7 @@ impl ClickHouseConfigurationExt for ClickHouseConfiguration {
             &self.database,
             &self.username,
             self.password.as_deref(),
-            &self.query_settings,
+            &self.session_settings,
             &self.insert_settings,
         )
     }
@@ -56,7 +56,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -71,7 +71,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -87,7 +87,7 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -103,7 +103,7 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };
@@ -129,7 +129,7 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
-            query_settings: std::collections::HashMap::new(),
+            session_settings: std::collections::HashMap::new(),
             insert_settings: std::collections::HashMap::new(),
             profiling: Default::default(),
         };

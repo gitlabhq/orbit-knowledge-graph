@@ -46,7 +46,7 @@
           "processors": false,
           "query_log": false
         },
-        "query_settings": {},
+        "session_settings": {},
         "url": "http://127.0.0.1:8123",
         "username": "default"
       }
@@ -124,7 +124,7 @@
           "processors": false,
           "query_log": false
         },
-        "query_settings": {},
+        "session_settings": {},
         "url": "http://127.0.0.1:8123",
         "username": "default"
       }
@@ -221,7 +221,10 @@
       "$ref": "#/$defs/QuerySettings",
       "default": {
         "default": {
+          "max_ast_depth": 10000,
+          "max_ast_elements": 1000000,
           "max_execution_time": 30,
+          "max_expanded_ast_elements": 10000000,
           "query_cache_ttl": 60
         }
       }
@@ -356,7 +359,7 @@
             "query_log": false
           }
         },
-        "query_settings": {
+        "session_settings": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
@@ -1206,6 +1209,26 @@
           "minimum": 0,
           "writeOnly": true
         },
+        "max_ast_depth": {
+          "description": "ClickHouse `max_ast_depth`. Limits AST nesting depth.\nDefault: 10,000 (10x ClickHouse default of 1,000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 10000,
+          "minimum": 0
+        },
+        "max_ast_elements": {
+          "description": "ClickHouse `max_ast_elements`. Limits AST node count after parsing.\nDefault: 1,000,000 (20x ClickHouse default, matches Siphon).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 1000000,
+          "minimum": 0
+        },
         "max_bytes_to_read": {
           "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Unset by default.",
           "type": [
@@ -1223,6 +1246,16 @@
           ],
           "format": "uint64",
           "default": 30,
+          "minimum": 0
+        },
+        "max_expanded_ast_elements": {
+          "description": "ClickHouse `max_expanded_ast_elements`. Limits AST node count after\nalias/macro expansion. Default: 10,000,000 (20x ClickHouse default).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 10000000,
           "minimum": 0
         },
         "max_memory_usage": {
@@ -1279,7 +1312,10 @@
         "default": {
           "$ref": "#/$defs/QueryConfig",
           "default": {
+            "max_ast_depth": 10000,
+            "max_ast_elements": 1000000,
             "max_execution_time": 30,
+            "max_expanded_ast_elements": 10000000,
             "query_cache_ttl": 60
           }
         }

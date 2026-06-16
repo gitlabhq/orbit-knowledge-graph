@@ -243,7 +243,7 @@ impl TestContext {
                     url: self.clickhouse_endpoint.clone(),
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
-                    query_settings: std::collections::HashMap::new(),
+                    session_settings: std::collections::HashMap::new(),
                     insert_settings: std::collections::HashMap::new(),
                     profiling: Default::default(),
                 },
