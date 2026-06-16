@@ -20,6 +20,26 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
+/// Files at or above this size are the OOM / stack-overflow-prone ones. We log
+/// them before processing so an uncatchable crash (SIGKILL from OOM, SIGSEGV
+/// from stack overflow) leaves a breadcrumb naming the in-flight file — the
+/// per-file skip/fault metrics never emit when the process dies mid-file.
+pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Emit a crash-surviving breadcrumb for a large in-flight file. Low volume
+/// (large files are rare) so it stays on in production.
+pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
+    if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
+        tracing::info!(
+            target: "code_graph::breadcrumb",
+            path,
+            bytes,
+            language,
+            "indexing large file (crash breadcrumb)"
+        );
+    }
+}
+
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
 /// Set `cancel()` from any thread to request pipeline shutdown.
 #[derive(Clone, Default)]
@@ -1303,6 +1323,8 @@ impl FamilyPipeline {
                         }));
                     }
                 };
+
+                breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
                 let t_parse = std::time::Instant::now();
                 let deadline = per_file_timeout.map(|t| t_parse + t);
