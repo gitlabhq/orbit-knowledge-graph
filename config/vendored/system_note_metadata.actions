@@ -66,7 +66,7 @@ custom_field
 duo_agent_started
 duo_agent_completed
 duo_agent_failed
-# EE actions (app/models/ee/system_note_metadata.rb)
+# EE actions (ee/app/models/ee/system_note_metadata.rb)
 weight
 published
 epic_issue_added
