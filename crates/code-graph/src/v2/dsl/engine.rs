@@ -90,18 +90,26 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
+/// Sample the wall clock once every this many walk nodes for the per-file
+/// deadline. The walk is hot, so a coarse sample keeps the check negligible.
+const WALK_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
+
 /// Typed errors from `parse_full_collect`. Adding a producer means
 /// adding a variant — the consumer's `match` becomes a compile error
 /// until the new arm is handled.
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
+    /// The parse or AST walk was aborted by the per-file guard (deadline,
+    /// stall, or cancellation). The file is skipped, not faulted.
+    Aborted(String),
 }
 
 impl std::fmt::Display for ParseFullError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidUtf8(e) => write!(f, "invalid UTF-8: {e}"),
+            Self::Aborted(detail) => write!(f, "parse aborted: {detail}"),
         }
     }
 }
@@ -589,14 +597,33 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
     ) -> Result<ParseFullResult, ParseFullError> {
+        self.parse_full_collect_with_deadline(source, file_path, language, tracer, None)
+    }
+
+    /// Like [`Self::parse_full_collect`] but aborts the tree-sitter parse and
+    /// AST walk once `deadline` passes, returning [`ParseFullError::Aborted`].
+    pub fn parse_full_collect_with_deadline(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        tracer: &Tracer,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
-        let ast = language.parse_ast(source_str);
+        let guard = match deadline {
+            Some(d) => treesitter_visit::ParseGuard::default().with_deadline(d),
+            None => treesitter_visit::ParseGuard::default(),
+        };
+        let ast = language
+            .parse_ast_with_guard(source_str, &guard)
+            .map_err(ParseFullError::Aborted)?;
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path);
+        let mut state = WalkFullState::new(&arena, tracer, file_path, deadline);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -629,6 +656,11 @@ impl LanguageSpec {
         });
 
         self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
+        if state.timed_out {
+            return Err(ParseFullError::Aborted(
+                "exceeded per-file deadline during AST walk".to_string(),
+            ));
+        }
 
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
@@ -774,6 +806,27 @@ impl LanguageSpec {
         sep: &'static str,
         module_prefix: Option<&str>,
     ) {
+        // Per-file deadline: once tripped, every walk_full call returns at once
+        // so the recursion unwinds and the file is skipped (checked in
+        // parse_full_collect). Sampled to keep the per-node cost negligible.
+        if state.timed_out {
+            return;
+        }
+        state.walk_ticks += 1;
+        if let Some(deadline) = state.deadline
+            && state
+                .walk_ticks
+                .is_multiple_of(WALK_DEADLINE_SAMPLE_INTERVAL)
+            && std::time::Instant::now() >= deadline
+        {
+            tracing::warn!(
+                file_path = state.file_path,
+                "AST walk aborted: per-file deadline exceeded"
+            );
+            state.timed_out = true;
+            return;
+        }
+
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             tracing::debug!(
@@ -1444,10 +1497,21 @@ struct WalkFullState<'a> {
     in_return: bool,
     tracer: &'a Tracer,
     file_path: &'a str,
+    /// Per-file wall-clock budget for the AST walk, sampled in `walk_full`.
+    deadline: Option<std::time::Instant>,
+    /// Set once the deadline trips so the walk unwinds and the file is skipped.
+    timed_out: bool,
+    /// Walk-node counter for deadline sampling.
+    walk_ticks: u64,
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer, file_path: &'a str) -> Self {
+    fn new(
+        arena: &'a bumpalo::Bump,
+        tracer: &'a Tracer,
+        file_path: &'a str,
+        deadline: Option<std::time::Instant>,
+    ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
         ssa.seal_block(entry);
@@ -1467,6 +1531,9 @@ impl<'a> WalkFullState<'a> {
             in_return: false,
             tracer,
             file_path,
+            deadline,
+            timed_out: false,
+            walk_ticks: 0,
         }
     }
 

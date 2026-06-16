@@ -7,6 +7,9 @@ use crate::node::{KindId, Position, Root};
 use crate::source::{Doc, SgNode};
 use std::borrow::Cow;
 use std::num::NonZero;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 use thiserror::Error;
 
 pub use traversal::TsPre;
@@ -53,19 +56,53 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
-impl<L: LanguageExt> StrDoc<L> {
-    pub fn try_new(src: &str, lang: L) -> Result<Self, String> {
-        Self::try_new_with_stall_limit(src, lang, DEFAULT_MAX_STALL)
+/// Sample the wall clock once every this many progress callbacks. `Instant::now`
+/// is cheap but the callback is hot; a 2s budget tolerates this much slack.
+const DEADLINE_SAMPLE_INTERVAL: u64 = 64;
+
+/// Cooperative limits enforced from the parser's progress callback, the only
+/// hook into tree-sitter's otherwise-uninterruptible C parse.
+#[derive(Clone)]
+pub struct ParseGuard {
+    /// Abort if the parser stalls at one byte offset this many iterations.
+    pub max_stall: u64,
+    /// Abort once this instant passes (per-file wall-clock budget).
+    pub deadline: Option<Instant>,
+    /// Abort when an external watchdog sets this flag (the indexer sentinel).
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl Default for ParseGuard {
+    fn default() -> Self {
+        Self {
+            max_stall: DEFAULT_MAX_STALL,
+            deadline: None,
+            cancel: None,
+        }
+    }
+}
+
+impl ParseGuard {
+    pub fn with_deadline(mut self, deadline: Instant) -> Self {
+        self.deadline = Some(deadline);
+        self
     }
 
-    /// Parse source with a configurable stall limit for the progress callback.
-    /// If the parser calls the progress callback more than `max_stall` times
-    /// at the same byte offset, the parse is aborted.
-    pub(crate) fn try_new_with_stall_limit(
-        src: &str,
-        lang: L,
-        max_stall: u64,
-    ) -> Result<Self, String> {
+    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(cancel);
+        self
+    }
+}
+
+impl<L: LanguageExt> StrDoc<L> {
+    pub fn try_new(src: &str, lang: L) -> Result<Self, String> {
+        Self::try_new_with_guard(src, lang, &ParseGuard::default())
+    }
+
+    /// Parse source, aborting if the [`ParseGuard`] trips: a stall, the
+    /// wall-clock deadline, or an externally-set cancel flag. An aborted parse
+    /// returns [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
+    pub fn try_new_with_guard(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
         let ts_lang = lang.get_ts_language();
@@ -74,10 +111,32 @@ impl<L: LanguageExt> StrDoc<L> {
                 use std::ops::ControlFlow;
                 use std::sync::atomic::{AtomicU64, Ordering};
 
+                let max_stall = guard.max_stall;
+                let deadline = guard.deadline;
+                let cancel = guard.cancel.clone();
                 let stall_count = AtomicU64::new(0);
                 let last_offset = AtomicU64::new(u64::MAX);
+                let ticks = AtomicU64::new(0);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
+                    // Watchdog cancellation (e.g. the per-file sentinel).
+                    if let Some(flag) = &cancel
+                        && flag.load(Ordering::Relaxed)
+                    {
+                        tracing::debug!("tree-sitter parse aborted: cancelled by watchdog");
+                        return ControlFlow::Break(());
+                    }
+                    // Wall-clock deadline, sampled to keep the callback cheap.
+                    if let Some(deadline) = deadline
+                        && ticks
+                            .fetch_add(1, Ordering::Relaxed)
+                            .is_multiple_of(DEADLINE_SAMPLE_INTERVAL)
+                        && Instant::now() >= deadline
+                    {
+                        tracing::warn!("tree-sitter parse aborted: per-file deadline exceeded");
+                        return ControlFlow::Break(());
+                    }
+                    // Stall detection: no forward progress for too long.
                     let offset = state.current_byte_offset() as u64;
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
@@ -331,6 +390,16 @@ pub trait LanguageExt: Language {
         crate::Root::new(source, self.clone())
     }
 
+    /// Like [`Self::ast_grep`] but aborts the parse when `guard` trips (stall,
+    /// deadline, or cancellation), returning `Err` instead of panicking.
+    fn ast_grep_with_guard<S: AsRef<str>>(
+        &self,
+        source: S,
+        guard: &ParseGuard,
+    ) -> Result<crate::Root<StrDoc<Self>>, String> {
+        crate::Root::try_new_with_guard(source, self.clone(), guard)
+    }
+
     /// tree sitter language to parse the source
     fn get_ts_language(&self) -> TSLanguage;
 
@@ -355,6 +424,15 @@ impl<L: LanguageExt> crate::Root<StrDoc<L>> {
         Ok(Root { doc })
     }
 
+    pub fn try_new_with_guard<S: AsRef<str>>(
+        src: S,
+        lang: L,
+        guard: &ParseGuard,
+    ) -> Result<Self, String> {
+        let doc = StrDoc::try_new_with_guard(src.as_ref(), lang, guard)?;
+        Ok(Root { doc })
+    }
+
     pub fn source(&self) -> &str {
         self.doc.get_source().as_str()
     }
@@ -366,11 +444,12 @@ impl<L: LanguageExt> crate::Root<StrDoc<L>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "builtin-parser")]
     use super::StrDoc;
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Reproduce the stall detection logic from try_new_with_stall_limit and verify
+    /// Reproduce the stall detection logic and verify
     /// it fires correctly. This tests the algorithm directly rather than relying on
     /// tree-sitter's internal behavior which varies between debug and release builds.
     #[test]
@@ -422,5 +501,31 @@ mod tests {
             "Valid Python should parse: {:?}",
             result.err()
         );
+    }
+
+    #[cfg(feature = "builtin-parser")]
+    #[test]
+    fn past_deadline_aborts_large_parse() {
+        use super::ParseGuard;
+        use std::time::{Duration, Instant};
+        // Large enough that tree-sitter invokes the progress callback.
+        let src = "def f(x):\n    return x + 1\n".repeat(50_000);
+        let guard = ParseGuard::default().with_deadline(Instant::now() - Duration::from_secs(1));
+        let result = StrDoc::try_new_with_guard(&src, crate::SupportLang::Python, &guard);
+        assert!(result.is_err(), "a past deadline must abort the parse");
+    }
+
+    #[cfg(feature = "builtin-parser")]
+    #[test]
+    fn future_deadline_allows_parse() {
+        use super::ParseGuard;
+        use std::time::{Duration, Instant};
+        let guard = ParseGuard::default().with_deadline(Instant::now() + Duration::from_secs(300));
+        let result = StrDoc::try_new_with_guard(
+            "def f(x):\n    return x\n",
+            crate::SupportLang::Python,
+            &guard,
+        );
+        assert!(result.is_ok(), "a far-future deadline must not abort");
     }
 }

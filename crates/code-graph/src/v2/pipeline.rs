@@ -1305,23 +1305,28 @@ impl FamilyPipeline {
                 };
 
                 let t_parse = std::time::Instant::now();
-                let result = match lctx
-                    .spec
-                    .parse_full_collect(&source, &f.path, f.language, tracer)
-                {
+                let deadline = per_file_timeout.map(|t| t_parse + t);
+                let result = match lctx.spec.parse_full_collect_with_deadline(
+                    &source, &f.path, f.language, tracer, deadline,
+                ) {
                     Ok(r) => r,
-                    Err(e) => {
-                        tracing::debug!(path = f.path, error = %e, "failed to parse file");
+                    Err(crate::v2::dsl::engine::ParseFullError::Aborted(detail)) => {
+                        tracing::warn!(path = f.path, %detail, "parse aborted: per-file deadline");
+                        ctx.record_skip(
+                            f.path.clone(),
+                            crate::v2::error::FileSkip::TimeoutSentinel,
+                            detail,
+                        );
                         pb.inc(1);
-                        let (kind, detail) = match e {
-                            crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err) => {
-                                (FileFault::InvalidUtf8, err.to_string())
-                            }
-                        };
+                        return None;
+                    }
+                    Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
+                        tracing::debug!(path = f.path, error = %err, "failed to parse file");
+                        pb.inc(1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
-                            kind,
-                            detail,
+                            kind: FileFault::InvalidUtf8,
+                            detail: err.to_string(),
                         }));
                     }
                 };
