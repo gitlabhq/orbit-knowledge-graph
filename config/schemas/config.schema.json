@@ -71,6 +71,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "per_file_parse_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "worker_threads": 0
             }
@@ -412,6 +413,13 @@
           "default": 1000000,
           "minimum": 0
         },
+        "per_file_parse_timeout_ms": {
+          "description": "Per-file wall-clock budget for the parse phase (tree-sitter parse + AST\nwalk + SSA) in milliseconds. Much tighter than `per_file_timeout_ms`:\nnormal files parse well under this, so a pathological large file is\nskipped instead of dominating the run. 0 = no parse deadline.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 100,
+          "minimum": 0
+        },
         "per_file_timeout_ms": {
           "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
           "type": "integer",
@@ -439,6 +447,7 @@
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
+            "per_file_parse_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
             "worker_threads": 0
           }
@@ -530,6 +539,7 @@
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
+                "per_file_parse_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
                 "worker_threads": 0
               }
@@ -771,6 +781,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "per_file_parse_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
               "worker_threads": 0
             }

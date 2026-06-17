@@ -528,6 +528,10 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
+    /// Per-file wall-clock budget for the parse phase (tree-sitter parse + AST
+    /// walk + SSA). Much tighter than `per_file_timeout`. `None` = no parse
+    /// deadline.
+    pub per_file_parse_timeout: Option<std::time::Duration>,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
@@ -550,6 +554,7 @@ impl Default for PipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
+            per_file_parse_timeout: None,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
@@ -1327,7 +1332,7 @@ impl FamilyPipeline {
                 breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
                 let t_parse = std::time::Instant::now();
-                let deadline = per_file_timeout.map(|t| t_parse + t);
+                let deadline = ctx.config.per_file_parse_timeout.map(|t| t_parse + t);
                 let result = match lctx.spec.parse_full_collect_with_deadline(
                     &source, &f.path, f.language, tracer, deadline,
                 ) {
