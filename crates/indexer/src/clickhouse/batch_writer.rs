@@ -37,13 +37,21 @@ impl ClickHouseBatchWriter {
         metrics: Arc<EngineMetrics>,
     ) -> Self {
         let insert_sql =
-            client.build_insert_sql_with_overrides(&table, durability.insert_overrides());
+            client.build_insert_sql_with_overrides(&table, insert_overrides(durability));
         Self {
             client,
             table,
             insert_sql,
             metrics,
         }
+    }
+}
+
+/// Empty for `FireAndForget` so the deployment's `insert_settings` apply unchanged.
+fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'static str)] {
+    match durability {
+        WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
+        WriteDurability::FireAndForget => &[],
     }
 }
 
@@ -75,5 +83,23 @@ impl BatchWriter for ClickHouseBatchWriter {
             .record_write_success(&self.table, elapsed, total_rows, total_bytes);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durable_pins_async_insert_and_wait() {
+        assert_eq!(
+            insert_overrides(WriteDurability::Durable),
+            &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+        );
+    }
+
+    #[test]
+    fn fire_and_forget_defers_to_config() {
+        assert!(insert_overrides(WriteDurability::FireAndForget).is_empty());
     }
 }

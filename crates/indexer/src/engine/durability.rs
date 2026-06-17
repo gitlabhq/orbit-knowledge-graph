@@ -1,21 +1,11 @@
 use crate::observer::IndexingMode;
 
-/// Whether a write blocks until ClickHouse confirms the async insert flushed. `Durable` is
-/// mandatory where a dropped write is unrecoverable: the watermark advances with no NATS retry.
+/// Whether a write blocks until the store confirms it durably landed. `Durable` is mandatory where
+/// a dropped write is unrecoverable: the watermark advances with no NATS retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteDurability {
     FireAndForget,
     Durable,
-}
-
-impl WriteDurability {
-    /// Empty for `FireAndForget` so the deployment's `insert_settings` apply unchanged.
-    pub(crate) fn insert_overrides(self) -> &'static [(&'static str, &'static str)] {
-        match self {
-            WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
-            WriteDurability::FireAndForget => &[],
-        }
-    }
 }
 
 /// Page and completion durability invert by mode: a full load re-pulls lost pages but must persist
@@ -44,19 +34,6 @@ impl RunDurability {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn durable_pins_async_insert_and_wait() {
-        assert_eq!(
-            WriteDurability::Durable.insert_overrides(),
-            &[("async_insert", "1"), ("wait_for_async_insert", "1")]
-        );
-    }
-
-    #[test]
-    fn fire_and_forget_defers_to_config() {
-        assert!(WriteDurability::FireAndForget.insert_overrides().is_empty());
-    }
 
     #[test]
     fn run_durability_inverts_page_and_completion() {
