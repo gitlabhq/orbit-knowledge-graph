@@ -46,7 +46,7 @@ pub async fn create_namespace_with_path(
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO siphon_namespace_details (namespace_id, description) VALUES ({id}, NULL)"
+        "INSERT INTO siphon_namespace_details (namespace_id, description, traversal_path) VALUES ({id}, NULL, '{traversal_path}')"
     ))
     .await;
     ctx.execute(&format!(
