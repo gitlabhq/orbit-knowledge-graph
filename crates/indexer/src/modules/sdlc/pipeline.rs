@@ -17,7 +17,7 @@ use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::IndexingObserver;
 
-use super::datalake::{DatalakeQuery, ScanStats};
+use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
@@ -284,9 +284,8 @@ impl Pipeline {
             .to_sql()
     }
 
-    /// Reads a whole page into memory and its ClickHouse scan cost, halving the
-    /// block size on a datalake failure so an Arrow 2GB offset overflow
-    /// self-corrects without bouncing the message to the dead letter stream.
+    /// Reads a page, retrying with a smaller block size so a datalake failure
+    /// self-corrects instead of bouncing the message to the dead letter stream.
     async fn extract_batch(
         &self,
         transform_name: &str,
@@ -333,12 +332,19 @@ impl Pipeline {
                         %err,
                         "datalake query failed, retrying with smaller block size"
                     );
+                    let overflow = is_arrow_string_overflow(&err);
                     last_error = Some(HandlerError::Processing(format!(
                         "datalake query failed: {err}"
                     )));
-                    max_block_size = Some(match max_block_size {
-                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
-                        None => self.retry_config.halving_initial_block_size,
+                    // An overflow only clears once blocks are small, and each halving
+                    // step re-scans the page, so jump straight to the floor.
+                    max_block_size = Some(if overflow {
+                        self.retry_config.halving_min_block_size
+                    } else {
+                        match max_block_size {
+                            Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
+                            None => self.retry_config.halving_initial_block_size,
+                        }
                     });
                 }
             }
@@ -867,9 +873,9 @@ mod tests {
         // at retry_config.halving_initial_block_size (8000 here) and halve
         // from there: 8000 → 4000 → 2000.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated arrow capacity overflow"),
-            Err("simulated arrow capacity overflow"),
-            Err("simulated arrow capacity overflow"),
+            Err("simulated transient failure"),
+            Err("simulated transient failure"),
+            Err("simulated transient failure"),
             Ok(vec![test_batch(1)]),
         ]));
         let pipeline = Pipeline::new(
@@ -908,9 +914,9 @@ mod tests {
         // Halving stops at halving_min_block_size and stays there for
         // subsequent retries.
         let datalake = Arc::new(RecordingDatalake::with_responses(vec![
-            Err("simulated arrow capacity overflow"),
-            Err("simulated arrow capacity overflow"),
-            Err("simulated arrow capacity overflow"),
+            Err("simulated transient failure"),
+            Err("simulated transient failure"),
+            Err("simulated transient failure"),
             Ok(vec![test_batch(1)]),
         ]));
         let pipeline = Pipeline::new(
@@ -988,7 +994,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn arrow_overflow_recovers_via_block_size_halving() {
+    async fn arrow_overflow_drops_straight_to_floor_block_size() {
         let datalake = Arc::new(OverflowingDatalake {
             calls: Mutex::new(Vec::new()),
             recover_at_block_size: 8_000,
@@ -1021,9 +1027,8 @@ mod tests {
         );
         assert_eq!(
             datalake.observed_block_sizes(),
-            vec![None, Some(8_000)],
-            "first attempt reads at the default and overflows; the retry must \
-             shrink the block rather than abort"
+            vec![None, Some(1_024)],
+            "an Arrow overflow skips gradual halving and drops to the floor block size"
         );
     }
 
