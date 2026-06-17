@@ -1264,7 +1264,7 @@ impl FamilyPipeline {
         let pb = progress_bar(file_count as u64, "parse + graph");
 
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
-        use crate::v2::error::{FaultedFile, FileFault};
+        use crate::v2::error::{FaultedFile, FileFault, FileSkip, SkippedFile};
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
@@ -1274,6 +1274,7 @@ impl FamilyPipeline {
 
         enum ParseOutcome {
             Ok(ParsedFile),
+            Skip(SkippedFile),
             Err(FaultedFile),
         }
 
@@ -1300,18 +1301,17 @@ impl FamilyPipeline {
                     && let Ok(metadata) = std::fs::metadata(&abs_path)
                     && metadata.len() > limit
                 {
-                    ctx.record_skip(
-                        f.path.clone(),
-                        crate::v2::error::FileSkip::ParserOversize,
-                        format!(
+                    pb.inc(1);
+                    return Some(ParseOutcome::Skip(SkippedFile {
+                        path: f.path.clone(),
+                        kind: FileSkip::ParserOversize,
+                        detail: format!(
                             "{} file is {} bytes, parser limit is {} bytes",
                             f.language,
                             metadata.len(),
                             limit
                         ),
-                    );
-                    pb.inc(1);
-                    return None;
+                    }));
                 }
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
@@ -1341,13 +1341,12 @@ impl FamilyPipeline {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
                         tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
-                        ctx.record_skip(
-                            f.path.clone(),
-                            crate::v2::error::FileSkip::Timeout(phase),
-                            detail,
-                        );
                         pb.inc(1);
-                        return None;
+                        return Some(ParseOutcome::Skip(SkippedFile {
+                            path: f.path.clone(),
+                            kind: FileSkip::Timeout(phase),
+                            detail,
+                        }));
                     }
                     Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
                         tracing::debug!(path = f.path, error = %err, "failed to parse file");
@@ -1382,11 +1381,16 @@ impl FamilyPipeline {
 
         let parse_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
+        let mut parsed_skips: Vec<SkippedFile> = Vec::new();
         let mut parsed_faults: Vec<FaultedFile> = Vec::new();
         let parsed: Vec<Option<ParsedFile>> = parse_outcomes
             .into_iter()
             .map(|outcome| match outcome {
                 Some(ParseOutcome::Ok(file)) => Some(file),
+                Some(ParseOutcome::Skip(s)) => {
+                    parsed_skips.push(s);
+                    None
+                }
                 Some(ParseOutcome::Err(e)) => {
                     parsed_faults.push(e);
                     None
@@ -1395,6 +1399,11 @@ impl FamilyPipeline {
             })
             .collect();
 
+        if !parsed_skips.is_empty()
+            && let Ok(mut skipped) = ctx.skipped.lock()
+        {
+            skipped.extend(parsed_skips);
+        }
         if !parsed_faults.is_empty()
             && let Ok(mut faults) = ctx.faults.lock()
         {
@@ -1921,6 +1930,43 @@ mod tests {
             crate::v2::error::FileSkip::ParserOversize
         );
         assert_eq!(result.skipped[0].path, "proto.gen.go");
+    }
+
+    #[test]
+    fn pipeline_records_timeout_skip_when_cpu_budget_is_exhausted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let source = "def f(x):\n    return x + 1\n";
+        std::fs::write(root.join("main.py"), source).unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "main.py".into(),
+                size: source.len() as u64,
+            }]),
+            PipelineConfig {
+                per_file_parse_timeout: Some(std::time::Duration::ZERO),
+                per_file_walk_timeout: Some(std::time::Duration::ZERO),
+                per_file_ssa_timeout: Some(std::time::Duration::ZERO),
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert!(
+            matches!(
+                result.skipped[0].kind,
+                crate::v2::error::FileSkip::Timeout(_)
+            ),
+            "a zero CPU budget must record a Timeout skip, got {:?}",
+            result.skipped[0].kind
+        );
+        assert_eq!(result.skipped[0].path, "main.py");
     }
 
     #[test]
