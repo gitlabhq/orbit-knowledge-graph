@@ -163,7 +163,7 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = dead_letter_subject(original_subscription, envelope);
+        let subject = NATS_VERSIONER.subject(&dead_letter_subject(original_subscription, envelope));
         let ack_future = self
             .inner
             .jetstream()
@@ -468,6 +468,35 @@ impl NatsBroker {
                 .await
                 .map_err(map_subscribe_error),
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl nats_client::KvServices for NatsBroker {
+    async fn kv_get(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<nats_client::KvEntry>, NatsError> {
+        self.kv_get(bucket, key).await
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: nats_client::KvPutOptions,
+    ) -> Result<nats_client::KvPutResult, NatsError> {
+        self.kv_put(bucket, key, value, options).await
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        self.kv_delete(bucket, key).await
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        self.kv_keys(bucket).await
     }
 }
 

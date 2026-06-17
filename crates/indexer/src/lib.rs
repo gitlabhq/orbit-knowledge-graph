@@ -106,9 +106,7 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
-        nats_client::KvServicesImpl::new(broker.client().clone()),
-    )));
+    let indexing_status = Arc::new(IndexingStatusStore::new(broker.clone()));
 
     let gitlab_client = config
         .gitlab
