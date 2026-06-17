@@ -33,13 +33,8 @@ pub trait BatchWriter: Send + Sync {
 /// Creates writers for a storage backend.
 #[async_trait]
 pub trait Destination: Send + Sync {
-    async fn new_batch_writer(
-        &self,
-        table: &str,
-    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        self.new_batch_writer_with_durability(table, WriteDurability::FireAndForget)
-            .await
-    }
+    async fn new_batch_writer(&self, table: &str)
+    -> Result<Box<dyn BatchWriter>, DestinationError>;
 
     async fn new_batch_writer_with_durability(
         &self,

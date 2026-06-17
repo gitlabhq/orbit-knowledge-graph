@@ -944,6 +944,13 @@ struct FailingDestination;
 
 #[async_trait]
 impl Destination for FailingDestination {
+    async fn new_batch_writer(
+        &self,
+        _table: &str,
+    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
+        Ok(Box::new(FailingBatchWriter))
+    }
+
     async fn new_batch_writer_with_durability(
         &self,
         _table: &str,

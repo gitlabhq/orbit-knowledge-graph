@@ -277,13 +277,13 @@ A run touches three write targets, and each mode (`RunDurability::for_mode`) pic
 
 | Write target | Full load | Incremental |
 |---|---|---|
-| Data pages (graph tables) | fire-and-forget — configured `insert_settings` | durable — `async_insert=1, wait_for_async_insert=1` |
-| Per-page progress checkpoint | fire-and-forget | fire-and-forget |
+| Data pages (graph tables) | configured `insert_settings` (no override) | durable — `async_insert=1, wait_for_async_insert=1` |
+| Per-page progress checkpoint | fire-and-forget — `async_insert=1, wait_for_async_insert=0` | fire-and-forget |
 | Completion checkpoint | durable | fire-and-forget |
 
-The inversion follows what a lost write costs. A full load re-pulls any lost data page from its watermark window, so pages favor throughput, but its completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so each data page must persist before the watermark moves; a lost completion just re-derives next dispatch. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
+The inversion follows what a lost write costs. A full load re-pulls any lost data page from its watermark window, so its data writes impose no durability and ride the deployment's configured settings, but its completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so each data page must persist before the watermark moves; a lost completion just re-derives next dispatch. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
 
-`WriteDurability::FireAndForget` emits no setting overrides, so a fire-and-forget write inherits the deployment's configured `insert_settings` verbatim.
+`FireAndForget` and `Durable` both pin `async_insert=1` to coalesce parts and differ only on `wait_for_async_insert`; "no override" is distinct — it imposes nothing and inherits the configured `insert_settings`. Full-load data writes take that no-override path (`RunDurability::data_writes` is `None`).
 
 **Checkpoint store**
 

@@ -33,6 +33,20 @@ impl ClickHouseBatchWriter {
     pub(crate) fn new(
         client: ArrowClickHouseClient,
         table: String,
+        metrics: Arc<EngineMetrics>,
+    ) -> Self {
+        let insert_sql = client.build_insert_sql(&table);
+        Self {
+            client,
+            table,
+            insert_sql,
+            metrics,
+        }
+    }
+
+    pub(crate) fn with_durability(
+        client: ArrowClickHouseClient,
+        table: String,
         durability: WriteDurability,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
@@ -47,11 +61,11 @@ impl ClickHouseBatchWriter {
     }
 }
 
-/// Empty for `FireAndForget` so the deployment's `insert_settings` apply unchanged.
+/// Both pin `async_insert` so the many small per-page inserts coalesce into fewer parts.
 fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'static str)] {
     match durability {
         WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
-        WriteDurability::FireAndForget => &[],
+        WriteDurability::FireAndForget => &[("async_insert", "1"), ("wait_for_async_insert", "0")],
     }
 }
 
@@ -99,7 +113,10 @@ mod tests {
     }
 
     #[test]
-    fn fire_and_forget_defers_to_config() {
-        assert!(insert_overrides(WriteDurability::FireAndForget).is_empty());
+    fn fire_and_forget_pins_async_without_waiting() {
+        assert_eq!(
+            insert_overrides(WriteDurability::FireAndForget),
+            &[("async_insert", "1"), ("wait_for_async_insert", "0")]
+        );
     }
 }

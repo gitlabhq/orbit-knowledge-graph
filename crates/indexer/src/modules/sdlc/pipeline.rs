@@ -382,7 +382,7 @@ impl Pipeline {
         destination: &dyn Destination,
         outputs: &[String],
         grouped: Vec<Vec<RecordBatch>>,
-        durability: WriteDurability,
+        durability: Option<WriteDurability>,
     ) -> Result<(WriteFutures, Vec<(usize, u64, u64)>), HandlerError> {
         let write_futures = WriteFutures::new();
         let mut per_table = Vec::new();
@@ -399,12 +399,17 @@ impl Pipeline {
             per_table.push((index, rows, bytes));
 
             let table = outputs[index].clone();
-            let writer = destination
-                .new_batch_writer_with_durability(&table, durability)
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
-                })?;
+            let writer = match durability {
+                Some(durability) => {
+                    destination
+                        .new_batch_writer_with_durability(&table, durability)
+                        .await
+                }
+                None => destination.new_batch_writer(&table).await,
+            }
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
+            })?;
             write_futures.push(
                 async move {
                     writer.write_batch(&batches).await.map_err(|err| {

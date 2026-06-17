@@ -29,12 +29,23 @@ impl ClickHouseDestination {
 
 #[async_trait]
 impl Destination for ClickHouseDestination {
+    async fn new_batch_writer(
+        &self,
+        table: &str,
+    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
+        Ok(Box::new(ClickHouseBatchWriter::new(
+            self.client.clone(),
+            table.to_string(),
+            self.metrics.clone(),
+        )))
+    }
+
     async fn new_batch_writer_with_durability(
         &self,
         table: &str,
         durability: WriteDurability,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        Ok(Box::new(ClickHouseBatchWriter::new(
+        Ok(Box::new(ClickHouseBatchWriter::with_durability(
             self.client.clone(),
             table.to_string(),
             durability,

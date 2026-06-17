@@ -8,13 +8,12 @@ pub enum WriteDurability {
     Durable,
 }
 
-/// Data-write and completion durability invert by mode: a full load re-pulls lost data but must
-/// persist its completion; an incremental must persist data writes (the watermark advances with no
-/// NATS retry) but re-derives a lost completion next dispatch. Per-page progress checkpoints are
-/// always [`WriteDurability::FireAndForget`] (see `ClickHouseCheckpointStore::save_progress`).
+/// Mode inverts durability. Full: data writes use configured settings (`None`) since a lost page
+/// re-pulls, but completion must persist or the watermark never advances. Incremental: each data
+/// write must persist (watermark advances, no NATS retry); a lost completion re-derives next run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
-    pub data_writes: WriteDurability,
+    pub data_writes: Option<WriteDurability>,
     pub completion: WriteDurability,
 }
 
@@ -22,11 +21,11 @@ impl RunDurability {
     pub fn for_mode(mode: IndexingMode) -> Self {
         match mode {
             IndexingMode::Full => Self {
-                data_writes: WriteDurability::FireAndForget,
+                data_writes: None,
                 completion: WriteDurability::Durable,
             },
             IndexingMode::Incremental => Self {
-                data_writes: WriteDurability::Durable,
+                data_writes: Some(WriteDurability::Durable),
                 completion: WriteDurability::FireAndForget,
             },
         }
@@ -40,11 +39,11 @@ mod tests {
     #[test]
     fn run_durability_inverts_page_and_completion() {
         let full = RunDurability::for_mode(IndexingMode::Full);
-        assert_eq!(full.data_writes, WriteDurability::FireAndForget);
+        assert_eq!(full.data_writes, None);
         assert_eq!(full.completion, WriteDurability::Durable);
 
         let incremental = RunDurability::for_mode(IndexingMode::Incremental);
-        assert_eq!(incremental.data_writes, WriteDurability::Durable);
+        assert_eq!(incremental.data_writes, Some(WriteDurability::Durable));
         assert_eq!(incremental.completion, WriteDurability::FireAndForget);
     }
 }
