@@ -6,12 +6,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
+use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
+use indexer::nats::versioning::{NATS_VERSIONER, NatsVersioner, cleanup_version};
 use indexer::types::{Envelope, Event, Subscription};
+use nats_client::{KvBucketConfig, KvPutOptions};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -83,8 +87,11 @@ async fn create_test_stream(url: &str) {
 
     jetstream
         .create_stream(async_nats::jetstream::stream::Config {
-            name: TEST_STREAM.to_string(),
-            subjects: vec![format!("{TEST_SUBJECT}.>"), TEST_SUBJECT.to_string()],
+            name: NATS_VERSIONER.stream(TEST_STREAM),
+            subjects: vec![
+                NATS_VERSIONER.subject(&format!("{TEST_SUBJECT}.>")),
+                NATS_VERSIONER.subject(TEST_SUBJECT),
+            ],
             ..Default::default()
         })
         .await
@@ -164,7 +171,7 @@ async fn get_dead_letter(
 ) -> async_nats::jetstream::message::StreamMessage {
     let jetstream = jetstream_client(url).await;
     let stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("dead letter stream should exist");
 
@@ -177,12 +184,12 @@ async fn get_dead_letter(
 async fn dead_letter_subject_counts(url: &str) -> BTreeMap<String, usize> {
     let jetstream = jetstream_client(url).await;
     let stream = jetstream
-        .get_stream(DEAD_LETTER_STREAM)
+        .get_stream(&NATS_VERSIONER.stream(DEAD_LETTER_STREAM))
         .await
         .expect("dead letter stream should exist");
 
     let mut subjects = stream
-        .info_with_subjects("dlq.dlq_source_stream.>")
+        .info_with_subjects(&NATS_VERSIONER.subject(&format!("dlq.{DLQ_SOURCE_STREAM}.>")))
         .await
         .expect("failed to fetch dead letter subjects");
 
@@ -229,8 +236,10 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         .await
         .expect("failed to publish second dead letter");
 
-    let first_subject = "dlq.dlq_source_stream.code.task.indexing.requested.278964.bWFzdGVy";
-    let first_dead_letter = get_dead_letter(&url, first_subject).await;
+    let first_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{DLQ_SOURCE_STREAM}.code.task.indexing.requested.278964.bWFzdGVy"
+    ));
+    let first_dead_letter = get_dead_letter(&url, &first_subject).await;
     assert_eq!(first_dead_letter.subject.to_string(), first_subject);
     let first_payload: DeadLetterEnvelope =
         serde_json::from_slice(&first_dead_letter.payload).expect("failed to parse dead letter");
@@ -239,8 +248,10 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.278964.bWFzdGVy"
     );
 
-    let second_subject = "dlq.dlq_source_stream.code.task.indexing.requested.80602550.bWFpbg";
-    let second_dead_letter = get_dead_letter(&url, second_subject).await;
+    let second_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{DLQ_SOURCE_STREAM}.code.task.indexing.requested.80602550.bWFpbg"
+    ));
+    let second_dead_letter = get_dead_letter(&url, &second_subject).await;
     assert_eq!(second_dead_letter.subject.to_string(), second_subject);
     let second_payload: DeadLetterEnvelope =
         serde_json::from_slice(&second_dead_letter.payload).expect("failed to parse dead letter");
@@ -249,17 +260,16 @@ async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
         "code.task.indexing.requested.80602550.bWFpbg"
     );
 
-    let wildcard_subject = "dlq.dlq_source_stream.code.task.indexing.requested.*.*";
+    let wildcard_subject = NATS_VERSIONER.subject(&format!(
+        "dlq.{DLQ_SOURCE_STREAM}.code.task.indexing.requested.*.*"
+    ));
     let subject_counts = dead_letter_subject_counts(&url).await;
     assert_eq!(
         subject_counts,
-        BTreeMap::from([
-            (first_subject.to_string(), 1),
-            (second_subject.to_string(), 1),
-        ])
+        BTreeMap::from([(first_subject.clone(), 1), (second_subject.clone(), 1),])
     );
     assert!(
-        !subject_counts.contains_key(wildcard_subject),
+        !subject_counts.contains_key(&wildcard_subject),
         "dead letters should not be stored under the wildcard subscription subject"
     );
 }
@@ -359,8 +369,8 @@ async fn multiple_streams() {
 
     let broker = connect_broker(&default_config(&url)).await;
 
-    let subscription_a = Subscription::new("stream_a", "a.events");
-    let subscription_b = Subscription::new("stream_b", "b.events");
+    let subscription_a = Subscription::new("stream_a", "a.events").manage_stream(false);
+    let subscription_b = Subscription::new("stream_b", "b.events").manage_stream(false);
 
     let mut messages_a = broker
         .subscribe(&subscription_a, Arc::new(EngineMetrics::new()))
@@ -401,11 +411,13 @@ async fn auto_creates_stream_with_configured_settings() {
         .await
         .expect("failed to ensure streams");
 
-    assert_stream_has_subjects(&url, "auto_created_stream", &["auto.events"]).await;
+    let versioned_stream = NATS_VERSIONER.stream("auto_created_stream");
+    let versioned_subject = NATS_VERSIONER.subject("auto.events");
+    assert_stream_has_subjects(&url, &versioned_stream, &[&versioned_subject]).await;
 
     let jetstream = jetstream_client(&url).await;
     let mut stream = jetstream
-        .get_stream("auto_created_stream")
+        .get_stream(&versioned_stream)
         .await
         .expect("stream should exist");
     let info = stream.info().await.expect("failed to get stream info");
@@ -430,7 +442,7 @@ async fn skips_creation_when_disabled() {
         .await
         .expect("ensure_streams should succeed even when disabled");
 
-    assert_stream_not_exists(&url, "should_not_exist").await;
+    assert_stream_not_exists(&url, &NATS_VERSIONER.stream("should_not_exist")).await;
 }
 
 #[tokio::test]
@@ -476,8 +488,16 @@ async fn updates_stream_config_during_rolling_update() {
         .await
         .expect("new broker should update stream config while old consumer is active");
 
-    let updated = stream_config(&url, TEST_STREAM).await;
-    assert_stream_has_subjects(&url, TEST_STREAM, &[TEST_SUBJECT, "test.new_subject"]).await;
+    let versioned_stream = NATS_VERSIONER.stream(TEST_STREAM);
+    let updated = stream_config(&url, &versioned_stream).await;
+    let versioned_subject = NATS_VERSIONER.subject(TEST_SUBJECT);
+    let versioned_new_subject = NATS_VERSIONER.subject("test.new_subject");
+    assert_stream_has_subjects(
+        &url,
+        &versioned_stream,
+        &[&versioned_subject, &versioned_new_subject],
+    )
+    .await;
     assert_eq!(
         updated.max_age,
         Duration::from_secs(7200),
@@ -589,4 +609,115 @@ async fn subscribe_with_multi_level_wildcard_does_not_reject_durable_name() {
         "subscribing to a `>` subject must produce a legal durable name; got: {:?}",
         result.err(),
     );
+}
+
+#[tokio::test]
+async fn cleanup_version_deletes_streams_and_kv_buckets() {
+    let (_container, url) = start_nats_container().await;
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect to NATS");
+    let jetstream = async_nats::jetstream::new(client.clone());
+
+    let version = 999;
+    let v = NatsVersioner::new(version);
+
+    let stream_names = ["GKG_INDEXER", "GKG_DEAD_LETTERS"].map(|s| v.stream(s));
+    let bucket_names = ["indexing_locks", "orbit_indexing_progress"].map(|b| v.bucket(b));
+
+    for name in &stream_names {
+        jetstream
+            .create_stream(async_nats::jetstream::stream::Config {
+                name: name.clone(),
+                subjects: vec![format!("{name}.>")],
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|e| panic!("failed to create stream {name}: {e}"));
+    }
+    for name in &bucket_names {
+        jetstream
+            .create_key_value(async_nats::jetstream::kv::Config {
+                bucket: name.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|e| panic!("failed to create bucket {name}: {e}"));
+    }
+
+    cleanup_version(&client, version)
+        .await
+        .expect("cleanup_version failed");
+
+    for name in &stream_names {
+        assert!(
+            jetstream.get_stream(name).await.is_err(),
+            "stream {name} should have been deleted by cleanup_version",
+        );
+    }
+    for name in &bucket_names {
+        assert!(
+            jetstream.get_key_value(name).await.is_err(),
+            "KV bucket {name} should have been deleted by cleanup_version",
+        );
+    }
+}
+
+#[tokio::test]
+async fn broker_kv_path_targets_versioned_bucket() {
+    let (_container, url) = start_nats_container().await;
+    let broker = connect_broker(&default_config(&url)).await;
+
+    broker
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await
+        .expect("ensure bucket");
+    broker
+        .kv_put(
+            INDEXING_PROGRESS_BUCKET,
+            "status.1.100",
+            Bytes::from_static(b"payload"),
+            KvPutOptions::default(),
+        )
+        .await
+        .expect("kv_put");
+
+    let round_trip = broker
+        .kv_get(INDEXING_PROGRESS_BUCKET, "status.1.100")
+        .await
+        .expect("kv_get")
+        .expect("entry present");
+    assert_eq!(round_trip.value, Bytes::from_static(b"payload"));
+
+    let jetstream = jetstream_client(&url).await;
+    let versioned = jetstream
+        .get_key_value(&NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET))
+        .await
+        .expect("versioned bucket should exist");
+    let entry = versioned
+        .get("status.1.100")
+        .await
+        .expect("get from versioned bucket")
+        .expect("value present in versioned bucket");
+    assert_eq!(entry, Bytes::from_static(b"payload"));
+
+    assert!(
+        jetstream
+            .get_key_value(INDEXING_PROGRESS_BUCKET)
+            .await
+            .is_err(),
+        "broker must not create the unversioned bucket",
+    );
+}
+
+#[tokio::test]
+async fn cleanup_version_is_idempotent() {
+    let (_container, url) = start_nats_container().await;
+    let client = async_nats::connect(format!("nats://{url}"))
+        .await
+        .expect("failed to connect to NATS");
+
+    cleanup_version(&client, 888)
+        .await
+        .expect("cleanup_version failed unexpectedly for non-existent version");
 }

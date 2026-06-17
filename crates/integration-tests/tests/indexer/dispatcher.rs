@@ -10,6 +10,7 @@ use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
 use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
 use serde::Deserialize;
@@ -96,10 +97,10 @@ impl TestContext {
         let consumer = jetstream
             .create_consumer_on_stream(
                 async_nats::jetstream::consumer::pull::Config {
-                    filter_subject: subject.into(),
+                    filter_subject: NATS_VERSIONER.subject(subject),
                     ..Default::default()
                 },
-                INDEXER_STREAM,
+                &NATS_VERSIONER.stream(INDEXER_STREAM),
             )
             .await
             .unwrap();
@@ -137,10 +138,10 @@ impl TestContext {
 
         jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: INDEXER_STREAM.into(),
+                name: NATS_VERSIONER.stream(INDEXER_STREAM),
                 subjects: vec![
-                    GLOBAL_INDEXING_SUBJECT.into(),
-                    NAMESPACE_INDEXING_SUBJECT_PATTERN.into(),
+                    NATS_VERSIONER.subject(GLOBAL_INDEXING_SUBJECT),
+                    NATS_VERSIONER.subject(NAMESPACE_INDEXING_SUBJECT_PATTERN),
                 ],
                 retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                 max_messages_per_subject: 1,

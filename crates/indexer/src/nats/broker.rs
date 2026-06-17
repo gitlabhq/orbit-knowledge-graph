@@ -25,6 +25,7 @@ use crate::dead_letter::{
     DEAD_LETTER_STREAM, DEAD_LETTER_SUBJECT_PREFIX, DeadLetterEnvelope, dead_letter_subject,
 };
 use crate::metrics::EngineMetrics;
+use crate::nats::versioning::NATS_VERSIONER;
 use crate::types::{Envelope, MessageId, Subscription};
 
 use async_nats::jetstream::ErrorCode;
@@ -96,21 +97,21 @@ impl NatsBroker {
             return Ok(());
         }
 
-        let mut managed_streams: std::collections::HashMap<&Arc<str>, Vec<String>> =
+        let mut managed_streams: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
 
         for subscription in subscriptions {
             if subscription.manage_stream {
                 managed_streams
-                    .entry(&subscription.stream)
+                    .entry(NATS_VERSIONER.stream(&subscription.stream))
                     .or_default()
-                    .push(subscription.subject.to_string());
+                    .push(NATS_VERSIONER.subject(&subscription.subject));
             }
         }
 
         for (stream_name, subjects) in managed_streams {
             self.inner
-                .create_or_update_stream(stream_name, subjects, None)
+                .create_or_update_stream(&stream_name, subjects, None)
                 .await?;
         }
 
@@ -137,9 +138,13 @@ impl NatsBroker {
     }
 
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
-        let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
+        let subject = NATS_VERSIONER.subject(&format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX));
         self.inner
-            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject], Some(DEAD_LETTER_MAX_AGE))
+            .create_or_update_stream(
+                &NATS_VERSIONER.stream(DEAD_LETTER_STREAM),
+                vec![subject],
+                Some(DEAD_LETTER_MAX_AGE),
+            )
             .await?;
         Ok(())
     }
@@ -158,7 +163,7 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = dead_letter_subject(original_subscription, envelope);
+        let subject = NATS_VERSIONER.subject(&dead_letter_subject(original_subscription, envelope));
         let ack_future = self
             .inner
             .jetstream()
@@ -184,7 +189,9 @@ impl NatsBroker {
         bucket: &str,
         config: nats_client::KvBucketConfig,
     ) -> Result<(), NatsError> {
-        self.inner.ensure_kv_bucket_exists(bucket, config).await
+        self.inner
+            .ensure_kv_bucket_exists(&NATS_VERSIONER.bucket(bucket), config)
+            .await
     }
 
     pub async fn kv_get(
@@ -192,7 +199,7 @@ impl NatsBroker {
         bucket: &str,
         key: &str,
     ) -> Result<Option<nats_client::KvEntry>, NatsError> {
-        self.inner.kv_get(bucket, key).await
+        self.inner.kv_get(&NATS_VERSIONER.bucket(bucket), key).await
     }
 
     pub async fn kv_put(
@@ -202,15 +209,19 @@ impl NatsBroker {
         value: Bytes,
         options: nats_client::KvPutOptions,
     ) -> Result<nats_client::KvPutResult, NatsError> {
-        self.inner.kv_put(bucket, key, value, options).await
+        self.inner
+            .kv_put(&NATS_VERSIONER.bucket(bucket), key, value, options)
+            .await
     }
 
     pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
-        self.inner.kv_delete(bucket, key).await
+        self.inner
+            .kv_delete(&NATS_VERSIONER.bucket(bucket), key)
+            .await
     }
 
     pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
-        self.inner.kv_keys(bucket).await
+        self.inner.kv_keys(&NATS_VERSIONER.bucket(bucket)).await
     }
 
     fn convert_message(
@@ -250,15 +261,16 @@ impl NatsBroker {
         subscription: &Subscription,
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
+        let (stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
+
         let ack_future = self
             .inner
             .jetstream()
-            .publish(subscription.subject.to_string(), envelope.payload.clone())
+            .publish(subject.clone(), envelope.payload.clone())
             .await
             .map_err(|e| {
                 NatsError::Publish(format!(
-                    "failed to publish to '{}' (stream '{}'): {e}",
-                    subscription.subject, subscription.stream
+                    "failed to publish to '{subject}' (stream '{stream_name}'): {e}",
                 ))
             })?;
 
@@ -268,8 +280,7 @@ impl NatsBroker {
                 Err(NatsError::PublishDuplicate)
             }
             Err(e) => Err(NatsError::Publish(format!(
-                "publish ack failed for '{}' (stream '{}'): {e}",
-                subscription.subject, subscription.stream
+                "publish ack failed for '{subject}' (stream '{stream_name}'): {e}",
             ))),
         }
     }
@@ -279,9 +290,11 @@ impl NatsBroker {
         subscription: &Subscription,
         metrics: Arc<EngineMetrics>,
     ) -> Result<NatsSubscription, NatsError> {
-        let stream = self.inner.get_stream(&subscription.stream).await?;
+        let (stream_name, subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
+
+        let stream = self.inner.get_stream(&stream_name).await?;
         let consumer = self
-            .get_or_create_consumer(&stream, &subscription.subject, subscription.max_ack_pending)
+            .get_or_create_consumer(&stream, &subject, subscription.max_ack_pending)
             .await?;
 
         let consumer_type = match &self.config.consumer_name {
@@ -291,7 +304,7 @@ impl NatsBroker {
         let batch_size = self.config.batch_size();
         let fetch_expires = self.config.fetch_expires();
         info!(
-            topic = %format!("{}.{}", subscription.stream, subscription.subject),
+            topic = %format!("{stream_name}.{subject}"),
             consumer_type,
             batch_size,
             "subscription started"
@@ -365,15 +378,22 @@ impl NatsBroker {
         subscription: &Subscription,
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError> {
-        let stream = self.inner.get_stream(&subscription.stream).await?;
+        let (stream_name, filter_subject) = NATS_VERSIONER.resolve_stream_and_subject(subscription);
 
-        let durable_name = format!(
-            "dispatch-{}",
-            escape_subject_for_durable(&subscription.subject)
-        );
+        let stream = self.inner.get_stream(&stream_name).await?;
 
-        let consumer_config = ConsumerConfig {
-            filter_subject: subscription.subject.to_string(),
+        let durable_name = if subscription.manage_stream {
+            format!("dispatch-{}", escape_subject_for_durable(&filter_subject))
+        } else {
+            format!(
+                "dispatch-{}-{}",
+                NATS_VERSIONER.tag(),
+                escape_subject_for_durable(&filter_subject)
+            )
+        };
+
+        let mut consumer_config = ConsumerConfig {
+            filter_subject,
             ack_wait: self.config.ack_wait(),
             max_deliver: -1,
             durable_name: Some(durable_name.clone()),
@@ -381,6 +401,14 @@ impl NatsBroker {
             max_ack_pending: max_ack_pending_to_i64(subscription.max_ack_pending),
             ..Default::default()
         };
+
+        if !subscription.manage_stream {
+            // Unmanaged (Siphon) streams: historical data comes from the datalake backfill,
+            // not replay. If this consumer is auto-deleted after inactive_threshold and
+            // recreated, events from the gap are skipped by design.
+            consumer_config.deliver_policy = async_nats::jetstream::consumer::DeliverPolicy::New;
+            consumer_config.inactive_threshold = self.config.consumer_inactive_threshold();
+        }
 
         let consumer = stream
             .get_or_create_consumer(&durable_name, consumer_config)
@@ -440,6 +468,35 @@ impl NatsBroker {
                 .await
                 .map_err(map_subscribe_error),
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl nats_client::KvServices for NatsBroker {
+    async fn kv_get(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<nats_client::KvEntry>, NatsError> {
+        self.kv_get(bucket, key).await
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: nats_client::KvPutOptions,
+    ) -> Result<nats_client::KvPutResult, NatsError> {
+        self.kv_put(bucket, key, value, options).await
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        self.kv_delete(bucket, key).await
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        self.kv_keys(bucket).await
     }
 }
 

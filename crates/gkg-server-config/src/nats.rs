@@ -113,6 +113,14 @@ pub struct NatsConfiguration {
     /// matching messages in filtered consumers. Defaults to 5.
     #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
     pub fetch_expires_secs: u64,
+
+    /// Inactive threshold for versioned dispatch consumers in seconds.
+    /// After this duration with no activity, NATS auto-deletes the consumer.
+    /// Used for Siphon dispatch consumers during blue-green deployments.
+    /// Clamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).
+    #[serde(default = "NatsConfiguration::default_consumer_inactive_threshold_secs")]
+    #[schemars(range(min = 60))]
+    pub consumer_inactive_threshold_secs: u64,
 }
 
 impl NatsConfiguration {
@@ -154,6 +162,14 @@ impl NatsConfiguration {
 
     fn default_fetch_expires_secs() -> u64 {
         5
+    }
+
+    fn default_consumer_inactive_threshold_secs() -> u64 {
+        3600
+    }
+
+    pub fn consumer_inactive_threshold(&self) -> Duration {
+        Duration::from_secs(self.consumer_inactive_threshold_secs.max(60))
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.
@@ -270,6 +286,7 @@ impl Default for NatsConfiguration {
             stream_max_bytes: None,
             stream_max_messages: None,
             fetch_expires_secs: Self::default_fetch_expires_secs(),
+            consumer_inactive_threshold_secs: Self::default_consumer_inactive_threshold_secs(),
         }
     }
 }
