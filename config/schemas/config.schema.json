@@ -193,6 +193,7 @@
         "auto_create_streams": true,
         "batch_size": 10,
         "connection_timeout_secs": 10,
+        "consumer_inactive_threshold_secs": 3600,
         "consumer_name": null,
         "fetch_expires_secs": 5,
         "max_deliver": 5,
@@ -1026,6 +1027,13 @@
           "format": "uint64",
           "default": 10,
           "minimum": 0
+        },
+        "consumer_inactive_threshold_secs": {
+          "description": "Inactive threshold for versioned dispatch consumers in seconds.\nAfter this duration with no activity, NATS auto-deletes the consumer.\nUsed for Siphon dispatch consumers during blue-green deployments.\nClamped to a minimum of 60 seconds. Defaults to 3600 (1 hour).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 3600,
+          "minimum": 60
         },
         "consumer_name": {
           "description": "Consumer name for durable subscriptions. Defaults to None (ephemeral consumer).\n\n**Ephemeral consumers** (`None`): Created on subscribe, destroyed on disconnect.\nMessages are only delivered while connected. Good for transient workers or testing.\n\n**Durable consumers** (`Some(\"name\")`): Persist across restarts. NATS tracks the\nlast acknowledged message, so reconnecting consumers resume where they left off.\nRequired for reliable message processing.\n\nFor horizontal scaling, give all instances the same `consumer_name`. NATS will\ndistribute messages across them (each message delivered to exactly one instance).",

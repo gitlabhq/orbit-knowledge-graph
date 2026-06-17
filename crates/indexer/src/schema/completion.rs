@@ -145,6 +145,7 @@ pub struct MigrationCompletionChecker {
     metrics: CompletionMetrics,
     _task_metrics: ScheduledTaskMetrics,
     campaign: Arc<CampaignState>,
+    nats_client: async_nats::Client,
 }
 
 impl MigrationCompletionChecker {
@@ -161,6 +162,7 @@ impl MigrationCompletionChecker {
         config: MigrationCompletionConfig,
         task_metrics: ScheduledTaskMetrics,
         campaign: Arc<CampaignState>,
+        nats_client: async_nats::Client,
     ) -> Self {
         Self {
             graph,
@@ -172,6 +174,7 @@ impl MigrationCompletionChecker {
             metrics: CompletionMetrics::new(),
             _task_metrics: task_metrics,
             campaign,
+            nats_client,
         }
     }
 }
@@ -611,6 +614,13 @@ impl MigrationCompletionChecker {
 
         for version in &succeeded {
             if failed.contains(version) {
+                self.metrics.record_cleanup(*version, current, "failure");
+                continue;
+            }
+            if let Err(e) =
+                crate::nats::versioning::cleanup_version(&self.nats_client, *version).await
+            {
+                warn!(version, error = %e, "GC: NATS cleanup failed, skipping mark_version_dropped");
                 self.metrics.record_cleanup(*version, current, "failure");
                 continue;
             }
