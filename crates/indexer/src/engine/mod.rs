@@ -28,6 +28,7 @@
 
 pub mod dead_letter;
 pub mod destination;
+pub mod durability;
 pub mod handler;
 pub mod metrics;
 pub mod types;

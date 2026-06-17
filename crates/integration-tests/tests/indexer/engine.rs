@@ -17,6 +17,8 @@ use gkg_server_config::{
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
+use indexer::destination::BatchWriterOptions;
+use indexer::durability::WriteDurability;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
@@ -73,7 +75,12 @@ impl Handler for TestHandler {
 
         let writer = context
             .destination
-            .new_batch_writer(TABLE)
+            .new_batch_writer(
+                TABLE,
+                BatchWriterOptions {
+                    durability: Some(WriteDurability::Durable),
+                },
+            )
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
@@ -399,7 +406,12 @@ impl Handler for PanickingHandler {
 
         let writer = context
             .destination
-            .new_batch_writer(TABLE)
+            .new_batch_writer(
+                TABLE,
+                BatchWriterOptions {
+                    durability: Some(WriteDurability::Durable),
+                },
+            )
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 

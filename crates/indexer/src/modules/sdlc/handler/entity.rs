@@ -8,7 +8,8 @@ use tracing::{Instrument, debug, info, info_span};
 use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
-use crate::checkpoint::{Checkpoint, CheckpointStore, WriteDurability, namespace_position_key};
+use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
@@ -19,7 +20,7 @@ use crate::modules::sdlc::plan::{
     Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
 };
 use crate::modules::sdlc::transform::system_notes;
-use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -145,18 +146,10 @@ impl EntityHandler {
             .load(&checkpoint_key)
             .await
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
-        let (last_watermark, target_watermark) =
-            pull_window(parent_checkpoint.as_ref(), request.watermark);
-        let window = WindowBounds {
-            target: target_watermark,
-            floor: Some(last_watermark),
-        };
+        let window = pull_window(parent_checkpoint.as_ref(), request.watermark);
 
-        observer.set_indexing_mode(if parent_checkpoint.is_none() {
-            IndexingMode::Full
-        } else {
-            IndexingMode::Incremental
-        });
+        let mode = window.indexing_mode();
+        observer.set_indexing_mode(mode);
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
         let pipeline_context = PipelineContext {
@@ -170,8 +163,8 @@ impl EntityHandler {
             .prepare()
             .with(WatermarkFilter {
                 column: &self.plan.watermark_column,
-                last: last_watermark,
-                current: target_watermark,
+                last: window.floor.unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
+                current: window.target,
             })
             .with(
                 request
@@ -191,11 +184,7 @@ impl EntityHandler {
             Vec::new()
         };
 
-        let completion_durability = if parent_checkpoint.is_none() {
-            WriteDurability::Durable
-        } else {
-            WriteDurability::FireAndForget
-        };
+        let durability = RunDurability::for_mode(mode);
 
         let result = if ranges.is_empty() {
             self.pipeline
@@ -205,7 +194,7 @@ impl EntityHandler {
                     base_query,
                     &checkpoint_key,
                     window,
-                    completion_durability,
+                    durability,
                 )
                 .await
         } else {
@@ -220,7 +209,7 @@ impl EntityHandler {
                     base_query.into_partitions(ranges),
                     &checkpoint_key,
                     window,
-                    completion_durability,
+                    durability,
                     &context,
                     &pipeline_context,
                 )
@@ -292,7 +281,7 @@ impl EntityHandler {
         )>,
         checkpoint_key: &str,
         window: WindowBounds,
-        completion_durability: WriteDurability,
+        durability: RunDurability,
         context: &HandlerContext,
         parent_pipeline_context: &PipelineContext,
     ) -> Result<PipelineStats, HandlerError> {
@@ -328,7 +317,7 @@ impl EntityHandler {
                         query,
                         &position_key,
                         window,
-                        completion_durability,
+                        durability,
                     )
                     .await
             });
@@ -355,21 +344,24 @@ impl EntityHandler {
     }
 }
 
-/// The `(last, target]` window for a pull. A cursor-bearing checkpoint resumes its
-/// original window rather than rescanning from epoch.
+/// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
 fn pull_window(
     parent_checkpoint: Option<&Checkpoint>,
     request_watermark: DateTime<Utc>,
-) -> (DateTime<Utc>, DateTime<Utc>) {
+) -> WindowBounds {
     match parent_checkpoint {
-        Some(checkpoint) if checkpoint.cursor_values.is_some() => (
-            checkpoint
-                .resume_floor
-                .unwrap_or(DateTime::<Utc>::UNIX_EPOCH),
-            checkpoint.watermark,
-        ),
-        Some(checkpoint) => (checkpoint.watermark, request_watermark),
-        None => (DateTime::<Utc>::UNIX_EPOCH, request_watermark),
+        Some(checkpoint) if checkpoint.cursor_values.is_some() => WindowBounds {
+            target: checkpoint.watermark,
+            floor: checkpoint.resume_floor,
+        },
+        Some(checkpoint) => WindowBounds {
+            target: request_watermark,
+            floor: Some(checkpoint.watermark),
+        },
+        None => WindowBounds {
+            target: request_watermark,
+            floor: None,
+        },
     }
 }
 
@@ -579,9 +571,15 @@ mod tests {
     }
 
     #[test]
-    fn pull_window_missing_checkpoint_is_full_load() {
+    fn pull_window_missing_checkpoint_starts_from_beginning() {
         let now = ts("2026-06-07T22:00:00Z");
-        assert_eq!(pull_window(None, now), (DateTime::<Utc>::UNIX_EPOCH, now));
+        assert_eq!(
+            pull_window(None, now),
+            WindowBounds {
+                target: now,
+                floor: None
+            }
+        );
     }
 
     #[test]
@@ -594,11 +592,13 @@ mod tests {
         };
         assert_eq!(
             pull_window(Some(&completed), now),
-            (ts("2026-06-07T21:59:30Z"), now)
+            WindowBounds {
+                target: now,
+                floor: Some(ts("2026-06-07T21:59:30Z")),
+            }
         );
     }
 
-    // Resume must keep the original window, never expand to (epoch, now].
     #[test]
     fn pull_window_resume_keeps_original_window() {
         let now = ts("2026-06-07T22:05:00Z");
@@ -609,12 +609,15 @@ mod tests {
         };
         assert_eq!(
             pull_window(Some(&in_progress), now),
-            (ts("2026-06-07T21:59:30Z"), ts("2026-06-07T22:00:00Z"))
+            WindowBounds {
+                target: ts("2026-06-07T22:00:00Z"),
+                floor: Some(ts("2026-06-07T21:59:30Z")),
+            }
         );
     }
 
     #[test]
-    fn pull_window_resume_without_floor_falls_back_to_epoch() {
+    fn pull_window_resume_without_floor_starts_from_beginning() {
         let now = ts("2026-06-07T22:05:00Z");
         let legacy = Checkpoint {
             watermark: ts("2026-06-07T22:00:00Z"),
@@ -623,7 +626,10 @@ mod tests {
         };
         assert_eq!(
             pull_window(Some(&legacy), now),
-            (DateTime::<Utc>::UNIX_EPOCH, ts("2026-06-07T22:00:00Z"))
+            WindowBounds {
+                target: ts("2026-06-07T22:00:00Z"),
+                floor: None,
+            }
         );
     }
 
