@@ -87,7 +87,7 @@ etl:
   source: namespace_traversal_paths
   select: >-
     namespace.id AS id, namespace.name AS name,
-    details.description AS description,
+    ifNull(details.description, '') AS description,
     namespace.visibility_level AS visibility_level,
     if(isNotNull(routes.source_id), routes.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
@@ -101,7 +101,7 @@ etl:
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) traversal_paths
     ON namespace.id = traversal_paths.id
-    INNER JOIN (
+    LEFT JOIN (
       SELECT namespace_id, argMax(description, {{watermark_column}}) AS description
       FROM siphon_namespace_details
       WHERE startsWith(traversal_path, {traversal_path:String})
