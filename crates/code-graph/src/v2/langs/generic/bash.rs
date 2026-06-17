@@ -120,7 +120,7 @@ mod tests {
                 "test.sh",
                 Language::Bash,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

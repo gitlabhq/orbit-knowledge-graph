@@ -90,6 +90,16 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
+/// Independent per-file wall-clock budgets for the three parse sub-phases, each
+/// measured from its own start so a timeout is attributable to the phase.
+/// `None` = no deadline for that phase. `Default` = all unbounded.
+#[derive(Clone, Copy, Default)]
+pub struct PhaseTimeouts {
+    pub parse: Option<std::time::Duration>,
+    pub walk: Option<std::time::Duration>,
+    pub ssa: Option<std::time::Duration>,
+}
+
 /// Typed errors from `parse_full_collect`. Adding a producer means
 /// adding a variant — the consumer's `match` becomes a compile error
 /// until the new arm is handled.
@@ -586,29 +596,30 @@ impl LanguageSpec {
     /// Parse the full AST: defs, imports, SSA, refs. Returns collected
     /// refs with reaching values resolved from SSA, but NOT cross-file
     /// resolved. Source bytes can be dropped after this returns.
-    /// Parse a file into defs/imports/refs. `per_phase`, when set, bounds each
-    /// phase (tree-sitter parse, AST walk, SSA resolution) with that wall-clock
-    /// budget measured from the phase's own start; an exceeded phase returns
-    /// [`ParseFullError::Aborted`] naming it. `None` = no deadline.
+    /// Parse a file into defs/imports/refs. Each [`PhaseTimeouts`] budget, when
+    /// set, bounds its sub-phase (tree-sitter parse, AST walk, SSA resolution)
+    /// from that phase's own start; an exceeded phase returns
+    /// [`ParseFullError::Aborted`] naming it.
     pub fn parse_full_collect(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
         tracer: &Tracer,
-        per_phase: Option<std::time::Duration>,
+        timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
-        let deadline = || per_phase.map(|t| std::time::Instant::now() + t);
+        let deadline =
+            |budget: Option<std::time::Duration>| budget.map(|t| std::time::Instant::now() + t);
 
         let ast = language
-            .parse_ast(source_str, deadline())
+            .parse_ast(source_str, deadline(timeouts.parse))
             .map_err(|detail| ParseFullError::Aborted(format!("parse: {detail}")))?;
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, deadline());
+        let mut state = WalkFullState::new(&arena, tracer, file_path, deadline(timeouts.walk));
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -648,7 +659,7 @@ impl LanguageSpec {
         }
 
         // Arm the SSA budget at the start of reaching-def resolution.
-        state.ssa.set_deadline(deadline());
+        state.ssa.set_deadline(deadline(timeouts.ssa));
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
@@ -1611,7 +1622,7 @@ mod tests {
             "test.py",
             Language::Python,
             &Tracer::new(false),
-            None,
+            Default::default(),
         )
         .map(|r| ParsedDefs {
             definitions: r.definitions,
@@ -1659,7 +1670,7 @@ mod tests {
                 "test.py",
                 Language::Python,
                 &tracer,
-                None,
+                Default::default(),
             )
             .unwrap();
 

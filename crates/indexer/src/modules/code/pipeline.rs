@@ -315,10 +315,10 @@ impl CodeIndexingPipeline {
         } else {
             None
         };
-        let per_file_parse_timeout =
-            (self.pipeline_config.per_file_parse_timeout_ms > 0).then(|| {
-                std::time::Duration::from_millis(self.pipeline_config.per_file_parse_timeout_ms)
-            });
+        let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
+        let per_file_parse_timeout = to_timeout(self.pipeline_config.per_file_parse_timeout_ms);
+        let per_file_walk_timeout = to_timeout(self.pipeline_config.per_file_walk_timeout_ms);
+        let per_file_ssa_timeout = to_timeout(self.pipeline_config.per_file_ssa_timeout_ms);
         let cross_file_resolve_timeout = if self.pipeline_config.cross_file_resolve_timeout_ms > 0 {
             Some(std::time::Duration::from_millis(
                 self.pipeline_config.cross_file_resolve_timeout_ms,
@@ -341,6 +341,8 @@ impl CodeIndexingPipeline {
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,
             per_file_parse_timeout,
+            per_file_walk_timeout,
+            per_file_ssa_timeout,
             cross_file_resolve_timeout,
             on_progress,
             ..Default::default()

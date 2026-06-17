@@ -775,7 +775,7 @@ mod tests {
                 "test.rb",
                 Language::Ruby,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -802,7 +802,7 @@ mod tests {
         let result = RubyDsl::spec().parse_full_collect(b"class Foo\n  def bar; end\nend\nclass Worker\n  def run\n    Foo.new.bar\n  end\nend\n",
         "test.rb",
         Language::Ruby,
-        &Tracer::new(false), None)
+        &Tracer::new(false), Default::default())
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
         let ref_chains: Vec<_> = result
@@ -941,7 +941,7 @@ mod tests {
                 "test.rb",
                 Language::Ruby,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
@@ -988,7 +988,7 @@ mod tests {
                 "test.rb",
                 Language::Ruby,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();

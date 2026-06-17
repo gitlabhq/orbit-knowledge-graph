@@ -194,7 +194,7 @@ mod tests {
                 "test.c",
                 Language::C,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

@@ -351,7 +351,7 @@ mod tests {
                 "test.tf",
                 Language::Hcl,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .unwrap();
         result
@@ -461,7 +461,7 @@ locals {
                 "test.tf",
                 Language::Hcl,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .unwrap();
         result.refs.iter().map(|r| r.name.to_string()).collect()

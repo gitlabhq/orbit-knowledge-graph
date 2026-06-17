@@ -411,7 +411,7 @@ mod tests {
                 "Test.java",
                 crate::v2::config::Language::Java,
                 &Tracer::new(false),
-                None,
+                Default::default(),
             )
             .map_err(|e| {
                 crate::v2::pipeline::PipelineError::parse(
@@ -475,7 +475,7 @@ mod tests {
                     "Test.java",
                     crate::v2::config::Language::Java,
                     &Tracer::new(false),
-                    None,
+                    Default::default(),
                 )
                 .unwrap()
         };
