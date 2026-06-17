@@ -127,7 +127,9 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
-    // Pinned settings: config `insert_settings` tuning must not downgrade Durable writes.
+    // Single-row checkpoint inserts bypass config `insert_settings`, so async batching is pinned
+    // here (not via WriteDurability::insert_overrides) to avoid a parts explosion from per-row
+    // inserts; durability only toggles the flush wait.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let wait_for_flush = match durability {
             WriteDurability::FireAndForget => "0",
@@ -148,6 +150,17 @@ impl ClickHouseCheckpointStore {
 pub enum WriteDurability {
     FireAndForget,
     Durable,
+}
+
+impl WriteDurability {
+    /// Layered over the deployment's `insert_settings`: `FireAndForget` returns empty to defer to
+    /// that config tuning, while `Durable` overrides it to guarantee the flush.
+    pub(crate) fn insert_overrides(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
+            WriteDurability::FireAndForget => &[],
+        }
+    }
 }
 
 /// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.
@@ -341,6 +354,19 @@ impl CheckpointStore for ClickHouseCheckpointStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_pins_async_insert_and_wait() {
+        assert_eq!(
+            WriteDurability::Durable.insert_overrides(),
+            &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+        );
+    }
+
+    #[test]
+    fn fire_and_forget_defers_to_config() {
+        assert!(WriteDurability::FireAndForget.insert_overrides().is_empty());
+    }
 
     #[test]
     fn serialization_roundtrip_completed() {
