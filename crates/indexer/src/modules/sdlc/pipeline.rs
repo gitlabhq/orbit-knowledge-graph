@@ -494,22 +494,14 @@ pub(in crate::modules::sdlc) struct RunDurability {
 impl RunDurability {
     pub fn for_mode(mode: IndexingMode) -> Self {
         match mode {
-            IndexingMode::Full => Self::full_load(),
-            IndexingMode::Incremental => Self::incremental(),
-        }
-    }
-
-    pub fn full_load() -> Self {
-        Self {
-            page: WriteDurability::FireAndForget,
-            completion: WriteDurability::Durable,
-        }
-    }
-
-    pub fn incremental() -> Self {
-        Self {
-            page: WriteDurability::Durable,
-            completion: WriteDurability::FireAndForget,
+            IndexingMode::Full => Self {
+                page: WriteDurability::FireAndForget,
+                completion: WriteDurability::Durable,
+            },
+            IndexingMode::Incremental => Self {
+                page: WriteDurability::Durable,
+                completion: WriteDurability::FireAndForget,
+            },
         }
     }
 }
@@ -737,11 +729,11 @@ mod tests {
 
     #[test]
     fn run_durability_inverts_page_and_completion() {
-        let full = RunDurability::full_load();
+        let full = RunDurability::for_mode(IndexingMode::Full);
         assert_eq!(full.page, WriteDurability::FireAndForget);
         assert_eq!(full.completion, WriteDurability::Durable);
 
-        let incremental = RunDurability::incremental();
+        let incremental = RunDurability::for_mode(IndexingMode::Incremental);
         assert_eq!(incremental.page, WriteDurability::Durable);
         assert_eq!(incremental.completion, WriteDurability::FireAndForget);
     }
@@ -763,7 +755,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok());
@@ -790,7 +782,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -830,7 +822,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -908,7 +900,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -950,7 +942,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -991,7 +983,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1071,7 +1063,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1112,7 +1104,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1190,7 +1182,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                RunDurability::incremental(),
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await
             .expect("run should succeed");

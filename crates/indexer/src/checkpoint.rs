@@ -127,9 +127,8 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
-    // Single-row checkpoint inserts bypass config `insert_settings`, so async batching is pinned
-    // here (not via WriteDurability::insert_overrides) to avoid a parts explosion from per-row
-    // inserts; durability only toggles the flush wait.
+    // Single-row inserts bypass config `insert_settings`, so async batching is self-pinned here
+    // (not via `insert_overrides`) to avoid a per-row parts explosion; durability only sets the wait.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let wait_for_flush = match durability {
             WriteDurability::FireAndForget => "0",

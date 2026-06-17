@@ -149,7 +149,11 @@ impl EntityHandler {
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
         let window = pull_window(parent_checkpoint.as_ref(), request.watermark);
 
-        let mode = indexing_mode(window.floor);
+        let mode = if window.floor.is_some() {
+            IndexingMode::Incremental
+        } else {
+            IndexingMode::Full
+        };
         observer.set_indexing_mode(mode);
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));
@@ -342,16 +346,6 @@ impl EntityHandler {
                 errors.join("; ")
             )))
         }
-    }
-}
-
-/// The window floor is the single source of truth for the run's mode (feeding analytics and
-/// write durability): a `None` floor starts from the beginning of time — a backfill — while any
-/// `Some` floor is an incremental pull.
-fn indexing_mode(floor: Option<DateTime<Utc>>) -> IndexingMode {
-    match floor {
-        None => IndexingMode::Full,
-        Some(_) => IndexingMode::Incremental,
     }
 }
 
@@ -580,19 +574,6 @@ mod tests {
 
     fn ts(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
-    }
-
-    #[test]
-    fn indexing_mode_no_floor_is_full() {
-        assert_eq!(indexing_mode(None), IndexingMode::Full);
-    }
-
-    #[test]
-    fn indexing_mode_some_floor_is_incremental() {
-        assert_eq!(
-            indexing_mode(Some(ts("2026-06-07T21:59:30Z"))),
-            IndexingMode::Incremental
-        );
     }
 
     #[test]
