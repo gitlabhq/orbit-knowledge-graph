@@ -53,10 +53,6 @@ pub enum Action {
     Moved,
     Cloned,
     Duplicate,
-    EpicIssueAdded,
-    IssueAddedToEpic,
-    EpicIssueMoved,
-    Task,
     Commit,
     Merge,
     Closed,
@@ -78,10 +74,6 @@ impl Action {
             "moved" => Self::Moved,
             "cloned" => Self::Cloned,
             "duplicate" => Self::Duplicate,
-            "epic_issue_added" => Self::EpicIssueAdded,
-            "issue_added_to_epic" => Self::IssueAddedToEpic,
-            "epic_issue_moved" => Self::EpicIssueMoved,
-            "task" => Self::Task,
             "commit" => Self::Commit,
             "merge" => Self::Merge,
             "closed" => Self::Closed,
@@ -108,10 +100,6 @@ impl Action {
             Self::Moved => "moved",
             Self::Cloned => "cloned",
             Self::Duplicate => "duplicate",
-            Self::EpicIssueAdded => "epic_issue_added",
-            Self::IssueAddedToEpic => "issue_added_to_epic",
-            Self::EpicIssueMoved => "epic_issue_moved",
-            Self::Task => "task",
             Self::Commit => "commit",
             Self::Merge => "merge",
             Self::Closed => "closed",
@@ -220,14 +208,7 @@ pub fn extract(action: Action, body: &str) -> Vec<Reference> {
         // Bodies:
         //   "moved to <ref>"     "moved from <ref>"
         //   "cloned to <ref>"    "cloned from <ref>"
-        //   "added issue <ref>" / "added to epic <ref>" / "moved issue <ref>"
-        Action::Moved
-        | Action::Cloned
-        | Action::EpicIssueAdded
-        | Action::IssueAddedToEpic
-        | Action::EpicIssueMoved => first_ref_any(body).into_iter().collect(),
-
-        Action::Task => extract_task_ref(body),
+        Action::Moved | Action::Cloned => first_ref_any(body).into_iter().collect(),
 
         // Bodies:
         //   "marked this issue as a duplicate of <ref>"
@@ -250,25 +231,6 @@ pub fn extract(action: Action, body: &str) -> Vec<Reference> {
         // and falls back to MR refs otherwise.
         Action::Merge => extract_merge_ref(body),
     }
-}
-
-fn extract_task_ref(body: &str) -> Vec<Reference> {
-    if body.starts_with("marked the checklist item ")
-        || body.starts_with("marked the task table item ")
-    {
-        return Vec::new();
-    }
-
-    static TASK_PARENT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\bparent\s+task\b|\btask\s+parent\b").expect("task parent regex compiles")
-    });
-    if !TASK_PARENT.is_match(body) {
-        return Vec::new();
-    }
-
-    first_ref(&ISSUE_REF, body, RefKind::Issue)
-        .into_iter()
-        .collect()
 }
 
 fn first_ref_any(body: &str) -> Option<Reference> {
@@ -414,10 +376,6 @@ mod tests {
             "moved",
             "cloned",
             "duplicate",
-            "epic_issue_added",
-            "issue_added_to_epic",
-            "epic_issue_moved",
-            "task",
             "commit",
             "merge",
             "closed",
@@ -438,6 +396,13 @@ mod tests {
             "branch",
             "designs_added",
             "duo_agent_started",
+            // Containment actions are intentionally unrouted: the FK path
+            // (siphon_work_item_parent_links -> contains.yaml) is the
+            // current-state source of truth for WorkItem CONTAINS. See ADR 013.
+            "epic_issue_added",
+            "issue_added_to_epic",
+            "epic_issue_moved",
+            "task",
         ] {
             assert!(Action::parse(s).is_none(), "{s} should not parse");
         }
@@ -603,48 +568,6 @@ mod tests {
             refs,
             vec![issue_ref(Some("other_namespace/project_new"), 11)]
         );
-    }
-
-    #[test]
-    fn epic_issue_added_extracts_issue_reference() {
-        let refs = extract(Action::EpicIssueAdded, "added issue group/project#11");
-        assert_eq!(refs, vec![issue_ref(Some("group/project"), 11)]);
-    }
-
-    #[test]
-    fn issue_added_to_epic_extracts_epic_work_item_reference() {
-        let refs = extract(Action::IssueAddedToEpic, "added to epic #42");
-        assert_eq!(refs, vec![issue_ref(None, 42)]);
-    }
-
-    #[test]
-    fn epic_issue_moved_extracts_issue_reference() {
-        let refs = extract(
-            Action::EpicIssueMoved,
-            "moved issue group/project#11 from another epic",
-        );
-        assert_eq!(refs, vec![issue_ref(Some("group/project"), 11)]);
-    }
-
-    #[test]
-    fn task_hierarchy_extracts_work_item_reference() {
-        let refs = extract(Action::Task, "added parent task group/project#11");
-        assert_eq!(refs, vec![issue_ref(Some("group/project"), 11)]);
-    }
-
-    #[test]
-    fn task_hierarchy_extracts_task_parent_word_order() {
-        let refs = extract(Action::Task, "set task parent to group/project#11");
-        assert_eq!(refs, vec![issue_ref(Some("group/project"), 11)]);
-    }
-
-    #[test]
-    fn task_checklist_status_extracts_nothing() {
-        let refs = extract(
-            Action::Task,
-            "marked the checklist item **Follow up in #11** as completed",
-        );
-        assert!(refs.is_empty());
     }
 
     // --- duplicate -----------------------------------------------------------
