@@ -43,7 +43,7 @@ pipeline today, none of which are entity-specific:
 | Keyset pagination with DNF cursor predicate (uses the CH sort-key index) | `CursorFilter` (`plan/mod.rs`), `run_plan` page loop (`pipeline.rs`) |
 | Watermark windowing + traversal-path scoping pushed into extract SQL | `WatermarkFilter`/`TraversalPathFilter` (`plan/mod.rs:94`, `:122`) |
 | Whole-page read with single-page read-ahead — next page's read overlaps current page's writes | `run_plan` `tokio::join!` (`pipeline.rs`) |
-| Adaptive retry: halve `max_block_size` on transient failure down to a floor | `Pipeline::extract_page` (`pipeline.rs`) |
+| Adaptive retry: shrink `max_block_size` on a datalake failure down to a floor (an Arrow 2 GiB string-offset overflow drops straight to the floor) | `Pipeline::extract_batch` (`pipeline.rs`) |
 | Lazy, per-destination-table bulk writers (no insert opened for an empty table) | `Pipeline::build_writes` (`pipeline.rs`) |
 | Page-boundary checkpointing + crash-safe cursor resume | `run_plan` (`pipeline.rs`), `Cursor` (`plan/mod.rs:19`) |
 | Idempotent re-processing via `ReplacingMergeTree` | graph DDL |

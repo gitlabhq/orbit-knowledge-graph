@@ -191,3 +191,37 @@ fn scan_stats_from_summary(summary: QuerySummary) -> ScanStats {
         scanned_bytes: scanned_bytes.unwrap_or(0),
     }
 }
+
+/// True when a datalake read failed because an Arrow column hit the 2 GiB i32
+/// offset cap. The pipeline's extract retry uses this to drop straight to the
+/// floor block size rather than gradually halving.
+pub(in crate::modules::sdlc) fn is_arrow_string_overflow(err: &DatalakeError) -> bool {
+    let DatalakeError::Query(message) = err else {
+        return false;
+    };
+    message.contains("2147483646")
+        || (message.contains("Arrow") && message.contains("Capacity error"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_the_production_arrow_string_overflow() {
+        let err = DatalakeError::Query(
+            "query failed: Code: 1002. DB::Exception: Error with a Arrow column \"String\": \
+             Capacity error: array cannot contain more than 2147483646 bytes, have 2147527792: \
+             While executing Arrow. (UNKNOWN_EXCEPTION)"
+                .to_string(),
+        );
+        assert!(is_arrow_string_overflow(&err));
+    }
+
+    #[test]
+    fn ignores_unrelated_datalake_errors() {
+        assert!(!is_arrow_string_overflow(&DatalakeError::Query(
+            "Code: 159. DB::Exception: Timeout exceeded".to_string()
+        )));
+    }
+}

@@ -67,7 +67,6 @@ impl From<RefKind> for NoteableKind {
 /// Relationship kind constants for the system-notes handler. Mirror the
 /// edge YAML filenames under `config/ontology/edges/`.
 pub mod edge_kinds {
-    pub const CONTAINS: &str = "CONTAINS";
     pub const MENTIONS: &str = "MENTIONS";
     pub const REOPENED: &str = "REOPENED";
     pub const CLOSED: &str = "CLOSED";
@@ -103,34 +102,6 @@ pub struct NoteRow {
     pub noteable_kind: NoteableKind,
     pub action: Action,
     pub references: Vec<Reference>,
-}
-
-/// Resolve a containment note into `(source_id, target_id, traversal_path)`
-/// with the edge always pointing parent → child and partitioned under the
-/// child's route row.
-///
-/// `epic_issue_added`/`epic_issue_moved` author the note on the parent (epic),
-/// so the resolved reference is the child; `issue_added_to_epic`/`task` author
-/// it on the child, so the noteable is the child and the reference is the
-/// parent. The `traversal_path` always comes from the child row, which matters
-/// when an issue in one namespace is added to an epic in another (the edge
-/// must land in the child's partition).
-///
-/// Returns `None` for any action the caller hasn't routed to this path, so a
-/// future action added to the match arm above without updating this function
-/// is skipped (log-and-drop) rather than crashing the worker.
-fn contains_endpoints(row: &NoteRow, resolved: &ResolvedTarget) -> Option<(i64, i64, String)> {
-    match row.action {
-        Action::EpicIssueAdded | Action::EpicIssueMoved => Some((
-            row.noteable_id,
-            resolved.id,
-            resolved.traversal_path.clone(),
-        )),
-        Action::IssueAddedToEpic | Action::Task => {
-            Some((resolved.id, row.noteable_id, row.traversal_path.clone()))
-        }
-        _ => None,
-    }
 }
 
 /// Map a lifecycle action to its `User → Noteable` edge kind. Returns `None`
@@ -200,49 +171,6 @@ where
             // who opened, and the entity's `created_at` already covers the
             // lifecycle point. ADR 013: out of scope.
             Action::Opened => {}
-
-            Action::EpicIssueAdded
-            | Action::IssueAddedToEpic
-            | Action::EpicIssueMoved
-            | Action::Task => {
-                if row.noteable_kind != NoteableKind::WorkItem {
-                    continue;
-                }
-                for r in &row.references {
-                    let target_kind = NoteableKind::from(r.kind);
-                    if target_kind != NoteableKind::WorkItem {
-                        continue;
-                    }
-                    let Some(resolved) = resolve(r, row.default_project.as_str()) else {
-                        continue;
-                    };
-                    if resolved.id == row.noteable_id {
-                        continue;
-                    }
-                    // Skip (don't `unreachable!`) on an unexpected action: a
-                    // panic here would crash-loop the worker on one bad row.
-                    // See "no panics in the indexer data path" in AGENTS.md.
-                    let Some((source_id, target_id, traversal_path)) =
-                        contains_endpoints(row, &resolved)
-                    else {
-                        warn!(
-                            action = ?row.action,
-                            noteable_id = row.noteable_id,
-                            reference_id = resolved.id,
-                            "system_notes: unexpected action in CONTAINS arm, skipping row"
-                        );
-                        continue;
-                    };
-                    edges.push(EmittedEdge {
-                        traversal_path,
-                        relationship_kind: edge_kinds::CONTAINS,
-                        source_id,
-                        source_kind: NoteableKind::WorkItem.as_str(),
-                        target_id,
-                        target_kind: NoteableKind::WorkItem.as_str(),
-                    });
-                }
-            }
 
             // Cross-reference / relate / hierarchy: Noteable → Target.
             // All collapse to MENTIONS edges in v1; link-type taxonomy is
@@ -374,98 +302,6 @@ mod tests {
     }
 
     #[test]
-    fn epic_issue_added_emits_contains_from_epic_to_issue() {
-        let row = row_for(
-            Action::EpicIssueAdded,
-            "added issue #456",
-            NoteableKind::WorkItem,
-            100,
-        );
-        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        let e = &edges[0];
-        assert_eq!(e.relationship_kind, "CONTAINS");
-        assert_eq!(e.source_id, 100);
-        assert_eq!(e.source_kind, "WorkItem");
-        assert_eq!(e.target_id, 456);
-        assert_eq!(e.target_kind, "WorkItem");
-    }
-
-    #[test]
-    fn issue_added_to_epic_emits_contains_from_epic_to_issue() {
-        let row = row_for(
-            Action::IssueAddedToEpic,
-            "added to epic #100",
-            NoteableKind::WorkItem,
-            456,
-        );
-        let edges = build_edges(&[row], always_resolve(100, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        let e = &edges[0];
-        assert_eq!(e.relationship_kind, "CONTAINS");
-        assert_eq!(e.source_id, 100);
-        assert_eq!(e.target_id, 456);
-        assert_eq!(e.traversal_path, "1/2/");
-    }
-
-    #[test]
-    fn epic_issue_moved_emits_contains_from_new_epic_to_issue() {
-        let row = row_for(
-            Action::EpicIssueMoved,
-            "moved issue #456 from another epic",
-            NoteableKind::WorkItem,
-            100,
-        );
-        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].relationship_kind, "CONTAINS");
-        assert_eq!(edges[0].source_id, 100);
-        assert_eq!(edges[0].target_id, 456);
-        assert_eq!(edges[0].traversal_path, "1/2/");
-    }
-
-    #[test]
-    fn task_hierarchy_emits_contains_from_parent_to_child() {
-        let row = row_for(
-            Action::Task,
-            "added parent task #100",
-            NoteableKind::WorkItem,
-            456,
-        );
-        let edges = build_edges(&[row], always_resolve(100, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].relationship_kind, "CONTAINS");
-        assert_eq!(edges[0].source_id, 100);
-        assert_eq!(edges[0].target_id, 456);
-        assert_eq!(edges[0].traversal_path, "1/2/");
-    }
-
-    #[test]
-    fn issue_added_to_epic_uses_noteable_traversal_path() {
-        let row = row_for(
-            Action::IssueAddedToEpic,
-            "added to epic #100",
-            NoteableKind::WorkItem,
-            456,
-        );
-        let edges = build_edges(&[row], always_resolve(100, "1/parent/"));
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].source_id, 100);
-        assert_eq!(edges[0].target_id, 456);
-        assert_eq!(edges[0].traversal_path, "1/2/");
-    }
-
-    #[test]
-    fn contains_endpoints_returns_none_for_unrouted_action() {
-        let row = row_for(Action::CrossReference, "x", NoteableKind::WorkItem, 100);
-        let resolved = ResolvedTarget {
-            id: 456,
-            traversal_path: "9/9/".to_string(),
-        };
-        assert_eq!(contains_endpoints(&row, &resolved), None);
-    }
-
-    #[test]
     fn lifecycle_edge_kind_maps_actions_and_skips_non_lifecycle() {
         assert_eq!(
             lifecycle_edge_kind(Action::Closed),
@@ -480,18 +316,6 @@ mod tests {
             Some(edge_kinds::MERGED)
         );
         assert_eq!(lifecycle_edge_kind(Action::CrossReference), None);
-    }
-
-    #[test]
-    fn epic_contains_action_with_mr_reference_is_dropped() {
-        let row = row_for(
-            Action::EpicIssueAdded,
-            "added issue !456",
-            NoteableKind::WorkItem,
-            100,
-        );
-        let edges = build_edges(&[row], always_resolve(456, "1/2/"));
-        assert!(edges.is_empty());
     }
 
     #[test]

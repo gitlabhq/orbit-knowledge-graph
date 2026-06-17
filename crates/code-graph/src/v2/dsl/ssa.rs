@@ -14,6 +14,15 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
+/// Past this reaching-def recursion depth a read degrades to `Opaque` rather
+/// than overflowing the worker stack (an uncatchable SIGSEGV).
+const MAX_SSA_READ_DEPTH: usize = 10_000;
+
+/// Grow the stack by a 4 MiB segment when a reaching-def read drops below this
+/// headroom, so a deep predecessor chain resolves instead of overflowing.
+const SSA_READ_RED_ZONE: usize = 128 * 1024;
+const SSA_READ_STACK_SEGMENT: usize = 4 * 1024 * 1024;
+
 // ── SSA types (local to the parser) ─────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,6 +71,8 @@ pub(crate) struct SsaStats {
     pub markers_elided: u64,
     pub writes: u64,
     pub blocks_created: u64,
+    /// Reads that hit [`MAX_SSA_READ_DEPTH`] and degraded to `Opaque`.
+    pub depth_capped: u64,
 }
 
 /// The concrete values a variable resolves to at a given program point.
@@ -143,6 +154,7 @@ pub(crate) struct SsaEngine<'a> {
     /// file. `None` = no SSA budget.
     budget: Option<treesitter_visit::CpuBudget>,
     timed_out: bool,
+    read_depth: usize,
 }
 
 impl<'a> SsaEngine<'a> {
@@ -156,6 +168,7 @@ impl<'a> SsaEngine<'a> {
             tracer: super::super::trace::leaked_noop_tracer(),
             budget: None,
             timed_out: false,
+            read_depth: 0,
         }
     }
 
@@ -382,15 +395,26 @@ impl<'a> SsaEngine<'a> {
             return value.clone();
         }
 
-        // Past the SSA deadline, degrade every read to `Opaque` so resolution
+        // Past the SSA budget, degrade every read to `Opaque` so resolution
         // unwinds fast and the file is skipped (the caller checks `timed_out`).
         if self.deadline_tripped() {
             return SsaValue::Opaque;
         }
 
-        // Global value numbering
+        // Recurses up the predecessor graph — thousands deep in a wide
+        // function. Grow on demand and cap so a pathological file degrades
+        // instead of overflowing the stack.
         self.stats.recursive_lookups += 1;
-        self.read_variable_recursive(variable, block)
+        if self.read_depth >= MAX_SSA_READ_DEPTH {
+            self.stats.depth_capped += 1;
+            return SsaValue::Opaque;
+        }
+        self.read_depth += 1;
+        let val = stacker::maybe_grow(SSA_READ_RED_ZONE, SSA_READ_STACK_SEGMENT, || {
+            self.read_variable_recursive(variable, block)
+        });
+        self.read_depth -= 1;
+        val
     }
 
     fn read_variable_recursive(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
@@ -1188,6 +1212,72 @@ mod tests {
         assert!(
             result.values.is_empty(),
             "a timed-out read degrades to Opaque"
+        );
+    }
+
+    /// `steps` sequential try/except joins (each a 3-predecessor join, as the
+    /// DSL emits for `try_statement`). The only definition is in the entry, so
+    /// reading from the bottom recurses the whole chain. Returns (entry, bottom).
+    fn build_try_except_chain(ssa: &mut SsaEngine<'static>, steps: usize) -> (BlockId, BlockId) {
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable("np", entry, SsaValue::LocalDef(0));
+
+        let mut pre = entry;
+        for _ in 0..steps {
+            let arm_a = ssa.add_block();
+            ssa.add_predecessor(arm_a, pre);
+            ssa.seal_block(arm_a);
+            let arm_b = ssa.add_block();
+            ssa.add_predecessor(arm_b, pre);
+            ssa.seal_block(arm_b);
+            let join = ssa.add_block();
+            ssa.add_predecessor(join, arm_a);
+            ssa.add_predecessor(join, arm_b);
+            ssa.add_predecessor(join, pre);
+            ssa.seal_block(join);
+            pre = join;
+        }
+        (entry, pre)
+    }
+
+    // 512 KiB is below the 2 MiB production worker stack: this chain overflows
+    // without on-demand growth, aborting the test binary (SIGSEGV, not a panic).
+    #[test]
+    fn wide_function_resolves_without_overflow() {
+        let (values, depth_capped) = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let mut ssa = SsaEngine::new();
+                let (_, bottom) = build_try_except_chain(&mut ssa, 4_000);
+                let result = ssa.read_variable_stateless("np", bottom);
+                (result.values.to_vec(), ssa.stats.depth_capped)
+            })
+            .unwrap()
+            .join()
+            .expect("reaching-def read overflowed the worker stack");
+
+        assert_eq!(depth_capped, 0, "4k-deep chain is under the cap");
+        assert_eq!(values.as_slice(), &[SsaValue::LocalDef(0)]);
+    }
+
+    #[test]
+    fn pathologically_wide_function_caps_instead_of_overflowing() {
+        let depth_capped = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(|| {
+                let mut ssa = SsaEngine::new();
+                let (_, bottom) = build_try_except_chain(&mut ssa, 10_000);
+                let _ = ssa.read_variable_stateless("np", bottom);
+                ssa.stats.depth_capped
+            })
+            .unwrap()
+            .join()
+            .expect("reaching-def read overflowed the worker stack");
+
+        assert!(
+            depth_capped > 0,
+            "a chain past MAX_SSA_READ_DEPTH must degrade, not recurse unbounded"
         );
     }
 }

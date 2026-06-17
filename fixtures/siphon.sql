@@ -104,14 +104,15 @@ CREATE TABLE IF NOT EXISTS siphon_namespace_details
     `description_html` Nullable(String),
     `creator_id` Nullable(Int64),
     `deleted_at` Nullable(DateTime64(6, 'UTC')),
+    `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
     INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
     `_siphon_deleted` Bool DEFAULT false,
     `state_metadata` String DEFAULT '{}'
 ) ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
-PRIMARY KEY namespace_id
-ORDER BY namespace_id;
+PRIMARY KEY (traversal_path, namespace_id)
+ORDER BY (traversal_path, namespace_id);
 
 CREATE TABLE IF NOT EXISTS namespace_traversal_paths
 (

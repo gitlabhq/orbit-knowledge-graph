@@ -3,7 +3,8 @@ mod lang;
 mod registry;
 
 pub use filter::{
-    EXCLUDED_INDEXING_GLOBS, is_excluded_from_indexing, is_parsable, parsable_language,
+    EXCLUDED_INDEXING_GLOBS, is_excluded_from_indexing, is_parsable, looks_binary,
+    parsable_language,
 };
 pub use lang::{Language, LanguageFamily};
 pub use registry::{

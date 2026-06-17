@@ -149,7 +149,8 @@ pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
      Reasons: `excluded_extension` (basename matches the binary-asset / \
      media / archive denylist in `code-graph::v2::config::filter::\
      EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the \
-     configured per-file ceiling).",
+     configured per-file ceiling), `binary` (a NUL byte in the first 8000 \
+     bytes, git-style, with a UTF BOM rescue).",
     None,
     &[labels::REASON],
     DOMAIN,

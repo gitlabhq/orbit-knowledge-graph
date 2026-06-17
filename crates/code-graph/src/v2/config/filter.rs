@@ -100,6 +100,28 @@ pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     EXCLUDED_INDEXING_GLOBSET.is_match(&lowered)
 }
 
+/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full of
+/// NULs, so the BOM is what distinguishes it from a binary blob.
+const TEXT_BOMS: &[&[u8]] = &[
+    &[0x00, 0x00, 0xFE, 0xFF], // UTF-32 BE
+    &[0xFF, 0xFE, 0x00, 0x00], // UTF-32 LE
+    &[0xEF, 0xBB, 0xBF],       // UTF-8
+    &[0xFF, 0xFE],             // UTF-16 LE
+    &[0xFE, 0xFF],             // UTF-16 BE
+];
+
+/// Binary when a NUL byte appears in `prefix`, like git's `buffer_is_binary`,
+/// plus a BOM rescue for UTF-16/32 text (git has none, so BOM-less is dropped).
+pub fn looks_binary(prefix: &[u8]) -> bool {
+    if prefix.is_empty() {
+        return false;
+    }
+    if TEXT_BOMS.iter().any(|bom| prefix.starts_with(bom)) {
+        return false;
+    }
+    prefix.contains(&0u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +237,46 @@ mod tests {
     fn excluded_extensions_match_at_any_depth() {
         assert!(is_excluded_from_indexing(&p("a/b/c/d/icon.png")));
         assert!(is_excluded_from_indexing(&p("static/fonts/x/Inter.ttf")));
+    }
+
+    #[test]
+    fn empty_prefix_is_text() {
+        assert!(!looks_binary(b""));
+    }
+
+    #[test]
+    fn ascii_source_is_text() {
+        assert!(!looks_binary(b"fn main() {}\n"));
+        assert!(!looks_binary(b"export function run() { return 1; }\n"));
+    }
+
+    #[test]
+    fn nul_byte_marks_binary() {
+        assert!(looks_binary(b"abc\x00def"));
+        assert!(looks_binary(&[0u8; 4096]));
+    }
+
+    #[test]
+    fn png_signature_is_binary() {
+        assert!(looks_binary(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"));
+    }
+
+    #[test]
+    fn bom_marked_text_is_kept() {
+        assert!(!looks_binary(&[0xEF, 0xBB, 0xBF, b'h', b'i']));
+        assert!(!looks_binary(&[0xFF, 0xFE, b'h', 0x00, b'i', 0x00]));
+        assert!(!looks_binary(&[0xFE, 0xFF, 0x00, b'h', 0x00, b'i']));
+        assert!(!looks_binary(&[
+            0xFF, 0xFE, 0x00, 0x00, b'h', 0x00, 0x00, 0x00
+        ]));
+        assert!(!looks_binary(&[
+            0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, b'h'
+        ]));
+    }
+
+    #[test]
+    fn nul_bearing_utf16_without_bom_is_treated_binary() {
+        assert!(looks_binary(&[0x68, 0x00, 0x69, 0x00]));
     }
 
     #[test]

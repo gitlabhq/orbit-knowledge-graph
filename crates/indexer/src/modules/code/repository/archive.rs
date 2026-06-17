@@ -1,10 +1,13 @@
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use code_graph::v2::FileInventoryEntry;
 use flate2::read::GzDecoder;
 use tracing::{trace, warn};
+
+/// Number of bytes to read for the sniffing test
+const BINARY_SNIFF_BYTES: u64 = 8000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -43,35 +46,42 @@ fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
-    extract_tar_gz_from_reader(data, target_dir, accept_all_filter).map(|_| ())
+    extract_tar_gz_from_reader(data, target_dir, accept_all_header, accept_all_content).map(|_| ())
 }
 
 #[cfg(test)]
-fn accept_all_filter(_path: &Path, _size: u64) -> bool {
+fn accept_all_header(_path: &Path, _size: u64) -> bool {
     true
 }
 
-/// `filter` receives the archive-root-stripped path and the tar header size,
-/// and is consulted only for regular files; symlinks and directories pass through.
-pub fn extract_tar_gz_from_reader<R: Read, F>(
-    reader: R,
-    target_dir: &Path,
-    filter: F,
-) -> Result<Vec<FileInventoryEntry>, ArchiveError>
-where
-    F: Fn(&Path, u64) -> bool,
-{
-    let decoder = GzDecoder::new(reader);
-    unpack_tar(decoder, target_dir, filter)
+#[cfg(test)]
+fn accept_all_content(_path: &Path, _size: u64, _prefix: &[u8]) -> bool {
+    true
 }
 
-fn unpack_tar<R: Read, F>(
+pub fn extract_tar_gz_from_reader<R: Read, F, G>(
     reader: R,
     target_dir: &Path,
-    filter: F,
+    keep_header: F,
+    keep_content: G,
 ) -> Result<Vec<FileInventoryEntry>, ArchiveError>
 where
     F: Fn(&Path, u64) -> bool,
+    G: Fn(&Path, u64, &[u8]) -> bool,
+{
+    let decoder = GzDecoder::new(reader);
+    unpack_tar(decoder, target_dir, keep_header, keep_content)
+}
+
+fn unpack_tar<R: Read, F, G>(
+    reader: R,
+    target_dir: &Path,
+    keep_header: F,
+    keep_content: G,
+) -> Result<Vec<FileInventoryEntry>, ArchiveError>
+where
+    F: Fn(&Path, u64) -> bool,
+    G: Fn(&Path, u64, &[u8]) -> bool,
 {
     std::fs::create_dir_all(target_dir)?;
 
@@ -174,31 +184,41 @@ where
                 path: relative_path.to_string_lossy().to_string(),
                 size: declared_size,
             });
-            if !filter(&relative_path, declared_size) {
+
+            if !keep_header(&relative_path, declared_size) {
                 trace!(
                     path = %relative_path.display(),
                     size = declared_size,
-                    "skipping archive entry filtered out before extraction"
+                    "skipping archive entry rejected by header filter"
                 );
                 continue;
             }
+
+            let mut prefix = Vec::new();
+            entry
+                .by_ref()
+                .take(BINARY_SNIFF_BYTES)
+                .read_to_end(&mut prefix)?;
+
+            if !keep_content(&relative_path, declared_size, &prefix) {
+                trace!(
+                    path = %relative_path.display(),
+                    size = declared_size,
+                    "skipping archive entry rejected by content filter"
+                );
+                continue;
+            }
+
+            let dest_canonical = resolve_dest(&dest, &relative_path, &target_canonical)?;
+            let mut file = std::fs::File::create(&dest_canonical)
+                .map_err(|e| ArchiveError::Io(e.to_string()))?;
+            file.write_all(&prefix)
+                .map_err(|e| ArchiveError::Io(e.to_string()))?;
+            std::io::copy(&mut entry, &mut file).map_err(|e| ArchiveError::Io(e.to_string()))?;
+            continue;
         }
 
-        let dest_canonical = if dest.exists() {
-            dest.canonicalize()
-                .map_err(|e| ArchiveError::Io(e.to_string()))?
-        } else {
-            gkg_utils::fs::safe_create_dir_all(&dest, &target_canonical)
-                .map_err(|e| ArchiveError::Archive(e.to_string()))?
-        };
-
-        if !dest_canonical.starts_with(&target_canonical) {
-            return Err(ArchiveError::Archive(format!(
-                "path traversal detected: {}",
-                relative_path.display()
-            )));
-        }
-
+        let dest_canonical = resolve_dest(&dest, &relative_path, &target_canonical)?;
         entry
             .unpack(&dest_canonical)
             .map_err(|e| ArchiveError::Archive(e.to_string()))?;
@@ -226,6 +246,29 @@ where
     }
 
     Ok(inventory)
+}
+
+fn resolve_dest(
+    dest: &Path,
+    relative_path: &Path,
+    target_canonical: &Path,
+) -> Result<PathBuf, ArchiveError> {
+    let dest_canonical = if dest.exists() {
+        dest.canonicalize()
+            .map_err(|e| ArchiveError::Io(e.to_string()))?
+    } else {
+        gkg_utils::fs::safe_create_dir_all(dest, target_canonical)
+            .map_err(|e| ArchiveError::Archive(e.to_string()))?
+    };
+
+    if !dest_canonical.starts_with(target_canonical) {
+        return Err(ArchiveError::Archive(format!(
+            "path traversal detected: {}",
+            relative_path.display()
+        )));
+    }
+
+    Ok(dest_canonical)
 }
 
 /// Strip the Gitaly archive root prefix from a path during extraction.
@@ -602,8 +645,13 @@ mod tests {
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
 
-        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), accept_all_filter)
-            .expect("archive should extract after deleting escaping symlink");
+        let inventory = extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            accept_all_header,
+            accept_all_content,
+        )
+        .expect("archive should extract after deleting escaping symlink");
 
         let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
         assert_eq!(paths, vec!["legit.txt"]);
@@ -703,9 +751,12 @@ mod tests {
             Entry::File("project-main/Cargo.lock", b"# lockfile"),
         ]);
 
-        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
-            path.extension().and_then(|e| e.to_str()) == Some("rs")
-        })
+        let inventory = extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            |path, _size| path.extension().and_then(|e| e.to_str()) == Some("rs"),
+            accept_all_content,
+        )
         .unwrap();
 
         let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
@@ -723,13 +774,88 @@ mod tests {
             Entry::File("project-main/big.rs", &vec![b'x'; 4096]),
         ]);
 
-        extract_tar_gz_from_reader(&data[..], dir.path(), |_path, size| size <= 100).unwrap();
+        extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            |_path, size| size <= 100,
+            accept_all_content,
+        )
+        .unwrap();
 
         assert!(dir.path().join("small.rs").exists());
         assert!(
             !dir.path().join("big.rs").exists(),
             "oversize file must be skipped before unpack"
         );
+    }
+
+    #[test]
+    fn binary_content_is_skipped_but_kept_in_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File("project-main/model/weights.onnx", b"\x00\x01\x02\x00blob"),
+        ]);
+
+        let inventory = extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            accept_all_header,
+            |_path, _size, prefix| !code_graph::v2::config::looks_binary(prefix),
+        )
+        .unwrap();
+
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/main.rs", "model/weights.onnx"]);
+        assert!(dir.path().join("src/main.rs").exists());
+        assert!(!dir.path().join("model/weights.onnx").exists());
+    }
+
+    #[test]
+    fn text_file_larger_than_sniff_window_is_written_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let body: Vec<u8> = (0..(BINARY_SNIFF_BYTES as usize) + 4096)
+            .map(|i| ((i % 254) + 1) as u8)
+            .collect();
+        let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+
+        assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
+    }
+
+    #[test]
+    fn empty_regular_file_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[Entry::File("project-main/empty.txt", b"")]);
+
+        extract_tar_gz(&data, dir.path()).unwrap();
+
+        let path = dir.path().join("empty.txt");
+        assert!(path.exists());
+        assert_eq!(std::fs::read(path).unwrap(), b"");
+    }
+
+    #[test]
+    fn bom_marked_nul_bearing_file_over_sniff_window_is_written_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut body = vec![0xFF, 0xFE];
+        for i in 0..6000u32 {
+            body.push(b'a' + (i % 26) as u8);
+            body.push(0x00);
+        }
+        let data = build_archive(&[Entry::File("project-main/utf16.txt", &body)]);
+
+        let inventory = extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            accept_all_header,
+            |_path, _size, prefix| !code_graph::v2::config::looks_binary(prefix),
+        )
+        .unwrap();
+
+        assert!(inventory.iter().any(|entry| entry.path == "utf16.txt"));
+        assert_eq!(std::fs::read(dir.path().join("utf16.txt")).unwrap(), body);
     }
 
     #[test]
@@ -740,9 +866,12 @@ mod tests {
             Entry::Symlink("project-main/bin/run", "../src/lib.rs"),
         ]);
 
-        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
-            path.extension().and_then(|e| e.to_str()) == Some("rs")
-        })
+        let inventory = extract_tar_gz_from_reader(
+            &data[..],
+            dir.path(),
+            |path, _| path.extension().and_then(|e| e.to_str()) == Some("rs"),
+            accept_all_content,
+        )
         .unwrap();
 
         let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
@@ -861,9 +990,12 @@ mod tests {
         let handle = tokio::runtime::Handle::current();
         let inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
-            extract_tar_gz_from_reader(bridge, &target, |rel, _size| {
-                !is_excluded_from_indexing(rel)
-            })
+            extract_tar_gz_from_reader(
+                bridge,
+                &target,
+                |rel, _size| !is_excluded_from_indexing(rel),
+                accept_all_content,
+            )
             .unwrap()
         })
         .await
