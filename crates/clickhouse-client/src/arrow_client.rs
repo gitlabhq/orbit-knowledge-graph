@@ -88,7 +88,7 @@ impl ArrowClickHouseClient {
         q
     }
 
-    /// `overrides` are merged over `insert_settings`; sorted so the emitted SQL is deterministic.
+    /// Sorted so the emitted `SETTINGS` clause is deterministic.
     fn insert_settings_clause(&self, overrides: &[(&str, &str)]) -> String {
         if self.insert_settings.is_empty() && overrides.is_empty() {
             return String::new();
@@ -108,8 +108,6 @@ impl ArrowClickHouseClient {
         self.build_insert_sql_with_overrides(table, &[])
     }
 
-    /// Layers `overrides` over the configured `insert_settings` so a caller can pin
-    /// per-write settings (e.g. `wait_for_async_insert`) regardless of config.
     pub fn build_insert_sql_with_overrides(
         &self,
         table: &str,

@@ -127,8 +127,8 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
-    // Single-row inserts bypass config `insert_settings`, so async batching is self-pinned here
-    // (not via `insert_overrides`) to avoid a per-row parts explosion; durability only sets the wait.
+    // Single-row inserts must pin async batching regardless of durability, or per-row inserts
+    // explode the part count.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let wait_for_flush = match durability {
             WriteDurability::FireAndForget => "0",
@@ -142,9 +142,7 @@ impl ClickHouseCheckpointStore {
 }
 
 /// Whether a write blocks until ClickHouse confirms the async insert flushed. `Durable` is
-/// mandatory where a dropped write is unrecoverable (checkpoint completions, SDLC incremental
-/// pages — the watermark advances with no NATS retry); `FireAndForget` trades it for throughput
-/// where loss re-pulls (full load, code indexing).
+/// mandatory where a dropped write is unrecoverable: the watermark advances with no NATS retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteDurability {
     FireAndForget,
@@ -152,8 +150,7 @@ pub enum WriteDurability {
 }
 
 impl WriteDurability {
-    /// Layered over the deployment's `insert_settings`: `FireAndForget` returns empty to defer to
-    /// that config tuning, while `Durable` overrides it to guarantee the flush.
+    /// Empty for `FireAndForget` so the deployment's `insert_settings` apply unchanged.
     pub(crate) fn insert_overrides(self) -> &'static [(&'static str, &'static str)] {
         match self {
             WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],

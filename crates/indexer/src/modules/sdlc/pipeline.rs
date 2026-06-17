@@ -473,8 +473,7 @@ impl Pipeline {
     }
 }
 
-/// A pull's replication-time window. `floor` is `None` when the pull starts from the beginning
-/// of time (a backfill); it is persisted so a resume can rebuild the window.
+/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct WindowBounds {
     pub target: DateTime<Utc>,

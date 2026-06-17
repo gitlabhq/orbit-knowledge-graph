@@ -349,8 +349,7 @@ impl EntityHandler {
     }
 }
 
-/// The `(floor, target]` window for a pull. A cursored checkpoint resumes its original window;
-/// a completed one starts after its watermark; a missing one starts from the beginning.
+/// A cursored checkpoint must resume its original window, never widen to `(epoch, target]`.
 fn pull_window(
     parent_checkpoint: Option<&Checkpoint>,
     request_watermark: DateTime<Utc>,
