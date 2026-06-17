@@ -54,10 +54,6 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
-/// Sample the wall clock once every this many progress callbacks. `Instant::now`
-/// is cheap but the callback is hot; a 2s budget tolerates this much slack.
-const DEADLINE_SAMPLE_INTERVAL: u64 = 64;
-
 /// Cooperative limits enforced from the parser's progress callback, the only
 /// hook into tree-sitter's otherwise-uninterruptible C parse.
 #[derive(Clone)]
@@ -101,14 +97,10 @@ impl<L: LanguageExt> StrDoc<L> {
                 let deadline = guard.deadline;
                 let stall_count = AtomicU64::new(0);
                 let last_offset = AtomicU64::new(u64::MAX);
-                let ticks = AtomicU64::new(0);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
-                    // Wall-clock deadline, sampled to keep the callback cheap.
+                    // Wall-clock deadline.
                     if let Some(deadline) = deadline
-                        && ticks
-                            .fetch_add(1, Ordering::Relaxed)
-                            .is_multiple_of(DEADLINE_SAMPLE_INTERVAL)
                         && Instant::now() >= deadline
                     {
                         tracing::warn!("tree-sitter parse aborted: per-file deadline exceeded");

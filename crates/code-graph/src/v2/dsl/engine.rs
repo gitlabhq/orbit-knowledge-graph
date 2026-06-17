@@ -90,10 +90,6 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
-/// Sample the wall clock once every this many walk nodes for the per-file
-/// deadline. The walk is hot, so a coarse sample keeps the check negligible.
-const WALK_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
-
 /// Typed errors from `parse_full_collect`. Adding a producer means
 /// adding a variant — the consumer's `match` becomes a compile error
 /// until the new arm is handled.
@@ -804,15 +800,11 @@ impl LanguageSpec {
     ) {
         // Per-file deadline: once tripped, every walk_full call returns at once
         // so the recursion unwinds and the file is skipped (checked in
-        // parse_full_collect). Sampled to keep the per-node cost negligible.
+        // parse_full_collect).
         if state.timed_out {
             return;
         }
-        state.walk_ticks += 1;
         if let Some(deadline) = state.deadline
-            && state
-                .walk_ticks
-                .is_multiple_of(WALK_DEADLINE_SAMPLE_INTERVAL)
             && std::time::Instant::now() >= deadline
         {
             tracing::warn!(
@@ -1493,12 +1485,10 @@ struct WalkFullState<'a> {
     in_return: bool,
     tracer: &'a Tracer,
     file_path: &'a str,
-    /// Per-file wall-clock budget for the AST walk, sampled in `walk_full`.
+    /// Per-file wall-clock budget for the AST walk, checked in `walk_full`.
     deadline: Option<std::time::Instant>,
     /// Set once the deadline trips so the walk unwinds and the file is skipped.
     timed_out: bool,
-    /// Walk-node counter for deadline sampling.
-    walk_ticks: u64,
 }
 
 impl<'a> WalkFullState<'a> {
@@ -1529,7 +1519,6 @@ impl<'a> WalkFullState<'a> {
             file_path,
             deadline,
             timed_out: false,
-            walk_ticks: 0,
         }
     }
 

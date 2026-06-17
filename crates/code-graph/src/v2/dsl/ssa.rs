@@ -143,11 +143,7 @@ pub(crate) struct SsaEngine<'a> {
     /// file. `None` = no SSA deadline.
     deadline: Option<std::time::Instant>,
     timed_out: bool,
-    read_ticks: u64,
 }
-
-/// Sample the wall clock once every this many reaching-def reads.
-const SSA_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
 
 impl<'a> SsaEngine<'a> {
     pub(crate) fn new() -> Self {
@@ -160,7 +156,6 @@ impl<'a> SsaEngine<'a> {
             tracer: super::super::trace::leaked_noop_tracer(),
             deadline: None,
             timed_out: false,
-            read_ticks: 0,
         }
     }
 
@@ -174,16 +169,11 @@ impl<'a> SsaEngine<'a> {
         self.timed_out
     }
 
-    /// True once the SSA deadline has tripped (latches `timed_out`). Sampled so
-    /// the per-call cost stays negligible on the hot read path. Used by both the
-    /// reaching-def reads and the SCC pass so every sub-phase is bounded.
+    /// True once the SSA deadline has tripped (latches `timed_out`). Used by both
+    /// the reaching-def reads and the SCC pass so every sub-phase is bounded.
     fn deadline_tripped(&mut self) -> bool {
-        if self.timed_out {
-            return true;
-        }
-        self.read_ticks += 1;
-        if let Some(deadline) = self.deadline
-            && self.read_ticks.is_multiple_of(SSA_DEADLINE_SAMPLE_INTERVAL)
+        if !self.timed_out
+            && let Some(deadline) = self.deadline
             && std::time::Instant::now() >= deadline
         {
             self.timed_out = true;
