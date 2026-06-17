@@ -127,21 +127,28 @@ impl RepositoryCache for LocalRepositoryCache {
         let metrics = self.metrics.clone();
         let file_inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size, prefix| {
-                if size > max_file_size {
-                    metrics.record_archive_entry_skipped("oversize", size);
-                    return false;
-                }
-                if is_excluded_from_indexing(rel_path) {
-                    metrics.record_archive_entry_skipped("excluded_extension", size);
-                    return false;
-                }
-                if looks_binary(prefix) {
-                    metrics.record_archive_entry_skipped("binary", size);
-                    return false;
-                }
-                true
-            })
+            extract_tar_gz_from_reader(
+                bridge,
+                &repo_dir_owned,
+                |rel_path, size| {
+                    if size > max_file_size {
+                        metrics.record_archive_entry_skipped("oversize", size);
+                        return false;
+                    }
+                    if is_excluded_from_indexing(rel_path) {
+                        metrics.record_archive_entry_skipped("excluded_extension", size);
+                        return false;
+                    }
+                    true
+                },
+                |_rel_path, size, prefix| {
+                    if looks_binary(prefix) {
+                        metrics.record_archive_entry_skipped("binary", size);
+                        return false;
+                    }
+                    true
+                },
+            )
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
@@ -521,7 +528,6 @@ mod tests {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
             ("project-abc/src/main.rs", b"fn main() {}"),
-            // Unlisted extension, well under the cap, but NUL-bearing.
             ("project-abc/model/weights.onnx", b"\x00\x01\x02\x00blob"),
         ]);
 
