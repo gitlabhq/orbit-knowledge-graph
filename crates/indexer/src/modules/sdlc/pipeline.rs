@@ -480,10 +480,8 @@ pub(in crate::modules::sdlc) struct WindowBounds {
     pub floor: Option<DateTime<Utc>>,
 }
 
-/// Page writes and the completion checkpoint need opposite durability. A full load
-/// re-pulls on a lost page (so pages favor throughput) but must persist its
-/// completion; an incremental must persist each page (the watermark advances with
-/// no NATS retry) but can re-derive a lost completion next dispatch.
+/// Page and completion durability invert by mode: a full load re-pulls lost pages but must persist
+/// completion; an incremental must persist pages (the watermark advances, no NATS retry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct RunDurability {
     pub page: WriteDurability,
