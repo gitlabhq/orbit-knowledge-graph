@@ -120,7 +120,10 @@ fn expand_namespace(row: &Row, location: &str) -> Vec<(String, Row)> {
         ),
         (
             "siphon_namespace_details".to_string(),
-            row_of([("namespace_id", id.clone())]),
+            row_of([
+                ("namespace_id", id.clone()),
+                ("traversal_path", traversal_path.clone().into()),
+            ]),
         ),
         (
             "namespace_traversal_paths".to_string(),

@@ -23,7 +23,7 @@ steps:
       siphon_namespaces:
         - { id: 100, name: renamed-group, path: renamed-group, type: Group, visibility_level: 0, traversal_ids: [1, 100], _siphon_replicated_at: "2024-01-20 18:00:00" }
       siphon_namespace_details:
-        - { namespace_id: 100, _siphon_replicated_at: "2024-01-20 18:00:00" }
+        - { namespace_id: 100, traversal_path: "1/100/", _siphon_replicated_at: "2024-01-20 18:00:00" }
     expect:
       nodes:
         gl_group:
