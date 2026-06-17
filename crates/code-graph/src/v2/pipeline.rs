@@ -528,10 +528,12 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
-    /// Per-file wall-clock budget for the parse phase (tree-sitter parse + AST
-    /// walk + SSA). Much tighter than `per_file_timeout`. `None` = no parse
-    /// deadline.
+    /// Per-file wall-clock budgets for the parse phase, each measured from its
+    /// own start so a miss is attributable: tree-sitter parse, AST walk, and
+    /// SSA reaching-def resolution. `None` = no deadline for that sub-phase.
     pub per_file_parse_timeout: Option<std::time::Duration>,
+    pub per_file_walk_timeout: Option<std::time::Duration>,
+    pub per_file_ssa_timeout: Option<std::time::Duration>,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
@@ -555,6 +557,8 @@ impl Default for PipelineConfig {
             max_concurrent_languages: 0,
             per_file_timeout: None,
             per_file_parse_timeout: None,
+            per_file_walk_timeout: None,
+            per_file_ssa_timeout: None,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
@@ -1332,9 +1336,13 @@ impl FamilyPipeline {
                 breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
                 let t_parse = std::time::Instant::now();
-                let deadline = ctx.config.per_file_parse_timeout.map(|t| t_parse + t);
-                let result = match lctx.spec.parse_full_collect_with_deadline(
-                    &source, &f.path, f.language, tracer, deadline,
+                let timeouts = crate::v2::dsl::engine::PhaseTimeouts {
+                    parse: ctx.config.per_file_parse_timeout,
+                    walk: ctx.config.per_file_walk_timeout,
+                    ssa: ctx.config.per_file_ssa_timeout,
+                };
+                let result = match lctx.spec.parse_full_collect_with_timeouts(
+                    &source, &f.path, f.language, tracer, timeouts,
                 ) {
                     Ok(r) => r,
                     Err(crate::v2::dsl::engine::ParseFullError::Aborted(detail)) => {

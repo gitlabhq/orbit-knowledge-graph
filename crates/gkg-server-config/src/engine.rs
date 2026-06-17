@@ -229,6 +229,14 @@ fn default_code_indexing_per_file_parse_timeout_ms() -> u64 {
     100
 }
 
+fn default_code_indexing_per_file_walk_timeout_ms() -> u64 {
+    100
+}
+
+fn default_code_indexing_per_file_ssa_timeout_ms() -> u64 {
+    100
+}
+
 fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
     180_000
 }
@@ -249,12 +257,18 @@ pub struct CodeIndexingPipelineConfig {
     /// specify a different value. 0 = no global timeout.
     #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
-    /// Per-file wall-clock budget for the parse phase (tree-sitter parse + AST
-    /// walk + SSA) in milliseconds. Much tighter than `per_file_timeout_ms`:
-    /// normal files parse well under this, so a pathological large file is
-    /// skipped instead of dominating the run. 0 = no parse deadline.
+    /// Per-file budgets (ms) for the parse phase, each measured from its own
+    /// start so a timeout is attributable to the sub-phase: tree-sitter parse,
+    /// AST walk, and SSA reaching-def resolution. Much tighter than
+    /// `per_file_timeout_ms`; normal files finish each well under it, so a
+    /// pathological file is skipped instead of dominating the run. 0 = no
+    /// deadline for that sub-phase.
     #[serde(default = "default_code_indexing_per_file_parse_timeout_ms")]
     pub per_file_parse_timeout_ms: u64,
+    #[serde(default = "default_code_indexing_per_file_walk_timeout_ms")]
+    pub per_file_walk_timeout_ms: u64,
+    #[serde(default = "default_code_indexing_per_file_ssa_timeout_ms")]
+    pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). 0 = no timeout.
     #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
@@ -275,6 +289,8 @@ impl Default for CodeIndexingPipelineConfig {
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
             per_file_parse_timeout_ms: default_code_indexing_per_file_parse_timeout_ms(),
+            per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),
+            per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             fetch_concurrency: default_fetch_concurrency(),
         }

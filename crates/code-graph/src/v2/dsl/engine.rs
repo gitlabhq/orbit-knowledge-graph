@@ -94,6 +94,15 @@ pub struct ParseFullResult {
 /// deadline. The walk is hot, so a coarse sample keeps the check negligible.
 const WALK_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
 
+/// Per-phase wall-clock budgets for one file. Each phase measures its own
+/// budget from its own start, so a timeout is attributable to the phase.
+#[derive(Clone, Copy, Default)]
+pub struct PhaseTimeouts {
+    pub parse: Option<std::time::Duration>,
+    pub walk: Option<std::time::Duration>,
+    pub ssa: Option<std::time::Duration>,
+}
+
 /// Typed errors from `parse_full_collect`. Adding a producer means
 /// adding a variant — the consumer's `match` becomes a compile error
 /// until the new arm is handled.
@@ -597,33 +606,41 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
     ) -> Result<ParseFullResult, ParseFullError> {
-        self.parse_full_collect_with_deadline(source, file_path, language, tracer, None)
+        self.parse_full_collect_with_timeouts(
+            source,
+            file_path,
+            language,
+            tracer,
+            PhaseTimeouts::default(),
+        )
     }
 
-    /// Like [`Self::parse_full_collect`] but aborts the tree-sitter parse and
-    /// AST walk once `deadline` passes, returning [`ParseFullError::Aborted`].
-    pub fn parse_full_collect_with_deadline(
+    /// Like [`Self::parse_full_collect`] but bounds each phase (parse, AST walk,
+    /// SSA resolution) with its own wall-clock budget measured from that phase's
+    /// start, returning [`ParseFullError::Aborted`] (naming the phase) on a miss.
+    pub fn parse_full_collect_with_timeouts(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
         tracer: &Tracer,
-        deadline: Option<std::time::Instant>,
+        timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
-        let guard = match deadline {
+        let guard = match timeouts.parse.map(|t| std::time::Instant::now() + t) {
             Some(d) => treesitter_visit::ParseGuard::default().with_deadline(d),
             None => treesitter_visit::ParseGuard::default(),
         };
         let ast = language
             .parse_ast_with_guard(source_str, &guard)
-            .map_err(ParseFullError::Aborted)?;
+            .map_err(|detail| ParseFullError::Aborted(format!("parse: {detail}")))?;
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, deadline);
+        let walk_deadline = timeouts.walk.map(|t| std::time::Instant::now() + t);
+        let mut state = WalkFullState::new(&arena, tracer, file_path, walk_deadline);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -658,10 +675,14 @@ impl LanguageSpec {
         self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
         if state.timed_out {
             return Err(ParseFullError::Aborted(
-                "exceeded per-file deadline during AST walk".to_string(),
+                "walk: exceeded per-file deadline during AST walk".to_string(),
             ));
         }
 
+        // Arm the SSA budget at the start of reaching-def resolution.
+        state
+            .ssa
+            .set_deadline(timeouts.ssa.map(|t| std::time::Instant::now() + t));
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
@@ -789,6 +810,11 @@ impl LanguageSpec {
 
         // Pass 2: resolve SSA reaching values → CollectedRef (no callback)
         let refs = state.collect_refs(&pending_refs);
+        if state.ssa.timed_out() {
+            return Err(ParseFullError::Aborted(
+                "ssa: exceeded per-file deadline during reaching-def resolution".to_string(),
+            ));
+        }
 
         Ok(ParseFullResult {
             definitions: state.defs,

@@ -138,7 +138,16 @@ pub(crate) struct SsaEngine<'a> {
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
+    /// Per-file wall-clock budget for reaching-def resolution. Once it trips,
+    /// reads degrade to `Opaque` and `timed_out` is set so the caller skips the
+    /// file. `None` = no SSA deadline.
+    deadline: Option<std::time::Instant>,
+    timed_out: bool,
+    read_ticks: u64,
 }
+
+/// Sample the wall clock once every this many reaching-def reads.
+const SSA_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
 
 impl<'a> SsaEngine<'a> {
     pub(crate) fn new() -> Self {
@@ -149,7 +158,20 @@ impl<'a> SsaEngine<'a> {
             incomplete_phis: FxHashMap::default(),
             stats: SsaStats::default(),
             tracer: super::super::trace::leaked_noop_tracer(),
+            deadline: None,
+            timed_out: false,
+            read_ticks: 0,
         }
+    }
+
+    /// Arm the reaching-def resolution deadline (start of the SSA phase).
+    pub(crate) fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.deadline = deadline;
+    }
+
+    /// Whether SSA resolution exceeded its deadline and degraded.
+    pub(crate) fn timed_out(&self) -> bool {
+        self.timed_out
     }
 
     pub(crate) fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
@@ -354,6 +376,21 @@ impl<'a> SsaEngine<'a> {
         {
             self.stats.local_hits += 1;
             return value.clone();
+        }
+
+        // Once the SSA deadline trips, degrade every read to `Opaque` so
+        // resolution unwinds fast and the file is skipped (checked by the
+        // caller via `timed_out`). Sampled to keep the read path cheap.
+        if self.timed_out {
+            return SsaValue::Opaque;
+        }
+        self.read_ticks += 1;
+        if let Some(deadline) = self.deadline
+            && self.read_ticks.is_multiple_of(SSA_DEADLINE_SAMPLE_INTERVAL)
+            && std::time::Instant::now() >= deadline
+        {
+            self.timed_out = true;
+            return SsaValue::Opaque;
         }
 
         // Global value numbering
@@ -1132,6 +1169,32 @@ mod tests {
                 && result.values.contains(&SsaValue::LocalDef(1)),
             "SCC with multiple external values must not be collapsed: got {:?}",
             result.values
+        );
+    }
+
+    // A past deadline must trip during a deep read and degrade to Opaque,
+    // so a pathologically wide function is skipped rather than resolved slowly.
+    #[test]
+    fn ssa_deadline_degrades_deep_read() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        let mut pre = entry;
+        for _ in 0..2_000 {
+            pre = ssa.add_sealed_successor(pre);
+        }
+        ssa.set_deadline(Some(
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+        ));
+        let result = ssa.read_variable_stateless("x", pre);
+        assert!(
+            ssa.timed_out(),
+            "past SSA deadline must trip during a deep read"
+        );
+        assert!(
+            result.values.is_empty(),
+            "a timed-out read degrades to Opaque"
         );
     }
 }

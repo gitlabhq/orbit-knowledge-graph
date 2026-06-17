@@ -72,7 +72,9 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_parse_timeout_ms": 100,
+              "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
+              "per_file_walk_timeout_ms": 100,
               "worker_threads": 0
             }
           },
@@ -414,7 +416,13 @@
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
-          "description": "Per-file wall-clock budget for the parse phase (tree-sitter parse + AST\nwalk + SSA) in milliseconds. Much tighter than `per_file_timeout_ms`:\nnormal files parse well under this, so a pathological large file is\nskipped instead of dominating the run. 0 = no parse deadline.",
+          "description": "Per-file budgets (ms) for the parse phase, each measured from its own\nstart so a timeout is attributable to the sub-phase: tree-sitter parse,\nAST walk, and SSA reaching-def resolution. Much tighter than\n`per_file_timeout_ms`; normal files finish each well under it, so a\npathological file is skipped instead of dominating the run. 0 = no\ndeadline for that sub-phase.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 100,
+          "minimum": 0
+        },
+        "per_file_ssa_timeout_ms": {
           "type": "integer",
           "format": "uint64",
           "default": 100,
@@ -425,6 +433,12 @@
           "type": "integer",
           "format": "uint64",
           "default": 2000,
+          "minimum": 0
+        },
+        "per_file_walk_timeout_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 100,
           "minimum": 0
         },
         "worker_threads": {
@@ -448,7 +462,9 @@
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
             "per_file_parse_timeout_ms": 100,
+            "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
+            "per_file_walk_timeout_ms": 100,
             "worker_threads": 0
           }
         }
@@ -540,7 +556,9 @@
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "per_file_parse_timeout_ms": 100,
+                "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
+                "per_file_walk_timeout_ms": 100,
                 "worker_threads": 0
               }
             },
@@ -782,7 +800,9 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_parse_timeout_ms": 100,
+              "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
+              "per_file_walk_timeout_ms": 100,
               "worker_threads": 0
             }
           }
