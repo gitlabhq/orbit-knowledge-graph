@@ -113,13 +113,14 @@ const TEXT_BOMS: &[&[u8]] = &[
 ];
 
 /// Returns `true` when `prefix` looks like binary content the indexer
-/// should not extract. Mirrors git's `buffer_is_binary` (a NUL byte in the
-/// leading bytes means binary), with a BOM rescue so BOM-marked UTF-16/32
-/// text is kept. Callers pass the first few thousand bytes of the file.
+/// should not extract. The core decision mirrors git's `buffer_is_binary`
+/// (a NUL byte in the leading bytes means binary). On top of git, this adds
+/// a BOM rescue so BOM-marked UTF-16/32 text is kept; git has no such rescue.
+/// Callers pass the first few thousand bytes of the file.
 ///
 /// BOM-less UTF-16/UTF-32 source is intentionally classified binary and
 /// dropped: without a BOM its NUL bytes are indistinguishable from a real
-/// blob, and git's `buffer_is_binary` makes the same call.
+/// blob, matching git's `buffer_is_binary`.
 pub fn looks_binary(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
@@ -284,8 +285,6 @@ mod tests {
 
     #[test]
     fn nul_bearing_utf16_without_bom_is_treated_binary() {
-        // UTF-16 LE "hi" with no BOM: real text, but its NULs are
-        // indistinguishable from a blob, so it is intentionally dropped.
         assert!(looks_binary(&[0x68, 0x00, 0x69, 0x00]));
     }
 
