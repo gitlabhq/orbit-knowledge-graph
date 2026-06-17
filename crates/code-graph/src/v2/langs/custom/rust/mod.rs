@@ -42,7 +42,7 @@ pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
-use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
+use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::sentinel;
 
@@ -336,7 +336,7 @@ fn parse_rust_files_with_workspaces(
                     return Err((
                         file.to_string(),
                         AnalyzerError::skip(
-                            FileSkip::TimeoutSentinel,
+                            FileSkip::Timeout(AbortPhase::Sentinel),
                             "per-file watchdog killed analysis",
                         ),
                     ));
@@ -369,7 +369,7 @@ fn parse_rust_files_with_workspaces(
                 return Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
                 ));
@@ -409,7 +409,7 @@ fn parse_rust_files_standalone(
                 return Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
                 ));

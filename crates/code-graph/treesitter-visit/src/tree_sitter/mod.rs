@@ -5,9 +5,10 @@ pub mod traversal;
 use crate::Language;
 use crate::node::{KindId, Position, Root};
 use crate::source::{Doc, SgNode};
+use cpu_time::ThreadTime;
 use std::borrow::Cow;
 use std::num::NonZero;
-use std::time::Instant;
+use std::time::Duration;
 use thiserror::Error;
 
 pub use traversal::TsPre;
@@ -54,35 +55,62 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
+/// A per-thread CPU-time budget. `start` captures the calling thread's CPU
+/// clock; [`Self::expired`] must be called on the same thread. Unlike a
+/// wall-clock deadline it ignores time the thread spent preempted, so a tiny
+/// file never trips just because its worker was starved of CPU under heavy
+/// parallelism.
+#[derive(Clone, Copy)]
+pub struct CpuBudget {
+    start: ThreadTime,
+    budget: Duration,
+}
+
+impl CpuBudget {
+    /// Begin a budget on the current thread.
+    pub fn start(budget: Duration) -> Self {
+        Self {
+            start: ThreadTime::now(),
+            budget,
+        }
+    }
+
+    /// True once this thread has spent `budget` of CPU since `start`.
+    pub fn expired(&self) -> bool {
+        self.start.elapsed() >= self.budget
+    }
+}
+
 /// Cooperative limits enforced from the parser's progress callback, the only
 /// hook into tree-sitter's otherwise-uninterruptible C parse.
 #[derive(Clone)]
 pub struct ParseGuard {
     /// Abort if the parser stalls at one byte offset this many iterations.
     pub max_stall: u64,
-    /// Abort once this instant passes (per-file wall-clock budget).
-    pub deadline: Option<Instant>,
+    /// Abort once this thread's parse CPU time exceeds the budget.
+    pub budget: Option<CpuBudget>,
 }
 
 impl Default for ParseGuard {
     fn default() -> Self {
         Self {
             max_stall: DEFAULT_MAX_STALL,
-            deadline: None,
+            budget: None,
         }
     }
 }
 
 impl ParseGuard {
-    pub fn with_deadline(mut self, deadline: Instant) -> Self {
-        self.deadline = Some(deadline);
+    /// Bound the parse to `budget` of CPU time on the parsing thread.
+    pub fn with_budget(mut self, budget: Duration) -> Self {
+        self.budget = Some(CpuBudget::start(budget));
         self
     }
 }
 
 impl<L: LanguageExt> StrDoc<L> {
     /// Parse source, aborting if the [`ParseGuard`] trips: a stall or the
-    /// wall-clock deadline. An aborted parse returns
+    /// per-thread CPU budget. An aborted parse returns
     /// [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
     pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
@@ -94,16 +122,16 @@ impl<L: LanguageExt> StrDoc<L> {
                 use std::sync::atomic::{AtomicU64, Ordering};
 
                 let max_stall = guard.max_stall;
-                let deadline = guard.deadline;
+                let budget = guard.budget;
                 let stall_count = AtomicU64::new(0);
                 let last_offset = AtomicU64::new(u64::MAX);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
-                    // Wall-clock deadline.
-                    if let Some(deadline) = deadline
-                        && Instant::now() >= deadline
+                    // Per-thread CPU budget.
+                    if let Some(budget) = budget
+                        && budget.expired()
                     {
-                        tracing::warn!("tree-sitter parse aborted: per-file deadline exceeded");
+                        tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
                         return ControlFlow::Break(());
                     }
                     // Stall detection: no forward progress for too long.
@@ -130,7 +158,17 @@ impl<L: LanguageExt> StrDoc<L> {
             },
             ts_lang,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            // The only way `parse_with_options` errors (language is always set)
+            // is the progress callback breaking, so an abort is budget-or-stall,
+            // never a syntax error. Name the budget case explicitly; otherwise
+            // fall through to the stall/`TreeUnavailable` message.
+            if guard.budget.is_some_and(|b| b.expired()) {
+                "per-file CPU budget exceeded".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
         Ok(Self {
             src,
             lang,
@@ -458,27 +496,31 @@ mod tests {
 
     #[cfg(feature = "builtin-parser")]
     #[test]
-    fn past_deadline_aborts_large_parse() {
+    fn zero_cpu_budget_aborts_large_parse() {
         use super::ParseGuard;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
         // Large enough that tree-sitter invokes the progress callback.
         let src = "def f(x):\n    return x + 1\n".repeat(50_000);
-        let guard = ParseGuard::default().with_deadline(Instant::now() - Duration::from_secs(1));
+        let guard = ParseGuard::default().with_budget(Duration::ZERO);
         let result = StrDoc::try_new(&src, crate::SupportLang::Python, &guard);
-        assert!(result.is_err(), "a past deadline must abort the parse");
+        assert_eq!(
+            result.err().as_deref(),
+            Some("per-file CPU budget exceeded"),
+            "a zero CPU budget must abort with the budget message"
+        );
     }
 
     #[cfg(feature = "builtin-parser")]
     #[test]
-    fn future_deadline_allows_parse() {
+    fn ample_cpu_budget_allows_parse() {
         use super::ParseGuard;
-        use std::time::{Duration, Instant};
-        let guard = ParseGuard::default().with_deadline(Instant::now() + Duration::from_secs(300));
+        use std::time::Duration;
+        let guard = ParseGuard::default().with_budget(Duration::from_secs(300));
         let result = StrDoc::try_new(
             "def f(x):\n    return x\n",
             crate::SupportLang::Python,
             &guard,
         );
-        assert!(result.is_ok(), "a far-future deadline must not abort");
+        assert!(result.is_ok(), "an ample CPU budget must not abort");
     }
 }

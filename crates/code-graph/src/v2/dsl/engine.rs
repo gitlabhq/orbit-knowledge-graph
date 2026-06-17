@@ -90,9 +90,9 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
-/// Independent per-file wall-clock budgets for the three parse sub-phases, each
+/// Independent per-file CPU-time budgets for the three parse sub-phases, each
 /// measured from its own start so a timeout is attributable to the phase.
-/// `None` = no deadline for that phase. `Default` = all unbounded.
+/// `None` = no budget for that phase. `Default` = all unbounded.
 #[derive(Clone, Copy, Default)]
 pub struct PhaseTimeouts {
     pub parse: Option<std::time::Duration>,
@@ -106,16 +106,20 @@ pub struct PhaseTimeouts {
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
-    /// A parse phase exceeded its per-file deadline (or the parser stalled).
-    /// The file is skipped, not faulted; the detail names the phase.
-    Aborted(String),
+    /// A bounded phase exceeded its per-file CPU budget (or the parser
+    /// stalled). The file is skipped, not faulted; `phase` names the budget
+    /// that tripped.
+    Aborted {
+        phase: crate::v2::error::AbortPhase,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ParseFullError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidUtf8(e) => write!(f, "invalid UTF-8: {e}"),
-            Self::Aborted(detail) => write!(f, "parse aborted: {detail}"),
+            Self::Aborted { phase, detail } => write!(f, "{phase} aborted: {detail}"),
         }
     }
 }
@@ -609,17 +613,18 @@ impl LanguageSpec {
         timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
-        let deadline =
-            |budget: Option<std::time::Duration>| budget.map(|t| std::time::Instant::now() + t);
 
         let ast = language
-            .parse_ast(source_str, deadline(timeouts.parse))
-            .map_err(|detail| ParseFullError::Aborted(format!("parse: {detail}")))?;
+            .parse_ast(source_str, timeouts.parse)
+            .map_err(|detail| ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Parse,
+                detail,
+            })?;
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path, deadline(timeouts.walk));
+        let mut state = WalkFullState::new(&arena, tracer, file_path, timeouts.walk);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -653,13 +658,14 @@ impl LanguageSpec {
 
         self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
         if state.timed_out {
-            return Err(ParseFullError::Aborted(
-                "walk: exceeded per-file deadline during AST walk".to_string(),
-            ));
+            return Err(ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Walk,
+                detail: "exceeded per-file CPU budget during AST walk".to_string(),
+            });
         }
 
         // Arm the SSA budget at the start of reaching-def resolution.
-        state.ssa.set_deadline(deadline(timeouts.ssa));
+        state.ssa.set_budget(timeouts.ssa);
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
@@ -788,9 +794,10 @@ impl LanguageSpec {
         // Pass 2: resolve SSA reaching values → CollectedRef (no callback)
         let refs = state.collect_refs(&pending_refs);
         if state.ssa.timed_out() {
-            return Err(ParseFullError::Aborted(
-                "ssa: exceeded per-file deadline during reaching-def resolution".to_string(),
-            ));
+            return Err(ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Ssa,
+                detail: "exceeded per-file CPU budget during reaching-def resolution".to_string(),
+            });
         }
 
         Ok(ParseFullResult {
@@ -809,18 +816,16 @@ impl LanguageSpec {
         sep: &'static str,
         module_prefix: Option<&str>,
     ) {
-        // Per-file deadline: once tripped, every walk_full call returns at once
+        // Per-file CPU budget: once tripped, every walk_full call returns at once
         // so the recursion unwinds and the file is skipped (checked in
         // parse_full_collect).
         if state.timed_out {
             return;
         }
-        if let Some(deadline) = state.deadline
-            && std::time::Instant::now() >= deadline
-        {
+        if state.budget.is_some_and(|b| b.expired()) {
             tracing::warn!(
                 file_path = state.file_path,
-                "AST walk aborted: per-file deadline exceeded"
+                "AST walk aborted: per-file CPU budget exceeded"
             );
             state.timed_out = true;
             return;
@@ -1496,9 +1501,9 @@ struct WalkFullState<'a> {
     in_return: bool,
     tracer: &'a Tracer,
     file_path: &'a str,
-    /// Per-file wall-clock budget for the AST walk, checked in `walk_full`.
-    deadline: Option<std::time::Instant>,
-    /// Set once the deadline trips so the walk unwinds and the file is skipped.
+    /// Per-file CPU-time budget for the AST walk, checked in `walk_full`.
+    budget: Option<treesitter_visit::CpuBudget>,
+    /// Set once the budget trips so the walk unwinds and the file is skipped.
     timed_out: bool,
 }
 
@@ -1507,7 +1512,7 @@ impl<'a> WalkFullState<'a> {
         arena: &'a bumpalo::Bump,
         tracer: &'a Tracer,
         file_path: &'a str,
-        deadline: Option<std::time::Instant>,
+        budget: Option<std::time::Duration>,
     ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
@@ -1528,7 +1533,7 @@ impl<'a> WalkFullState<'a> {
             in_return: false,
             tracer,
             file_path,
-            deadline,
+            budget: budget.map(treesitter_visit::CpuBudget::start),
             timed_out: false,
         }
     }

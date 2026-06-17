@@ -91,12 +91,12 @@ macro_rules! define_languages {
             }
 
             /// Parse source with tree-sitter, optionally bounded by a per-file
-            /// `deadline`. Returns `Err` if the language has no tree-sitter
-            /// grammar or the parse was aborted (deadline/stall).
+            /// CPU-time `budget`. Returns `Err` if the language has no
+            /// tree-sitter grammar or the parse was aborted (budget/stall).
             pub fn parse_ast(
                 &self,
                 code: &str,
-                deadline: Option<std::time::Instant>,
+                budget: Option<std::time::Duration>,
             ) -> Result<
                 treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
                 String,
@@ -105,8 +105,8 @@ macro_rules! define_languages {
                     .to_support_lang()
                     .ok_or_else(|| format!("{self} has no tree-sitter grammar"))?;
                 let mut guard = treesitter_visit::ParseGuard::default();
-                if let Some(d) = deadline {
-                    guard = guard.with_deadline(d);
+                if let Some(b) = budget {
+                    guard = guard.with_budget(b);
                 }
                 treesitter_visit::Root::try_new(code, lang, &guard)
             }

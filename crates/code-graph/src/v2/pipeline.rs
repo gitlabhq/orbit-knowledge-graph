@@ -1346,11 +1346,11 @@ impl FamilyPipeline {
                     .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
                 {
                     Ok(r) => r,
-                    Err(crate::v2::dsl::engine::ParseFullError::Aborted(detail)) => {
-                        tracing::warn!(path = f.path, %detail, "parse aborted: per-file deadline");
+                    Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
+                        tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
                         ctx.record_skip(
                             f.path.clone(),
-                            crate::v2::error::FileSkip::TimeoutSentinel,
+                            crate::v2::error::FileSkip::Timeout(phase),
                             detail,
                         );
                         pb.inc(1);
@@ -1615,7 +1615,7 @@ impl FamilyPipeline {
                 };
                 ctx.record_skip(
                     path.to_string(),
-                    crate::v2::error::FileSkip::TimeoutSentinel,
+                    crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Sentinel),
                     "per-file watchdog killed analysis",
                 );
             }
@@ -2340,14 +2340,17 @@ namespace MyApp {
         });
         ctx.record_skip(
             "src/slow.rs",
-            crate::v2::error::FileSkip::TimeoutSentinel,
+            crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Ssa),
             "killed",
         );
         ctx.record_fault("src/bad.js", crate::v2::error::FileFault::OxcPanic, "boom");
 
         let skipped = ctx.skipped.lock().unwrap().clone();
         assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].kind, crate::v2::error::FileSkip::TimeoutSentinel);
+        assert_eq!(
+            skipped[0].kind,
+            crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Ssa)
+        );
         assert_eq!(skipped[0].path, "src/slow.rs");
 
         let faults = ctx.faults.lock().unwrap().clone();

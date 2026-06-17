@@ -138,10 +138,10 @@ pub(crate) struct SsaEngine<'a> {
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
-    /// Per-file wall-clock budget for reaching-def resolution. Once it trips,
+    /// Per-file CPU-time budget for reaching-def resolution. Once it trips,
     /// reads degrade to `Opaque` and `timed_out` is set so the caller skips the
-    /// file. `None` = no SSA deadline.
-    deadline: Option<std::time::Instant>,
+    /// file. `None` = no SSA budget.
+    budget: Option<treesitter_visit::CpuBudget>,
     timed_out: bool,
 }
 
@@ -154,28 +154,25 @@ impl<'a> SsaEngine<'a> {
             incomplete_phis: FxHashMap::default(),
             stats: SsaStats::default(),
             tracer: super::super::trace::leaked_noop_tracer(),
-            deadline: None,
+            budget: None,
             timed_out: false,
         }
     }
 
-    /// Arm the reaching-def resolution deadline (start of the SSA phase).
-    pub(crate) fn set_deadline(&mut self, deadline: Option<std::time::Instant>) {
-        self.deadline = deadline;
+    /// Arm the reaching-def resolution budget (start of the SSA phase).
+    pub(crate) fn set_budget(&mut self, budget: Option<std::time::Duration>) {
+        self.budget = budget.map(treesitter_visit::CpuBudget::start);
     }
 
-    /// Whether SSA resolution exceeded its deadline and degraded.
+    /// Whether SSA resolution exceeded its budget and degraded.
     pub(crate) fn timed_out(&self) -> bool {
         self.timed_out
     }
 
-    /// True once the SSA deadline has tripped (latches `timed_out`). Used by both
+    /// True once the SSA budget has tripped (latches `timed_out`). Used by both
     /// the reaching-def reads and the SCC pass so every sub-phase is bounded.
     fn deadline_tripped(&mut self) -> bool {
-        if !self.timed_out
-            && let Some(deadline) = self.deadline
-            && std::time::Instant::now() >= deadline
-        {
+        if !self.timed_out && self.budget.is_some_and(|b| b.expired()) {
             self.timed_out = true;
         }
         self.timed_out
@@ -1170,10 +1167,10 @@ mod tests {
         );
     }
 
-    // A past deadline must trip during a deep read and degrade to Opaque,
+    // A zero budget must trip during a deep read and degrade to Opaque,
     // so a pathologically wide function is skipped rather than resolved slowly.
     #[test]
-    fn ssa_deadline_degrades_deep_read() {
+    fn ssa_budget_degrades_deep_read() {
         let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
         ssa.seal_block(entry);
@@ -1182,13 +1179,11 @@ mod tests {
         for _ in 0..2_000 {
             pre = ssa.add_sealed_successor(pre);
         }
-        ssa.set_deadline(Some(
-            std::time::Instant::now() - std::time::Duration::from_secs(1),
-        ));
+        ssa.set_budget(Some(std::time::Duration::ZERO));
         let result = ssa.read_variable_stateless("x", pre);
         assert!(
             ssa.timed_out(),
-            "past SSA deadline must trip during a deep read"
+            "a zero SSA budget must trip during a deep read"
         );
         assert!(
             result.values.is_empty(),

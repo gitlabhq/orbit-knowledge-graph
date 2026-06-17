@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 
-use crate::v2::error::FileSkip;
+use crate::v2::error::{AbortPhase, FileSkip};
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{
     CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
@@ -63,7 +63,7 @@ pub fn attach_resolution_edges(
                 if guard.as_ref().is_some_and(|g| g.is_killed()) {
                     ctx.record_skip(
                         analyzed.relative_path.clone(),
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed local call resolution",
                     );
                 }
@@ -155,7 +155,7 @@ pub fn attach_resolution_edges(
         tracing::warn!("js cross-file import resolution timed out");
         ctx.record_skip(
             "js:cross-file-resolve".to_string(),
-            FileSkip::TimeoutSentinel,
+            FileSkip::Timeout(AbortPhase::Sentinel),
             "cross-file resolution timed out",
         );
     } else {
