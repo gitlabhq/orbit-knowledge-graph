@@ -100,10 +100,8 @@ pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     EXCLUDED_INDEXING_GLOBSET.is_match(&lowered)
 }
 
-/// Byte-order marks that mark a buffer as text even though it carries the
-/// NUL bytes the heuristic below would otherwise treat as binary. UTF-16
-/// and UTF-32 text is full of NULs; the BOM is what tells it apart from a
-/// real binary blob.
+/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full of
+/// NULs, so the BOM is what distinguishes it from a binary blob.
 const TEXT_BOMS: &[&[u8]] = &[
     &[0x00, 0x00, 0xFE, 0xFF], // UTF-32 BE
     &[0xFF, 0xFE, 0x00, 0x00], // UTF-32 LE
@@ -112,15 +110,8 @@ const TEXT_BOMS: &[&[u8]] = &[
     &[0xFE, 0xFF],             // UTF-16 BE
 ];
 
-/// Returns `true` when `prefix` looks like binary content the indexer
-/// should not extract. The core decision mirrors git's `buffer_is_binary`
-/// (a NUL byte in the leading bytes means binary). On top of git, this adds
-/// a BOM rescue so BOM-marked UTF-16/32 text is kept; git has no such rescue.
-/// Callers pass the first few thousand bytes of the file.
-///
-/// BOM-less UTF-16/UTF-32 source is intentionally classified binary and
-/// dropped: without a BOM its NUL bytes are indistinguishable from a real
-/// blob, matching git's `buffer_is_binary`.
+/// Binary when a NUL byte appears in `prefix`, like git's `buffer_is_binary`,
+/// plus a BOM rescue for UTF-16/32 text (git has none, so BOM-less is dropped).
 pub fn looks_binary(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
