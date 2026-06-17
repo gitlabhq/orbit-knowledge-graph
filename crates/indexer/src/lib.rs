@@ -47,7 +47,7 @@ pub mod testkit;
 
 // Re-export engine submodules at crate root for external API stability.
 pub use config::*;
-pub use engine::{dead_letter, destination, handler, types, worker_pool};
+pub use engine::{dead_letter, destination, durability, handler, types, worker_pool};
 
 /// Re-export metrics from their canonical locations for external API stability.
 pub mod metrics {

@@ -17,6 +17,8 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::destination::BatchWriterOptions;
+
 /// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
 /// around the core node columns.
 pub struct IndexerEnvelope {
@@ -849,7 +851,7 @@ impl BufferedClickHouseSink {
             let dest = self.destination.clone();
             handles.push(tokio::spawn(async move {
                 let writer = dest
-                    .new_batch_writer(&table)
+                    .new_batch_writer(&table, BatchWriterOptions::default())
                     .await
                     .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
                 writer

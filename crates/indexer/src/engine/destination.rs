@@ -6,6 +6,8 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use thiserror::Error;
 
+use crate::durability::WriteDurability;
+
 /// Underlying error from implementations.
 pub type UnderlyingError = Box<dyn StdError + Send + Sync>;
 
@@ -28,9 +30,18 @@ pub trait BatchWriter: Send + Sync {
     async fn write_batch(&self, batch: &[RecordBatch]) -> Result<(), DestinationError>;
 }
 
+/// `durability: None` inherits the backend's configured settings.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BatchWriterOptions {
+    pub durability: Option<WriteDurability>,
+}
+
 /// Creates writers for a storage backend.
 #[async_trait]
 pub trait Destination: Send + Sync {
-    async fn new_batch_writer(&self, table: &str)
-    -> Result<Box<dyn BatchWriter>, DestinationError>;
+    async fn new_batch_writer(
+        &self,
+        table: &str,
+        options: BatchWriterOptions,
+    ) -> Result<Box<dyn BatchWriter>, DestinationError>;
 }

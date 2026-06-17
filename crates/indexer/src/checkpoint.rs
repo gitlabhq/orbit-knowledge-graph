@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, TIMESTAMP_FORMAT};
+use crate::durability::WriteDurability;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -127,7 +128,8 @@ impl ClickHouseCheckpointStore {
         Ok(())
     }
 
-    // Pinned settings: config `insert_settings` tuning must not downgrade Durable writes.
+    // Single-row inserts must pin async batching regardless of durability, or per-row inserts
+    // explode the part count.
     fn insert(&self, sql: &str, durability: WriteDurability) -> ArrowQuery {
         let wait_for_flush = match durability {
             WriteDurability::FireAndForget => "0",
@@ -138,13 +140,6 @@ impl ClickHouseCheckpointStore {
             .with_setting("async_insert", "1")
             .with_setting("wait_for_async_insert", wait_for_flush)
     }
-}
-
-/// Durable only where a dropped write forces a re-pull from the start: full-load completions and tombstones.
-#[derive(Clone, Copy)]
-pub enum WriteDurability {
-    FireAndForget,
-    Durable,
 }
 
 /// Flush-time `now64` defaults would let a buffered progress row outrank a later durable completion.

@@ -5,7 +5,7 @@ use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
 use super::batch_writer::ClickHouseBatchWriter;
-use crate::destination::{BatchWriter, Destination, DestinationError};
+use crate::destination::{BatchWriter, BatchWriterOptions, Destination, DestinationError};
 use crate::metrics::EngineMetrics;
 
 pub struct ClickHouseDestination {
@@ -31,10 +31,12 @@ impl Destination for ClickHouseDestination {
     async fn new_batch_writer(
         &self,
         table: &str,
+        options: BatchWriterOptions,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
         Ok(Box::new(ClickHouseBatchWriter::new(
             self.client.clone(),
             table.to_string(),
+            options,
             self.metrics.clone(),
         )))
     }

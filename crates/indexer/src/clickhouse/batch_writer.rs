@@ -18,7 +18,8 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
 
-use crate::destination::{BatchWriter, DestinationError};
+use crate::destination::{BatchWriter, BatchWriterOptions, DestinationError};
+use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
 pub(crate) struct ClickHouseBatchWriter {
@@ -32,15 +33,29 @@ impl ClickHouseBatchWriter {
     pub(crate) fn new(
         client: ArrowClickHouseClient,
         table: String,
+        options: BatchWriterOptions,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
-        let insert_sql = client.build_insert_sql(&table);
+        let insert_sql = match options.durability {
+            Some(durability) => {
+                client.build_insert_sql_with_overrides(&table, insert_overrides(durability))
+            }
+            None => client.build_insert_sql(&table),
+        };
         Self {
             client,
             table,
             insert_sql,
             metrics,
         }
+    }
+}
+
+/// Both pin `async_insert` so the many small per-page inserts coalesce into fewer parts.
+fn insert_overrides(durability: WriteDurability) -> &'static [(&'static str, &'static str)] {
+    match durability {
+        WriteDurability::Durable => &[("async_insert", "1"), ("wait_for_async_insert", "1")],
+        WriteDurability::FireAndForget => &[("async_insert", "1"), ("wait_for_async_insert", "0")],
     }
 }
 
@@ -72,5 +87,26 @@ impl BatchWriter for ClickHouseBatchWriter {
             .record_write_success(&self.table, elapsed, total_rows, total_bytes);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn durable_pins_async_insert_and_wait() {
+        assert_eq!(
+            insert_overrides(WriteDurability::Durable),
+            &[("async_insert", "1"), ("wait_for_async_insert", "1")]
+        );
+    }
+
+    #[test]
+    fn fire_and_forget_pins_async_without_waiting() {
+        assert_eq!(
+            insert_overrides(WriteDurability::FireAndForget),
+            &[("async_insert", "1"), ("wait_for_async_insert", "0")]
+        );
     }
 }

@@ -12,16 +12,17 @@ use futures::{FutureExt, StreamExt};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::Destination;
+use crate::destination::{BatchWriterOptions, Destination};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
-use crate::observer::IndexingObserver;
+use crate::observer::{IndexingMode, IndexingObserver};
 
 use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore, WriteDurability};
+use crate::checkpoint::{Checkpoint, CheckpointStore};
+use crate::durability::{RunDurability, WriteDurability};
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
@@ -130,7 +131,7 @@ impl Pipeline {
         base_query: PreparedQuery,
         position_key: &str,
         window: WindowBounds,
-        completion_durability: WriteDurability,
+        durability: RunDurability,
     ) -> Result<PipelineStats, HandlerError> {
         let started_at = Instant::now();
         let checkpoint = self.load_checkpoint(position_key).await;
@@ -183,7 +184,12 @@ impl Pipeline {
             stats.transform_ms += transform_elapsed.as_millis() as u64;
 
             let (write_futures, per_table) = self
-                .build_writes(context.destination.as_ref(), &outputs, grouped)
+                .build_writes(
+                    context.destination.as_ref(),
+                    &outputs,
+                    grouped,
+                    durability.data_writes,
+                )
                 .await?;
 
             {
@@ -231,7 +237,7 @@ impl Pipeline {
         }
 
         self.checkpoint_store
-            .save_completed(position_key, &window.target, completion_durability)
+            .save_completed(position_key, &window.target, durability.completion)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -376,6 +382,7 @@ impl Pipeline {
         destination: &dyn Destination,
         outputs: &[String],
         grouped: Vec<Vec<RecordBatch>>,
+        durability: Option<WriteDurability>,
     ) -> Result<(WriteFutures, Vec<(usize, u64, u64)>), HandlerError> {
         let write_futures = WriteFutures::new();
         let mut per_table = Vec::new();
@@ -392,9 +399,12 @@ impl Pipeline {
             per_table.push((index, rows, bytes));
 
             let table = outputs[index].clone();
-            let writer = destination.new_batch_writer(&table).await.map_err(|err| {
-                HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
-            })?;
+            let writer = destination
+                .new_batch_writer(&table, BatchWriterOptions { durability })
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
+                })?;
             write_futures.push(
                 async move {
                     writer.write_batch(&batches).await.map_err(|err| {
@@ -464,11 +474,20 @@ impl Pipeline {
     }
 }
 
-/// A pull's replication-time window. `floor` is persisted so a resume can rebuild it.
-#[derive(Clone, Copy)]
+/// `floor` is `None` for a backfill (start of time); it is persisted so a resume rebuilds the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::modules::sdlc) struct WindowBounds {
     pub target: DateTime<Utc>,
     pub floor: Option<DateTime<Utc>>,
+}
+
+impl WindowBounds {
+    pub fn indexing_mode(&self) -> IndexingMode {
+        match self.floor {
+            Some(_) => IndexingMode::Incremental,
+            None => IndexingMode::Full,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -709,7 +728,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok());
@@ -736,7 +755,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -776,7 +795,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -854,7 +873,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -896,7 +915,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -937,7 +956,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1017,7 +1036,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1058,7 +1077,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await;
 
@@ -1136,7 +1155,7 @@ mod tests {
                 base_query(&plan),
                 &position_key(&plan),
                 test_window(),
-                WriteDurability::Durable,
+                RunDurability::for_mode(IndexingMode::Incremental),
             )
             .await
             .expect("run should succeed");
