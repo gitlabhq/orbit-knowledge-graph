@@ -21,7 +21,7 @@ use crate::modules::sdlc::plan::{
     Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
 };
 use crate::modules::sdlc::transform::system_notes;
-use crate::observer::{self, IndexingMode, IndexingObserver, PipelineType};
+use crate::observer::{self, IndexingObserver, PipelineType};
 use crate::topic::{GlobalIndexingRequest, NamespaceIndexingRequest};
 use crate::types::{Envelope, SerializationError, Subscription};
 
@@ -149,11 +149,7 @@ impl EntityHandler {
             .map_err(|err| HandlerError::Processing(err.to_string()))?;
         let window = pull_window(parent_checkpoint.as_ref(), request.watermark);
 
-        let mode = if window.floor.is_some() {
-            IndexingMode::Incremental
-        } else {
-            IndexingMode::Full
-        };
+        let mode = window.indexing_mode();
         observer.set_indexing_mode(mode);
 
         let observer: Arc<Mutex<dyn IndexingObserver>> = Arc::new(Mutex::new(observer));

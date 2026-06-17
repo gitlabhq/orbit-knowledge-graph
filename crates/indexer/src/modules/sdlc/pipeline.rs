@@ -480,6 +480,15 @@ pub(in crate::modules::sdlc) struct WindowBounds {
     pub floor: Option<DateTime<Utc>>,
 }
 
+impl WindowBounds {
+    pub fn indexing_mode(&self) -> IndexingMode {
+        match self.floor {
+            Some(_) => IndexingMode::Incremental,
+            None => IndexingMode::Full,
+        }
+    }
+}
+
 /// Page and completion durability invert by mode: a full load re-pulls lost pages but must persist
 /// completion; an incremental must persist pages (the watermark advances, no NATS retry).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
