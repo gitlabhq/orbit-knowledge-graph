@@ -108,7 +108,7 @@ macro_rules! define_languages {
                 if let Some(d) = deadline {
                     guard = guard.with_deadline(d);
                 }
-                treesitter_visit::Root::try_new_with_guard(code, lang, &guard)
+                treesitter_visit::Root::try_new(code, lang, &guard)
             }
         }
     };

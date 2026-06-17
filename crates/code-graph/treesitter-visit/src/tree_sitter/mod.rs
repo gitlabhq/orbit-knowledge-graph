@@ -85,14 +85,10 @@ impl ParseGuard {
 }
 
 impl<L: LanguageExt> StrDoc<L> {
-    pub fn try_new(src: &str, lang: L) -> Result<Self, String> {
-        Self::try_new_with_guard(src, lang, &ParseGuard::default())
-    }
-
     /// Parse source, aborting if the [`ParseGuard`] trips: a stall or the
     /// wall-clock deadline. An aborted parse returns
     /// [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
-    pub fn try_new_with_guard(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
+    pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
         let ts_lang = lang.get_ts_language();
@@ -149,10 +145,6 @@ impl<L: LanguageExt> StrDoc<L> {
             tree,
             kind_names,
         })
-    }
-
-    pub fn new(src: &str, lang: L) -> Self {
-        Self::try_new(src, lang).expect("Parser tree error")
     }
 }
 
@@ -387,21 +379,14 @@ pub trait LanguageExt: Language {
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {
+    /// Infallible parse with default limits; panics on parse failure. For
+    /// tests and fuzz harnesses — production code uses [`Self::try_new`].
     pub fn new<S: AsRef<str>>(src: S, lang: L) -> Self {
-        Self::try_new(src, lang).expect("should parse")
+        Self::try_new(src, lang, &ParseGuard::default()).expect("should parse")
     }
 
-    pub fn try_new<S: AsRef<str>>(src: S, lang: L) -> Result<Self, String> {
-        let doc = StrDoc::try_new(src.as_ref(), lang)?;
-        Ok(Root { doc })
-    }
-
-    pub fn try_new_with_guard<S: AsRef<str>>(
-        src: S,
-        lang: L,
-        guard: &ParseGuard,
-    ) -> Result<Self, String> {
-        let doc = StrDoc::try_new_with_guard(src.as_ref(), lang, guard)?;
+    pub fn try_new<S: AsRef<str>>(src: S, lang: L, guard: &ParseGuard) -> Result<Self, String> {
+        let doc = StrDoc::try_new(src.as_ref(), lang, guard)?;
         Ok(Root { doc })
     }
 
@@ -467,7 +452,11 @@ mod tests {
     #[cfg(feature = "builtin-parser")]
     #[test]
     fn test_default_stall_limit_allows_valid_parse() {
-        let result = StrDoc::try_new("def f(x):\n    return x\n", crate::SupportLang::Python);
+        let result = StrDoc::try_new(
+            "def f(x):\n    return x\n",
+            crate::SupportLang::Python,
+            &super::ParseGuard::default(),
+        );
         assert!(
             result.is_ok(),
             "Valid Python should parse: {:?}",
@@ -483,7 +472,7 @@ mod tests {
         // Large enough that tree-sitter invokes the progress callback.
         let src = "def f(x):\n    return x + 1\n".repeat(50_000);
         let guard = ParseGuard::default().with_deadline(Instant::now() - Duration::from_secs(1));
-        let result = StrDoc::try_new_with_guard(&src, crate::SupportLang::Python, &guard);
+        let result = StrDoc::try_new(&src, crate::SupportLang::Python, &guard);
         assert!(result.is_err(), "a past deadline must abort the parse");
     }
 
@@ -493,7 +482,7 @@ mod tests {
         use super::ParseGuard;
         use std::time::{Duration, Instant};
         let guard = ParseGuard::default().with_deadline(Instant::now() + Duration::from_secs(300));
-        let result = StrDoc::try_new_with_guard(
+        let result = StrDoc::try_new(
             "def f(x):\n    return x\n",
             crate::SupportLang::Python,
             &guard,
