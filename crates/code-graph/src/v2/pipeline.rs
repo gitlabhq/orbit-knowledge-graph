@@ -20,6 +20,22 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
+/// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
+pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Emit a crash-surviving breadcrumb for a large in-flight file; low volume, stays on in production.
+pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
+    if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
+        tracing::info!(
+            target: "code_graph::breadcrumb",
+            path,
+            bytes,
+            language,
+            "indexing large file (crash breadcrumb)"
+        );
+    }
+}
+
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
 /// Set `cancel()` from any thread to request pipeline shutdown.
 #[derive(Clone, Default)]
@@ -508,6 +524,9 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
+    pub per_file_parse_timeout: Option<std::time::Duration>,
+    pub per_file_walk_timeout: Option<std::time::Duration>,
+    pub per_file_ssa_timeout: Option<std::time::Duration>,
     /// Wall-clock budget for the sequential cross-file resolution phase.
     /// `None` = use the compiled-in default from `utils::CROSS_FILE_RESOLVE_TIMEOUT`.
     pub cross_file_resolve_timeout: Option<std::time::Duration>,
@@ -530,6 +549,9 @@ impl Default for PipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
+            per_file_parse_timeout: None,
+            per_file_walk_timeout: None,
+            per_file_ssa_timeout: None,
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
@@ -1304,24 +1326,36 @@ impl FamilyPipeline {
                     }
                 };
 
+                breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
+
                 let t_parse = std::time::Instant::now();
+                let timeouts = crate::v2::dsl::engine::PhaseTimeouts {
+                    parse: ctx.config.per_file_parse_timeout,
+                    walk: ctx.config.per_file_walk_timeout,
+                    ssa: ctx.config.per_file_ssa_timeout,
+                };
                 let result = match lctx
                     .spec
-                    .parse_full_collect(&source, &f.path, f.language, tracer)
+                    .parse_full_collect(&source, &f.path, f.language, tracer, timeouts)
                 {
                     Ok(r) => r,
-                    Err(e) => {
-                        tracing::debug!(path = f.path, error = %e, "failed to parse file");
+                    Err(crate::v2::dsl::engine::ParseFullError::Aborted { phase, detail }) => {
+                        tracing::warn!(path = f.path, phase = phase.as_ref(), %detail, "parse aborted: per-file CPU budget");
+                        ctx.record_skip(
+                            f.path.clone(),
+                            crate::v2::error::FileSkip::Timeout(phase),
+                            detail,
+                        );
                         pb.inc(1);
-                        let (kind, detail) = match e {
-                            crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err) => {
-                                (FileFault::InvalidUtf8, err.to_string())
-                            }
-                        };
+                        return None;
+                    }
+                    Err(crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err)) => {
+                        tracing::debug!(path = f.path, error = %err, "failed to parse file");
+                        pb.inc(1);
                         return Some(ParseOutcome::Err(FaultedFile {
                             path: f.path.to_string(),
-                            kind,
-                            detail,
+                            kind: FileFault::InvalidUtf8,
+                            detail: err.to_string(),
                         }));
                     }
                 };
@@ -1574,7 +1608,7 @@ impl FamilyPipeline {
                 };
                 ctx.record_skip(
                     path.to_string(),
-                    crate::v2::error::FileSkip::TimeoutSentinel,
+                    crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Sentinel),
                     "per-file watchdog killed analysis",
                 );
             }
@@ -2299,14 +2333,17 @@ namespace MyApp {
         });
         ctx.record_skip(
             "src/slow.rs",
-            crate::v2::error::FileSkip::TimeoutSentinel,
+            crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Ssa),
             "killed",
         );
         ctx.record_fault("src/bad.js", crate::v2::error::FileFault::OxcPanic, "boom");
 
         let skipped = ctx.skipped.lock().unwrap().clone();
         assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].kind, crate::v2::error::FileSkip::TimeoutSentinel);
+        assert_eq!(
+            skipped[0].kind,
+            crate::v2::error::FileSkip::Timeout(crate::v2::error::AbortPhase::Ssa)
+        );
         assert_eq!(skipped[0].path, "src/slow.rs");
 
         let faults = ctx.faults.lock().unwrap().clone();

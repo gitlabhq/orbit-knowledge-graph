@@ -123,7 +123,9 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.skipped",
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
      Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, \
-     `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, `timeout_sentinel`.",
+     `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, and per-phase \
+     CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, \
+     `timeout_sentinel`.",
     None,
     &[labels::REASON],
     DOMAIN,

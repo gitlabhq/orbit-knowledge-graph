@@ -5,8 +5,8 @@ use std::str::from_utf8;
 fn main() {
     check!().for_each(|input: &[u8]| {
         if let Ok(s) = from_utf8(input) {
-            let _ = Language::TypeScript.parse_ast(s);
-            let _ = Language::JavaScript.parse_ast(s);
+            let _ = Language::TypeScript.parse_ast(s, None);
+            let _ = Language::JavaScript.parse_ast(s, None);
         }
     });
 }

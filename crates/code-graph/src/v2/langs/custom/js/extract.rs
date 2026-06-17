@@ -2,7 +2,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
-use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
+use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
     ImportMode, Position as GraphPosition, Range as GraphRange,
@@ -63,7 +63,7 @@ pub fn analyze_files(
                 return (
                     relative_path.clone(),
                     Err(AnalyzerError::skip(
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     )),
                 );

@@ -1,4 +1,5 @@
 use std::fmt;
+use strum::{AsRefStr, Display};
 
 /// Task-level failures from the v2 code-graph pipeline. Per-file
 /// failures route through [`FileFault`] instead.
@@ -90,6 +91,16 @@ impl CodeGraphError {
     }
 }
 
+/// Which bounded phase tripped a per-file timeout: the parse/walk/ssa budget or the Phase 2/3 watchdog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum AbortPhase {
+    Parse,
+    Walk,
+    Ssa,
+    Sentinel,
+}
+
 /// Per-file benign skip. `as_metric_label` returns the wire-stable label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileSkip {
@@ -102,7 +113,7 @@ pub enum FileSkip {
     NotUtf8,
     NonRegularFile,
     UnsafePath,
-    TimeoutSentinel,
+    Timeout(AbortPhase),
 }
 
 impl FileSkip {
@@ -117,7 +128,10 @@ impl FileSkip {
             Self::NotUtf8 => "not_utf8",
             Self::NonRegularFile => "non_regular_file",
             Self::UnsafePath => "unsafe_path",
-            Self::TimeoutSentinel => "timeout_sentinel",
+            Self::Timeout(AbortPhase::Parse) => "timeout_parse",
+            Self::Timeout(AbortPhase::Walk) => "timeout_walk",
+            Self::Timeout(AbortPhase::Ssa) => "timeout_ssa",
+            Self::Timeout(AbortPhase::Sentinel) => "timeout_sentinel",
         }
     }
 }
@@ -240,7 +254,19 @@ mod tests {
         );
         assert_eq!(FileSkip::UnsafePath.as_metric_label(), "unsafe_path");
         assert_eq!(
-            FileSkip::TimeoutSentinel.as_metric_label(),
+            FileSkip::Timeout(AbortPhase::Parse).as_metric_label(),
+            "timeout_parse"
+        );
+        assert_eq!(
+            FileSkip::Timeout(AbortPhase::Walk).as_metric_label(),
+            "timeout_walk"
+        );
+        assert_eq!(
+            FileSkip::Timeout(AbortPhase::Ssa).as_metric_label(),
+            "timeout_ssa"
+        );
+        assert_eq!(
+            FileSkip::Timeout(AbortPhase::Sentinel).as_metric_label(),
             "timeout_sentinel"
         );
     }

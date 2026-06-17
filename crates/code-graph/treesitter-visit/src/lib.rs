@@ -19,4 +19,6 @@ pub use language::Language;
 pub use languages::SupportLang;
 pub use node::{Axis, KindId, Match, Node, Position, Root};
 pub use source::{Content, Doc, SgNode};
-pub use tree_sitter::{LanguageExt, StrDoc, TSLanguage, TSParseError, TSPoint, TSRange, TsPre};
+pub use tree_sitter::{
+    CpuBudget, LanguageExt, ParseGuard, StrDoc, TSLanguage, TSParseError, TSPoint, TSRange, TsPre,
+};

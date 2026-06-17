@@ -10,7 +10,9 @@ pub mod sink;
 pub mod trace;
 pub mod types;
 
-pub use error::{AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile};
+pub use error::{
+    AbortPhase, AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
+};
 pub use pipeline::{
     BatchTx, CancellationToken, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
     GenericPipeline, GraphStatsCounters, LanguageContext, LanguagePipeline, LanguageTimings,

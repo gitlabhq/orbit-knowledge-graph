@@ -149,6 +149,8 @@ pub(crate) struct SsaEngine<'a> {
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
+    budget: Option<treesitter_visit::CpuBudget>,
+    timed_out: bool,
     read_depth: usize,
 }
 
@@ -161,8 +163,28 @@ impl<'a> SsaEngine<'a> {
             incomplete_phis: FxHashMap::default(),
             stats: SsaStats::default(),
             tracer: super::super::trace::leaked_noop_tracer(),
+            budget: None,
+            timed_out: false,
             read_depth: 0,
         }
+    }
+
+    /// Arm the reaching-def resolution budget (start of the SSA phase).
+    pub(crate) fn set_budget(&mut self, budget: Option<std::time::Duration>) {
+        self.budget = budget.map(treesitter_visit::CpuBudget::start);
+    }
+
+    /// Whether SSA resolution exceeded its budget and degraded.
+    pub(crate) fn timed_out(&self) -> bool {
+        self.timed_out
+    }
+
+    /// True once the SSA budget has tripped (latches `timed_out`); bounds both the reads and the SCC pass.
+    fn deadline_tripped(&mut self) -> bool {
+        if !self.timed_out && self.budget.is_some_and(|b| b.expired()) {
+            self.timed_out = true;
+        }
+        self.timed_out
     }
 
     pub(crate) fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
@@ -367,6 +389,11 @@ impl<'a> SsaEngine<'a> {
         {
             self.stats.local_hits += 1;
             return value.clone();
+        }
+
+        // Past the SSA budget: degrade reads to `Opaque` so resolution unwinds and the file is skipped.
+        if self.deadline_tripped() {
+            return SsaValue::Opaque;
         }
 
         // Recurses up the predecessor graph — thousands deep in a wide
@@ -617,7 +644,7 @@ impl<'a> SsaEngine<'a> {
     const MAX_SCC_DEPTH: usize = 32;
 
     fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId], depth: usize) {
-        if phi_ids.len() < 2 {
+        if phi_ids.len() < 2 || self.deadline_tripped() {
             return;
         }
         if depth >= Self::MAX_SCC_DEPTH {
@@ -1156,6 +1183,29 @@ mod tests {
                 && result.values.contains(&SsaValue::LocalDef(1)),
             "SCC with multiple external values must not be collapsed: got {:?}",
             result.values
+        );
+    }
+
+    // A zero budget must trip during a deep read and degrade to Opaque.
+    #[test]
+    fn ssa_budget_degrades_deep_read() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        ssa.seal_block(entry);
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        let mut pre = entry;
+        for _ in 0..2_000 {
+            pre = ssa.add_sealed_successor(pre);
+        }
+        ssa.set_budget(Some(std::time::Duration::ZERO));
+        let result = ssa.read_variable_stateless("x", pre);
+        assert!(
+            ssa.timed_out(),
+            "a zero SSA budget must trip during a deep read"
+        );
+        assert!(
+            result.values.is_empty(),
+            "a timed-out read degrades to Opaque"
         );
     }
 

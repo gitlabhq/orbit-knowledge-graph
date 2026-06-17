@@ -189,7 +189,13 @@ mod tests {
         code: &str,
     ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         CDsl::spec()
-            .parse_full_collect(code.as_bytes(), "test.c", Language::C, &Tracer::new(false))
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.c",
+                Language::C,
+                &Tracer::new(false),
+                Default::default(),
+            )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
                 imports: r.imports,
