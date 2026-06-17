@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
-use treesitter_visit::{LanguageExt, SupportLang};
+use treesitter_visit::SupportLang;
 
 /// Groups of languages that can resolve symbols across each other's
 /// files. Languages in the same family share a single `CodeGraph`
@@ -90,31 +90,25 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Parse source with tree-sitter. Panics if the language has no grammar.
+            /// Parse source with tree-sitter, optionally bounded by a per-file
+            /// `deadline`. Returns `Err` if the language has no tree-sitter
+            /// grammar or the parse was aborted (deadline/stall).
             pub fn parse_ast(
                 &self,
                 code: &str,
-            ) -> treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>> {
-                self.to_support_lang()
-                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"))
-                    .ast_grep(code)
-            }
-
-            /// Parse with a [`treesitter_visit::ParseGuard`] (per-file deadline).
-            /// Returns `Err` when the parse is aborted. Panics if the language
-            /// has no grammar.
-            pub fn parse_ast_with_guard(
-                &self,
-                code: &str,
-                guard: &treesitter_visit::ParseGuard,
+                deadline: Option<std::time::Instant>,
             ) -> Result<
                 treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
                 String,
             > {
                 let lang = self
                     .to_support_lang()
-                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"));
-                treesitter_visit::Root::try_new_with_guard(code, lang, guard)
+                    .ok_or_else(|| format!("{self} has no tree-sitter grammar"))?;
+                let mut guard = treesitter_visit::ParseGuard::default();
+                if let Some(d) = deadline {
+                    guard = guard.with_deadline(d);
+                }
+                treesitter_visit::Root::try_new_with_guard(code, lang, &guard)
             }
         }
     };

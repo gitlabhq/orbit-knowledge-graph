@@ -605,12 +605,8 @@ impl LanguageSpec {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
         let deadline = || per_phase.map(|t| std::time::Instant::now() + t);
 
-        let guard = match deadline() {
-            Some(d) => treesitter_visit::ParseGuard::default().with_deadline(d),
-            None => treesitter_visit::ParseGuard::default(),
-        };
         let ast = language
-            .parse_ast_with_guard(source_str, &guard)
+            .parse_ast(source_str, deadline())
             .map_err(|detail| ParseFullError::Aborted(format!("parse: {detail}")))?;
         let root = ast.root();
         let sep = language.fqn_separator();
