@@ -18,8 +18,8 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
 
-use crate::checkpoint::WriteDurability;
 use crate::destination::{BatchWriter, DestinationError};
+use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
 pub(crate) struct ClickHouseBatchWriter {

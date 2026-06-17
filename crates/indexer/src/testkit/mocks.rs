@@ -148,7 +148,7 @@ impl Destination for MockDestination {
     async fn new_batch_writer(
         &self,
         _table: &str,
-        _durability: crate::checkpoint::WriteDurability,
+        _durability: crate::durability::WriteDurability,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
         Ok(Box::new(MockBatchWriter {
             writes: self.batch_writes.clone(),

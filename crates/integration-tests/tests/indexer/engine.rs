@@ -15,9 +15,9 @@ use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, NatsConfiguration, SubscriptionConfig,
 };
 use gkg_utils::arrow::ArrowUtils;
-use indexer::checkpoint::WriteDurability;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
+use indexer::durability::WriteDurability;
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;

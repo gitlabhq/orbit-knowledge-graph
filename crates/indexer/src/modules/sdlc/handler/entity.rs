@@ -9,14 +9,13 @@ use uuid::Uuid;
 
 use crate::analytics::IndexingAnalytics;
 use crate::checkpoint::{Checkpoint, CheckpointStore, namespace_position_key};
+use crate::durability::RunDurability;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::metrics::SdlcMetrics;
 use crate::modules::sdlc::observer::SdlcOtelObserver;
 use crate::modules::sdlc::partitioning::{PartitionAssignment, PartitionStrategy};
-use crate::modules::sdlc::pipeline::{
-    Pipeline, PipelineContext, PipelineStats, RunDurability, WindowBounds,
-};
+use crate::modules::sdlc::pipeline::{Pipeline, PipelineContext, PipelineStats, WindowBounds};
 use crate::modules::sdlc::plan::{
     Plan, PreparedQuery, TransformSpec, TraversalPathFilter, WatermarkFilter,
 };

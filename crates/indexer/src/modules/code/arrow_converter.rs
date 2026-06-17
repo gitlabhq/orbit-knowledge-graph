@@ -849,7 +849,7 @@ impl BufferedClickHouseSink {
             let dest = self.destination.clone();
             handles.push(tokio::spawn(async move {
                 let writer = dest
-                    .new_batch_writer(&table, crate::checkpoint::WriteDurability::FireAndForget)
+                    .new_batch_writer(&table, crate::durability::WriteDurability::FireAndForget)
                     .await
                     .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
                 writer

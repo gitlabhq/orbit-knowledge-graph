@@ -5,8 +5,8 @@ use clickhouse_client::{ArrowClickHouseClient, ClickHouseConfigurationExt};
 use gkg_server_config::ClickHouseConfiguration;
 
 use super::batch_writer::ClickHouseBatchWriter;
-use crate::checkpoint::WriteDurability;
 use crate::destination::{BatchWriter, Destination, DestinationError};
+use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
 pub struct ClickHouseDestination {

@@ -7,8 +7,9 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::NamespaceDeletionStore;
-use crate::checkpoint::{CheckpointStore, WriteDurability};
+use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::TIMESTAMP_FORMAT;
+use crate::durability::WriteDurability;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
@@ -248,7 +249,8 @@ mod tests {
     };
     use crate::testkit::mocks::MockNatsServices;
 
-    use crate::checkpoint::{Checkpoint, CheckpointError, WriteDurability};
+    use crate::checkpoint::{Checkpoint, CheckpointError};
+    use crate::durability::WriteDurability;
     use crate::nats::{NatsError, NatsServices};
     use crate::types::{Envelope, Subscription};
 

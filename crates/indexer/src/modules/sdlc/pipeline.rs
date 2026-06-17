@@ -21,7 +21,8 @@ use super::datalake::{DatalakeQuery, ScanStats, is_arrow_string_overflow};
 use super::metrics::SdlcMetrics;
 use super::plan::{Cursor, CursorFilter, Plan, PreparedQuery};
 use super::transform::{BlockTransform, TransformRegistry};
-use crate::checkpoint::{Checkpoint, CheckpointStore, WriteDurability};
+use crate::checkpoint::{Checkpoint, CheckpointStore};
+use crate::durability::{RunDurability, WriteDurability};
 use gkg_server_config::DatalakeRetryConfig;
 
 const MAX_RETRIES: u32 = 3;
@@ -489,29 +490,6 @@ impl WindowBounds {
     }
 }
 
-/// Page and completion durability invert by mode: a full load re-pulls lost pages but must persist
-/// completion; an incremental must persist pages (the watermark advances, no NATS retry).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::modules::sdlc) struct RunDurability {
-    pub page: WriteDurability,
-    pub completion: WriteDurability,
-}
-
-impl RunDurability {
-    pub fn for_mode(mode: IndexingMode) -> Self {
-        match mode {
-            IndexingMode::Full => Self {
-                page: WriteDurability::FireAndForget,
-                completion: WriteDurability::Durable,
-            },
-            IndexingMode::Incremental => Self {
-                page: WriteDurability::Durable,
-                completion: WriteDurability::FireAndForget,
-            },
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::plan::{TransformSpec, Transformation};
@@ -731,17 +709,6 @@ mod tests {
         ) -> Result<(), CheckpointError> {
             Ok(())
         }
-    }
-
-    #[test]
-    fn run_durability_inverts_page_and_completion() {
-        let full = RunDurability::for_mode(IndexingMode::Full);
-        assert_eq!(full.page, WriteDurability::FireAndForget);
-        assert_eq!(full.completion, WriteDurability::Durable);
-
-        let incremental = RunDurability::for_mode(IndexingMode::Incremental);
-        assert_eq!(incremental.page, WriteDurability::Durable);
-        assert_eq!(incremental.completion, WriteDurability::FireAndForget);
     }
 
     #[tokio::test]

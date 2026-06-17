@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::checkpoint::WriteDurability;
+use crate::durability::WriteDurability;
 
 /// Underlying error from implementations.
 pub type UnderlyingError = Box<dyn StdError + Send + Sync>;
