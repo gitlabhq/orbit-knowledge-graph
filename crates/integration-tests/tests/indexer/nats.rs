@@ -6,13 +6,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
 use gkg_server_config::NatsConfiguration;
 use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
+use indexer::indexing_status::INDEXING_PROGRESS_BUCKET;
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::nats::versioning::{NATS_VERSIONER, NatsVersioner, cleanup_version};
 use indexer::types::{Envelope, Event, Subscription};
+use nats_client::{KvBucketConfig, KvPutOptions};
 use serde::{Deserialize, Serialize};
 use testcontainers::ImageExt;
 use testcontainers::core::{ContainerPort, WaitFor};
@@ -658,6 +661,53 @@ async fn cleanup_version_deletes_streams_and_kv_buckets() {
             "KV bucket {name} should have been deleted by cleanup_version",
         );
     }
+}
+
+#[tokio::test]
+async fn broker_kv_path_targets_versioned_bucket() {
+    let (_container, url) = start_nats_container().await;
+    let broker = connect_broker(&default_config(&url)).await;
+
+    broker
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await
+        .expect("ensure bucket");
+    broker
+        .kv_put(
+            INDEXING_PROGRESS_BUCKET,
+            "status.1.100",
+            Bytes::from_static(b"payload"),
+            KvPutOptions::default(),
+        )
+        .await
+        .expect("kv_put");
+
+    let round_trip = broker
+        .kv_get(INDEXING_PROGRESS_BUCKET, "status.1.100")
+        .await
+        .expect("kv_get")
+        .expect("entry present");
+    assert_eq!(round_trip.value, Bytes::from_static(b"payload"));
+
+    let jetstream = jetstream_client(&url).await;
+    let versioned = jetstream
+        .get_key_value(&NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET))
+        .await
+        .expect("versioned bucket should exist");
+    let entry = versioned
+        .get("status.1.100")
+        .await
+        .expect("get from versioned bucket")
+        .expect("value present in versioned bucket");
+    assert_eq!(entry, Bytes::from_static(b"payload"));
+
+    assert!(
+        jetstream
+            .get_key_value(INDEXING_PROGRESS_BUCKET)
+            .await
+            .is_err(),
+        "broker must not create the unversioned bucket",
+    );
 }
 
 #[tokio::test]

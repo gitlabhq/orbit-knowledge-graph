@@ -14,7 +14,6 @@ use gkg_server::proto::{
     get_graph_status_response,
 };
 use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
-use indexer::nats::versioning::NATS_VERSIONER;
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
 
@@ -204,11 +203,7 @@ fn seed_indexing_progress(
 ) {
     let key = format!("status.{}", dotted_traversal(traversal_path));
     let payload = serde_json::to_vec(progress).expect("serialize progress");
-    mock_kv.set(
-        &NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET),
-        &key,
-        Bytes::from(payload),
-    );
+    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
 }
 
 fn seed_entity_progress(
@@ -219,11 +214,7 @@ fn seed_entity_progress(
 ) {
     let key = format!("status.{}.{entity_kind}", dotted_traversal(traversal_path));
     let payload = serde_json::to_vec(progress).expect("serialize progress");
-    mock_kv.set(
-        &NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET),
-        &key,
-        Bytes::from(payload),
-    );
+    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
 }
 
 fn extract_structured(response: GetGraphStatusResponse) -> StructuredGraphStatus {
