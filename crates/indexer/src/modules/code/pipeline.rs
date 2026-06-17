@@ -431,6 +431,28 @@ impl CodeIndexingPipeline {
             self.metrics.record_language_timing(lt);
         }
 
+        // Name the few genuinely-slow files so an engineer can open them; the
+        // per-phase CPU distribution lives in the phase_cpu_duration histogram.
+        const SLOW_FILE_LOG_THRESHOLD_MS: f64 = 500.0;
+        const SLOW_FILE_LOG_MAX: usize = 10;
+        for entry in result
+            .stats
+            .slowest_files
+            .iter()
+            .filter(|e| e.total_ms >= SLOW_FILE_LOG_THRESHOLD_MS)
+            .take(SLOW_FILE_LOG_MAX)
+        {
+            info!(
+                path = %entry.path,
+                language = %entry.language,
+                size_bytes = entry.size_bytes,
+                parse_ms = entry.parse_ms,
+                resolve_ms = entry.resolve_ms,
+                total_ms = entry.total_ms,
+                "slow file during code indexing"
+            );
+        }
+
         observer.record_source_bytes(result.stats.bytes_discovered);
         observer.files_processed(
             result.stats.files_discovered as u64,
