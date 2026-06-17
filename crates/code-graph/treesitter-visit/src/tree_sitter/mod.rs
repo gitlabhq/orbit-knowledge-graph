@@ -7,8 +7,6 @@ use crate::node::{KindId, Position, Root};
 use crate::source::{Doc, SgNode};
 use std::borrow::Cow;
 use std::num::NonZero;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -68,8 +66,6 @@ pub struct ParseGuard {
     pub max_stall: u64,
     /// Abort once this instant passes (per-file wall-clock budget).
     pub deadline: Option<Instant>,
-    /// Abort when an external watchdog sets this flag (the indexer sentinel).
-    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Default for ParseGuard {
@@ -77,7 +73,6 @@ impl Default for ParseGuard {
         Self {
             max_stall: DEFAULT_MAX_STALL,
             deadline: None,
-            cancel: None,
         }
     }
 }
@@ -87,11 +82,6 @@ impl ParseGuard {
         self.deadline = Some(deadline);
         self
     }
-
-    pub fn with_cancel(mut self, cancel: Arc<AtomicBool>) -> Self {
-        self.cancel = Some(cancel);
-        self
-    }
 }
 
 impl<L: LanguageExt> StrDoc<L> {
@@ -99,9 +89,9 @@ impl<L: LanguageExt> StrDoc<L> {
         Self::try_new_with_guard(src, lang, &ParseGuard::default())
     }
 
-    /// Parse source, aborting if the [`ParseGuard`] trips: a stall, the
-    /// wall-clock deadline, or an externally-set cancel flag. An aborted parse
-    /// returns [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
+    /// Parse source, aborting if the [`ParseGuard`] trips: a stall or the
+    /// wall-clock deadline. An aborted parse returns
+    /// [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
     pub fn try_new_with_guard(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
@@ -113,19 +103,11 @@ impl<L: LanguageExt> StrDoc<L> {
 
                 let max_stall = guard.max_stall;
                 let deadline = guard.deadline;
-                let cancel = guard.cancel.clone();
                 let stall_count = AtomicU64::new(0);
                 let last_offset = AtomicU64::new(u64::MAX);
                 let ticks = AtomicU64::new(0);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
-                    // Watchdog cancellation (e.g. the per-file sentinel).
-                    if let Some(flag) = &cancel
-                        && flag.load(Ordering::Relaxed)
-                    {
-                        tracing::debug!("tree-sitter parse aborted: cancelled by watchdog");
-                        return ControlFlow::Break(());
-                    }
                     // Wall-clock deadline, sampled to keep the callback cheap.
                     if let Some(deadline) = deadline
                         && ticks
