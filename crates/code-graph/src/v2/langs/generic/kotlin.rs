@@ -385,6 +385,7 @@ mod tests {
                 "Test.kt",
                 crate::v2::config::Language::Kotlin,
                 &Tracer::new(false),
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

@@ -215,6 +215,7 @@ mod tests {
                 "test.cpp",
                 Language::Cpp,
                 &Tracer::new(false),
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -273,6 +274,7 @@ mod tests {
                 "test.cpp",
                 Language::Cpp,
                 &Tracer::new(false),
+                Default::default(),
             )
             .unwrap();
         let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();

@@ -42,7 +42,7 @@ pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
-use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
+use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::sentinel;
 
@@ -324,6 +324,9 @@ fn parse_rust_files_with_workspaces(
             .zip(workspace_files.par_iter())
             .map(|(workspace, file)| {
                 let guard = sentinel.map(|s| s.file_start(file));
+                if let Ok(meta) = std::fs::metadata(to_absolute_path(root_path, file)) {
+                    crate::v2::pipeline::breadcrumb_large_file(file, meta.len(), "rust");
+                }
                 let t_file = std::time::Instant::now();
                 let result = catch_rust_file_panic(file, || {
                     parse_workspace_file(file, root_path, &workspace)
@@ -333,7 +336,7 @@ fn parse_rust_files_with_workspaces(
                     return Err((
                         file.to_string(),
                         AnalyzerError::skip(
-                            FileSkip::TimeoutSentinel,
+                            FileSkip::Timeout(AbortPhase::Sentinel),
                             "per-file watchdog killed analysis",
                         ),
                     ));
@@ -366,7 +369,7 @@ fn parse_rust_files_with_workspaces(
                 return Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
                 ));
@@ -406,7 +409,7 @@ fn parse_rust_files_standalone(
                 return Err((
                     file_path.to_string(),
                     AnalyzerError::skip(
-                        FileSkip::TimeoutSentinel,
+                        FileSkip::Timeout(AbortPhase::Sentinel),
                         "per-file watchdog killed analysis",
                     ),
                 ));
@@ -516,6 +519,7 @@ fn parse_rust_file_standalone(
             AnalyzerError::fault(kind, err.to_string()),
         )
     })?;
+    crate::v2::pipeline::breadcrumb_large_file(file_path, source.len() as u64, "rust");
     let file_module_parts = fallback_file_module_parts(&relative_path);
     let workspace = standalone_workspace(&relative_path, source, Path::new(root_path));
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {

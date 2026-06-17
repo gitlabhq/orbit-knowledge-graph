@@ -90,18 +90,32 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
+/// Independent per-file CPU-time budgets for the parse/walk/ssa sub-phases (`None` = unbounded).
+#[derive(Clone, Copy, Default)]
+pub struct PhaseTimeouts {
+    pub parse: Option<std::time::Duration>,
+    pub walk: Option<std::time::Duration>,
+    pub ssa: Option<std::time::Duration>,
+}
+
 /// Typed errors from `parse_full_collect`. Adding a producer means
 /// adding a variant — the consumer's `match` becomes a compile error
 /// until the new arm is handled.
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
+    /// A phase exceeded its per-file CPU budget (or the parser stalled); `phase` names which.
+    Aborted {
+        phase: crate::v2::error::AbortPhase,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for ParseFullError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidUtf8(e) => write!(f, "invalid UTF-8: {e}"),
+            Self::Aborted { phase, detail } => write!(f, "{phase} aborted: {detail}"),
         }
     }
 }
@@ -582,21 +596,28 @@ impl LanguageSpec {
     /// Parse the full AST: defs, imports, SSA, refs. Returns collected
     /// refs with reaching values resolved from SSA, but NOT cross-file
     /// resolved. Source bytes can be dropped after this returns.
+    /// Each [`PhaseTimeouts`] budget bounds its sub-phase; an exceeded phase returns [`ParseFullError::Aborted`].
     pub fn parse_full_collect(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
         tracer: &Tracer,
+        timeouts: PhaseTimeouts,
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
-        let ast = language.parse_ast(source_str);
+        let ast = language
+            .parse_ast(source_str, timeouts.parse)
+            .map_err(|detail| ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Parse,
+                detail,
+            })?;
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer, file_path);
+        let mut state = WalkFullState::new(&arena, tracer, file_path, timeouts.walk);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -629,7 +650,15 @@ impl LanguageSpec {
         });
 
         self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
+        if state.timed_out {
+            return Err(ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Walk,
+                detail: "exceeded per-file CPU budget during AST walk".to_string(),
+            });
+        }
 
+        // Arm the SSA budget at the start of reaching-def resolution.
+        state.ssa.set_budget(timeouts.ssa);
         state.ssa.seal_remaining();
         state.ssa.remove_redundant_phi_sccs();
 
@@ -757,6 +786,12 @@ impl LanguageSpec {
 
         // Pass 2: resolve SSA reaching values → CollectedRef (no callback)
         let refs = state.collect_refs(&pending_refs);
+        if state.ssa.timed_out() {
+            return Err(ParseFullError::Aborted {
+                phase: crate::v2::error::AbortPhase::Ssa,
+                detail: "exceeded per-file CPU budget during reaching-def resolution".to_string(),
+            });
+        }
 
         Ok(ParseFullResult {
             definitions: state.defs,
@@ -774,6 +809,19 @@ impl LanguageSpec {
         sep: &'static str,
         module_prefix: Option<&str>,
     ) {
+        // CPU budget tripped: bail so the walk unwinds; parse_full_collect then skips the file.
+        if state.timed_out {
+            return;
+        }
+        if state.budget.is_some_and(|b| b.expired()) {
+            tracing::warn!(
+                file_path = state.file_path,
+                "AST walk aborted: per-file CPU budget exceeded"
+            );
+            state.timed_out = true;
+            return;
+        }
+
         if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             tracing::debug!(
@@ -1444,10 +1492,17 @@ struct WalkFullState<'a> {
     in_return: bool,
     tracer: &'a Tracer,
     file_path: &'a str,
+    budget: Option<treesitter_visit::CpuBudget>,
+    timed_out: bool,
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer, file_path: &'a str) -> Self {
+    fn new(
+        arena: &'a bumpalo::Bump,
+        tracer: &'a Tracer,
+        file_path: &'a str,
+        budget: Option<std::time::Duration>,
+    ) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
         ssa.seal_block(entry);
@@ -1467,6 +1522,8 @@ impl<'a> WalkFullState<'a> {
             in_return: false,
             tracer,
             file_path,
+            budget: budget.map(treesitter_visit::CpuBudget::start),
+            timed_out: false,
         }
     }
 
@@ -1559,6 +1616,7 @@ mod tests {
             "test.py",
             Language::Python,
             &Tracer::new(false),
+            Default::default(),
         )
         .map(|r| ParsedDefs {
             definitions: r.definitions,
@@ -1606,6 +1664,7 @@ mod tests {
                 "test.py",
                 Language::Python,
                 &tracer,
+                Default::default(),
             )
             .unwrap();
 

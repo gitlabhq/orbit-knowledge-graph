@@ -90,6 +90,9 @@ engine:
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000
+        per_file_parse_timeout_ms: 100
+        per_file_walk_timeout_ms: 100
+        per_file_ssa_timeout_ms: 100
         cross_file_resolve_timeout_ms: 180000
         fetch_concurrency: 6
 

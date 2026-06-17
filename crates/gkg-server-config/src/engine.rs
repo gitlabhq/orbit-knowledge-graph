@@ -225,6 +225,18 @@ fn default_code_indexing_per_file_timeout_ms() -> u64 {
     2000
 }
 
+fn default_code_indexing_per_file_parse_timeout_ms() -> u64 {
+    100
+}
+
+fn default_code_indexing_per_file_walk_timeout_ms() -> u64 {
+    100
+}
+
+fn default_code_indexing_per_file_ssa_timeout_ms() -> u64 {
+    100
+}
+
 fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
     180_000
 }
@@ -245,6 +257,12 @@ pub struct CodeIndexingPipelineConfig {
     /// specify a different value. 0 = no global timeout.
     #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
+    #[serde(default = "default_code_indexing_per_file_parse_timeout_ms")]
+    pub per_file_parse_timeout_ms: u64,
+    #[serde(default = "default_code_indexing_per_file_walk_timeout_ms")]
+    pub per_file_walk_timeout_ms: u64,
+    #[serde(default = "default_code_indexing_per_file_ssa_timeout_ms")]
+    pub per_file_ssa_timeout_ms: u64,
     /// Wall-clock budget for the sequential cross-file resolution phase
     /// (import edges, call edges). 0 = no timeout.
     #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
@@ -264,6 +282,9 @@ impl Default for CodeIndexingPipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
+            per_file_parse_timeout_ms: default_code_indexing_per_file_parse_timeout_ms(),
+            per_file_walk_timeout_ms: default_code_indexing_per_file_walk_timeout_ms(),
+            per_file_ssa_timeout_ms: default_code_indexing_per_file_ssa_timeout_ms(),
             cross_file_resolve_timeout_ms: default_code_indexing_cross_file_resolve_timeout_ms(),
             fetch_concurrency: default_fetch_concurrency(),
         }

@@ -5,8 +5,10 @@ pub mod traversal;
 use crate::Language;
 use crate::node::{KindId, Position, Root};
 use crate::source::{Doc, SgNode};
+use cpu_time::ThreadTime;
 use std::borrow::Cow;
 use std::num::NonZero;
+use std::time::Duration;
 use thiserror::Error;
 
 pub use traversal::TsPre;
@@ -53,19 +55,55 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
-impl<L: LanguageExt> StrDoc<L> {
-    pub fn try_new(src: &str, lang: L) -> Result<Self, String> {
-        Self::try_new_with_stall_limit(src, lang, DEFAULT_MAX_STALL)
+/// Per-thread CPU-time budget (create and check on the same thread); ignores preempted time, unlike a wall-clock deadline.
+#[derive(Clone, Copy)]
+pub struct CpuBudget {
+    start: ThreadTime,
+    budget: Duration,
+}
+
+impl CpuBudget {
+    /// Begin a budget on the current thread.
+    pub fn start(budget: Duration) -> Self {
+        Self {
+            start: ThreadTime::now(),
+            budget,
+        }
     }
 
-    /// Parse source with a configurable stall limit for the progress callback.
-    /// If the parser calls the progress callback more than `max_stall` times
-    /// at the same byte offset, the parse is aborted.
-    pub(crate) fn try_new_with_stall_limit(
-        src: &str,
-        lang: L,
-        max_stall: u64,
-    ) -> Result<Self, String> {
+    /// True once this thread has spent `budget` of CPU since `start`.
+    pub fn expired(&self) -> bool {
+        self.start.elapsed() >= self.budget
+    }
+}
+
+/// Cooperative limits enforced from the parser's progress callback, the only hook into tree-sitter's uninterruptible C parse.
+#[derive(Clone)]
+pub struct ParseGuard {
+    pub max_stall: u64,
+    pub budget: Option<CpuBudget>,
+}
+
+impl Default for ParseGuard {
+    fn default() -> Self {
+        Self {
+            max_stall: DEFAULT_MAX_STALL,
+            budget: None,
+        }
+    }
+}
+
+impl ParseGuard {
+    /// Bound the parse to `budget` of CPU time on the parsing thread.
+    pub fn with_budget(mut self, budget: Duration) -> Self {
+        self.budget = Some(CpuBudget::start(budget));
+        self
+    }
+}
+
+impl<L: LanguageExt> StrDoc<L> {
+    /// Parse, aborting if the [`ParseGuard`] trips (stall or CPU budget); an abort surfaces as `Err`.
+    pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
         let ts_lang = lang.get_ts_language();
@@ -74,10 +112,20 @@ impl<L: LanguageExt> StrDoc<L> {
                 use std::ops::ControlFlow;
                 use std::sync::atomic::{AtomicU64, Ordering};
 
+                let max_stall = guard.max_stall;
+                let budget = guard.budget;
                 let stall_count = AtomicU64::new(0);
                 let last_offset = AtomicU64::new(u64::MAX);
 
                 let mut progress = |state: &tree_sitter::ParseState| {
+                    // Per-thread CPU budget.
+                    if let Some(budget) = budget
+                        && budget.expired()
+                    {
+                        tracing::warn!("tree-sitter parse aborted: CPU budget exceeded");
+                        return ControlFlow::Break(());
+                    }
+                    // Stall detection: no forward progress for too long.
                     let offset = state.current_byte_offset() as u64;
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
@@ -101,17 +149,20 @@ impl<L: LanguageExt> StrDoc<L> {
             },
             ts_lang,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            // The only error here is the progress callback breaking (budget or stall), never a syntax error; name the budget case.
+            if guard.budget.is_some_and(|b| b.expired()) {
+                "per-file CPU budget exceeded".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
         Ok(Self {
             src,
             lang,
             tree,
             kind_names,
         })
-    }
-
-    pub fn new(src: &str, lang: L) -> Self {
-        Self::try_new(src, lang).expect("Parser tree error")
     }
 }
 
@@ -346,12 +397,13 @@ pub trait LanguageExt: Language {
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {
+    /// Infallible parse with default limits; panics on failure. For tests/fuzz; production uses [`Self::try_new`].
     pub fn new<S: AsRef<str>>(src: S, lang: L) -> Self {
-        Self::try_new(src, lang).expect("should parse")
+        Self::try_new(src, lang, &ParseGuard::default()).expect("should parse")
     }
 
-    pub fn try_new<S: AsRef<str>>(src: S, lang: L) -> Result<Self, String> {
-        let doc = StrDoc::try_new(src.as_ref(), lang)?;
+    pub fn try_new<S: AsRef<str>>(src: S, lang: L, guard: &ParseGuard) -> Result<Self, String> {
+        let doc = StrDoc::try_new(src.as_ref(), lang, guard)?;
         Ok(Root { doc })
     }
 
@@ -366,13 +418,12 @@ impl<L: LanguageExt> crate::Root<StrDoc<L>> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "builtin-parser")]
     use super::StrDoc;
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Reproduce the stall detection logic from try_new_with_stall_limit and verify
-    /// it fires correctly. This tests the algorithm directly rather than relying on
-    /// tree-sitter's internal behavior which varies between debug and release builds.
+    /// Verify the stall-detection logic directly, independent of tree-sitter's build-varying internals.
     #[test]
     fn test_stall_detection_logic() {
         let max_stall: u64 = 3;
@@ -416,11 +467,45 @@ mod tests {
     #[cfg(feature = "builtin-parser")]
     #[test]
     fn test_default_stall_limit_allows_valid_parse() {
-        let result = StrDoc::try_new("def f(x):\n    return x\n", crate::SupportLang::Python);
+        let result = StrDoc::try_new(
+            "def f(x):\n    return x\n",
+            crate::SupportLang::Python,
+            &super::ParseGuard::default(),
+        );
         assert!(
             result.is_ok(),
             "Valid Python should parse: {:?}",
             result.err()
         );
+    }
+
+    #[cfg(feature = "builtin-parser")]
+    #[test]
+    fn zero_cpu_budget_aborts_large_parse() {
+        use super::ParseGuard;
+        use std::time::Duration;
+        // Large enough that tree-sitter invokes the progress callback.
+        let src = "def f(x):\n    return x + 1\n".repeat(50_000);
+        let guard = ParseGuard::default().with_budget(Duration::ZERO);
+        let result = StrDoc::try_new(&src, crate::SupportLang::Python, &guard);
+        assert_eq!(
+            result.err().as_deref(),
+            Some("per-file CPU budget exceeded"),
+            "a zero CPU budget must abort with the budget message"
+        );
+    }
+
+    #[cfg(feature = "builtin-parser")]
+    #[test]
+    fn ample_cpu_budget_allows_parse() {
+        use super::ParseGuard;
+        use std::time::Duration;
+        let guard = ParseGuard::default().with_budget(Duration::from_secs(300));
+        let result = StrDoc::try_new(
+            "def f(x):\n    return x\n",
+            crate::SupportLang::Python,
+            &guard,
+        );
+        assert!(result.is_ok(), "an ample CPU budget must not abort");
     }
 }

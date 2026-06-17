@@ -47,6 +47,7 @@ labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev 
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
+cpu-time = "1.0.0"
 cargo-util-schemas = "0.13.0"
 cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"

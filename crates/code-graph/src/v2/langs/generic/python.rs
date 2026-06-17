@@ -459,6 +459,7 @@ mod tests {
                 "test.py",
                 crate::v2::config::Language::Python,
                 &Tracer::new(false),
+                Default::default(),
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,
@@ -563,6 +564,7 @@ mod tests {
                 "test.py",
                 crate::v2::config::Language::Python,
                 &tracer,
+                Default::default(),
             )
             .unwrap();
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();

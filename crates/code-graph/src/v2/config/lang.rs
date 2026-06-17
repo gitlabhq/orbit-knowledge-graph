@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
-use treesitter_visit::{LanguageExt, SupportLang};
+use treesitter_visit::SupportLang;
 
 /// Groups of languages that can resolve symbols across each other's
 /// files. Languages in the same family share a single `CodeGraph`
@@ -90,14 +90,23 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Parse source with tree-sitter. Panics if the language has no grammar.
+            /// Parse with tree-sitter, optionally CPU-budgeted; `Err` if there is no grammar or the parse aborted.
             pub fn parse_ast(
                 &self,
                 code: &str,
-            ) -> treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>> {
-                self.to_support_lang()
-                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"))
-                    .ast_grep(code)
+                budget: Option<std::time::Duration>,
+            ) -> Result<
+                treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
+                String,
+            > {
+                let lang = self
+                    .to_support_lang()
+                    .ok_or_else(|| format!("{self} has no tree-sitter grammar"))?;
+                let mut guard = treesitter_visit::ParseGuard::default();
+                if let Some(b) = budget {
+                    guard = guard.with_budget(b);
+                }
+                treesitter_visit::Root::try_new(code, lang, &guard)
             }
         }
     };
