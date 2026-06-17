@@ -145,7 +145,7 @@ impl Default for MockDestination {
 
 #[async_trait]
 impl Destination for MockDestination {
-    async fn new_batch_writer(
+    async fn new_batch_writer_with_durability(
         &self,
         _table: &str,
         _durability: crate::durability::WriteDurability,

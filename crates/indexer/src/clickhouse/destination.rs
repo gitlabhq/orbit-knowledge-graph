@@ -29,7 +29,7 @@ impl ClickHouseDestination {
 
 #[async_trait]
 impl Destination for ClickHouseDestination {
-    async fn new_batch_writer(
+    async fn new_batch_writer_with_durability(
         &self,
         table: &str,
         durability: WriteDurability,

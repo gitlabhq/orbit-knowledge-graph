@@ -944,7 +944,7 @@ struct FailingDestination;
 
 #[async_trait]
 impl Destination for FailingDestination {
-    async fn new_batch_writer(
+    async fn new_batch_writer_with_durability(
         &self,
         _table: &str,
         _durability: indexer::durability::WriteDurability,

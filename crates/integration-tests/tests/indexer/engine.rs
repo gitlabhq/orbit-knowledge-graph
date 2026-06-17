@@ -74,7 +74,7 @@ impl Handler for TestHandler {
 
         let writer = context
             .destination
-            .new_batch_writer(TABLE, WriteDurability::Durable)
+            .new_batch_writer_with_durability(TABLE, WriteDurability::Durable)
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 
@@ -400,7 +400,7 @@ impl Handler for PanickingHandler {
 
         let writer = context
             .destination
-            .new_batch_writer(TABLE, WriteDurability::Durable)
+            .new_batch_writer_with_durability(TABLE, WriteDurability::Durable)
             .await
             .map_err(|error| HandlerError::Processing(error.to_string()))?;
 

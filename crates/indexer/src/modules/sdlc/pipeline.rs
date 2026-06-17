@@ -400,7 +400,7 @@ impl Pipeline {
 
             let table = outputs[index].clone();
             let writer = destination
-                .new_batch_writer(&table, durability)
+                .new_batch_writer_with_durability(&table, durability)
                 .await
                 .map_err(|err| {
                     HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
