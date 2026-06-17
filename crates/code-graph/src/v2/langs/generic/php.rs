@@ -529,6 +529,7 @@ mod tests {
                 "Test.php",
                 crate::v2::config::Language::Php,
                 &Tracer::new(false),
+                None,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

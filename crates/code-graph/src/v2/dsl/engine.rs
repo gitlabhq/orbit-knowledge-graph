@@ -100,8 +100,8 @@ const WALK_DEADLINE_SAMPLE_INTERVAL: u64 = 1024;
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
-    /// The parse or AST walk was aborted by the per-file guard (deadline,
-    /// stall, or cancellation). The file is skipped, not faulted.
+    /// A parse phase exceeded its per-file deadline (or the parser stalled).
+    /// The file is skipped, not faulted; the detail names the phase.
     Aborted(String),
 }
 
@@ -590,21 +590,11 @@ impl LanguageSpec {
     /// Parse the full AST: defs, imports, SSA, refs. Returns collected
     /// refs with reaching values resolved from SSA, but NOT cross-file
     /// resolved. Source bytes can be dropped after this returns.
+    /// Parse a file into defs/imports/refs. `per_phase`, when set, bounds each
+    /// phase (tree-sitter parse, AST walk, SSA resolution) with that wall-clock
+    /// budget measured from the phase's own start; an exceeded phase returns
+    /// [`ParseFullError::Aborted`] naming it. `None` = no deadline.
     pub fn parse_full_collect(
-        &self,
-        source: &[u8],
-        file_path: &str,
-        language: Language,
-        tracer: &Tracer,
-    ) -> Result<ParseFullResult, ParseFullError> {
-        self.parse_full_collect_with_timeout(source, file_path, language, tracer, None)
-    }
-
-    /// Like [`Self::parse_full_collect`] but bounds each phase (parse, AST walk,
-    /// SSA resolution) with `per_phase` as a wall-clock budget measured from
-    /// that phase's own start, returning [`ParseFullError::Aborted`] (naming the
-    /// phase) on a miss. `None` = no deadline.
-    pub fn parse_full_collect_with_timeout(
         &self,
         source: &[u8],
         file_path: &str,
@@ -1636,6 +1626,7 @@ mod tests {
             "test.py",
             Language::Python,
             &Tracer::new(false),
+            None,
         )
         .map(|r| ParsedDefs {
             definitions: r.definitions,
@@ -1683,6 +1674,7 @@ mod tests {
                 "test.py",
                 Language::Python,
                 &tracer,
+                None,
             )
             .unwrap();
 

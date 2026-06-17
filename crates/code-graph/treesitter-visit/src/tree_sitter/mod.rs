@@ -372,16 +372,6 @@ pub trait LanguageExt: Language {
         crate::Root::new(source, self.clone())
     }
 
-    /// Like [`Self::ast_grep`] but aborts the parse when `guard` trips (stall,
-    /// deadline, or cancellation), returning `Err` instead of panicking.
-    fn ast_grep_with_guard<S: AsRef<str>>(
-        &self,
-        source: S,
-        guard: &ParseGuard,
-    ) -> Result<crate::Root<StrDoc<Self>>, String> {
-        crate::Root::try_new_with_guard(source, self.clone(), guard)
-    }
-
     /// tree sitter language to parse the source
     fn get_ts_language(&self) -> TSLanguage;
 

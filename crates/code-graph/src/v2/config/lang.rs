@@ -100,9 +100,9 @@ macro_rules! define_languages {
                     .ast_grep(code)
             }
 
-            /// Parse with a [`treesitter_visit::ParseGuard`] (per-file deadline /
-            /// cancellation). Returns `Err` when the parse is aborted. Panics if
-            /// the language has no grammar.
+            /// Parse with a [`treesitter_visit::ParseGuard`] (per-file deadline).
+            /// Returns `Err` when the parse is aborted. Panics if the language
+            /// has no grammar.
             pub fn parse_ast_with_guard(
                 &self,
                 code: &str,
@@ -111,9 +111,10 @@ macro_rules! define_languages {
                 treesitter_visit::Root<treesitter_visit::tree_sitter::StrDoc<SupportLang>>,
                 String,
             > {
-                self.to_support_lang()
-                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"))
-                    .ast_grep_with_guard(code, guard)
+                let lang = self
+                    .to_support_lang()
+                    .unwrap_or_else(|| panic!("{self} has no tree-sitter grammar"));
+                treesitter_visit::Root::try_new_with_guard(code, lang, guard)
             }
         }
     };

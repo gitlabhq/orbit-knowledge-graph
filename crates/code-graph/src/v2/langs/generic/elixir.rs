@@ -399,6 +399,7 @@ mod tests {
                 "test.ex",
                 Language::Elixir,
                 &Tracer::new(false),
+                None,
             )
             .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.ex", format!("{e:?}")))
     }

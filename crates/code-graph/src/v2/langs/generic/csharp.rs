@@ -363,6 +363,7 @@ mod tests {
                 "Test.cs",
                 crate::v2::config::Language::CSharp,
                 &Tracer::new(false),
+                None,
             )
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

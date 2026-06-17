@@ -1332,7 +1332,7 @@ impl FamilyPipeline {
                 breadcrumb_large_file(&f.path, source.len() as u64, f.language.as_ref());
 
                 let t_parse = std::time::Instant::now();
-                let result = match lctx.spec.parse_full_collect_with_timeout(
+                let result = match lctx.spec.parse_full_collect(
                     &source,
                     &f.path,
                     f.language,
