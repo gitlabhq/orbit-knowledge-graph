@@ -18,6 +18,7 @@ bumpalo = { workspace = true }
 cargo-platform = { workspace = true }
 cargo-util-schemas = { workspace = true }
 cargo_metadata = { workspace = true }
+cpu-time = { workspace = true }
 crossbeam-channel = "0.5"
 either = { workspace = true }
 globset = { workspace = true }

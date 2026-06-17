@@ -538,7 +538,13 @@ pub struct PipelineConfig {
     /// uses this to send NATS progress heartbeats so the message is not
     /// redelivered during long pipeline runs.
     pub on_progress: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Called once per successfully-parsed file with its per-phase CPU time, so
+    /// the consumer can record a distribution. Fires from parallel workers.
+    pub on_phase_cpu: Option<PhaseCpuObserver>,
 }
+
+/// Observer for per-file parse/walk/ssa CPU time. See [`PipelineConfig::on_phase_cpu`].
+pub type PhaseCpuObserver = Arc<dyn Fn(Language, crate::v2::dsl::engine::PhaseCpu) + Send + Sync>;
 
 impl Default for PipelineConfig {
     fn default() -> Self {
@@ -555,6 +561,7 @@ impl Default for PipelineConfig {
             cross_file_resolve_timeout: None,
             emit_file_inventory_graph: false,
             on_progress: None,
+            on_phase_cpu: None,
         }
     }
 }
@@ -1360,6 +1367,10 @@ impl FamilyPipeline {
                 };
                 let parse_ms = t_parse.elapsed().as_secs_f64() * 1000.0;
 
+                if let Some(cb) = &ctx.config.on_phase_cpu {
+                    cb(f.language, result.phase_cpu);
+                }
+
                 let ext = f
                     .path
                     .rsplit_once('.')
@@ -1967,6 +1978,46 @@ mod tests {
             result.skipped[0].kind
         );
         assert_eq!(result.skipped[0].path, "main.py");
+    }
+
+    #[test]
+    fn on_phase_cpu_fires_once_per_parsed_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("a.py"), "def f():\n    return 1\n").unwrap();
+        std::fs::write(root.join("b.py"), "def g():\n    return 2\n").unwrap();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_cb = calls.clone();
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![
+                FileInventoryEntry {
+                    path: "a.py".into(),
+                    size: 22,
+                },
+                FileInventoryEntry {
+                    path: "b.py".into(),
+                    size: 22,
+                },
+            ]),
+            PipelineConfig {
+                on_phase_cpu: Some(Arc::new(move |_lang, _cpu| {
+                    calls_cb.fetch_add(1, Ordering::Relaxed);
+                })),
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            2,
+            "on_phase_cpu fires once per successfully-parsed file"
+        );
     }
 
     #[test]

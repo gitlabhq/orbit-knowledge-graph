@@ -10,13 +10,14 @@ pub mod sink;
 pub mod trace;
 pub mod types;
 
+pub use dsl::engine::PhaseCpu;
 pub use error::{
     AbortPhase, AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
 };
 pub use pipeline::{
     BatchTx, CancellationToken, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
     GenericPipeline, GraphStatsCounters, LanguageContext, LanguagePipeline, LanguageTimings,
-    PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
+    PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_family, dispatch_language};
 pub use sink::{BatchSink, CollectSink, GraphConverter, NullSink, SinkError};

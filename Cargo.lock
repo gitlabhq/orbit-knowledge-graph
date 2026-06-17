@@ -2131,6 +2131,7 @@ dependencies = [
  "cargo-platform",
  "cargo-util-schemas",
  "cargo_metadata",
+ "cpu-time",
  "crossbeam-channel",
  "either",
  "gkg-utils",

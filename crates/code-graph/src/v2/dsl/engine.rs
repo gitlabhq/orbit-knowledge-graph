@@ -88,6 +88,15 @@ pub struct ParseFullResult {
     /// After graph finalize, the pipeline resolves these targets and
     /// patches the reaching values.
     pub unresolved_aliases: Vec<(usize, String)>,
+    pub phase_cpu: PhaseCpu,
+}
+
+/// Per-thread CPU time spent in each bounded parse sub-phase of one file.
+#[derive(Clone, Copy, Default)]
+pub struct PhaseCpu {
+    pub parse: std::time::Duration,
+    pub walk: std::time::Duration,
+    pub ssa: std::time::Duration,
 }
 
 /// Independent per-file CPU-time budgets for the parse/walk/ssa sub-phases (`None` = unbounded).
@@ -607,12 +616,14 @@ impl LanguageSpec {
     ) -> Result<ParseFullResult, ParseFullError> {
         let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
+        let parse_start = cpu_time::ThreadTime::now();
         let ast = language
             .parse_ast(source_str, timeouts.parse)
             .map_err(|detail| ParseFullError::Aborted {
                 phase: crate::v2::error::AbortPhase::Parse,
                 detail,
             })?;
+        let parse_cpu = parse_start.elapsed();
         let root = ast.root();
         let sep = language.fqn_separator();
 
@@ -649,6 +660,7 @@ impl LanguageSpec {
                 .join(sep)
         });
 
+        let walk_start = cpu_time::ThreadTime::now();
         self.walk_full(&root, &mut state, sep, module_prefix.as_deref());
         if state.timed_out {
             return Err(ParseFullError::Aborted {
@@ -656,7 +668,9 @@ impl LanguageSpec {
                 detail: "exceeded per-file CPU budget during AST walk".to_string(),
             });
         }
+        let walk_cpu = walk_start.elapsed();
 
+        let ssa_start = cpu_time::ThreadTime::now();
         // Arm the SSA budget at the start of reaching-def resolution.
         state.ssa.set_budget(timeouts.ssa);
         state.ssa.seal_remaining();
@@ -792,6 +806,7 @@ impl LanguageSpec {
                 detail: "exceeded per-file CPU budget during reaching-def resolution".to_string(),
             });
         }
+        let ssa_cpu = ssa_start.elapsed();
 
         Ok(ParseFullResult {
             definitions: state.defs,
@@ -799,6 +814,11 @@ impl LanguageSpec {
             refs,
             inferred_returns,
             unresolved_aliases,
+            phase_cpu: PhaseCpu {
+                parse: parse_cpu,
+                walk: walk_cpu,
+                ssa: ssa_cpu,
+            },
         })
     }
 

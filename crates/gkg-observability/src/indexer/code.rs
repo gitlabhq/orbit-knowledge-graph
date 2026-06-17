@@ -2,7 +2,7 @@
 //! per-stage errors).
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY_SLOW, MEMORY_BYTES};
+use crate::buckets::{LATENCY_FAST_FINE, LATENCY_SLOW, MEMORY_BYTES};
 
 pub mod labels {
     pub const OUTCOME: &str = "outcome";
@@ -176,6 +176,18 @@ pub const LANGUAGE_PHASE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     DOMAIN,
 );
 
+pub const FILE_PHASE_CPU_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.indexer.code.file.phase_cpu_duration",
+    "Per-file CPU time in each bounded parse sub-phase (the phases the per-file CPU \
+     budgets bound). One observation per successfully-parsed file. Labels: language, \
+     phase (parse, walk, ssa). Aborted files appear in `files.skipped{reason=timeout_*}` \
+     instead, so this measures the surviving-file distribution used to size the budgets.",
+    Some("s"),
+    &[labels::LANGUAGE, labels::PHASE],
+    LATENCY_FAST_FINE,
+    DOMAIN,
+);
+
 pub const LANGUAGE_FILES: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.language.files",
     "Files processed per language family.",
@@ -220,6 +232,7 @@ pub const CATALOG: &[&MetricSpec] = &[
     &ARCHIVE_ENTRIES_SKIPPED,
     &ARCHIVE_BYTES_SKIPPED,
     &LANGUAGE_PHASE_DURATION,
+    &FILE_PHASE_CPU_DURATION,
     &LANGUAGE_FILES,
     &LANGUAGE_BYTES,
     &PIPELINE_PHASE_DURATION,

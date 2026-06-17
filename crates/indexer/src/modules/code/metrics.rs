@@ -25,6 +25,7 @@ pub struct CodeMetrics {
     pub(in crate::modules::code) archive_entries_skipped: Counter<u64>,
     pub(in crate::modules::code) archive_bytes_skipped: Counter<u64>,
     pub(in crate::modules::code) language_phase_duration: Histogram<f64>,
+    pub(in crate::modules::code) file_phase_cpu_duration: Histogram<f64>,
     pub(in crate::modules::code) language_files: Counter<u64>,
     pub(in crate::modules::code) language_bytes: Counter<u64>,
     pub(in crate::modules::code) pipeline_phase_duration: Histogram<f64>,
@@ -57,6 +58,7 @@ impl CodeMetrics {
             archive_entries_skipped: code::ARCHIVE_ENTRIES_SKIPPED.build_counter_u64(meter),
             archive_bytes_skipped: code::ARCHIVE_BYTES_SKIPPED.build_counter_u64(meter),
             language_phase_duration: code::LANGUAGE_PHASE_DURATION.build_histogram_f64(meter),
+            file_phase_cpu_duration: code::FILE_PHASE_CPU_DURATION.build_histogram_f64(meter),
             language_files: code::LANGUAGE_FILES.build_counter_u64(meter),
             language_bytes: code::LANGUAGE_BYTES.build_counter_u64(meter),
             pipeline_phase_duration: code::PIPELINE_PHASE_DURATION.build_histogram_f64(meter),
@@ -153,6 +155,23 @@ impl CodeMetrics {
         ] {
             self.language_phase_duration.record(
                 duration_ms / 1000.0,
+                &[
+                    KeyValue::new(code::labels::LANGUAGE, lang.to_owned()),
+                    KeyValue::new(code::labels::PHASE, phase),
+                ],
+            );
+        }
+    }
+
+    pub(in crate::modules::code) fn record_file_phase_cpu(
+        &self,
+        language: code_graph::v2::config::Language,
+        cpu: code_graph::v2::PhaseCpu,
+    ) {
+        let lang = language.as_ref();
+        for (phase, dur) in [("parse", cpu.parse), ("walk", cpu.walk), ("ssa", cpu.ssa)] {
+            self.file_phase_cpu_duration.record(
+                dur.as_secs_f64(),
                 &[
                     KeyValue::new(code::labels::LANGUAGE, lang.to_owned()),
                     KeyValue::new(code::labels::PHASE, phase),

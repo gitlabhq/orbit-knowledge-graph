@@ -334,6 +334,11 @@ impl CodeIndexingPipeline {
                     handle.block_on(progress.notify_in_progress());
                 }));
             }));
+        let phase_cpu_metrics = self.metrics.clone();
+        let on_phase_cpu: Option<code_graph::v2::PhaseCpuObserver> =
+            Some(std::sync::Arc::new(move |language, cpu| {
+                phase_cpu_metrics.record_file_phase_cpu(language, cpu)
+            }));
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
@@ -345,6 +350,7 @@ impl CodeIndexingPipeline {
             per_file_ssa_timeout,
             cross_file_resolve_timeout,
             on_progress,
+            on_phase_cpu,
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);

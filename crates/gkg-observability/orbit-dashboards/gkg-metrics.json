@@ -448,6 +448,29 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.file.phase_cpu_duration",
+      "prom_name": "gkg_indexer_code_file_phase_cpu_duration_seconds",
+      "description": "Per-file CPU time in each bounded parse sub-phase (the phases the per-file CPU budgets bound). One observation per successfully-parsed file. Labels: language, phase (parse, walk, ssa). Aborted files appear in `files.skipped{reason=timeout_*}` instead, so this measures the surviving-file distribution used to size the budgets.",
+      "kind": "histogram_f64",
+      "unit": "s",
+      "labels": [
+        "language",
+        "phase"
+      ],
+      "buckets": [
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.file_faults",
       "prom_name": "gkg_indexer_code_file_faults_total",
       "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`.",
