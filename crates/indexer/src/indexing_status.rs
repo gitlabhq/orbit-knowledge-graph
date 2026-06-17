@@ -42,10 +42,6 @@ impl IndexingStatusStore {
         Self { kv }
     }
 
-    fn bucket() -> String {
-        crate::nats::versioning::NATS_VERSIONER.bucket(INDEXING_PROGRESS_BUCKET)
-    }
-
     /// Read-modify-write — a concurrent call on the same path could lose the
     /// previous completion fields. Safe here because NATS message deduping and
     /// per-path locks already serialize runs for a given traversal path.
@@ -158,7 +154,7 @@ impl IndexingStatusStore {
     }
 
     async fn read_key(&self, key: &str) -> Result<Option<IndexingProgress>, Error> {
-        let Some(entry) = self.kv.kv_get(&Self::bucket(), key).await? else {
+        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, key).await? else {
             return Ok(None);
         };
         let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
@@ -203,7 +199,12 @@ impl IndexingStatusStore {
 
         if let Err(error) = self
             .kv
-            .kv_put(&Self::bucket(), key, payload, KvPutOptions::default())
+            .kv_put(
+                INDEXING_PROGRESS_BUCKET,
+                key,
+                payload,
+                KvPutOptions::default(),
+            )
             .await
         {
             warn!(%error, key, "failed to write indexing progress");
