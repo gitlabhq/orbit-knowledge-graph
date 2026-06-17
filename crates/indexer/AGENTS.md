@@ -190,9 +190,10 @@ malformed or unexpected row takes down every row behind it. Prefer **log-and-ski
 (`tracing::warn!` with enough context to debug — the unexpected value plus the relevant ids — then
 `continue`) over panicking. Compute branch-dependent values in one fallible step that returns
 `Option`/`Result` and skip on the unexpected case, rather than mirroring a match in two places and
-needing an `unreachable!()` fallthrough in each (see the `contains_endpoints` helper in
-`modules/sdlc/transform/system_notes/emit.rs`, the motivating case from !1559). Panicking is only
-acceptable on a genuine programmer invariant that no production data can reach.
+needing an `unreachable!()` fallthrough in each (see the `lifecycle_edge_kind` helper in
+`modules/sdlc/transform/system_notes/emit.rs`, which returns `None` for any non-lifecycle action so
+the caller can log-and-skip instead of `unreachable!`-panicking if the outer match drifts).
+Panicking is only acceptable on a genuine programmer invariant that no production data can reach.
 
 ### New edge/action routing needs an end-to-end YAML scenario
 
@@ -202,7 +203,7 @@ just `emit.rs`/`parse.rs` unit tests. Seed the real siphon rows and assert the e
 rows — direction and `traversal_path`. Include any cross-namespace / `traversal_path` invariant
 (e.g. a child in one namespace under a parent in another) so the partition-side property is guarded
 end-to-end; unit tests that reuse one traversal path cannot catch a target-vs-source partition bug.
-See `epic_and_task_hierarchy_emit_contains_edges.yaml` (!1559).
+See `processes_work_item_parent_links.yaml` for the `WorkItem CONTAINS WorkItem` shape.
 
 ### Concurrency
 
