@@ -2,20 +2,14 @@ use std::sync::LazyLock;
 
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::DeleteStreamErrorKind;
+use futures::StreamExt;
 use tracing::{debug, info, warn};
 
-use crate::dead_letter::DEAD_LETTER_STREAM;
-use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
-use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::schema::version::SCHEMA_VERSION;
-use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(*SCHEMA_VERSION));
-
-const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
-const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
 
 pub struct NatsVersioner {
     version: u32,
@@ -57,17 +51,41 @@ impl NatsVersioner {
     }
 }
 
+const STREAM_VERSION_SUFFIX: &str = "_V";
+const KV_STREAM_PREFIX: &str = "KV_";
+const BUCKET_VERSION_SUFFIX: &str = "_v";
+
+fn is_versioned_stream(name: &str, version: u32) -> bool {
+    let suffix = format!("{STREAM_VERSION_SUFFIX}{version}");
+    name.ends_with(&suffix)
+}
+
+fn is_versioned_kv_stream(name: &str, version: u32) -> bool {
+    let suffix = format!("{BUCKET_VERSION_SUFFIX}{version}");
+    name.starts_with(KV_STREAM_PREFIX) && name.ends_with(&suffix)
+}
+
 pub async fn cleanup_version(
     nats_client: &async_nats::Client,
     version: u32,
 ) -> Result<(), CleanupError> {
-    let v = NatsVersioner::new(version);
     let jetstream = async_nats::jetstream::new(nats_client.clone());
     let mut errors: Vec<String> = Vec::new();
 
-    for base in MANAGED_STREAMS {
-        let name = v.stream(base);
-        match jetstream.delete_stream(&name).await {
+    let all_names: Vec<String> = jetstream
+        .stream_names()
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .filter_map(|r| r.ok())
+        .collect();
+
+    for name in &all_names {
+        if !is_versioned_stream(name, version) && !is_versioned_kv_stream(name, version) {
+            continue;
+        }
+
+        match jetstream.delete_stream(name).await {
             Ok(_) => info!(version, stream = %name, "deleted versioned stream"),
             Err(e)
                 if matches!(
@@ -76,21 +94,11 @@ pub async fn cleanup_version(
                         if js_err.kind() == ErrorCode::STREAM_NOT_FOUND
                 ) =>
             {
-                debug!(version, stream = %name, "versioned stream does not exist, skipping");
+                debug!(version, stream = %name, "versioned stream already deleted, skipping");
             }
             Err(e) => {
                 warn!(version, stream = %name, error = %e, "failed to delete versioned stream");
                 errors.push(format!("stream {name}: {e}"));
-            }
-        }
-    }
-
-    for base in MANAGED_BUCKETS {
-        let name = v.bucket(base);
-        match jetstream.delete_key_value(&name).await {
-            Ok(_) => info!(version, bucket = %name, "deleted versioned KV bucket"),
-            Err(e) => {
-                debug!(version, bucket = %name, error = %e, "failed to delete versioned KV bucket, will retry on next tick");
             }
         }
     }
@@ -116,53 +124,33 @@ impl std::error::Error for CleanupError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dead_letter::DEAD_LETTER_STREAM;
+    use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
+    use crate::locking::INDEXING_LOCKS_BUCKET;
+    use crate::topic::INDEXER_STREAM;
     use crate::types::Subscription;
-
-    fn check_versioner(version: u32) {
-        let v = NatsVersioner::new(version);
-
-        assert_eq!(
-            v.stream(INDEXER_STREAM),
-            format!("{INDEXER_STREAM}_V{version}")
-        );
-        assert_eq!(
-            v.stream(DEAD_LETTER_STREAM),
-            format!("{DEAD_LETTER_STREAM}_V{version}")
-        );
-
-        assert_eq!(
-            v.bucket(INDEXING_LOCKS_BUCKET),
-            format!("{INDEXING_LOCKS_BUCKET}_v{version}")
-        );
-        assert_eq!(
-            v.bucket(INDEXING_PROGRESS_BUCKET),
-            format!("{INDEXING_PROGRESS_BUCKET}_v{version}")
-        );
-
-        assert_eq!(
-            v.subject("sdlc.global.indexing.requested"),
-            format!("v{version}.sdlc.global.indexing.requested")
-        );
-        assert_eq!(
-            v.subject("code.task.indexing.requested.278964.bWFzdGVy"),
-            format!("v{version}.code.task.indexing.requested.278964.bWFzdGVy")
-        );
-        assert_eq!(v.subject("dlq.>"), format!("v{version}.dlq.>"));
-
-        assert_eq!(v.tag(), format!("v{version}"));
-    }
 
     #[test]
     fn versioner_formats_all_entity_types() {
-        check_versioner(67);
-        check_versioner(69);
+        for version in [67, 69] {
+            let v = NatsVersioner::new(version);
+
+            assert_eq!(v.stream("GKG_INDEXER"), format!("GKG_INDEXER_V{version}"));
+            assert_eq!(
+                v.bucket("indexing_locks"),
+                format!("indexing_locks_v{version}")
+            );
+            assert_eq!(
+                v.subject("sdlc.global.indexing.requested"),
+                format!("v{version}.sdlc.global.indexing.requested")
+            );
+            assert_eq!(v.tag(), format!("v{version}"));
+        }
     }
 
     #[test]
     fn global_versioner_uses_schema_version() {
         let v = *SCHEMA_VERSION;
-        check_versioner(v);
-
         assert_eq!(
             NATS_VERSIONER.stream(INDEXER_STREAM),
             format!("{INDEXER_STREAM}_V{v}")
@@ -170,25 +158,34 @@ mod tests {
     }
 
     #[test]
-    fn managed_streams_contains_all_stream_constants() {
-        let required = [INDEXER_STREAM, DEAD_LETTER_STREAM];
-        for stream in &required {
-            assert!(
-                MANAGED_STREAMS.contains(stream),
-                "MANAGED_STREAMS is missing {stream:?} — add it so cleanup_version deletes it"
-            );
-        }
+    fn is_versioned_stream_matches_gkg_streams() {
+        assert!(is_versioned_stream("GKG_INDEXER_V62", 62));
+        assert!(is_versioned_stream("GKG_DEAD_LETTERS_V62", 62));
+        assert!(!is_versioned_stream("GKG_INDEXER_V63", 62));
+        assert!(!is_versioned_stream("siphon_db", 62));
+        assert!(!is_versioned_stream("KV_indexing_locks_v62", 62));
     }
 
     #[test]
-    fn managed_buckets_contains_all_bucket_constants() {
-        let required = [INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
-        for bucket in &required {
-            assert!(
-                MANAGED_BUCKETS.contains(bucket),
-                "MANAGED_BUCKETS is missing {bucket:?} — add it so cleanup_version deletes it"
-            );
-        }
+    fn is_versioned_kv_stream_matches_kv_buckets() {
+        assert!(is_versioned_kv_stream("KV_indexing_locks_v62", 62));
+        assert!(is_versioned_kv_stream("KV_orbit_indexing_progress_v62", 62));
+        assert!(!is_versioned_kv_stream("KV_indexing_locks_v63", 62));
+        assert!(!is_versioned_kv_stream("GKG_INDEXER_V62", 62));
+        assert!(!is_versioned_kv_stream("indexing_locks_v62", 62));
+    }
+
+    #[test]
+    fn versioner_output_matches_discovery_predicates() {
+        let v = NatsVersioner::new(62);
+
+        assert!(is_versioned_stream(&v.stream(INDEXER_STREAM), 62));
+        assert!(is_versioned_stream(&v.stream(DEAD_LETTER_STREAM), 62));
+
+        let locks_kv = format!("KV_{}", v.bucket(INDEXING_LOCKS_BUCKET));
+        let progress_kv = format!("KV_{}", v.bucket(INDEXING_PROGRESS_BUCKET));
+        assert!(is_versioned_kv_stream(&locks_kv, 62));
+        assert!(is_versioned_kv_stream(&progress_kv, 62));
     }
 
     #[test]
