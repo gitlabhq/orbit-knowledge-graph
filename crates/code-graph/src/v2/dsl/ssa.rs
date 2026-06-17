@@ -174,6 +174,23 @@ impl<'a> SsaEngine<'a> {
         self.timed_out
     }
 
+    /// True once the SSA deadline has tripped (latches `timed_out`). Sampled so
+    /// the per-call cost stays negligible on the hot read path. Used by both the
+    /// reaching-def reads and the SCC pass so every sub-phase is bounded.
+    fn deadline_tripped(&mut self) -> bool {
+        if self.timed_out {
+            return true;
+        }
+        self.read_ticks += 1;
+        if let Some(deadline) = self.deadline
+            && self.read_ticks.is_multiple_of(SSA_DEADLINE_SAMPLE_INTERVAL)
+            && std::time::Instant::now() >= deadline
+        {
+            self.timed_out = true;
+        }
+        self.timed_out
+    }
+
     pub(crate) fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
         self.tracer = tracer;
         self
@@ -378,18 +395,9 @@ impl<'a> SsaEngine<'a> {
             return value.clone();
         }
 
-        // Once the SSA deadline trips, degrade every read to `Opaque` so
-        // resolution unwinds fast and the file is skipped (checked by the
-        // caller via `timed_out`). Sampled to keep the read path cheap.
-        if self.timed_out {
-            return SsaValue::Opaque;
-        }
-        self.read_ticks += 1;
-        if let Some(deadline) = self.deadline
-            && self.read_ticks.is_multiple_of(SSA_DEADLINE_SAMPLE_INTERVAL)
-            && std::time::Instant::now() >= deadline
-        {
-            self.timed_out = true;
+        // Past the SSA deadline, degrade every read to `Opaque` so resolution
+        // unwinds fast and the file is skipped (the caller checks `timed_out`).
+        if self.deadline_tripped() {
             return SsaValue::Opaque;
         }
 
@@ -630,7 +638,7 @@ impl<'a> SsaEngine<'a> {
     const MAX_SCC_DEPTH: usize = 32;
 
     fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId], depth: usize) {
-        if phi_ids.len() < 2 {
+        if phi_ids.len() < 2 || self.deadline_tripped() {
             return;
         }
         if depth >= Self::MAX_SCC_DEPTH {
