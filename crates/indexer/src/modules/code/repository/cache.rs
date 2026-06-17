@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::{FileInventoryEntry, config::is_excluded_from_indexing};
+use code_graph::v2::{
+    FileInventoryEntry,
+    config::{is_excluded_from_indexing, looks_binary},
+};
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -124,13 +127,17 @@ impl RepositoryCache for LocalRepositoryCache {
         let metrics = self.metrics.clone();
         let file_inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
+            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size, prefix| {
                 if size > max_file_size {
                     metrics.record_archive_entry_skipped("oversize", size);
                     return false;
                 }
                 if is_excluded_from_indexing(rel_path) {
                     metrics.record_archive_entry_skipped("excluded_extension", size);
+                    return false;
+                }
+                if looks_binary(prefix) {
+                    metrics.record_archive_entry_skipped("binary", size);
                     return false;
                 }
                 true
@@ -506,6 +513,33 @@ mod tests {
         assert!(
             !path.join("big.rs").exists(),
             "files larger than max_file_size must not be written to disk"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_archive_drops_binary_content_under_size_cap() {
+        let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[
+            ("project-abc/src/main.rs", b"fn main() {}"),
+            // Unlisted extension, well under the cap, but NUL-bearing.
+            ("project-abc/model/weights.onnx", b"\x00\x01\x02\x00blob"),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(
+            path.file_inventory
+                .iter()
+                .any(|entry| entry.path == "model/weights.onnx"),
+            "binary files should still be present in archive inventory"
+        );
+        assert!(path.join("src/main.rs").exists());
+        assert!(
+            !path.join("model/weights.onnx").exists(),
+            "binary content must not be written to disk"
         );
     }
 }
