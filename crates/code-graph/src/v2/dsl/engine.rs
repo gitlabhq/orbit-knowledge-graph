@@ -90,9 +90,7 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
-/// Independent per-file CPU-time budgets for the three parse sub-phases, each
-/// measured from its own start so a timeout is attributable to the phase.
-/// `None` = no budget for that phase. `Default` = all unbounded.
+/// Independent per-file CPU-time budgets for the parse/walk/ssa sub-phases (`None` = unbounded).
 #[derive(Clone, Copy, Default)]
 pub struct PhaseTimeouts {
     pub parse: Option<std::time::Duration>,
@@ -106,9 +104,7 @@ pub struct PhaseTimeouts {
 #[derive(Debug)]
 pub enum ParseFullError {
     InvalidUtf8(std::str::Utf8Error),
-    /// A bounded phase exceeded its per-file CPU budget (or the parser
-    /// stalled). The file is skipped, not faulted; `phase` names the budget
-    /// that tripped.
+    /// A phase exceeded its per-file CPU budget (or the parser stalled); `phase` names which.
     Aborted {
         phase: crate::v2::error::AbortPhase,
         detail: String,
@@ -600,10 +596,7 @@ impl LanguageSpec {
     /// Parse the full AST: defs, imports, SSA, refs. Returns collected
     /// refs with reaching values resolved from SSA, but NOT cross-file
     /// resolved. Source bytes can be dropped after this returns.
-    /// Parse a file into defs/imports/refs. Each [`PhaseTimeouts`] budget, when
-    /// set, bounds its sub-phase (tree-sitter parse, AST walk, SSA resolution)
-    /// from that phase's own start; an exceeded phase returns
-    /// [`ParseFullError::Aborted`] naming it.
+    /// Each [`PhaseTimeouts`] budget bounds its sub-phase; an exceeded phase returns [`ParseFullError::Aborted`].
     pub fn parse_full_collect(
         &self,
         source: &[u8],
@@ -816,9 +809,7 @@ impl LanguageSpec {
         sep: &'static str,
         module_prefix: Option<&str>,
     ) {
-        // Per-file CPU budget: once tripped, every walk_full call returns at once
-        // so the recursion unwinds and the file is skipped (checked in
-        // parse_full_collect).
+        // CPU budget tripped: bail so the walk unwinds; parse_full_collect then skips the file.
         if state.timed_out {
             return;
         }
@@ -1501,9 +1492,7 @@ struct WalkFullState<'a> {
     in_return: bool,
     tracer: &'a Tracer,
     file_path: &'a str,
-    /// Per-file CPU-time budget for the AST walk, checked in `walk_full`.
     budget: Option<treesitter_visit::CpuBudget>,
-    /// Set once the budget trips so the walk unwinds and the file is skipped.
     timed_out: bool,
 }
 

@@ -257,12 +257,6 @@ pub struct CodeIndexingPipelineConfig {
     /// specify a different value. 0 = no global timeout.
     #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
-    /// Per-file budgets (ms) for the three parse sub-phases, each measured from
-    /// its own start so a timeout is attributable: tree-sitter parse, the AST
-    /// walk, and SSA reaching-def resolution. Much tighter than
-    /// `per_file_timeout_ms`; normal files finish each well under it, so a
-    /// pathological file is skipped instead of dominating the run. 0 = no
-    /// deadline for that sub-phase.
     #[serde(default = "default_code_indexing_per_file_parse_timeout_ms")]
     pub per_file_parse_timeout_ms: u64,
     #[serde(default = "default_code_indexing_per_file_walk_timeout_ms")]

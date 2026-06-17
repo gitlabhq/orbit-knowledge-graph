@@ -90,9 +90,7 @@ macro_rules! define_languages {
                 }
             }
 
-            /// Parse source with tree-sitter, optionally bounded by a per-file
-            /// CPU-time `budget`. Returns `Err` if the language has no
-            /// tree-sitter grammar or the parse was aborted (budget/stall).
+            /// Parse with tree-sitter, optionally CPU-budgeted; `Err` if there is no grammar or the parse aborted.
             pub fn parse_ast(
                 &self,
                 code: &str,

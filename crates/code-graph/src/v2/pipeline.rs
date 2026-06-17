@@ -20,14 +20,10 @@ use crate::v2::trace::Tracer;
 // limit; `arrow_overflow` panic recovery keeps that case self-healing.
 const GO_PARSER_MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Files at or above this size are the OOM / stack-overflow-prone ones. We log
-/// them before processing so an uncatchable crash (SIGKILL from OOM, SIGSEGV
-/// from stack overflow) leaves a breadcrumb naming the in-flight file — the
-/// per-file skip/fault metrics never emit when the process dies mid-file.
+/// Log files >= this size before processing so an uncatchable OOM/overflow crash names the in-flight file.
 pub(crate) const LARGE_FILE_BREADCRUMB_BYTES: u64 = 2 * 1024 * 1024;
 
-/// Emit a crash-surviving breadcrumb for a large in-flight file. Low volume
-/// (large files are rare) so it stays on in production.
+/// Emit a crash-surviving breadcrumb for a large in-flight file; low volume, stays on in production.
 pub(crate) fn breadcrumb_large_file(path: &str, bytes: u64, language: &str) {
     if bytes >= LARGE_FILE_BREADCRUMB_BYTES {
         tracing::info!(
@@ -528,9 +524,6 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
-    /// Per-file budgets for the three parse sub-phases, each measured from its
-    /// own start so a miss is attributable: tree-sitter parse, the AST walk, and
-    /// SSA reaching-def resolution. `None` = no deadline for that sub-phase.
     pub per_file_parse_timeout: Option<std::time::Duration>,
     pub per_file_walk_timeout: Option<std::time::Duration>,
     pub per_file_ssa_timeout: Option<std::time::Duration>,

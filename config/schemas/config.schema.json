@@ -416,7 +416,6 @@
           "minimum": 0
         },
         "per_file_parse_timeout_ms": {
-          "description": "Per-file budgets (ms) for the three parse sub-phases, each measured from\nits own start so a timeout is attributable: tree-sitter parse, the AST\nwalk, and SSA reaching-def resolution. Much tighter than\n`per_file_timeout_ms`; normal files finish each well under it, so a\npathological file is skipped instead of dominating the run. 0 = no\ndeadline for that sub-phase.",
           "type": "integer",
           "format": "uint64",
           "default": 100,

@@ -149,9 +149,6 @@ pub(crate) struct SsaEngine<'a> {
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
     tracer: &'a Tracer,
-    /// Per-file CPU-time budget for reaching-def resolution. Once it trips,
-    /// reads degrade to `Opaque` and `timed_out` is set so the caller skips the
-    /// file. `None` = no SSA budget.
     budget: Option<treesitter_visit::CpuBudget>,
     timed_out: bool,
     read_depth: usize,
@@ -182,8 +179,7 @@ impl<'a> SsaEngine<'a> {
         self.timed_out
     }
 
-    /// True once the SSA budget has tripped (latches `timed_out`). Used by both
-    /// the reaching-def reads and the SCC pass so every sub-phase is bounded.
+    /// True once the SSA budget has tripped (latches `timed_out`); bounds both the reads and the SCC pass.
     fn deadline_tripped(&mut self) -> bool {
         if !self.timed_out && self.budget.is_some_and(|b| b.expired()) {
             self.timed_out = true;
@@ -395,8 +391,7 @@ impl<'a> SsaEngine<'a> {
             return value.clone();
         }
 
-        // Past the SSA budget, degrade every read to `Opaque` so resolution
-        // unwinds fast and the file is skipped (the caller checks `timed_out`).
+        // Past the SSA budget: degrade reads to `Opaque` so resolution unwinds and the file is skipped.
         if self.deadline_tripped() {
             return SsaValue::Opaque;
         }
@@ -1191,8 +1186,7 @@ mod tests {
         );
     }
 
-    // A zero budget must trip during a deep read and degrade to Opaque,
-    // so a pathologically wide function is skipped rather than resolved slowly.
+    // A zero budget must trip during a deep read and degrade to Opaque.
     #[test]
     fn ssa_budget_degrades_deep_read() {
         let mut ssa = SsaEngine::new();

@@ -55,11 +55,7 @@ pub struct StrDoc<L: LanguageExt> {
 /// byte offset is clearly pathological -- normal parsing always advances.
 const DEFAULT_MAX_STALL: u64 = 100_000;
 
-/// A per-thread CPU-time budget. `start` captures the calling thread's CPU
-/// clock; [`Self::expired`] must be called on the same thread. Unlike a
-/// wall-clock deadline it ignores time the thread spent preempted, so a tiny
-/// file never trips just because its worker was starved of CPU under heavy
-/// parallelism.
+/// Per-thread CPU-time budget (create and check on the same thread); ignores preempted time, unlike a wall-clock deadline.
 #[derive(Clone, Copy)]
 pub struct CpuBudget {
     start: ThreadTime,
@@ -81,13 +77,10 @@ impl CpuBudget {
     }
 }
 
-/// Cooperative limits enforced from the parser's progress callback, the only
-/// hook into tree-sitter's otherwise-uninterruptible C parse.
+/// Cooperative limits enforced from the parser's progress callback, the only hook into tree-sitter's uninterruptible C parse.
 #[derive(Clone)]
 pub struct ParseGuard {
-    /// Abort if the parser stalls at one byte offset this many iterations.
     pub max_stall: u64,
-    /// Abort once this thread's parse CPU time exceeds the budget.
     pub budget: Option<CpuBudget>,
 }
 
@@ -109,9 +102,7 @@ impl ParseGuard {
 }
 
 impl<L: LanguageExt> StrDoc<L> {
-    /// Parse source, aborting if the [`ParseGuard`] trips: a stall or the
-    /// per-thread CPU budget. An aborted parse returns
-    /// [`TSParseError::TreeUnavailable`] (surfaced here as `Err`).
+    /// Parse, aborting if the [`ParseGuard`] trips (stall or CPU budget); an abort surfaces as `Err`.
     pub fn try_new(src: &str, lang: L, guard: &ParseGuard) -> Result<Self, String> {
         let src = src.to_string();
         let kind_names = lang.kind_names();
@@ -159,10 +150,7 @@ impl<L: LanguageExt> StrDoc<L> {
             ts_lang,
         )
         .map_err(|e| {
-            // The only way `parse_with_options` errors (language is always set)
-            // is the progress callback breaking, so an abort is budget-or-stall,
-            // never a syntax error. Name the budget case explicitly; otherwise
-            // fall through to the stall/`TreeUnavailable` message.
+            // The only error here is the progress callback breaking (budget or stall), never a syntax error; name the budget case.
             if guard.budget.is_some_and(|b| b.expired()) {
                 "per-file CPU budget exceeded".to_string()
             } else {
@@ -409,8 +397,7 @@ pub trait LanguageExt: Language {
 }
 
 impl<L: LanguageExt> crate::Root<StrDoc<L>> {
-    /// Infallible parse with default limits; panics on parse failure. For
-    /// tests and fuzz harnesses — production code uses [`Self::try_new`].
+    /// Infallible parse with default limits; panics on failure. For tests/fuzz; production uses [`Self::try_new`].
     pub fn new<S: AsRef<str>>(src: S, lang: L) -> Self {
         Self::try_new(src, lang, &ParseGuard::default()).expect("should parse")
     }
@@ -436,9 +423,7 @@ mod tests {
     use std::ops::ControlFlow;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    /// Reproduce the stall detection logic and verify
-    /// it fires correctly. This tests the algorithm directly rather than relying on
-    /// tree-sitter's internal behavior which varies between debug and release builds.
+    /// Verify the stall-detection logic directly, independent of tree-sitter's build-varying internals.
     #[test]
     fn test_stall_detection_logic() {
         let max_stall: u64 = 3;

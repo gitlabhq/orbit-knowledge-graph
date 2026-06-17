@@ -91,9 +91,7 @@ impl CodeGraphError {
     }
 }
 
-/// Which bounded phase tripped a per-file timeout. Lets a timeout skip name
-/// the exact budget that fired (`parse`/`walk`/`ssa`) or the Phase 2/3
-/// watchdog (`sentinel`), rather than collapsing to one opaque reason.
+/// Which bounded phase tripped a per-file timeout: the parse/walk/ssa budget or the Phase 2/3 watchdog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display)]
 #[strum(serialize_all = "snake_case")]
 pub enum AbortPhase {

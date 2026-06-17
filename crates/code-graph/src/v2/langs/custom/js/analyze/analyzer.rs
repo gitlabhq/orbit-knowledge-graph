@@ -873,10 +873,7 @@ impl JsAnalyzer {
         );
 
         let imports = extract_imports(&ctx, &parsed);
-        // The CallExtractor Visit walk recurses with the AST depth and has no
-        // internal guard, so grow the stack on demand exactly like the parse
-        // and semantic passes above — deep expressions overflow the 2 MiB
-        // worker stack otherwise (an uncatchable SIGSEGV).
+        // Grow the stack on demand: the recursive CallExtractor walk overflows the 2 MiB worker stack on deep expressions (uncatchable SIGSEGV).
         let (local_calls, calls) = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             extract_call_edges(&ctx, &parsed.program, &defs, &imports, &class_hierarchy)
         });
