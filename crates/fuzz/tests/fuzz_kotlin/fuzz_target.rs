@@ -13,6 +13,6 @@ fn spec() -> &'static code_graph::v2::dsl::types::LanguageSpec {
 fn main() {
     let tracer = Tracer::new(false);
     check!().for_each(|input: &[u8]| {
-        let _ = spec().parse_full_collect(input, "fuzz.kt", Language::Kotlin, &tracer);
+        let _ = spec().parse_full_collect(input, "fuzz.kt", Language::Kotlin, &tracer, None);
     });
 }
