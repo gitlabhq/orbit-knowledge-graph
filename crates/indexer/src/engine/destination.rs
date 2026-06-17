@@ -33,9 +33,6 @@ pub trait BatchWriter: Send + Sync {
 /// Creates writers for a storage backend.
 #[async_trait]
 pub trait Destination: Send + Sync {
-    /// Writes with the backend's configured durability. Use
-    /// [`new_batch_writer_with_durability`](Self::new_batch_writer_with_durability) where a write
-    /// must pin its own (SDLC).
     async fn new_batch_writer(
         &self,
         table: &str,
