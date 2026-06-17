@@ -374,7 +374,9 @@ Count detected vulnerabilities by severity:
 
 ## `path_finding` — shortest path between nodes
 
-Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
+Shortest path between two projects (`max_depth` ≤ 3, server-enforced).
+`rel_types` is required when either endpoint uses `filters` — omitting it
+causes a server-side validation error:
 
 ```json
 {
@@ -384,7 +386,7 @@ Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
       {"id": "from", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}},
       {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
     ],
-    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3}
+    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3, "rel_types": ["IN_GROUP", "CONTAINS"]}
   }
 }
 ```
