@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use gkg_server_config::ClickHouseConfiguration;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
-use indexer::destination::Destination;
+use indexer::destination::{BatchWriterOptions, Destination};
 use indexer::durability::WriteDurability;
 use indexer::metrics::EngineMetrics;
 use testcontainers::GenericImage;
@@ -182,7 +182,12 @@ async fn write_batch_to_clickhouse(context: &TestContext) {
 
     let writer = context
         .destination
-        .new_batch_writer_with_durability(TEST_TABLE, WriteDurability::Durable)
+        .new_batch_writer(
+            TEST_TABLE,
+            BatchWriterOptions {
+                durability: Some(WriteDurability::Durable),
+            },
+        )
         .await
         .expect("failed to create batch writer");
 
@@ -206,7 +211,12 @@ async fn write_multiple_batches(context: &TestContext) {
 
     let writer = context
         .destination
-        .new_batch_writer_with_durability(TEST_TABLE, WriteDurability::Durable)
+        .new_batch_writer(
+            TEST_TABLE,
+            BatchWriterOptions {
+                durability: Some(WriteDurability::Durable),
+            },
+        )
         .await
         .expect("failed to create batch writer");
 
@@ -234,7 +244,12 @@ async fn write_empty_batch_succeeds(context: &TestContext) {
 
     let writer = context
         .destination
-        .new_batch_writer_with_durability(TEST_TABLE, WriteDurability::Durable)
+        .new_batch_writer(
+            TEST_TABLE,
+            BatchWriterOptions {
+                durability: Some(WriteDurability::Durable),
+            },
+        )
         .await
         .expect("failed to create batch writer");
 
@@ -336,7 +351,12 @@ async fn connection_failure_returns_error() {
         .expect("failed to create destination");
 
     let writer = destination
-        .new_batch_writer_with_durability(TEST_TABLE, WriteDurability::Durable)
+        .new_batch_writer(
+            TEST_TABLE,
+            BatchWriterOptions {
+                durability: Some(WriteDurability::Durable),
+            },
+        )
         .await
         .expect("writer creation should succeed");
 

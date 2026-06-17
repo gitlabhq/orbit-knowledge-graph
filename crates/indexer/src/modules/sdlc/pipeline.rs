@@ -12,7 +12,7 @@ use futures::{FutureExt, StreamExt};
 use serde_json::Value;
 use tracing::{debug, info, warn};
 
-use crate::destination::Destination;
+use crate::destination::{BatchWriterOptions, Destination};
 use crate::handler::HandlerError;
 use crate::nats::ProgressNotifier;
 use crate::observer::{IndexingMode, IndexingObserver};
@@ -399,17 +399,12 @@ impl Pipeline {
             per_table.push((index, rows, bytes));
 
             let table = outputs[index].clone();
-            let writer = match durability {
-                Some(durability) => {
-                    destination
-                        .new_batch_writer_with_durability(&table, durability)
-                        .await
-                }
-                None => destination.new_batch_writer(&table).await,
-            }
-            .map_err(|err| {
-                HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
-            })?;
+            let writer = destination
+                .new_batch_writer(&table, BatchWriterOptions { durability })
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!("failed to create writer for {table}: {err}"))
+                })?;
             write_futures.push(
                 async move {
                     writer.write_batch(&batches).await.map_err(|err| {

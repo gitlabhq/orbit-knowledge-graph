@@ -18,7 +18,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use clickhouse_client::ArrowClickHouseClient;
 
-use crate::destination::{BatchWriter, DestinationError};
+use crate::destination::{BatchWriter, BatchWriterOptions, DestinationError};
 use crate::durability::WriteDurability;
 use crate::metrics::EngineMetrics;
 
@@ -33,25 +33,15 @@ impl ClickHouseBatchWriter {
     pub(crate) fn new(
         client: ArrowClickHouseClient,
         table: String,
+        options: BatchWriterOptions,
         metrics: Arc<EngineMetrics>,
     ) -> Self {
-        let insert_sql = client.build_insert_sql(&table);
-        Self {
-            client,
-            table,
-            insert_sql,
-            metrics,
-        }
-    }
-
-    pub(crate) fn with_durability(
-        client: ArrowClickHouseClient,
-        table: String,
-        durability: WriteDurability,
-        metrics: Arc<EngineMetrics>,
-    ) -> Self {
-        let insert_sql =
-            client.build_insert_sql_with_overrides(&table, insert_overrides(durability));
+        let insert_sql = match options.durability {
+            Some(durability) => {
+                client.build_insert_sql_with_overrides(&table, insert_overrides(durability))
+            }
+            None => client.build_insert_sql(&table),
+        };
         Self {
             client,
             table,
