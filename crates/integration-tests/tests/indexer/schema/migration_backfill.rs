@@ -12,6 +12,7 @@ use gkg_server_config::{
     NamespaceCodeBackfillDispatcherConfig, NatsConfiguration, ScheduleConfiguration,
 };
 use indexer::modules::code::NamespaceCodeBackfillDispatcher;
+use indexer::nats::versioning::NATS_VERSIONER;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
@@ -85,10 +86,10 @@ impl TestContext {
         let consumer = jetstream
             .create_consumer_on_stream(
                 async_nats::jetstream::consumer::pull::Config {
-                    filter_subject: CODE_INDEXING_TASK_SUBJECT_PATTERN.into(),
+                    filter_subject: NATS_VERSIONER.subject(CODE_INDEXING_TASK_SUBJECT_PATTERN),
                     ..Default::default()
                 },
-                INDEXER_STREAM,
+                &NATS_VERSIONER.stream(INDEXER_STREAM),
             )
             .await
             .unwrap();
@@ -124,11 +125,10 @@ impl TestContext {
         let client = async_nats::connect(format!("nats://{url}")).await.unwrap();
         let jetstream = async_nats::jetstream::new(client);
 
-        // Stream for dispatched code indexing tasks.
         jetstream
             .create_stream(async_nats::jetstream::stream::Config {
-                name: INDEXER_STREAM.into(),
-                subjects: vec![CODE_INDEXING_TASK_SUBJECT_PATTERN.into()],
+                name: NATS_VERSIONER.stream(INDEXER_STREAM),
+                subjects: vec![NATS_VERSIONER.subject(CODE_INDEXING_TASK_SUBJECT_PATTERN)],
                 retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                 max_messages_per_subject: 1,
                 discard: async_nats::jetstream::stream::DiscardPolicy::New,
