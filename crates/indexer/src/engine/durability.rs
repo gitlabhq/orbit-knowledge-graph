@@ -8,11 +8,13 @@ pub enum WriteDurability {
     Durable,
 }
 
-/// Page and completion durability invert by mode: a full load re-pulls lost pages but must persist
-/// completion; an incremental must persist pages (the watermark advances, no NATS retry).
+/// Data-write and completion durability invert by mode: a full load re-pulls lost data but must
+/// persist its completion; an incremental must persist data writes (the watermark advances with no
+/// NATS retry) but re-derives a lost completion next dispatch. Per-page progress checkpoints are
+/// always [`WriteDurability::FireAndForget`] (see `ClickHouseCheckpointStore::save_progress`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RunDurability {
-    pub page: WriteDurability,
+    pub data_writes: WriteDurability,
     pub completion: WriteDurability,
 }
 
@@ -20,11 +22,11 @@ impl RunDurability {
     pub fn for_mode(mode: IndexingMode) -> Self {
         match mode {
             IndexingMode::Full => Self {
-                page: WriteDurability::FireAndForget,
+                data_writes: WriteDurability::FireAndForget,
                 completion: WriteDurability::Durable,
             },
             IndexingMode::Incremental => Self {
-                page: WriteDurability::Durable,
+                data_writes: WriteDurability::Durable,
                 completion: WriteDurability::FireAndForget,
             },
         }
@@ -38,11 +40,11 @@ mod tests {
     #[test]
     fn run_durability_inverts_page_and_completion() {
         let full = RunDurability::for_mode(IndexingMode::Full);
-        assert_eq!(full.page, WriteDurability::FireAndForget);
+        assert_eq!(full.data_writes, WriteDurability::FireAndForget);
         assert_eq!(full.completion, WriteDurability::Durable);
 
         let incremental = RunDurability::for_mode(IndexingMode::Incremental);
-        assert_eq!(incremental.page, WriteDurability::Durable);
+        assert_eq!(incremental.data_writes, WriteDurability::Durable);
         assert_eq!(incremental.completion, WriteDurability::FireAndForget);
     }
 }

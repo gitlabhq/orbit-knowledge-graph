@@ -245,7 +245,7 @@ Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct
    The happy path pays nothing for this; on a 1002 overflow the extract retry (`Pipeline::extract_batch`) drops `max_block_size` straight to the floor block size and re-reads the page — idempotent from the page's start cursor (point 7) — so no single block can exceed the cap.
 5. Transform the whole page in-memory with DataFusion SQL (a row-wise projection: mapping source columns to graph columns, resolving FK edges, applying type discriminators), grouping the output rows by destination table. While the current page's writes are in flight, the next page's read is overlapped via `tokio::join!`, so the next page's query-open latency hides behind the writes; peak memory is roughly two pages.
 6. Each destination table's transformed rows for a page are written as one bulk `INSERT` per page. The whole transformed page is resident at write time — the trade for throughput on high-latency backends like ClickHouse Cloud, where one large insert per page beats many smaller round-trips. `engine.handlers.entity_handler.stream_block_size` (rows per wire block on the read side) is tunable per deployment.
-   The incremental tail (a completed checkpoint advancing the watermark) pins `async_insert=1, wait_for_async_insert=1` on these writes, so the bulk page persists before step 8 advances the watermark — there is no NATS retry, so a fire-and-forget async insert lost after the watermark moves would be an unrecoverable gap. The initial load (first run, or a still-cursored resume of one) instead lets these writes fire-and-forget for throughput, since a lost page re-pulls from its watermark window. This is the only difference between the two modes' page writes; both async-batch to coalesce the many small per-page inserts into fewer parts.
+   Data-page write durability differs by mode (see **Write durability** below); both modes async-batch to coalesce the many small per-page inserts into fewer parts.
 7. Save the cursor to the checkpoint store after each page completes. If the indexer crashes mid-pagination, the next run picks up from the last written page rather than replaying the entire watermark window. Re-running a page is idempotent: the graph tables are `ReplacingMergeTree`, so any rows re-inserted after a mid-page failure are de-duplicated.
 8. When the final page comes back with fewer rows than the batch size, mark the plan completed: clear the cursor and advance the watermark.
 
@@ -270,6 +270,20 @@ WHERE _siphon_watermark > {last_watermark:String}
 ORDER BY traversal_path, id
 LIMIT 1000000
 ```
+
+**Write durability**
+
+A run touches three write targets, and each mode (`RunDurability::for_mode`) picks durability per target:
+
+| Write target | Full load | Incremental |
+|---|---|---|
+| Data pages (graph tables) | fire-and-forget — configured `insert_settings` | durable — `async_insert=1, wait_for_async_insert=1` |
+| Per-page progress checkpoint | fire-and-forget | fire-and-forget |
+| Completion checkpoint | durable | fire-and-forget |
+
+The inversion follows what a lost write costs. A full load re-pulls any lost data page from its watermark window, so pages favor throughput, but its completion must persist or the watermark never advances. An incremental advances the watermark with no NATS retry, so each data page must persist before the watermark moves; a lost completion just re-derives next dispatch. Progress checkpoints are always best-effort — a lost one only re-reads from the prior page (`save_progress` hardcodes fire-and-forget; it is not part of `RunDurability`).
+
+`WriteDurability::FireAndForget` emits no setting overrides, so a fire-and-forget write inherits the deployment's configured `insert_settings` verbatim.
 
 **Checkpoint store**
 

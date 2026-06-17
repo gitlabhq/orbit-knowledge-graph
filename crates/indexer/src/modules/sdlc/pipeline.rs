@@ -188,7 +188,7 @@ impl Pipeline {
                     context.destination.as_ref(),
                     &outputs,
                     grouped,
-                    durability.page,
+                    durability.data_writes,
                 )
                 .await?;
 
