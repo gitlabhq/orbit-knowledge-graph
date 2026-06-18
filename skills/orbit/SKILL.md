@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and questions requiring relationship traversal or aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`); prefer Orbit when the question spans relationships, cross-entity joins, or multi-entity aggregation.
-version: 0.14.1
+version: 0.14.0
 license: MIT
 metadata:
   audience: developers
@@ -29,10 +29,10 @@ authoritative usage references. For entity properties, prefer the recipes in
 [`references/recipes.md`](references/recipes.md) over schema introspection —
 they already encode the columns and filters known to work.
 
-If you must introspect, call `glab orbit remote schema <Entity…>` (scoped
-properties) or `glab orbit remote dsl` (full DSL JSON Schema). Call schema **at
-most once per session** — schemas don't change mid-session, and the unscoped
-form returns ~28 KB.
+If you must introspect, call `glab orbit remote schema <Entity…>` with explicit
+entity names to scope it (the unscoped form returns ~28 KB and is rarely what you
+want), or `glab orbit remote dsl` for the full DSL JSON Schema. Call schema at
+most once per session; schemas don't change mid-session.
 
 Each `glab orbit remote query` has fixed per-call overhead. Prefer one
 `aggregation` query over N traversal queries for "how many X grouped by Y", and
