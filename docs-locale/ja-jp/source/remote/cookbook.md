@@ -16,8 +16,8 @@ title: Cookbook
 
 {{< history >}}
 
-- `knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)とともに、GitLab 18.10で[導入](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)されました。
+- GitLab 18.10で`knowledge_graph`という名前の[機能フラグ](https://docs.gitlab.com/administration/feature_flags/)付きで[導入されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。デフォルトでは無効です。この機能は[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)です。
+- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676)。
 
 {{< /history >}}
 
@@ -26,13 +26,13 @@ title: Cookbook
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-最も一般的なOrbitのユースケースに対応した、すぐに使えるクエリ集です。すべての例はREST APIフォーマットを使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
+最も一般的なOrbitのユースケース向けにすぐに使えるクエリです。すべての例はREST APIフォーマットを使用しています。MCPを通じて実行するには、JSONボディを`query_graph`に渡してください。
 
 ## ブラスト半径分析 {#blast-radius-analysis}
 
 「これを変更すると何が壊れるか？」という問いに答えます。
 
-### 特定のモジュールをインポートしているファイルをすべて検索する {#find-all-files-that-import-a-specific-module}
+### 特定のモジュールをインポートしているすべてのファイルを検索する {#find-all-files-that-import-a-specific-module}
 
 `payments-service`をトレースしたいモジュールまたはライブラリに置き換えてください。
 
@@ -110,9 +110,9 @@ title: Cookbook
 
 ## 依存関係マッピング {#dependency-mapping}
 
-「サービス同士はどのように接続されているか？」という問いに答えます。
+「サービス間はどのように接続されているか？」という問いに答えます。
 
-### インポートされた定義をマッピングする {#map-imported-definitions}
+### インポートされた定義をマップする {#map-imported-definitions}
 
 ```json
 {

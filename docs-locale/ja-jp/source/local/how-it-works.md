@@ -64,8 +64,9 @@ Orbit LocalはグラフをDuckDBデータベースとして公開します。`or
 
 ## サポートされている言語 {#supported-languages}
 
-Orbit Remoteがサポートする12の言語はすべてローカルでもサポートされています:
-Ruby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++、PHP。
+Orbit Remoteがサポートする13の言語はすべてローカルでもサポートされています:
+Ruby、Java、Kotlin、Python、TypeScript、JavaScript、Rust、Go、C#、C、C++、PHP、
+およびBash/Shell。
 
 完全な言語サポート表については、[Orbitがインデックス作成する対象](../remote/indexing.md#supported-languages)を参照してください。
 

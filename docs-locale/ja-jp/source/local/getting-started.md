@@ -91,9 +91,9 @@ glab orbit local help
 |---|---|---|
 | [Orbit CLI（`orbit`）](access/cli.md) | CLIの直接使用、スクリプト作成、インデックス作成タスク | ワンラインインストーラーまたは`glab orbit local --install` |
 | [GitLab CLI（`glab`）](access/glab.md) | すでに`glab`を使用している方 | `glab orbit local --install` |
-| [MCP](access/mcp.md) | Claude Code、Codex、その他のAIエージェント | `glab orbit setup`またはMCPの手動設定 |
+| [MCP](access/mcp.md) | Claude Code、Codex、その他のAIエージェント | 予定中、[現時点では利用不可](access/mcp.md) |
 
-クエリ言語は3つすべてで同一です。1つで学んだことはそのまま他にも応用でき、[Orbit Remote](../remote/_index.md)にも活用できます。
+3つすべてが同じローカルグラフを参照します。Orbit LocalはDuckDB SQLでクエリを実行します。構造化JSONクエリDSLは[Orbit Remote](../remote/_index.md)専用です。
 
 ## 60秒クイックスタート {#60-second-quickstart}
 
@@ -104,15 +104,15 @@ glab orbit local help
 
 ```shell
 glab orbit local index /path/to/your/repo
-glab orbit local schema --ontology
+glab orbit local schema
 ```
 
-これにより、`~/.orbit/graph.duckdb`にローカルDuckDBグラフが構築され、ノードタイプ（`Definition`、`File`、`Directory`、`ImportedSymbol`）が表示されます。
+これにより、`~/.orbit/graph.duckdb`にローカルDuckDBグラフが構築され、すべてのテーブルとカラムが表示されます: `gl_definition`、`gl_file`、`gl_directory`、`gl_imported_symbol`、`gl_edge`、および`_orbit_manifest`管理テーブル。
 
 次のステップ:
 
 - 実際のクエリを実行する: [glabでOrbit Localを使用する](access/glab.md)。
-- AIエージェントに接続する: `glab orbit setup`を実行するか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
+- AIエージェントに接続する: `glab orbit setup`を実行してOrbitスキルをインストールします。MCPサーバーは[予定中](access/mcp.md)です。
 - テーブルレイアウトを確認する: [スキーマリファレンス](schema.md)。
 
 ## 課金 {#billing}

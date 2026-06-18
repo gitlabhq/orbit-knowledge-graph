@@ -2,52 +2,56 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Claude Code、Codex、またはMCP対応のAIエージェントをローカルのOrbitグラフに接続します。
+description: Orbit LocalのMCPサーバー（計画中）。現時点では利用できません。
 title: MCPを使用してOrbit Localに接続する
 ---
 
-{{< details >}}
+> [!warning]
+> **現時点では利用できません。** Orbit LocalはまだMCPサーバーとして動作できません。`orbit mcp serve`および`glab orbit local mcp serve`コマンドは、Orbit CLIのいかなるリリース済みバージョンにも存在しません。以下の設定例は**計画中**のインターフェースを説明するものであり、現在使用できる機能ではありません。このMCP設定をエージェントに追加しても、サイレントに失敗します。サーバーは起動せず、エージェントは何もクエリできません。
+>
+> MCPサーバーがリリースされるまでは、以下の[回避策](#workaround-query-from-the-terminal)を使用してください。進捗状況は[マージリクエスト !1377](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1377)で確認できます。
 
-- プラン: Free、Premium、Ultimate
-- 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
-
-{{< /details >}}
-
-{{< history >}}
-
-- GitLab 19.0で[実験的機能](https://docs.gitlab.com/policy/development_stages_support/#experiment)として[導入されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
-- GitLab 19.1で[ベータ](https://docs.gitlab.com/policy/development_stages_support/#beta)に[変更されました](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324)。
-
-{{< /history >}}
-
-Orbit LocalはMCPサーバーとして動作し、Orbit Remoteと同じ2つのツール（`query_graph`、`get_graph_schema`）を公開しますが、GitLabインスタンスではなくローカルのDuckDBグラフを参照します。
-
-> [!note]
-> MCPサーバーは実験的機能です。GAリリース前に、機能や設定の形式が変更される場合があります。
+リリース後、Orbit LocalはGitLabインスタンスではなくローカルのDuckDBグラフを参照し、stdio経由でステートレスなMCPサーバーとして動作します。Orbit Remote（JSON形式のクエリDSLを公開）とは異なり、Orbit LocalはDuckDB SQLをそのまま使用します。エージェントはプロパティグラフのテーブルに対して直接SQLを組み立てます。
 
 ## 前提条件 {#prerequisites}
 
 - Orbit CLI（`orbit`）がインストールされていること。[Orbit CLIを直接使用する](cli.md)を参照してください。
 - ローカルリポジトリのインデックスが作成されていること（`orbit index <path>` または `glab orbit local index <path>`）。
 
-## MCPツール {#mcp-tools}
+## 回避策: ターミナルからクエリを実行する {#workaround-query-from-the-terminal}
+
+MCPサーバーがリリースされるまでは、`glab orbit local`を使用してターミナルから直接ローカルグラフをクエリしてください。これが現時点でOrbit Localを使用するためのサポートされた方法です。
+
+ローカルのDuckDBグラフに対して読み取り専用のSQLクエリを実行する:
+
+```shell
+glab orbit local sql "SELECT name, definition_type FROM gl_definition LIMIT 10"
+```
+
+グラフスキーマ（テーブル名、カラム、データ型）を確認する。デフォルトのテーブル表示ではなくJSONで出力するには`--raw`を追加します:
+
+```shell
+glab orbit local schema
+```
+
+これらのコマンドの出力をコンテキストとしてAIエージェントに貼り付けることができます。また、今すぐ[Orbitスキルを手動でインストール](../../ai_coding_agents.md)することで、エージェントにクエリレシピ、SQLガイダンス、トラブルシューティング情報を提供できます。
+
+## 計画中のインターフェース {#planned-interface}
+
+> [!note]
+> このセクションの内容はすべて計画中のMCPサーバーについて説明しています。これらのコマンドや設定ブロックはまだ動作しません。機能を実装するコントリビューター向けの仕様として、また今後の予定を確認できるよう、ここに記載しています。
+
+### 計画中のMCPツール {#planned-mcp-tools}
 
 | ツール | 説明 |
 |------|-------------|
-| `run_sql` | ローカルのDuckDBグラフに対して読み取り専用のSQLクエリを実行します。 |
+| `run_sql` | ローカルのDuckDBグラフに対して読み取り専用のSQLクエリを実行します。JSON形式の行データを返します。 |
 | `get_graph_schema` | スキーマ（ローカルのDuckDBに存在するテーブル名、カラム、データ型）をフェッチします。 |
+| `index` | リポジトリ（またはリポジトリのディレクトリ）をローカルグラフにインデックス作成します。 |
 
-Orbit Remote（JSON形式のクエリDSLを公開）とは異なり、Orbit LocalはDuckDB SQLをそのまま使用します。エージェントはプロパティグラフのテーブルに対して直接SQLを組み立てます。
+### 計画中の設定: Claude Code {#planned-config-claude-code}
 
-> [!note]
-> 今後リリース予定の`glab orbit setup`サブコマンドを使用すると、Orbitスキルのインストールとこのページで説明するMCP設定の書き込みが自動化されます。リリースまでの間は、以下の手順に従ってMCPクライアントを手動で設定してください。
-
-また、[Orbitスキルを手動でインストール](../../ai_coding_agents.md)することで、エージェントにクエリレシピ、DSLガイダンス、トラブルシューティング情報を提供できます。
-
-## 手動設定: Claude Code {#manual-config-claude-code}
-
-`~/.claude/mcp_servers.json`またはプロジェクトの`.claude/mcp_servers.json`に以下を追加します。
+計画中のインターフェースでは、`~/.claude/mcp_servers.json`またはプロジェクトの`.claude/mcp_servers.json`に以下を追加できるようになります。
 
 ```json
 {
@@ -73,24 +77,22 @@ Orbit Remote（JSON形式のクエリDSLを公開）とは異なり、Orbit Loca
 }
 ```
 
-## 手動設定: その他のMCPクライアント {#manual-config-other-mcp-clients}
+### 計画中の設定: その他のMCPクライアント {#planned-config-other-mcp-clients}
 
-`orbit mcp serve`（または`glab orbit local mcp serve`）を実行することで、任意のMCPクライアントから接続できます。サーバーはstdio経由でMCPプロトコルを使用し、`query_graph`と`get_graph_schema`を公開します。
+`orbit mcp serve`（または`glab orbit local mcp serve`）を実行することで、任意のMCPクライアントから接続できるようになります。サーバーはstdio経由でMCPプロトコルを使用し、`run_sql`、`get_graph_schema`、`index`を公開します。
 
-## ツールの使用方法 {#using-the-tools}
+### 計画中の使用方法 {#planned-usage}
 
 接続後、AIエージェントに対してOrbitを直接使用するよう指示します。
 
 スキーマを確認する:
-> "`get_graph_schema`を使用して、ローカルグラフに含まれるノードタイプを表示してください。"
+> "`get_graph_schema`を使用して、ローカルグラフに含まれるテーブルを表示してください。"
 
-関数の呼び出し元を検索する:
-> "Orbitを使用して、`parseConfig`をインポートしているすべてのファイルと、それを呼び出している関数を検索してください。"
+種類別に定義を検索する:
+> "Orbitを使用して、このリポジトリ内の定義を種類別に集計し、最も大きいクラスを10件一覧表示してください。"
 
 モジュールをマップする:
 > "Orbitを使用して、`src/auth/`で宣言されているすべての定義とその種類を一覧表示してください。"
-
-エージェントはSQLを組み立て、代わりに`run_sql`を呼び出します。
 
 ## ローカルグラフの内容 {#what-s-in-the-local-graph}
 
@@ -98,4 +100,4 @@ Orbit Localはコードのみをインデックス作成します。対象は、
 
 ## 課金 {#billing}
 
-Orbit LocalはGitLabクレジットを消費しません。すべてのMCPトラフィックはローカルで処理されます。
+Orbit LocalはGitLabクレジットを消費しません。すべてのローカルトラフィックはマシン上で処理されます。
