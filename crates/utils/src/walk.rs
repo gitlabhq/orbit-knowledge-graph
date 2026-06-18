@@ -20,11 +20,20 @@ pub fn walk_dir<H: FileStreamHooks>(
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
+    // Match git's own listing semantics (what gitalisk gave us before): honor
+    // `.gitignore` and `.git/info/exclude`, include dotfiles, but not ripgrep's
+    // `.ignore` files, not the machine's global/ancestor ignores (so indexing is
+    // reproducible), and never the `.git` dir itself — `hidden(false)` would
+    // otherwise descend into it and list every object.
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)
+        .git_exclude(true)
+        .ignore(false)
         .git_global(false)
+        .parents(false)
         .require_git(false)
+        .filter_entry(|entry| entry.file_name() != ".git")
         .build();
 
     for result in walker {
@@ -81,6 +90,40 @@ mod tests {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn matches_git_listing_semantics() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(root, "src/main.rs", b"fn main(){}");
+        write(root, ".git/config", b"[core]\n");
+        write(root, ".git/HEAD", b"ref: x\n");
+        write(root, ".gitignore", b"build/\n");
+        write(root, "build/out.rs", b"compiled\n");
+        write(root, ".ignore", b"notes/\n");
+        write(root, "notes/x.rs", b"note\n");
+        write(root, ".env", b"secret\n");
+
+        struct KeepAll;
+        impl FileStreamHooks for KeepAll {}
+        let inv = walk_dir(root, &mut KeepAll).unwrap();
+        let has = |p: &str| inv.iter().any(|e| e.path == p);
+
+        assert!(
+            !has(".git/config") && !has(".git/HEAD"),
+            "the .git dir must not be listed"
+        );
+        assert!(!has("build/out.rs"), ".gitignore must be honored");
+        assert!(
+            has("notes/x.rs"),
+            ".ignore files are not a git concept and must not be honored"
+        );
+        assert!(
+            has(".gitignore") && has(".env"),
+            "dotfiles must be included"
+        );
+        assert!(has("src/main.rs"));
     }
 
     #[test]
