@@ -1,19 +1,16 @@
-//! Path-based predicates for deciding whether a file is worth feeding to the
-//! pipeline.
+//! Path and content predicates the file stream composes into a policy.
 //!
-//! Two use sites:
+//! - [`parsable_language`] / [`is_parsable`] map an extension to the language
+//!   that would parse it — a pure lookup, no filtering.
+//! - [`is_excluded_from_indexing`] is the single denylist of files recorded as
+//!   a bare node but never loaded or parsed. A denylist by design — anything
+//!   not listed is loaded — so resolver inputs (`Cargo.toml`, `package.json`,
+//!   `tsconfig.json`, `.gitignore`, …) survive without an inclusion list that
+//!   has to track every resolver.
+//! - [`looks_binary`] is git's NUL-in-prefix heuristic.
 //!
-//! - [`parsable_language`] / [`is_parsable`] — used by parser discovery
-//!   after extraction to decide which language to dispatch a file to.
-//! - [`is_excluded_from_indexing`] — used by the archive extractor
-//!   before bytes touch disk. Exclusion-based by design: we drop only
-//!   files we are confident the indexer never needs (binary assets,
-//!   media, fonts, archives, compiled artifacts), and let everything
-//!   else through. The blast radius of a miss in the denylist is "we
-//!   extract a few extra bytes," not "we break a resolver." Inclusion
-//!   filters here historically broke resolvers that load
-//!   `Cargo.toml` / `package.json` / `tsconfig.json` / `.gitignore`
-//!   from disk after extraction.
+//! [`CodeFilter`](super::CodeFilter) composes these into the stream policy; the
+//! parser never second-guesses its input.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -23,25 +20,13 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use super::lang::Language;
 use super::registry::detect_language_from_extension;
 
-/// Returns the [`Language`] that would parse `rel_path`, or `None` if no
-/// registered language claims the extension or the path matches a per-language
-/// source-convention exclude suffix (e.g. Go's `*_test.go`). Build-artifact
-/// filtering (minified bundles, binary blobs) lives in `CodeFilter`, not here.
-///
-/// `rel_path` is matched as-is against exclude suffixes, so a file named
-/// `foo_test.go` is rejected even though its `Path::extension()` is just `go`.
+/// Returns the [`Language`] that would parse `rel_path` by extension, or `None`
+/// if no registered language claims it. A pure mapping; whether a file is
+/// *worth* parsing (excluded, minified, a test file) is decided upstream by
+/// [`is_excluded_from_indexing`].
 pub fn parsable_language(rel_path: &Path) -> Option<Language> {
     let ext = rel_path.extension().and_then(|e| e.to_str())?;
-    let lang = detect_language_from_extension(ext)?;
-    let path_str = rel_path.to_string_lossy();
-    if lang
-        .exclude_extensions()
-        .iter()
-        .any(|excl| path_str.ends_with(excl))
-    {
-        return None;
-    }
-    Some(lang)
+    detect_language_from_extension(ext)
 }
 
 /// Returns `true` when `rel_path` would be picked up by the parsing pipeline.
@@ -49,18 +34,14 @@ pub fn is_parsable(rel_path: &Path) -> bool {
     parsable_language(rel_path).is_some()
 }
 
-/// Glob patterns the archive extractor refuses to write to disk.
+/// The single denylist of files recorded as a bare node but never loaded or
+/// parsed. One group per line, ordered by category. Patterns are globs matched
+/// case-insensitively against the basename.
 ///
-/// Curated denylist of obvious binary blobs and rendered output where
-/// no current or near-term resolver could plausibly want the bytes.
-/// **Source files, manifests, lockfiles, dotfiles, and unknown
-/// extensions are intentionally NOT here** — letting them through
-/// preserves resolver inputs (`Cargo.toml`, `package.json`,
-/// `tsconfig.json`, `.gitignore`, etc.) without an inclusion list that
-/// has to be kept in sync with every new resolver.
-///
-/// Patterns are case-insensitive (`*.PNG` is dropped just like `*.png`)
-/// and matched against the basename of each archive entry.
+/// **Source files, manifests, lockfiles, dotfiles, and unknown extensions are
+/// intentionally absent** (beyond the specific build artifacts and test-file
+/// conventions below), so resolver inputs survive without an inclusion list
+/// that has to track every resolver. This is the one place to add an exclusion.
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -76,6 +57,10 @@ pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     "*.{pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp}",
     // Datastores / disk images.
     "*.{db,sqlite,sqlite3,iso,dmg,bin,dat}",
+    // Minified JS/TS bundles (the content heuristic catches unnamed ones).
+    "*.min.{js,mjs,cjs}",
+    // Test files: real source we deliberately keep out of the graph.
+    "*_test.go",
 ];
 
 static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
@@ -86,13 +71,10 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     builder.build().expect("static excluded-indexing globset")
 });
 
-/// Returns `true` when the archive extractor should refuse to write
-/// `rel_path` to disk. Match is case-insensitive and on basename only.
-///
-/// This is exclusion-based: a `false` here just means the extractor
-/// keeps the file. Resolver inputs (manifests, `.gitignore`, etc.)
-/// fall in the `false` bucket because they are not in the denylist,
-/// without needing to be enumerated upfront.
+/// Returns `true` when `rel_path` is on the [`EXCLUDED_INDEXING_GLOBS`] denylist
+/// and should be recorded as a bare node but not loaded or parsed. Match is
+/// case-insensitive and on the basename only. A `false` means "load it";
+/// resolver inputs fall there because they are not in the denylist.
 pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     let Some(name) = rel_path.file_name() else {
         return false;
@@ -158,10 +140,10 @@ mod tests {
     }
 
     #[test]
-    fn excluded_suffix_is_not_parsable() {
-        // Go test files are a source-convention exclude; minified `.min.js` is
-        // no longer excluded here (it is a CodeFilter concern).
-        assert!(!is_parsable(&p("pkg/server_test.go")));
+    fn parsable_language_is_pure_extension_lookup() {
+        // Exclusion (test files, minified bundles) is the denylist's job, not
+        // this mapping's: a `.go` test file is still a "Go" file here.
+        assert!(is_parsable(&p("pkg/server_test.go")));
         assert!(is_parsable(&p("vendor/jquery.min.js")));
     }
 
@@ -180,6 +162,9 @@ mod tests {
             "vendor/cache.tar.gz",
             "docs/spec.pdf",
             "data/seed.sqlite",
+            "vendor/jquery.min.js",
+            "web/app.min.mjs",
+            "pkg/server_test.go",
         ] {
             assert!(
                 is_excluded_from_indexing(&p(path)),
@@ -277,12 +262,12 @@ mod tests {
         assert_eq!(parsable_language(&p("a.ts")), Some(Language::TypeScript));
         assert_eq!(parsable_language(&p("a.tsx")), Some(Language::TypeScript));
         assert_eq!(parsable_language(&p("a.js")), Some(Language::JavaScript));
-        // `.min.js` is no longer excluded at this layer; CodeFilter handles it.
+        // Pure extension lookup: exclusion lives in the denylist, not here.
         assert_eq!(
             parsable_language(&p("a.min.js")),
             Some(Language::JavaScript)
         );
-        assert_eq!(parsable_language(&p("pkg/x_test.go")), None);
+        assert_eq!(parsable_language(&p("pkg/x_test.go")), Some(Language::Go));
         assert_eq!(parsable_language(&p("foo.unknown")), None);
     }
 }

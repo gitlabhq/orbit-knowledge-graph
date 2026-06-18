@@ -39,7 +39,6 @@ macro_rules! define_languages {
         $variant:ident => {
             $(support_lang: $sl:ident,)?
             extensions: [$($ext:literal),+ $(,)?],
-            exclude: [$($excl:literal),* $(,)?],
             separator: $sep:literal,
             names: [$($name:literal),+ $(,)?] $(,)?
         }
@@ -59,9 +58,6 @@ macro_rules! define_languages {
                 match self { $(Self::$variant => &[$($ext),+]),+ }
             }
 
-            pub const fn exclude_extensions(&self) -> &'static [&'static str] {
-                match self { $(Self::$variant => &[$($excl),*]),+ }
-            }
 
             pub const fn fqn_separator(&self) -> &'static str {
                 match self { $(Self::$variant => $sep),+ }
@@ -118,42 +114,36 @@ define_languages! {
     Bash => {
         support_lang: Bash,
         extensions: ["sh", "bash", "zsh"],
-        exclude: [],
         separator: ".",
         names: ["bash", "shell", "sh"],
     },
     C => {
         support_lang: C,
         extensions: ["c", "h"],
-        exclude: [],
         separator: "::",
         names: ["c"],
     },
     Cpp => {
         support_lang: Cpp,
         extensions: ["cpp", "cc", "cxx", "hpp", "hh", "hxx"],
-        exclude: [],
         separator: "::",
         names: ["cpp", "c++"],
     },
     Elixir => {
         support_lang: Elixir,
         extensions: ["ex", "exs"],
-        exclude: [],
         separator: ".",
         names: ["elixir"],
     },
     Ruby => {
         support_lang: Ruby,
         extensions: ["rb", "rbw", "rake", "gemspec"],
-        exclude: [],
         separator: "::",
         names: ["ruby"],
     },
     Python => {
         support_lang: Python,
         extensions: ["py"],
-        exclude: [],
         separator: ".",
         names: ["python"],
     },
@@ -173,63 +163,54 @@ define_languages! {
             "gql",
             "json"
         ],
-        exclude: [],
         separator: "::",
         names: ["javascript", "js"],
     },
     TypeScript => {
         support_lang: TypeScript,
         extensions: ["ts", "tsx", "mts", "cts"],
-        exclude: [],
         separator: "::",
         names: ["typescript", "ts"],
     },
     Kotlin => {
         support_lang: Kotlin,
         extensions: ["kt", "kts"],
-        exclude: [],
         separator: ".",
         names: ["kotlin"],
     },
     CSharp => {
         support_lang: CSharp,
         extensions: ["cs"],
-        exclude: [],
         separator: ".",
         names: ["csharp"],
     },
     Java => {
         support_lang: Java,
         extensions: ["java"],
-        exclude: [],
         separator: ".",
         names: ["java"],
     },
     Go => {
         support_lang: Go,
         extensions: ["go"],
-        exclude: ["_test.go"],
         separator: ".",
         names: ["go", "golang"],
     },
     Rust => {
         support_lang: Rust,
         extensions: ["rs"],
-        exclude: [],
         separator: "::",
         names: ["rust"],
     },
     Php => {
         support_lang: Php,
         extensions: ["php", "phtml", "php3", "php4", "php5", "php7", "phps"],
-        exclude: [],
         separator: "\\",
         names: ["php"],
     },
     Hcl => {
         support_lang: Hcl,
         extensions: ["tf", "tfvars"],
-        exclude: [],
         separator: ".",
         names: ["hcl", "terraform"],
     },

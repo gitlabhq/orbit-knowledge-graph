@@ -24,11 +24,6 @@ const MAX_LINE_LENGTH: usize = 64 * 1024;
 const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
 const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
 
-/// Build-artifact bundles recognized by name, before any read. The content
-/// heuristic in `on_content` catches unnamed ones, but a small minified bundle
-/// can stay under the content thresholds, so the name match still earns its keep.
-const MINIFIED_SUFFIXES: &[&str] = &[".min.js", ".min.mjs", ".min.cjs"];
-
 /// Why [`CodeFilter`] declined to load a file. Low-cardinality, snake_case for
 /// metric labels.
 #[derive(
@@ -99,9 +94,6 @@ impl FileStreamHooks for CodeFilter {
         }
         if is_excluded_from_indexing(Path::new(&file.path)) {
             return self.record(FilterSkip::ExcludedExtension, file.size);
-        }
-        if MINIFIED_SUFFIXES.iter().any(|s| file.path.ends_with(s)) {
-            return self.record(FilterSkip::Minified, file.size);
         }
         Decision::Keep
     }
