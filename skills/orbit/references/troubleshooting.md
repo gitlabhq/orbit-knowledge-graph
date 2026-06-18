@@ -96,6 +96,9 @@ has no matches.
 - `query_type: "aggregation"` without any `aggregations` entries.
 - `max_hops` or `max_depth` > 3 (server-enforced ceiling).
 - `cursor.offset + cursor.page_size > limit`.
+- `allowlist rejected` / `not valid under 'oneOf'` on a `columns` entry —
+  the column name is not in the entity's allowlist. Run
+  `glab orbit remote schema <Entity>` to get the valid column list.
 
 **Fix:** validate against the live DSL schema, which is authoritative and
 always current. Fetch it with `glab orbit remote dsl`:

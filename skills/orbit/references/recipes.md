@@ -374,19 +374,25 @@ Count detected vulnerabilities by severity:
 
 ## `path_finding` — shortest path between nodes
 
-Shortest path between two projects (`max_depth` ≤ 3, server-enforced).
+Shortest path from a group to a project (`max_depth` ≤ 3, server-enforced).
 `rel_types` is required when either endpoint uses `filters` — omitting it
-causes a server-side validation error:
+causes a server-side validation error.
+
+> **Pitfall:** `path_finding` follows `rel_types` only in their **defined
+> (schema) direction**, unlike `traversal` where `from`/`to` merely name
+> endpoints. Pick endpoints and edge types that form a forward-directed chain
+> (e.g. `Group --CONTAINS--> Project`, not `Project → … → Project` via a
+> reverse hop the engine will not take).
 
 ```json
 {
   "query": {
     "query_type": "path_finding",
     "nodes": [
-      {"id": "from", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}},
+      {"id": "from", "entity": "Group",   "filters": {"id": {"op": "eq", "value": 9970}}},
       {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
     ],
-    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3, "rel_types": ["IN_GROUP", "CONTAINS"]}
+    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 2, "rel_types": ["CONTAINS"]}
   }
 }
 ```
