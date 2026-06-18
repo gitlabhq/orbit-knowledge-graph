@@ -148,18 +148,19 @@ fn resolve_dest(
     relative_path: &Path,
     target_canonical: &Path,
 ) -> Result<PathBuf, StreamError> {
-    let dest_canonical = if dest.exists() {
-        dest.canonicalize()?
+    if dest.exists() {
+        // Canonicalizes and confirms the real target lives under the root.
+        crate::fs::contained_canonical_path(target_canonical, dest).ok_or_else(|| {
+            StreamError::Io(std::io::Error::other(format!(
+                "path traversal detected: {}",
+                relative_path.display()
+            )))
+        })
     } else {
-        crate::fs::safe_create_dir_all(dest, target_canonical).map_err(std::io::Error::other)?
-    };
-    if !dest_canonical.starts_with(target_canonical) {
-        return Err(StreamError::Io(std::io::Error::other(format!(
-            "path traversal detected: {}",
-            relative_path.display()
-        ))));
+        // `safe_create_dir_all` validates the existing ancestor is within the
+        // root and returns a path under it, so no extra containment check.
+        Ok(crate::fs::safe_create_dir_all(dest, target_canonical)?)
     }
-    Ok(dest_canonical)
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
