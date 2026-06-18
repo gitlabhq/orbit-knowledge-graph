@@ -2132,12 +2132,12 @@ mod tests {
             FileInventoryEntry {
                 path: "assets/logo.png".into(),
                 size: 128,
-                decision: Decision::Keep,
+                decision: Decision::ListOnly,
             },
             FileInventoryEntry {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
-                decision: Decision::Keep,
+                decision: Decision::ListOnly,
             },
         ];
 

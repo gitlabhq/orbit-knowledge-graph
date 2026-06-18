@@ -25,10 +25,11 @@ use super::registry::detect_language_from_extension;
 
 /// Returns the [`Language`] that would parse `rel_path`, or `None` if no
 /// registered language claims the extension or the path matches a per-language
-/// exclude suffix (e.g. `*.min.js`, `*_test.go`).
+/// source-convention exclude suffix (e.g. Go's `*_test.go`). Build-artifact
+/// filtering (minified bundles, binary blobs) lives in `CodeFilter`, not here.
 ///
 /// `rel_path` is matched as-is against exclude suffixes, so a file named
-/// `foo.min.js` is rejected even though its `Path::extension()` is just `js`.
+/// `foo_test.go` is rejected even though its `Path::extension()` is just `go`.
 pub fn parsable_language(rel_path: &Path) -> Option<Language> {
     let ext = rel_path.extension().and_then(|e| e.to_str())?;
     let lang = detect_language_from_extension(ext)?;
@@ -158,20 +159,10 @@ mod tests {
 
     #[test]
     fn excluded_suffix_is_not_parsable() {
-        // `foo.min.js` has extension `js` but is excluded by suffix.
-        assert!(!is_parsable(&p("vendor/jquery.min.js")));
+        // Go test files are a source-convention exclude; minified `.min.js` is
+        // no longer excluded here (it is a CodeFilter concern).
         assert!(!is_parsable(&p("pkg/server_test.go")));
-    }
-
-    #[test]
-    fn min_js_suffix_does_not_match_unrelated_filenames() {
-        // The `.min.js` exclude must require a literal dot before `min.js`,
-        // otherwise common identifiers ending in those characters get
-        // dropped by accident.
-        assert!(is_parsable(&p("src/admin.js")));
-        assert!(is_parsable(&p("src/gemini.js")));
-        assert!(is_parsable(&p("src/vitamin.js")));
-        assert!(is_parsable(&p("src/examine.js")));
+        assert!(is_parsable(&p("vendor/jquery.min.js")));
     }
 
     #[test]
@@ -286,7 +277,12 @@ mod tests {
         assert_eq!(parsable_language(&p("a.ts")), Some(Language::TypeScript));
         assert_eq!(parsable_language(&p("a.tsx")), Some(Language::TypeScript));
         assert_eq!(parsable_language(&p("a.js")), Some(Language::JavaScript));
-        assert_eq!(parsable_language(&p("a.min.js")), None);
+        // `.min.js` is no longer excluded at this layer; CodeFilter handles it.
+        assert_eq!(
+            parsable_language(&p("a.min.js")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(parsable_language(&p("pkg/x_test.go")), None);
         assert_eq!(parsable_language(&p("foo.unknown")), None);
     }
 }
