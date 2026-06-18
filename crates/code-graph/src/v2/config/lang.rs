@@ -173,7 +173,7 @@ define_languages! {
             "gql",
             "json"
         ],
-        exclude: [".min.js"],
+        exclude: [".min.js", ".min.mjs", ".min.cjs"],
         separator: "::",
         names: ["javascript", "js"],
     },

@@ -88,6 +88,7 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
+        max_total_bytes: 10000000000
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 2000

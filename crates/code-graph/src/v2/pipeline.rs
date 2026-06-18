@@ -513,6 +513,9 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
+    /// Total discovered bytes above which the whole repo is skipped (no parse,
+    /// no structural graph) to bound pathologically large repos. 0 = no limit.
+    pub max_total_bytes: u64,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -551,6 +554,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             max_files: 0,
+            max_total_bytes: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
@@ -736,10 +740,24 @@ impl Pipeline {
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
         let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
-        let (files_by_family, parsed_file_languages) =
+        let (mut files_by_family, parsed_file_languages) =
             group_parseable_inventory(root, &file_inventory, &config);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
+
+        // Bound pathologically large repos: above the cap, index nothing (skip
+        // parse and the structural file/dir graph). The run still returns a
+        // valid empty result so the task checkpoints instead of retrying forever.
+        let over_size_cap = config.max_total_bytes > 0 && total_bytes > config.max_total_bytes;
+        if over_size_cap {
+            tracing::warn!(
+                total_bytes,
+                max_total_bytes = config.max_total_bytes,
+                total_files,
+                "repository exceeds the total-bytes cap; skipping indexing"
+            );
+            files_by_family.clear();
+        }
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_family
             .iter()
@@ -780,7 +798,7 @@ impl Pipeline {
         let file_discovery_ms = t_discovery.elapsed().as_secs_f64() * 1000.0;
 
         let t_structural = std::time::Instant::now();
-        if !file_inventory.is_empty() {
+        if !over_size_cap && !file_inventory.is_empty() {
             let structural_graph =
                 Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
             write_graph_direct(
@@ -1109,6 +1127,13 @@ fn group_parseable_inventory(
         let Some(lang) = parsable_language(rel_path) else {
             continue;
         };
+
+        // Vendored third-party source (node_modules/, vendor/, ...) is left on
+        // disk for resolvers but not parsed: it is duplicated across repos and
+        // dominates parse time without adding first-party graph value.
+        if crate::v2::config::is_vendored_path(rel_path) {
+            continue;
+        }
 
         if config.max_files > 0 && accepted_files >= config.max_files {
             continue;
@@ -1895,6 +1920,68 @@ mod tests {
         let accepted = groups.values().map(Vec::len).sum::<usize>();
 
         assert_eq!(accepted, 2);
+    }
+
+    #[test]
+    fn inventory_grouping_skips_vendored_dirs() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("app.js"), "export const x = 1;").unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules/jquery")).unwrap();
+        std::fs::write(
+            dir.path().join("node_modules/jquery/jquery.js"),
+            "var $ = 1;",
+        )
+        .unwrap();
+
+        let inventory = [
+            FileInventoryEntry {
+                path: "app.js".into(),
+                size: 10,
+            },
+            FileInventoryEntry {
+                path: "node_modules/jquery/jquery.js".into(),
+                size: 10,
+            },
+        ];
+        let groups = Pipeline::group_inventory(dir.path(), &inventory, &PipelineConfig::default());
+        let accepted = groups.values().map(Vec::len).sum::<usize>();
+
+        assert_eq!(accepted, 1, "vendored node_modules file must not be parsed");
+    }
+
+    #[test]
+    fn repository_over_total_bytes_cap_is_not_indexed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let source = "def f():\n    return 1\n";
+        std::fs::write(root.join("a.py"), source).unwrap();
+
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "a.py".into(),
+                size: source.len() as u64,
+            }]),
+            PipelineConfig {
+                max_total_bytes: 1,
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            Arc::new(TestCapture::new()),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.stats.files_discovered, 1);
+        assert_eq!(result.stats.bytes_discovered, source.len() as u64);
+        assert_eq!(
+            result.stats.files_indexed, 0,
+            "a repo over the total-bytes cap indexes no files"
+        );
+        assert_eq!(
+            result.stats.definitions_count, 0,
+            "a repo over the total-bytes cap parses nothing"
+        );
     }
 
     #[test]
