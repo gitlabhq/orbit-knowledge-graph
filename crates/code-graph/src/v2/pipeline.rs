@@ -779,26 +779,6 @@ impl Pipeline {
 
         let file_discovery_ms = t_discovery.elapsed().as_secs_f64() * 1000.0;
 
-        let t_structural = std::time::Instant::now();
-        if !file_inventory.is_empty() {
-            let structural_graph =
-                Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
-            write_graph_direct(
-                structural_graph,
-                converter.as_ref(),
-                sink.as_ref(),
-                &all_errors,
-                GraphStatsCounters::new(
-                    &directories_count,
-                    &files_count,
-                    &definitions_count,
-                    &imports_count,
-                    &edges_count,
-                ),
-            );
-        }
-        let structural_graph_ms = t_structural.elapsed().as_secs_f64() * 1000.0;
-
         // Bounded channel as a semaphore: N permits = N concurrent languages
         let t_languages = std::time::Instant::now();
         let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
@@ -1015,6 +995,44 @@ impl Pipeline {
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
 
+        // The structural graph (gl_file/gl_directory) is written after parsing so
+        // each File node carries its final skip/fault reason in a single write
+        // (no second row to dedup, which the local DuckDB graph can't do). Synthetic
+        // skip paths (e.g. "js:cross-file-resolve") never match an inventory entry,
+        // so they produce no File node.
+        let t_structural = std::time::Instant::now();
+        if !file_inventory.is_empty() {
+            let reasons: FxHashMap<&str, &str> = skipped
+                .iter()
+                .map(|s| (s.path.as_str(), s.kind.as_metric_label()))
+                .chain(
+                    faults
+                        .iter()
+                        .map(|f| (f.path.as_str(), f.kind.as_metric_label())),
+                )
+                .collect();
+            let structural_graph = Self::build_file_inventory_graph(
+                root,
+                &file_inventory,
+                &parsed_file_languages,
+                &reasons,
+            );
+            write_graph_direct(
+                structural_graph,
+                converter.as_ref(),
+                sink.as_ref(),
+                &all_errors,
+                GraphStatsCounters::new(
+                    &directories_count,
+                    &files_count,
+                    &definitions_count,
+                    &imports_count,
+                    &edges_count,
+                ),
+            );
+        }
+        let structural_graph_ms = t_structural.elapsed().as_secs_f64() * 1000.0;
+
         let slowest_files = ctx.drain_slowest_files();
         let mut language_timings = ctx
             .language_timings
@@ -1075,11 +1093,13 @@ impl Pipeline {
         root: &Path,
         inventory: &[FileInventoryEntry],
         parsed_file_languages: &FxHashMap<String, Language>,
+        reasons: &FxHashMap<&str, &str>,
     ) -> CodeGraph {
         let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
         for entry in inventory {
             let language = parsed_file_languages.get(&entry.path).copied();
-            graph.add_unparsed_file(&entry.path, language, entry.size);
+            let reason = reasons.get(entry.path.as_str()).copied().unwrap_or("");
+            graph.add_unparsed_file(&entry.path, language, entry.size, reason);
         }
 
         graph.drop_construction_indexes();
@@ -1941,6 +1961,45 @@ mod tests {
             crate::v2::error::FileSkip::ParserOversize
         );
         assert_eq!(result.skipped[0].path, "proto.gen.go");
+    }
+
+    #[test]
+    fn skipped_file_reason_is_emitted_to_gl_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let path = root.join("proto.gen.go");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(GO_PARSER_MAX_FILE_SIZE + 1).unwrap();
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "proto.gen.go".into(),
+                size: GO_PARSER_MAX_FILE_SIZE + 1,
+            }]),
+            PipelineConfig {
+                max_file_size: u64::MAX,
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(
+            result.skipped[0].kind,
+            crate::v2::error::FileSkip::ParserOversize
+        );
+        // The re-emit produces a File node for the skipped path carrying the
+        // low-card reason label, which the converter writes to gl_file.reason.
+        let reason = capture
+            .take()
+            .iter()
+            .flat_map(|g| g.files())
+            .find(|(_, f)| f.path == "proto.gen.go" && !f.reason.is_empty())
+            .map(|(_, f)| f.reason.clone());
+        assert_eq!(reason.as_deref(), Some("parser_oversize"));
     }
 
     #[test]
