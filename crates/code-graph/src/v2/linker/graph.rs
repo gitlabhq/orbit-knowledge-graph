@@ -811,7 +811,7 @@ impl CodeGraph {
             GraphNode::File(f) => match property {
                 "extension" => Some(f.extension.clone()),
                 "language" => Some(f.language_name().to_string()),
-                "reason" => Some(f.reason.as_label()),
+                "reason" => Some(f.reason.to_string()),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
@@ -1190,7 +1190,7 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
         b.col("name")?.push_str(&self.file.name)?;
         b.col("extension")?.push_str(&self.file.extension)?;
         b.col("language")?.push_str(self.file.language_name())?;
-        b.col("reason")?.push_str(self.file.reason.as_label())?;
+        b.col("reason")?.push_str(self.file.reason.to_string())?;
         Ok(())
     }
 }

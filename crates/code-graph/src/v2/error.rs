@@ -180,28 +180,21 @@ impl fmt::Display for FileFault {
 }
 
 /// Why a file did not index cleanly: a benign skip, a genuine fault, or
-/// nothing. Carried on the File node so `gl_file.reason` is strictly an
-/// enum — `as_label` is the only way to produce its string, so an unbounded
-/// value can never reach the column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// nothing. Carried on the File node and written to `gl_file.reason` via its
+/// `Display`, which is the only way to produce the string — so the column is
+/// strictly enum-bounded. The category prefix (`skip_` / `fault_`) composes
+/// with the inner enum's `Display` via strum, so a new `FileSkip` / `FileFault`
+/// variant is labelled automatically (`skip_oversize`, `fault_invalid_utf8`, …;
+/// empty for `None`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display)]
 pub enum FileReason {
     #[default]
+    #[strum(to_string = "")]
     None,
+    #[strum(to_string = "skip_{0}")]
     Skip(FileSkip),
+    #[strum(to_string = "fault_{0}")]
     Fault(FileFault),
-}
-
-impl FileReason {
-    /// The low-card label written to `gl_file.reason`: empty for `None`, else the
-    /// inner label prefixed with its category (`skip_` / `fault_`) so the merged
-    /// column says which enum produced it (e.g. `skip_oversize`, `fault_invalid_utf8`).
-    pub fn as_label(self) -> String {
-        match self {
-            Self::None => String::new(),
-            Self::Skip(kind) => format!("skip_{}", kind.as_metric_label()),
-            Self::Fault(kind) => format!("fault_{}", kind.as_metric_label()),
-        }
-    }
 }
 
 /// Per-file outcome from a language analyzer. Encodes skip-vs-fault
@@ -320,17 +313,17 @@ mod tests {
 
     #[test]
     fn file_reason_labels_are_category_prefixed() {
-        assert_eq!(FileReason::None.as_label(), "");
+        assert_eq!(FileReason::None.to_string(), "");
         assert_eq!(
-            FileReason::Skip(FileSkip::Oversize).as_label(),
+            FileReason::Skip(FileSkip::Oversize).to_string(),
             "skip_oversize"
         );
         assert_eq!(
-            FileReason::Skip(FileSkip::Timeout(AbortPhase::Ssa)).as_label(),
+            FileReason::Skip(FileSkip::Timeout(AbortPhase::Ssa)).to_string(),
             "skip_timeout_ssa"
         );
         assert_eq!(
-            FileReason::Fault(FileFault::InvalidUtf8).as_label(),
+            FileReason::Fault(FileFault::InvalidUtf8).to_string(),
             "fault_invalid_utf8"
         );
     }
