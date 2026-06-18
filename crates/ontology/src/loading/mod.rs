@@ -901,22 +901,22 @@ mod tests {
         let mut ontology = crate::Ontology::new().with_edges(["MENTIONS"]);
         ontology.derived_entities.insert(
             "SystemNote".to_string(),
-            system_note(&["MENTIONS", "REOPENED"]),
+            system_note(&["MENTIONS", "GHOST_EDGE"]),
         );
 
         let err = validate_derived_emits_registered(&ontology).unwrap_err();
         assert!(
-            err.to_string().contains("REOPENED") && err.to_string().contains("SystemNote"),
+            err.to_string().contains("GHOST_EDGE") && err.to_string().contains("SystemNote"),
             "got: {err}"
         );
     }
 
     #[test]
     fn registered_derived_emits_pass() {
-        let mut ontology = crate::Ontology::new().with_edges(["MENTIONS", "REOPENED"]);
+        let mut ontology = crate::Ontology::new().with_edges(["MENTIONS", "GHOST_EDGE"]);
         ontology.derived_entities.insert(
             "SystemNote".to_string(),
-            system_note(&["MENTIONS", "REOPENED"]),
+            system_note(&["MENTIONS", "GHOST_EDGE"]),
         );
 
         assert!(validate_derived_emits_registered(&ontology).is_ok());

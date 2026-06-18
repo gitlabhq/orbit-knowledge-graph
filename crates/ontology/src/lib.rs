@@ -3033,7 +3033,6 @@ properties:
         }
 
         assert!(edge_names.contains(&"MENTIONS"));
-        assert!(edge_names.contains(&"REOPENED"));
     }
 
     // --- Scope annotation tests ---
