@@ -5,6 +5,7 @@ mod error;
 mod extract;
 mod profiling;
 pub mod stats;
+pub mod uri_guard;
 
 pub use arrow_client::{ArrowClickHouseClient, ArrowQuery, QuerySummary};
 pub use circuit_breaking::{CircuitBreakingClickHouseClient, CircuitBreakingQuery};

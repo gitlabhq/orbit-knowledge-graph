@@ -70,6 +70,13 @@ impl ArrowClickHouseClient {
         &self.database
     }
 
+    /// The base ClickHouse HTTP URL (scheme + authority), used to measure the
+    /// serialized request URI against the `http` crate's length cap. See
+    /// [`crate::uri_guard`].
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub fn query(&self, sql: &str) -> ArrowQuery {
         ArrowQuery {
             inner: self.client.query(sql),

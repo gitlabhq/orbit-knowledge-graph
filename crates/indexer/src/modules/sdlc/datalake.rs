@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::clickhouse::{ArrowClickHouseClient, ArrowQuery, QuerySummary};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use clickhouse_client::uri_guard;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
@@ -16,6 +17,16 @@ pub(crate) enum DatalakeError {
 
     #[error("arrow decode error: {0}")]
     ArrowDecode(#[from] arrow::error::ArrowError),
+
+    /// The serialized request URI would exceed the `http` crate's length cap.
+    /// Caught at [`Datalake::build_query`] so an over-limit batch fails loudly
+    /// here instead of re-failing every dispatch with an opaque `uri too long`
+    /// downstream (KG#881). The caller must split the batch into smaller chunks.
+    #[error(
+        "request URI is {len} bytes, over the {limit}-byte http limit; \
+         the batched param list is too large and must be split into smaller chunks"
+    )]
+    UriTooLong { len: usize, limit: usize },
 }
 
 impl From<clickhouse::error::Error> for DatalakeError {
@@ -84,14 +95,37 @@ impl Datalake {
         }
     }
 
-    fn build_query(&self, sql: &str, params: Value) -> ArrowQuery {
+    /// Builds an [`ArrowQuery`] from `sql` + `params`, guarding the serialized
+    /// request URI against the `http` crate's length cap.
+    ///
+    /// This is the single chokepoint where every datalake query turns its
+    /// params into the `param_*` settings that get percent-encoded into the
+    /// dispatched URL. An over-limit URI fails downstream with an opaque `uri
+    /// too long` and re-fails every retry (KG#881), so we measure the encoded
+    /// length here and reject it with a typed [`DatalakeError::UriTooLong`]
+    /// before it reaches `hyper`/`http`. The `debug_assert!` trips the same
+    /// invariant loudly in dev/CI debug builds; the returned error is the
+    /// release-build backstop so production degrades to a loud, attributable
+    /// failure instead of a panic.
+    fn build_query(&self, sql: &str, params: Value) -> Result<ArrowQuery, DatalakeError> {
+        if let Some(len) =
+            uri_guard::request_uri_overflow(self.client.base_url(), self.client.database(), &params)
+        {
+            let limit = uri_guard::MAX_REQUEST_URI_LEN;
+            debug_assert!(
+                len <= limit,
+                "datalake query URI is {len} bytes, over the {limit}-byte http cap"
+            );
+            return Err(DatalakeError::UriTooLong { len, limit });
+        }
+
         let mut query = self.client.query(sql);
         if let Value::Object(map) = params {
             for (key, value) in map {
                 query = query.param(&key, value);
             }
         }
-        query
+        Ok(query)
     }
 }
 
@@ -106,7 +140,7 @@ impl DatalakeQuery for Datalake {
         // The Arrow 2GB-overflow byte-cap lives in `query_arrow_with_scan`; this
         // path only serves `query_batches`, which always passes `None`.
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
-        let query = self.build_query(sql, params);
+        let query = self.build_query(sql, params)?;
         let stream = query
             .fetch_arrow_streamed(block_size)
             .await
@@ -143,7 +177,7 @@ impl DatalakeQuery for Datalake {
         max_block_size: Option<u64>,
     ) -> Result<(Vec<RecordBatch>, ScanStats), DatalakeError> {
         let block_size = max_block_size.unwrap_or(self.default_max_block_size);
-        let mut query = self.build_query(sql, params);
+        let mut query = self.build_query(sql, params)?;
         if max_block_size.is_some() {
             // Retry after a datalake failure (the Arrow 2GB overflow): byte-cap
             // blocks so the retry is safe regardless of row width.
@@ -206,6 +240,134 @@ pub(in crate::modules::sdlc) fn is_arrow_string_overflow(err: &DatalakeError) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn test_datalake() -> Datalake {
+        let client = ArrowClickHouseClient::new(
+            "http://clickhouse:8123",
+            "datalake",
+            "default",
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        Datalake::new(Arc::new(client), 65_536)
+    }
+
+    fn measured_uri_len(datalake: &Datalake, params: &Value) -> usize {
+        uri_guard::request_uri_len(
+            datalake.client.base_url(),
+            datalake.client.database(),
+            params,
+        )
+    }
+
+    // A `paths` batch whose *encoded* URI clears the cap must be caught at the
+    // chokepoint. In a debug build the `debug_assert!` is the loud signal, so
+    // `build_query` panics here (this is what CI exercises); the release path is
+    // covered by `build_query_returns_uri_too_long_in_release`.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "over the")]
+    fn build_query_debug_asserts_on_over_cap_uri() {
+        let datalake = test_datalake();
+        let path: String = std::iter::repeat_n('a', 255).collect();
+        let paths: Vec<String> = std::iter::repeat_n(path, 3_000).collect();
+
+        let _ = datalake.build_query("SELECT 1", json!({ "paths": paths }));
+    }
+
+    // The release backstop: with `debug_assert!` compiled out (production runs
+    // release), an over-cap batch degrades to a typed `UriTooLong` carrying the
+    // actual length and the limit, never a panic on the data path.
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn build_query_returns_uri_too_long_in_release() {
+        let datalake = test_datalake();
+        let path: String = std::iter::repeat_n('a', 255).collect();
+        let paths: Vec<String> = std::iter::repeat_n(path, 3_000).collect();
+
+        let result = datalake
+            .build_query("SELECT 1", json!({ "paths": paths }))
+            .map(|_| ());
+
+        match result {
+            Err(DatalakeError::UriTooLong { len, limit }) => {
+                assert_eq!(limit, uri_guard::MAX_REQUEST_URI_LEN);
+                assert!(
+                    len > limit,
+                    "reported len {len} should exceed limit {limit}"
+                );
+            }
+            other => panic!("expected UriTooLong, got {other:?}"),
+        }
+    }
+
+    // A batch just under the cap must pass through untouched in any build: the
+    // guard cannot false-positive on a legitimately-large-but-valid request.
+    #[test]
+    fn build_query_passes_under_cap_uri() {
+        let datalake = test_datalake();
+        let path: String = std::iter::repeat_n('a', 18).collect();
+        let paths: Vec<String> = std::iter::repeat_n(path, 1_000).collect();
+        let params = json!({ "paths": paths });
+
+        assert!(measured_uri_len(&datalake, &params) < uri_guard::MAX_REQUEST_URI_LEN);
+        assert!(datalake.build_query("SELECT 1", params).is_ok());
+    }
+
+    // `'` is doubled by the ClickHouse escaper *before* percent-encoding, so the
+    // guard must measure the real (escaped, then `%27`-encoded) wire length. A
+    // raw-byte proxy would call this batch safe — raw bytes are well under the
+    // cap — yet its encoded URI is over, so only the encoded measurement catches
+    // it. Pins the encoded measurement, not a raw-byte one.
+    #[test]
+    fn build_query_measures_escaped_encoded_length_for_adversarial_input() {
+        let datalake = test_datalake();
+        let quote_heavy: String = std::iter::repeat_n('\'', 500).collect();
+        let paths: Vec<String> = std::iter::repeat_n(quote_heavy.clone(), 40).collect();
+        let params = json!({ "paths": paths });
+
+        let raw_param_bytes: usize = 40 * quote_heavy.len();
+        assert!(
+            raw_param_bytes < uri_guard::MAX_REQUEST_URI_LEN,
+            "raw byte count {raw_param_bytes} must be under the cap so that only \
+             an encoded-length guard can catch this batch"
+        );
+        assert!(
+            measured_uri_len(&datalake, &params) > uri_guard::MAX_REQUEST_URI_LEN,
+            "the escaped+percent-encoded URI must clear the cap"
+        );
+    }
+
+    // A URI right at the cap is allowed (`http` rejects only `> MAX_LEN`); one
+    // byte more flips it. Asserted on the measurement so the `<` vs `<=`
+    // boundary is checked without the debug-assert aborting either case.
+    #[test]
+    fn uri_guard_boundary_is_strictly_over_cap() {
+        let datalake = test_datalake();
+        let base_len = measured_uri_len(&datalake, &json!({}));
+        // Top-level string params are unquoted and `a` percent-encodes to
+        // itself, so encoded length == base + `&param_p=` + value byte count.
+        let framing = "&param_p=".len();
+        let value_len = uri_guard::MAX_REQUEST_URI_LEN - base_len - framing;
+        let at_cap: String = std::iter::repeat_n('a', value_len).collect();
+        let over_cap: String = std::iter::repeat_n('a', value_len + 1).collect();
+
+        assert_eq!(
+            measured_uri_len(&datalake, &json!({ "p": at_cap })),
+            uri_guard::MAX_REQUEST_URI_LEN
+        );
+        assert!(
+            datalake
+                .build_query("SELECT 1", json!({ "p": at_cap }))
+                .is_ok()
+        );
+        assert!(
+            measured_uri_len(&datalake, &json!({ "p": over_cap })) > uri_guard::MAX_REQUEST_URI_LEN
+        );
+    }
 
     #[test]
     fn detects_the_production_arrow_string_overflow() {
