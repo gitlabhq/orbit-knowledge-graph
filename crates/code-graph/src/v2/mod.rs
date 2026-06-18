@@ -1,6 +1,7 @@
 pub mod config;
 pub mod dsl;
 pub mod error;
+pub mod inventory;
 pub mod langs;
 pub mod linker;
 pub mod pipeline;

@@ -3,9 +3,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::v2::error::AnalyzerError;
+use crate::v2::inventory::FileInput;
 use crate::v2::pipeline::{
-    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
-    PipelineError,
+    BatchTx, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext, PipelineError,
 };
 use crate::v2::sentinel;
 use rustc_hash::FxHashMap;

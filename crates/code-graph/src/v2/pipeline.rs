@@ -1,14 +1,18 @@
-use crate::v2::config::{Language, detect_language_from_path};
+use crate::v2::config::Language;
+use crate::v2::inventory::{
+    FamilyFileInput, FileInput, build_file_inventory_graph, canonical_file_inventory,
+    group_parseable_inventory,
+};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::any::Any;
 use std::marker::PhantomData;
-use std::path::{Component, Path};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -179,17 +183,6 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
             detail.clone(),
         );
     }
-}
-
-/// Input to a language pipeline: file path (source read on demand).
-pub type FileInput = String;
-
-/// A file paired with the specific [`Language`] that should parse it.
-/// Used when a language family groups multiple languages into one
-/// pipeline invocation (e.g. C and C++ in `CFamily`).
-pub struct FamilyFileInput {
-    pub language: Language,
-    pub path: FileInput,
 }
 
 /// Immutable context shared across the entire pipeline run.
@@ -733,7 +726,7 @@ impl Pipeline {
         let pb_discover = spinner("Preparing file inventory...");
         let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
         let (files_by_family, parsed_file_languages) =
-            group_parseable_inventory(&file_inventory, &config);
+            group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -778,7 +771,7 @@ impl Pipeline {
         let t_structural = std::time::Instant::now();
         if !file_inventory.is_empty() {
             let structural_graph =
-                Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
+                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -1049,115 +1042,6 @@ impl Pipeline {
             faults,
             ctx,
         }
-    }
-
-    #[cfg(test)]
-    fn group_inventory(
-        inventory: &[FileInventoryEntry],
-        config: &PipelineConfig,
-    ) -> FxHashMap<Language, Vec<FileInput>> {
-        let (by_family, _) = group_parseable_inventory(inventory, config);
-        let mut by_lang: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
-        for (_fam, files) in by_family {
-            for f in files {
-                by_lang.entry(f.language).or_default().push(f.path);
-            }
-        }
-        by_lang
-    }
-
-    fn build_file_inventory_graph(
-        root: &Path,
-        inventory: &[FileInventoryEntry],
-        parsed_file_languages: &FxHashMap<String, Language>,
-    ) -> CodeGraph {
-        let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
-        for entry in inventory {
-            let language = parsed_file_languages.get(&entry.path).copied();
-            graph.add_unparsed_file(&entry.path, language, entry.size);
-        }
-
-        graph.drop_construction_indexes();
-        graph
-    }
-}
-
-fn group_parseable_inventory(
-    inventory: &[FileInventoryEntry],
-    config: &PipelineConfig,
-) -> (
-    FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>>,
-    FxHashMap<String, Language>,
-) {
-    let mut groups: FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>> =
-        FxHashMap::default();
-    let mut parsed_file_languages = FxHashMap::default();
-    let mut accepted_files = 0usize;
-
-    for entry in inventory {
-        // Only loaded files are parse candidates; the stream settled the rest as
-        // ListOnly.
-        if entry.decision != Decision::Keep {
-            continue;
-        }
-        let Some(lang) = detect_language_from_path(&entry.path) else {
-            continue;
-        };
-        if config.max_files > 0 && accepted_files >= config.max_files {
-            continue;
-        }
-
-        accepted_files += 1;
-        parsed_file_languages.insert(entry.path.clone(), lang);
-        groups
-            .entry(lang.family())
-            .or_default()
-            .push(FamilyFileInput {
-                language: lang,
-                path: entry.path.clone(),
-            });
-    }
-
-    (groups, parsed_file_languages)
-}
-
-fn canonical_file_inventory(
-    entries: impl IntoIterator<Item = FileInventoryEntry>,
-) -> Vec<FileInventoryEntry> {
-    let mut by_path = FxHashMap::default();
-    for entry in entries {
-        let Some(path) = normalize_inventory_path(&entry.path) else {
-            continue;
-        };
-        by_path.entry(path).or_insert((entry.size, entry.decision));
-    }
-
-    let mut entries: Vec<_> = by_path
-        .into_iter()
-        .map(|(path, (size, decision))| FileInventoryEntry {
-            path,
-            size,
-            decision,
-        })
-        .collect();
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    entries
-}
-
-fn normalize_inventory_path(path: &str) -> Option<String> {
-    let mut parts = Vec::new();
-    for component in Path::new(path).components() {
-        match component {
-            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("/"))
     }
 }
 
@@ -1854,57 +1738,6 @@ mod tests {
         let mut graphs = capture.take();
         assert!(!graphs.is_empty(), "expected graph output");
         graphs.remove(0)
-    }
-
-    #[test]
-    fn inventory_grouping_respects_max_files() {
-        let inventory = [
-            FileInventoryEntry {
-                path: "a.java".into(),
-                size: 10,
-                decision: Decision::Keep,
-            },
-            FileInventoryEntry {
-                path: "b.java".into(),
-                size: 10,
-                decision: Decision::Keep,
-            },
-            FileInventoryEntry {
-                path: "c.java".into(),
-                size: 10,
-                decision: Decision::Keep,
-            },
-        ];
-        let groups = Pipeline::group_inventory(
-            &inventory,
-            &PipelineConfig {
-                max_files: 2,
-                ..PipelineConfig::default()
-            },
-        );
-        let accepted = groups.values().map(Vec::len).sum::<usize>();
-
-        assert_eq!(accepted, 2);
-    }
-
-    #[test]
-    fn inventory_grouping_keeps_only_loaded_files() {
-        let inventory = [
-            FileInventoryEntry {
-                path: "app.js".into(),
-                size: 10,
-                decision: Decision::Keep,
-            },
-            FileInventoryEntry {
-                path: "vendor/jquery.min.js".into(),
-                size: 10,
-                decision: Decision::ListOnly,
-            },
-        ];
-        let groups = Pipeline::group_inventory(&inventory, &PipelineConfig::default());
-        let accepted = groups.values().map(Vec::len).sum::<usize>();
-
-        assert_eq!(accepted, 1, "only Keep files are parse candidates");
     }
 
     #[test]

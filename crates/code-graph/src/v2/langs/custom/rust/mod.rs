@@ -46,9 +46,9 @@ use crate::v2::error::{AbortPhase, AnalyzerError, FileFault, FileSkip};
 use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::sentinel;
 
+use crate::v2::inventory::FileInput;
 use crate::v2::pipeline::{
-    BatchTx, FileInput, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext,
-    PipelineError,
+    BatchTx, FileTimingEntry, LanguagePipeline, LanguageTimings, PipelineContext, PipelineError,
 };
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,

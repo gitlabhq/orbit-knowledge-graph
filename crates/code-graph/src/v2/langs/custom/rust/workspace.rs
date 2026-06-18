@@ -1,7 +1,7 @@
 use super::manifest::{ManifestCache, build_project_workspace};
 use super::sysroot::EmbeddedSysroot;
 use super::*;
-use crate::v2::pipeline::FileInput;
+use crate::v2::inventory::FileInput;
 
 #[derive(Clone)]
 pub(super) struct WorkspaceIndex {
