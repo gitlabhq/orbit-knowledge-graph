@@ -22,12 +22,29 @@ pub use clickhouse::QuerySummary;
 
 use crate::error::ClickHouseError;
 
+/// The settings every read query carries, seeded on the underlying
+/// `clickhouse::Client`. `do_execute` appends one URL query pair per entry, so
+/// they count toward the request-URI length the `http` crate caps; the URI
+/// guard measures them via [`ArrowClickHouseClient::request_scaffold_pairs`].
+const BASELINE_QUERY_SETTINGS: &[(&str, &str)] = &[
+    ("output_format_arrow_string_as_string", "1"),
+    ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
+    ("use_query_condition_cache", "true"),
+    ("join_use_nulls", "0"),
+    ("query_plan_join_swap_table", "auto"),
+    ("optimize_aggregation_in_order", "1"),
+];
+
 #[derive(Clone)]
 pub struct ArrowClickHouseClient {
     client: Client,
     base_url: String,
     database: String,
     insert_settings: std::collections::HashMap<String, String>,
+    /// The baseline settings plus any operator `session_settings`, captured in
+    /// the same form `do_execute` appends them. Held alongside the client
+    /// because `clickhouse::Client` does not expose its settings for iteration.
+    query_settings: Vec<(String, String)>,
 }
 
 impl ArrowClickHouseClient {
@@ -42,13 +59,13 @@ impl ArrowClickHouseClient {
         let mut client = Client::default()
             .with_url(url)
             .with_database(database)
-            .with_user(username)
-            .with_setting("output_format_arrow_string_as_string", "1")
-            .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_setting("use_query_condition_cache", "true")
-            .with_setting("join_use_nulls", "0")
-            .with_setting("query_plan_join_swap_table", "auto")
-            .with_setting("optimize_aggregation_in_order", "1");
+            .with_user(username);
+
+        let mut query_settings: Vec<(String, String)> = Vec::new();
+        for (k, v) in BASELINE_QUERY_SETTINGS {
+            client = client.with_setting(*k, *v);
+            query_settings.push(((*k).to_string(), (*v).to_string()));
+        }
 
         if let Some(password) = password {
             client = client.with_password(password);
@@ -56,6 +73,7 @@ impl ArrowClickHouseClient {
 
         for (k, v) in session_settings {
             client = client.with_setting(k, v);
+            query_settings.push((k.clone(), v.clone()));
         }
 
         Self {
@@ -63,6 +81,7 @@ impl ArrowClickHouseClient {
             base_url: url.to_string(),
             database: database.to_string(),
             insert_settings: insert_settings.clone(),
+            query_settings,
         }
     }
 
@@ -75,6 +94,24 @@ impl ArrowClickHouseClient {
     /// [`crate::uri_guard`].
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// The URL query pairs `clickhouse::Query::do_execute` appends to every read
+    /// request *besides* `default_format`, `database`, and the per-query
+    /// `param_*` settings: the compression flag and the seeded query settings
+    /// (baseline + `session_settings`). The URI guard sums these so it measures
+    /// the same bytes `http` sees, not just the params (see [`crate::uri_guard`]
+    /// and the B1 gap they close).
+    ///
+    /// `new` never overrides compression, so the client keeps the
+    /// `clickhouse::Compression` default (LZ4 with the `lz4` feature on), which
+    /// `do_execute` serializes as `compress=1`. `roles` are never set here, so
+    /// none are emitted.
+    pub fn request_scaffold_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = Vec::with_capacity(self.query_settings.len() + 1);
+        pairs.push(("compress".to_string(), "1".to_string()));
+        pairs.extend(self.query_settings.iter().cloned());
+        pairs
     }
 
     pub fn query(&self, sql: &str) -> ArrowQuery {

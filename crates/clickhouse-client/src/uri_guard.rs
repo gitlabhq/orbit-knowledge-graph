@@ -2,26 +2,24 @@
 //!
 //! Every batched datalake lookup turns its params into named ClickHouse
 //! `param_*` settings that `clickhouse 0.15` percent-encodes into the request
-//! URL's query string at dispatch (`Query::do_execute`). The `http` crate caps
-//! a URI at [`MAX_REQUEST_URI_LEN`] bytes and rejects anything longer with an
-//! opaque `uri too long` — the production stall in KG#881, where a batched
-//! routes lookup overflowed the cap and re-failed every dispatch.
+//! URL at dispatch (`Query::do_execute`). The `http` crate caps a URI at
+//! [`MAX_REQUEST_URI_LEN`] bytes and rejects anything longer with an opaque `uri
+//! too long`: the production stall in KG#881, where a batched routes lookup
+//! overflowed the cap and re-failed every dispatch.
 //!
-//! This module measures the **encoded** URI a query will produce — the same two
-//! encoders the client applies, in order — so a caller can reject an over-limit
-//! request loudly *before* it reaches `hyper`/`http`:
+//! [`request_uri_len`] reproduces that URL so a caller can reject an over-limit
+//! request before it reaches `hyper`/`http`. Two compounding encoders make the
+//! **encoded** length, not the raw param bytes, the thing to measure:
 //!
-//! 1. **ClickHouse param serialization** (`clickhouse::sql::ser::ParamSerializer`):
-//!    a top-level string is backslash-escaped (no surrounding quotes); an array
-//!    becomes `['a','b',…]` with each element single-quoted and `\ ' \` \t \n`
-//!    backslash-escaped; numbers/bools render as-is.
-//! 2. **URL percent-encoding** (`url::form_urlencoded`, via `query_pairs_mut`):
-//!    the serialized literal is percent-encoded into `&param_<name>=…`, exactly
-//!    as `Query::do_execute` builds the dispatched URL.
+//! 1. ClickHouse param serialization (`clickhouse::sql::ser::ParamSerializer`):
+//!    an array becomes `['a','b',...]`, with `'` and `\` backslash-doubled.
+//! 2. URL percent-encoding (`url`, via `query_pairs_mut`), as `do_execute`
+//!    builds the dispatched URL.
 //!
-//! Measuring the encoded length (not the raw param bytes) is the point: `'`/`\`
-//! are doubled by stage 1 *then* tripled by stage 2, so a naive raw-byte proxy
-//! under-counts the real wire size (KG !1822 review, §3).
+//! `'` and `\` are doubled by stage 1 *then* tripled by stage 2 (6 bytes per raw
+//! byte), so a naive raw-byte proxy undercounts the wire size (KG !1822 review,
+//! §3). The measured URL also includes the client's compression flag and query
+//! settings (`scaffold_pairs`), which `do_execute` appends and `http` counts.
 
 use serde_json::Value;
 use url::Url;
@@ -38,15 +36,23 @@ pub const MAX_REQUEST_URI_LEN: usize = 65534;
 /// Compute the byte length of the request URI that a fetch of `sql_params`
 /// against `base_url`/`database` will serialize to on the wire.
 ///
-/// This mirrors `clickhouse::query::Query::do_execute`: it appends
-/// `default_format`, `database`, and one `param_<name>` pair per object entry to
-/// the URL via the same `url` crate, then returns `url.as_str().len()`. The SQL
-/// body is sent separately and does not count toward the URI cap, so it is not
-/// included.
+/// Reproduces the URL `clickhouse::query::Query::do_execute` builds: it appends
+/// `default_format`, `database`, every pair in `scaffold_pairs` (the client's
+/// compression flag, baseline query settings, and any `session_settings` /
+/// `roles`; see [`ArrowClickHouseClient::request_scaffold_pairs`]), then one
+/// `param_<name>` pair per object entry, all via the same `url` crate, and
+/// returns `url.as_str().len()`. Omitting `scaffold_pairs` would undercount the
+/// real URI (the B1 gap: ~206 bytes of baseline settings plus the open-ended
+/// session settings the client sends but a params-only measure ignores). The SQL
+/// body is dispatched separately and does not count toward the URI cap.
 ///
-/// Non-object `sql_params` carry no `param_*` pairs, so only the base URL +
-/// format/database scaffold is measured.
-pub fn request_uri_len(base_url: &str, database: &str, sql_params: &Value) -> usize {
+/// [`ArrowClickHouseClient::request_scaffold_pairs`]: crate::ArrowClickHouseClient::request_scaffold_pairs
+pub fn request_uri_len(
+    base_url: &str,
+    database: &str,
+    scaffold_pairs: &[(String, String)],
+    sql_params: &Value,
+) -> usize {
     let mut url = match Url::parse(base_url) {
         Ok(url) => url,
         // A malformed base URL is a configuration bug, not a per-query data
@@ -60,6 +66,9 @@ pub fn request_uri_len(base_url: &str, database: &str, sql_params: &Value) -> us
         pairs.clear();
         pairs.append_pair("default_format", "ArrowStream");
         pairs.append_pair("database", database);
+        for (name, value) in scaffold_pairs {
+            pairs.append_pair(name, value);
+        }
 
         if let Value::Object(map) = sql_params {
             let mut serialized = String::new();
@@ -79,8 +88,13 @@ pub fn request_uri_len(base_url: &str, database: &str, sql_params: &Value) -> us
 /// Returns `Some(len)` with the measured length when over the cap, `None` when
 /// it fits (`len <= MAX_REQUEST_URI_LEN`). Strictly-over fails; a URI exactly at
 /// the cap passes, matching `http`'s `s.len() > MAX_LEN` boundary.
-pub fn request_uri_overflow(base_url: &str, database: &str, sql_params: &Value) -> Option<usize> {
-    let len = request_uri_len(base_url, database, sql_params);
+pub fn request_uri_overflow(
+    base_url: &str,
+    database: &str,
+    scaffold_pairs: &[(String, String)],
+    sql_params: &Value,
+) -> Option<usize> {
+    let len = request_uri_len(base_url, database, scaffold_pairs, sql_params);
     (len > MAX_REQUEST_URI_LEN).then_some(len)
 }
 
@@ -88,13 +102,10 @@ pub fn request_uri_overflow(base_url: &str, database: &str, sql_params: &Value) 
 /// percent-encoding. Mirrors `clickhouse::sql::ser` for the JSON value domain
 /// that flows through datalake params (the only `Value` variants used there).
 enum ParamRepr {
-    /// Top-level scalar/string: written unquoted, ClickHouse-escaped.
     Scalar(String),
-    /// `\N`, the ClickHouse NULL param literal.
     Null,
-    /// An array literal `[e0,e1,…]`; elements carry their own nested repr.
     Array(Vec<ParamRepr>),
-    /// A nested array element string: single-quoted and ClickHouse-escaped.
+    /// Nested strings are single-quoted, unlike top-level [`ParamRepr::Scalar`].
     QuotedScalar(String),
 }
 
@@ -146,6 +157,14 @@ fn write_param(repr: &ParamRepr, out: &mut String) {
 /// (`clickhouse::sql::escape::escape`): `\ ' \` \t \n`. These doublings are what
 /// defeat a naive 3x percent-encoding factor, so they must be reproduced here to
 /// measure the true wire length.
+///
+/// This and the `write_param`/`value_into_*` replica mirror
+/// `clickhouse::sql::ser::ParamSerializer`, which is not public, so it cannot be
+/// round-tripped against directly. Mirrored from **clickhouse 0.15.1** (pinned
+/// `clickhouse = "0.15"`); `quoted_element_matches_clickhouse_escape_string_fixture`
+/// pins the output to that version's `escape::string` test. Re-verify the
+/// `REPLACE` set and the array/quote framing against `sql/ser.rs` + `sql/escape.rs`
+/// on any `clickhouse` bump.
 fn escape(src: &str, out: &mut String) {
     const REPLACE: &[char] = &['\\', '\'', '`', '\t', '\n'];
     let mut rest = src;
@@ -166,6 +185,19 @@ mod tests {
 
     const BASE: &str = "http://clickhouse:8123";
     const DB: &str = "datalake";
+    const NO_SCAFFOLD: &[(String, String)] = &[];
+
+    fn baseline_scaffold() -> Vec<(String, String)> {
+        let client = crate::ArrowClickHouseClient::new(
+            BASE,
+            DB,
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        client.request_scaffold_pairs()
+    }
 
     #[test]
     fn matches_the_http_crate_hard_cap() {
@@ -173,10 +205,37 @@ mod tests {
     }
 
     #[test]
-    fn empty_params_measure_only_the_scaffold() {
-        let len = request_uri_len(BASE, DB, &json!({}));
+    fn no_scaffold_measures_only_format_and_database() {
+        let len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({}));
         let expected = "http://clickhouse:8123/?default_format=ArrowStream&database=datalake".len();
         assert_eq!(len, expected);
+    }
+
+    // B1 regression: the client's compression flag and baseline query settings
+    // are on the wire and `http` counts them, so the measured scaffold must
+    // grow by exactly their encoded `&name=value` framing. Pins that the guard
+    // includes them (omitting them is what let the guard under-report the URI).
+    #[test]
+    fn scaffold_pairs_add_the_client_settings_to_the_measure() {
+        let base = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({}));
+        let scaffold = baseline_scaffold();
+        let with_settings = request_uri_len(BASE, DB, &scaffold, &json!({}));
+
+        let expected_extra: usize = scaffold
+            .iter()
+            .map(|(k, v)| format!("&{k}={v}").len())
+            .sum();
+        assert_eq!(with_settings - base, expected_extra);
+        assert!(
+            scaffold.iter().any(|(k, _)| k == "compress"),
+            "compression flag must be measured"
+        );
+        assert!(
+            scaffold
+                .iter()
+                .any(|(k, _)| k == "output_format_arrow_string_as_string"),
+            "baseline settings must be measured"
+        );
     }
 
     #[test]
@@ -224,10 +283,10 @@ mod tests {
     fn quote_heavy_input_measures_larger_encoded_than_raw() {
         let raw_heavy: String = std::iter::repeat_n('\'', 500).collect();
         let plain: String = std::iter::repeat_n('a', 500).collect();
-        let heavy_len = request_uri_len(BASE, DB, &json!({ "paths": [raw_heavy] }));
-        let plain_len = request_uri_len(BASE, DB, &json!({ "paths": [plain] }));
+        let heavy_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [raw_heavy] }));
+        let plain_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [plain] }));
         // Same raw byte count, but `'` is doubled then percent-encoded, so the
-        // quote-heavy URI must be materially longer — the exact effect a
+        // quote-heavy URI must be materially longer, the exact effect a
         // raw-byte proxy would miss.
         assert!(
             heavy_len > plain_len,
@@ -237,11 +296,11 @@ mod tests {
 
     #[test]
     fn overflow_is_strictly_over_the_cap() {
-        let small = request_uri_overflow(BASE, DB, &json!({ "paths": ["x"] }));
+        let small = request_uri_overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": ["x"] }));
         assert_eq!(small, None);
 
         let huge_path: String = std::iter::repeat_n('a', 70_000).collect();
-        let over = request_uri_overflow(BASE, DB, &json!({ "paths": [huge_path] }));
+        let over = request_uri_overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [huge_path] }));
         assert!(matches!(over, Some(len) if len > MAX_REQUEST_URI_LEN));
     }
 }

@@ -95,22 +95,23 @@ impl Datalake {
         }
     }
 
-    /// Builds an [`ArrowQuery`] from `sql` + `params`, guarding the serialized
-    /// request URI against the `http` crate's length cap.
+    /// Builds an [`ArrowQuery`] from `sql` + `params`, the single chokepoint
+    /// where a datalake query's params become the `param_*` settings encoded
+    /// into the dispatched URL.
     ///
-    /// This is the single chokepoint where every datalake query turns its
-    /// params into the `param_*` settings that get percent-encoded into the
-    /// dispatched URL. An over-limit URI fails downstream with an opaque `uri
-    /// too long` and re-fails every retry (KG#881), so we measure the encoded
-    /// length here and reject it with a typed [`DatalakeError::UriTooLong`]
-    /// before it reaches `hyper`/`http`. The `debug_assert!` trips the same
-    /// invariant loudly in dev/CI debug builds; the returned error is the
-    /// release-build backstop so production degrades to a loud, attributable
-    /// failure instead of a panic.
+    /// An over-limit URI fails downstream with an opaque `uri too long` and
+    /// re-fails every retry (KG#881), so the guard measures the encoded URI here
+    /// and rejects it before `hyper`/`http` sees it. The `debug_assert!` trips
+    /// the invariant loudly in dev/CI debug builds; the returned
+    /// [`DatalakeError::UriTooLong`] is the release-build backstop so production
+    /// degrades to a loud, attributable failure instead of a panic.
     fn build_query(&self, sql: &str, params: Value) -> Result<ArrowQuery, DatalakeError> {
-        if let Some(len) =
-            uri_guard::request_uri_overflow(self.client.base_url(), self.client.database(), &params)
-        {
+        if let Some(len) = uri_guard::request_uri_overflow(
+            self.client.base_url(),
+            self.client.database(),
+            &self.client.request_scaffold_pairs(),
+            &params,
+        ) {
             let limit = uri_guard::MAX_REQUEST_URI_LEN;
             debug_assert!(
                 len <= limit,
@@ -259,6 +260,7 @@ mod tests {
         uri_guard::request_uri_len(
             datalake.client.base_url(),
             datalake.client.database(),
+            &datalake.client.request_scaffold_pairs(),
             params,
         )
     }
@@ -319,8 +321,8 @@ mod tests {
 
     // `'` is doubled by the ClickHouse escaper *before* percent-encoding, so the
     // guard must measure the real (escaped, then `%27`-encoded) wire length. A
-    // raw-byte proxy would call this batch safe — raw bytes are well under the
-    // cap — yet its encoded URI is over, so only the encoded measurement catches
+    // raw-byte proxy would call this batch safe (raw bytes are well under the
+    // cap) yet its encoded URI is over, so only the encoded measurement catches
     // it. Pins the encoded measurement, not a raw-byte one.
     #[test]
     fn build_query_measures_escaped_encoded_length_for_adversarial_input() {
