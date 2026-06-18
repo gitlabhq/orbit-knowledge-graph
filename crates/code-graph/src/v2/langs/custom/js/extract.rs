@@ -1,4 +1,4 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
@@ -119,22 +119,11 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
     } else {
         input
     };
-    for component in rel.components() {
-        match component {
-            Component::ParentDir => {
-                return Err(AnalyzerError::skip(
-                    FileSkip::UnsafePath,
-                    format!("refusing `..` in path: {relative_path}"),
-                ));
-            }
-            Component::Prefix(_) | Component::RootDir => {
-                return Err(AnalyzerError::skip(
-                    FileSkip::UnsafePath,
-                    format!("refusing rooted path: {relative_path}"),
-                ));
-            }
-            _ => {}
-        }
+    if !gkg_utils::fs::is_safe_relative_path(rel) {
+        return Err(AnalyzerError::skip(
+            FileSkip::UnsafePath,
+            format!("refusing unsafe path: {relative_path}"),
+        ));
     }
     let joined = Path::new(root_path).join(rel);
     let meta = std::fs::symlink_metadata(&joined).map_err(|err| {

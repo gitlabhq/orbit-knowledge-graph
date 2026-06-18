@@ -502,7 +502,6 @@ pub trait LanguagePipeline {
 
 #[derive(Clone)]
 pub struct PipelineConfig {
-    pub max_file_size: u64,
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
@@ -542,7 +541,6 @@ pub type PhaseCpuObserver = Arc<dyn Fn(Language, crate::v2::dsl::engine::PhaseCp
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            max_file_size: 1_000_000,
             max_files: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
@@ -1769,10 +1767,7 @@ mod tests {
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
                 decision: Decision::Keep,
             }]),
-            PipelineConfig {
-                max_file_size: u64::MAX,
-                ..PipelineConfig::default()
-            },
+            PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),

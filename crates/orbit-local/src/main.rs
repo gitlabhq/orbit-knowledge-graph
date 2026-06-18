@@ -20,6 +20,10 @@ use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
 
+/// Per-file byte cap for local indexing; files above it are recorded as nodes
+/// but not loaded or parsed.
+const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
+
 #[derive(Serialize)]
 struct IndexOutput {
     repository: String,
@@ -370,7 +374,6 @@ pub(crate) fn index_collect(
     }
 
     let pipeline_config = code_graph::v2::PipelineConfig {
-        max_file_size: 5_000_000,
         worker_threads: threads,
         per_file_timeout: Some(std::time::Duration::from_secs(2)),
         per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
@@ -464,7 +467,7 @@ fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let mut filter = code_graph::v2::config::CodeFilter::new(pipeline_config.max_file_size, 0);
+    let mut filter = code_graph::v2::config::CodeFilter::new(MAX_INDEXED_FILE_BYTES, 0);
     let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
         gkg_utils::walk::walk_dir(&git.repo_path, &mut filter)
             .context("failed to walk repository files")?,
