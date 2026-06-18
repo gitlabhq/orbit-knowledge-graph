@@ -192,12 +192,14 @@ pub enum FileReason {
 }
 
 impl FileReason {
-    /// The low-card wire label written to `gl_file.reason`; empty for `None`.
-    pub fn as_label(self) -> &'static str {
+    /// The low-card label written to `gl_file.reason`: empty for `None`, else the
+    /// inner label prefixed with its category (`skip_` / `fault_`) so the merged
+    /// column says which enum produced it (e.g. `skip_oversize`, `fault_invalid_utf8`).
+    pub fn as_label(self) -> String {
         match self {
-            Self::None => "",
-            Self::Skip(kind) => kind.as_metric_label(),
-            Self::Fault(kind) => kind.as_metric_label(),
+            Self::None => String::new(),
+            Self::Skip(kind) => format!("skip_{}", kind.as_metric_label()),
+            Self::Fault(kind) => format!("fault_{}", kind.as_metric_label()),
         }
     }
 }
@@ -313,6 +315,23 @@ mod tests {
         assert_eq!(
             FileFault::RustWorkspaceMissing.as_metric_label(),
             "rust_workspace_missing"
+        );
+    }
+
+    #[test]
+    fn file_reason_labels_are_category_prefixed() {
+        assert_eq!(FileReason::None.as_label(), "");
+        assert_eq!(
+            FileReason::Skip(FileSkip::Oversize).as_label(),
+            "skip_oversize"
+        );
+        assert_eq!(
+            FileReason::Skip(FileSkip::Timeout(AbortPhase::Ssa)).as_label(),
+            "skip_timeout_ssa"
+        );
+        assert_eq!(
+            FileReason::Fault(FileFault::InvalidUtf8).as_label(),
+            "fault_invalid_utf8"
         );
     }
 }

@@ -811,7 +811,7 @@ impl CodeGraph {
             GraphNode::File(f) => match property {
                 "extension" => Some(f.extension.clone()),
                 "language" => Some(f.language_name().to_string()),
-                "reason" => Some(f.reason.as_label().to_string()),
+                "reason" => Some(f.reason.as_label()),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
