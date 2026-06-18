@@ -1929,12 +1929,12 @@ mod tests {
         let sql = compile_sql(query);
 
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_file AS f FINAL WHERE")
                 && sql.contains("endsWith(f.path, '.rb')"),
             "filtered File join should push filters into the subquery, got:\n{sql}"
         );
         assert!(
-            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d WHERE")
+            sql.contains("INNER JOIN (SELECT * FROM gl_definition AS d FINAL WHERE")
                 && sql.contains("startsWith(d.name, 'process')"),
             "filtered Definition join should push filters into the subquery, got:\n{sql}"
         );
