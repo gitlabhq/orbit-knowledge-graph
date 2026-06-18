@@ -179,6 +179,29 @@ impl fmt::Display for FileFault {
     }
 }
 
+/// Why a file did not index cleanly: a benign skip, a genuine fault, or
+/// nothing. Carried on the File node so `gl_file.reason` is strictly an
+/// enum — `as_label` is the only way to produce its string, so an unbounded
+/// value can never reach the column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileReason {
+    #[default]
+    None,
+    Skip(FileSkip),
+    Fault(FileFault),
+}
+
+impl FileReason {
+    /// The low-card wire label written to `gl_file.reason`; empty for `None`.
+    pub fn as_label(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Skip(kind) => kind.as_metric_label(),
+            Self::Fault(kind) => kind.as_metric_label(),
+        }
+    }
+}
+
 /// Per-file outcome from a language analyzer. Encodes skip-vs-fault
 /// at the type level so callers route by variant, not by string match.
 #[derive(Debug)]

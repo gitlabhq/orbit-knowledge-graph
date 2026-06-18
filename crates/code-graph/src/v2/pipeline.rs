@@ -1002,13 +1002,14 @@ impl Pipeline {
         // so they produce no File node.
         let t_structural = std::time::Instant::now();
         if !file_inventory.is_empty() {
-            let reasons: FxHashMap<&str, &str> = skipped
+            use crate::v2::error::FileReason;
+            let reasons: FxHashMap<&str, FileReason> = skipped
                 .iter()
-                .map(|s| (s.path.as_str(), s.kind.as_metric_label()))
+                .map(|s| (s.path.as_str(), FileReason::Skip(s.kind)))
                 .chain(
                     faults
                         .iter()
-                        .map(|f| (f.path.as_str(), f.kind.as_metric_label())),
+                        .map(|f| (f.path.as_str(), FileReason::Fault(f.kind))),
                 )
                 .collect();
             let structural_graph = Self::build_file_inventory_graph(
@@ -1093,12 +1094,15 @@ impl Pipeline {
         root: &Path,
         inventory: &[FileInventoryEntry],
         parsed_file_languages: &FxHashMap<String, Language>,
-        reasons: &FxHashMap<&str, &str>,
+        reasons: &FxHashMap<&str, crate::v2::error::FileReason>,
     ) -> CodeGraph {
         let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
         for entry in inventory {
             let language = parsed_file_languages.get(&entry.path).copied();
-            let reason = reasons.get(entry.path.as_str()).copied().unwrap_or("");
+            let reason = reasons
+                .get(entry.path.as_str())
+                .copied()
+                .unwrap_or_default();
             graph.add_unparsed_file(&entry.path, language, entry.size, reason);
         }
 
@@ -1991,15 +1995,20 @@ mod tests {
             result.skipped[0].kind,
             crate::v2::error::FileSkip::ParserOversize
         );
-        // The re-emit produces a File node for the skipped path carrying the
-        // low-card reason label, which the converter writes to gl_file.reason.
+        // The File node for the skipped path carries its reason as a typed enum,
+        // which the converter writes to gl_file.reason.
         let reason = capture
             .take()
             .iter()
             .flat_map(|g| g.files())
-            .find(|(_, f)| f.path == "proto.gen.go" && !f.reason.is_empty())
-            .map(|(_, f)| f.reason.clone());
-        assert_eq!(reason.as_deref(), Some("parser_oversize"));
+            .find(|(_, f)| f.path == "proto.gen.go")
+            .map(|(_, f)| f.reason);
+        assert_eq!(
+            reason,
+            Some(crate::v2::error::FileReason::Skip(
+                crate::v2::error::FileSkip::ParserOversize
+            ))
+        );
     }
 
     #[test]

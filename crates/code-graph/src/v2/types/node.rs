@@ -176,9 +176,9 @@ pub struct CanonicalFile {
     pub extension: String,
     pub language: Option<Language>,
     pub size: u64,
-    /// Low-card skip/fault label (e.g. `oversize`, `timeout_parse`); empty for
-    /// files indexed successfully. Set on a re-emit after the parse outcome is known.
-    pub reason: String,
+    /// Why the file did not index cleanly (skip/fault), or `None`. Strictly an
+    /// enum so `gl_file.reason` can never hold an unbounded string.
+    pub reason: crate::v2::error::FileReason,
 }
 
 impl CanonicalFile {

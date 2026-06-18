@@ -12,7 +12,8 @@ pub mod types;
 
 pub use dsl::engine::PhaseCpu;
 pub use error::{
-    AbortPhase, AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile,
+    AbortPhase, AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileReason, FileSkip,
+    SkippedFile,
 };
 pub use pipeline::{
     BatchTx, CancellationToken, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
