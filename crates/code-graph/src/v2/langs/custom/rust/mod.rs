@@ -69,8 +69,8 @@ use self::rust_ast::{
     build_parsed_rust_file, fallback_file_module_parts, file_module_parts_from_workspace,
 };
 use self::workspace::{
-    WorkspaceCatalog, WorkspaceIndex, canonical_root_path, relative_path, standalone_workspace,
-    to_absolute_path,
+    WorkspaceCatalog, WorkspaceIndex, canonical_root_path, relative_path,
+    relative_path_if_under_root, standalone_workspace, to_absolute_path,
 };
 
 pub struct RustPipeline;
@@ -507,7 +507,16 @@ fn parse_rust_file_standalone(
     root_path: &str,
 ) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
-    let relative_path = relative_path(root_path, &abs_path);
+    // Never read a file that resolves outside the repo root.
+    let Some(relative_path) = relative_path_if_under_root(root_path, &abs_path) else {
+        return Err((
+            file_path.to_string(),
+            AnalyzerError::skip(
+                FileSkip::UnsafePath,
+                format!("path escapes repo root: {file_path}"),
+            ),
+        ));
+    };
     let source = std::fs::read_to_string(&abs_path).map_err(|err| {
         let kind = if err.kind() == std::io::ErrorKind::InvalidData {
             FileFault::InvalidUtf8
