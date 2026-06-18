@@ -27,9 +27,8 @@ pub enum RepositoryCacheError {
     #[error("archive contained no entries (empty or truncated stream)")]
     EmptyArchive,
 
-    /// The repository exceeded the total-bytes cap mid-extraction. Like
-    /// `EmptyArchive`, the resolver treats this as an empty-repository outcome
-    /// (index nothing, checkpoint) rather than a retryable failure.
+    /// The repository exceeded the total-bytes cap. Like `EmptyArchive`, the
+    /// resolver treats it as an empty repo (checkpoint), not a retryable failure.
     #[error("repository exceeded the total-bytes cap")]
     RepositoryTooLarge,
 }

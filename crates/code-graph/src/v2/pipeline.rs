@@ -1095,9 +1095,8 @@ fn group_parseable_inventory(
     let mut accepted_files = 0usize;
 
     for entry in inventory {
-        // Only loaded files are parse candidates; the stream already settled
-        // oversize / binary / minified / excluded files as ListOnly and they are
-        // not on disk for the tar source.
+        // Only loaded files are parse candidates; the stream settled the rest as
+        // ListOnly.
         if entry.decision != Decision::Keep {
             continue;
         }

@@ -38,18 +38,15 @@ pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
     canonical.starts_with(root).then_some(canonical)
 }
 
-/// `true` when `path` is a relative path safe to join under a root: every
-/// component is a normal name, with no `..`, `.`, root, or drive-prefix
-/// component that could climb out. A cheap pre-join guard; pair it with
-/// [`contained_canonical_path`] for the post-canonicalize check.
+/// `true` when `path` has only normal components — safe to join under a root,
+/// with no `..`/`.`/root/prefix that could climb out.
 pub fn is_safe_relative_path(path: &Path) -> bool {
     path.components()
         .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
-/// Resolve `dest` to its canonical form within `root`, creating parent
-/// directories if it does not yet exist. The destination guard for unpackers:
-/// errors with `PermissionDenied` if the real target escapes `root`.
+/// Resolve `dest` to its canonical form within `root`, creating parents if
+/// needed. `PermissionDenied` if the real target escapes `root`.
 pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
     if dest.exists() {
         contained_canonical_path(root, dest).ok_or_else(|| {

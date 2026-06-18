@@ -1,10 +1,8 @@
-//! End-to-end tests for the archive extraction path: stand up an axum server
-//! emulating the GitLab `/repository/archive` endpoint, stream the response
-//! through the real `gkg_utils::archive::extract_tar_gz` with the production
-//! `CodeFilter`, and run `Pipeline::run`. They verify the resolver inputs the
-//! indexer needs (`Cargo.toml`, `package.json`, `tsconfig.json`, `.gitignore`)
-//! survive the round trip and that resolution works against the extracted tree,
-//! and that excluded entries are recorded but not materialized or parsed.
+//! End-to-end archive path: serve a tar over a mock GitLab archive endpoint,
+//! stream it through `gkg_utils::archive::extract_tar_gz` + the production
+//! `CodeFilter`, and run `Pipeline::run`. Verifies resolver inputs survive the
+//! round trip and resolution works, and that excluded entries are recorded but
+//! not materialized or parsed.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};

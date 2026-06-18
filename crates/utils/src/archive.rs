@@ -1,7 +1,6 @@
-//! Tar.gz extraction as a [`FileStreamHooks`] source: untar, normalize and
-//! safety-check each path, hand the entry to the hooks, and materialize only the
-//! files the hooks [`Decision::Keep`]. The archive code carries no filtering of
-//! its own — what to load is entirely the hooks' decision.
+//! Tar.gz extraction as a [`FileStreamHooks`] source: untar, safety-check each
+//! path, hand the entry to the hooks, and materialize only the files they
+//! [`Decision::Keep`]. No filtering of its own.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -13,9 +12,8 @@ use tracing::warn;
 use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
 /// Extract a gzipped tar from `reader` into `target_dir`, running every regular
-/// file through `hooks`. Returns the inventory of recorded files (every regular
-/// file and symlink the hooks did not drop), with `Decision::Keep` files written
-/// to disk and `Decision::ListOnly` files recorded as nodes only.
+/// file through `hooks`. `Keep` files are written to disk; every non-dropped
+/// file (and symlink) is returned in the inventory.
 pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     reader: R,
     target_dir: &Path,

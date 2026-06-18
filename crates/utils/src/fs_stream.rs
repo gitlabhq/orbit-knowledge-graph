@@ -1,32 +1,24 @@
-//! One filtering and limit surface for every file source.
-//!
-//! A repository's files reach the indexer two ways — a Gitaly tar (the server,
-//! [`crate::archive`]) and a directory walk (orbit-local, [`crate::walk`]) — and
-//! historically each filtered differently. Both now feed their entries through
-//! one [`FileStreamHooks`] policy via [`step`]: the sources carry no filtering,
-//! the hooks decide [`Decision`] per file and enforce aggregate [`Counter`]
-//! caps. What we load, what we record as a bare node, and how large a repository
-//! we accept all live in one place.
+//! One filtering and limit surface for every file source. A repository's files
+//! arrive two ways — a Gitaly tar ([`crate::archive`]) and a directory walk
+//! ([`crate::walk`]) — and both run every entry through one [`FileStreamHooks`]
+//! policy via [`step`]; the sources carry no filtering of their own.
 
 /// Per-file outcome of the hook pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Decision {
-    /// Load the bytes (materialize on disk) and record the file. The only
-    /// decision whose file is a parse candidate downstream.
+    /// Load the bytes and record the file; the only parse candidate downstream.
     #[default]
     Keep,
-    /// Record the file as a node but never read its bytes (binary, excluded,
-    /// oversize, minified).
+    /// Record the file as a node without reading its bytes.
     ListOnly,
-    /// Exclude the file entirely; it is not recorded.
+    /// Exclude the file entirely.
     Drop,
 }
 
 /// A file discovered in a repository, recorded whether or not its bytes were
-/// loaded. `path` is repository-relative. `decision` is the verdict the stream
-/// reached; downstream parse selection keeps only [`Decision::Keep`] entries, so
-/// both file sources agree without re-deriving eligibility from disk state.
+/// loaded. `decision` drives parse selection, so both sources agree without
+/// re-checking disk state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileInventoryEntry {
     pub path: String,
@@ -51,66 +43,55 @@ pub enum StreamError {
     Cap(#[from] CapExceeded),
     #[error("source error: {0}")]
     Io(#[from] std::io::Error),
-    /// The source produced no entries because its stream ended before any could
-    /// be read (empty or truncated archive). Callers classify this as an
-    /// empty-repository outcome, not a retryable failure.
+    /// The source produced no entries (empty or truncated archive); callers
+    /// treat it as an empty repository, not a retryable failure.
     #[error("source contained no entries (empty or truncated stream)")]
     Empty,
 }
 
-/// The filtering and accounting policy for a file stream. Every method is
-/// optional (defaults to a pass-through), so a consumer implements only what it
-/// needs and holds its own state — e.g. [`Counter`]s — in `self`. Generic, no
-/// `dyn`: the driver is monomorphized over the concrete `Self`.
-///
-/// This is the single place filtering lives; the sources (tar, dir walk) carry
-/// none of their own.
+/// The filtering and accounting policy for a file stream. Each method defaults
+/// to a pass-through; a consumer implements only what it needs and holds its
+/// state (e.g. [`Counter`]s) in `self`. Generic, no `dyn`.
 pub trait FileStreamHooks {
-    /// Charge aggregate counters for the whole repository. Called once per
-    /// source entry regardless of the keep decision, so caps see every byte
-    /// (a repo of nothing but excluded blobs still trips a total-bytes cap).
-    /// `Err` aborts the entire stream.
+    /// Charge aggregate counters; called for every entry (so excluded blobs
+    /// still count toward a total-bytes cap). `Err` aborts the stream.
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Decide from path + size alone, before any bytes are read. A non-`Keep`
-    /// verdict here is final and the file's content is never read.
+    /// Decide from path + size alone, before any bytes are read; a non-`Keep`
+    /// verdict is final.
     fn on_header(&mut self, _file: &FileInventoryEntry) -> Decision {
         Decision::Keep
     }
-    /// Decide with the file's full (size-capped) content available — binary
-    /// sniff, minified/long-line detection. Only reached for files `on_header`
-    /// kept; the final say.
+    /// Decide with the file's full (size-capped) content; only reached for files
+    /// `on_header` kept.
     fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> Decision {
         Decision::Keep
     }
 }
 
-/// Run the per-file hook sequence and return the [`Decision`] the caller acts
-/// on (write + record, record only, or skip). The whole driver loop minus the
-/// source-specific "pull next entry" and "write the bytes": `admit` charges
-/// caps for every file, then `on_header` can settle the verdict without reading
-/// content, and only a `Keep` proceeds to fill `prefix` via `sniff` and consult
-/// `on_content`. `prefix` is caller-owned so it can be reused across entries.
+/// Run the per-file hook sequence: `admit` charges caps for every file, then a
+/// non-`Keep` `on_header` settles it without reading, and only `Keep` fills
+/// `content` via `sniff` and consults `on_content`. `content` is caller-owned
+/// to reuse across entries.
 pub fn step<H: FileStreamHooks>(
     hooks: &mut H,
     file: &FileInventoryEntry,
-    prefix: &mut Vec<u8>,
+    content: &mut Vec<u8>,
     sniff: impl FnOnce(&mut Vec<u8>) -> std::io::Result<()>,
 ) -> Result<Decision, StreamError> {
     hooks.admit(file)?;
-    prefix.clear();
+    content.clear();
     match hooks.on_header(file) {
         Decision::Keep => {}
         settled => return Ok(settled),
     }
-    sniff(prefix)?;
-    Ok(hooks.on_content(file, prefix))
+    sniff(content)?;
+    Ok(hooks.on_content(file, content))
 }
 
-/// A capped running total (`cap == 0` = unlimited). Compose as many as a source
-/// needs — total bytes, file count, anything — and `add` to each per kept file;
-/// the first to overflow short-circuits the stream.
+/// A capped running total (`cap == 0` = unlimited); the first `add` to overflow
+/// short-circuits the stream.
 pub struct Counter {
     metric: &'static str,
     cap: u64,

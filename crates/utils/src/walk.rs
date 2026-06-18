@@ -1,7 +1,6 @@
-//! Directory walk as a [`FileStreamHooks`] source: enumerate a checked-out
-//! repository with git's own listing semantics, run each file through the hooks,
-//! and record the resulting inventory. Files already live on disk, so nothing is
-//! written; the walk only classifies and records.
+//! Directory walk as a [`FileStreamHooks`] source: enumerate a checked-out repo
+//! with git's listing semantics and run each file through the hooks. Files are
+//! already on disk, so nothing is written — the walk only classifies.
 
 use std::io::Read;
 use std::path::Path;
@@ -20,11 +19,9 @@ pub fn walk_dir<H: FileStreamHooks>(
     let mut inventory = Vec::new();
     let mut content = Vec::new();
 
-    // Match git's own listing semantics (what gitalisk gave us before): honor
-    // `.gitignore` and `.git/info/exclude`, include dotfiles, but not ripgrep's
-    // `.ignore` files, not the machine's global/ancestor ignores (so indexing is
-    // reproducible), and never the `.git` dir itself — `hidden(false)` would
-    // otherwise descend into it and list every object.
+    // git's listing semantics (matching the prior gitalisk listing): .gitignore
+    // + .git/info/exclude + dotfiles, but not ripgrep .ignore or global/ancestor
+    // ignores, and never `.git` itself (hidden(false) would enumerate it).
     let walker = WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)

@@ -31,8 +31,7 @@ pub enum EmptyRepositoryReason {
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
-    /// Repository exceeded the total-bytes cap; indexed empty and checkpointed
-    /// rather than running unbounded or retrying forever.
+    /// Repository exceeded the total-bytes cap; indexed empty and checkpointed.
     RepositoryTooLarge,
 }
 

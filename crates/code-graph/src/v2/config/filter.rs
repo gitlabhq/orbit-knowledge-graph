@@ -1,13 +1,9 @@
 //! The single filtering policy for code indexing, shared by every file source
-//! (Gitaly tar, directory walk) as a [`FileStreamHooks`] implementation.
-//!
-//! It decides, per file, whether to load the bytes ([`Decision::Keep`]) or
-//! record a bare node only ([`Decision::ListOnly`]): excluded extensions and
-//! oversize files are settled from the header; binary blobs and minified /
-//! long-line bundles from the content. Resolver inputs (`Cargo.toml`,
-//! `package.json`, `.gitignore`, …) are never in the denylist, so they survive.
-//! It also charges a total-bytes [`Counter`] across every file so a
-//! pathologically large repository aborts the whole stream.
+//! as a [`FileStreamHooks`] implementation. Per file it decides load
+//! ([`Decision::Keep`]) vs record-as-bare-node ([`Decision::ListOnly`]):
+//! excluded extensions and oversize from the header, binary and minified bundles
+//! from the content. Resolver inputs are never in the denylist, so they survive.
+//! A total-bytes [`Counter`] across every file aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -138,13 +134,9 @@ fn minified_skip(content: &[u8]) -> Option<FilterSkip> {
 }
 
 /// The single denylist of files recorded as a bare node but never loaded or
-/// parsed. One group per line, ordered by category. Patterns are globs matched
-/// case-insensitively against the basename.
-///
-/// **Source files (including tests), manifests, lockfiles, dotfiles, and unknown
-/// extensions are intentionally absent** (beyond the build artifacts below), so
-/// resolver inputs survive without an inclusion list that has to track every
-/// resolver. This is the one place to add an exclusion.
+/// parsed: globs matched case-insensitively on the basename, grouped by line.
+/// Source (including tests), manifests, lockfiles, and dotfiles are absent so
+/// resolver inputs survive — this is the one place to add an exclusion.
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
