@@ -1,7 +1,7 @@
 ---
 name: orbit
-description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.13.9
+description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and questions requiring relationship traversal or aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`); prefer Orbit when the question spans relationships, cross-entity joins, or multi-entity aggregation.
+version: 0.14.0
 license: MIT
 metadata:
   audience: developers
@@ -29,15 +29,10 @@ authoritative usage references. For entity properties, prefer the recipes in
 [`references/recipes.md`](references/recipes.md) over schema introspection —
 they already encode the columns and filters known to work.
 
-If you must introspect, call `schema` **at most once per session** and pass
-entity names to scope it — schemas don't change within a session, so re-fetching
-is pure latency. Calling `schema` with no arguments returns the full ontology
-(~28 KB) and is rarely what you want.
-
-```bash
-glab orbit remote schema MergeRequest Project   # scoped properties
-glab orbit remote dsl                           # full query DSL JSON Schema (source of truth for body shape)
-```
+If you must introspect, call `glab orbit remote schema <Entity…>` (scoped
+properties) or `glab orbit remote dsl` (full DSL JSON Schema). Call schema **at
+most once per session** — schemas don't change mid-session, and the unscoped
+form returns ~28 KB.
 
 Each `glab orbit remote query` has fixed per-call overhead. Prefer one
 `aggregation` query over N traversal queries for "how many X grouped by Y", and
