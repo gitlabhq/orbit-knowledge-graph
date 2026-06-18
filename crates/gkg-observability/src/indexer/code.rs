@@ -149,7 +149,7 @@ pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
      for the tar source, did not write to disk). Reasons: `excluded_extension` \
      (basename matches the `code-graph::v2::config::filter::\
      EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, \
-     minified bundles, test files), `oversize` (declared size exceeds the \
+     minified bundles), `oversize` (declared size exceeds the \
      configured per-file ceiling), `binary` (a NUL byte in the first 8000 \
      bytes, git-style, with a UTF BOM rescue), `minified` / `line_too_long` \
      (content has a high average line length or a >64 KiB line).",

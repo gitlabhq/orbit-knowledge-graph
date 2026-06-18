@@ -163,15 +163,11 @@ mod tests {
         );
         assert_eq!(detect_language_from_path("README.md"), None);
         assert_eq!(detect_language_from_path("Makefile"), None);
-        // Pure extension lookup: exclusion (minified bundles, test files) is the
-        // CodeFilter denylist's job, not this mapping's.
+        // Pure extension lookup: minified-bundle exclusion is the CodeFilter
+        // denylist's job, not this mapping's.
         assert_eq!(
             detect_language_from_path("vendor/jquery.min.js"),
             Some(Language::JavaScript)
-        );
-        assert_eq!(
-            detect_language_from_path("pkg/server_test.go"),
-            Some(Language::Go)
         );
     }
 

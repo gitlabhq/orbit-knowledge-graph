@@ -141,10 +141,10 @@ fn minified_skip(content: &[u8]) -> Option<FilterSkip> {
 /// parsed. One group per line, ordered by category. Patterns are globs matched
 /// case-insensitively against the basename.
 ///
-/// **Source files, manifests, lockfiles, dotfiles, and unknown extensions are
-/// intentionally absent** (beyond the specific build artifacts and test-file
-/// conventions below), so resolver inputs survive without an inclusion list
-/// that has to track every resolver. This is the one place to add an exclusion.
+/// **Source files (including tests), manifests, lockfiles, dotfiles, and unknown
+/// extensions are intentionally absent** (beyond the build artifacts below), so
+/// resolver inputs survive without an inclusion list that has to track every
+/// resolver. This is the one place to add an exclusion.
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -162,8 +162,6 @@ pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     "*.{db,sqlite,sqlite3,iso,dmg,bin,dat}",
     // Minified JS/TS bundles (the content heuristic catches unnamed ones).
     "*.min.{js,mjs,cjs}",
-    // Test files: real source we deliberately keep out of the graph.
-    "*_test.go",
 ];
 
 static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
@@ -274,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn denylist_drops_blobs_minified_and_test_files() {
+    fn denylist_drops_blobs_and_minified() {
         for path in [
             "assets/logo.png",
             "img/photo.JPG",
@@ -288,7 +286,6 @@ mod tests {
             "data/seed.sqlite",
             "vendor/jquery.min.js",
             "web/app.min.mjs",
-            "pkg/server_test.go",
             "a/b/c/d/icon.png",
         ] {
             assert!(
@@ -313,6 +310,8 @@ mod tests {
             "README.md",
             "Makefile",
             "src/admin.js",
+            // Test files are real source and are indexed like any other.
+            "pkg/server_test.go",
         ] {
             assert!(
                 !is_excluded_from_indexing(&p(path)),
