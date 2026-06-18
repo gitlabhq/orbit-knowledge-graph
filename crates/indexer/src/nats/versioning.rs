@@ -2,11 +2,18 @@ use std::sync::LazyLock;
 
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::DeleteStreamErrorKind;
-use futures::StreamExt;
 use tracing::{debug, info, warn};
 
+use crate::dead_letter::DEAD_LETTER_STREAM;
+use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
+use crate::locking::INDEXING_LOCKS_BUCKET;
 use crate::schema::version::SCHEMA_VERSION;
+use crate::topic::INDEXER_STREAM;
 use crate::types::Subscription;
+
+pub const MANAGED_STREAMS: &[&str] = &[INDEXER_STREAM, DEAD_LETTER_STREAM];
+
+pub const MANAGED_BUCKETS: &[&str] = &[INDEXING_LOCKS_BUCKET, INDEXING_PROGRESS_BUCKET];
 
 pub static NATS_VERSIONER: LazyLock<NatsVersioner> =
     LazyLock::new(|| NatsVersioner::new(*SCHEMA_VERSION));
@@ -51,18 +58,18 @@ impl NatsVersioner {
     }
 }
 
-const STREAM_VERSION_SUFFIX: &str = "_V";
-const KV_STREAM_PREFIX: &str = "KV_";
-const BUCKET_VERSION_SUFFIX: &str = "_v";
-
-fn is_versioned_stream(name: &str, version: u32) -> bool {
-    let suffix = format!("{STREAM_VERSION_SUFFIX}{version}");
-    name.ends_with(&suffix)
-}
-
-fn is_versioned_kv_stream(name: &str, version: u32) -> bool {
-    let suffix = format!("{BUCKET_VERSION_SUFFIX}{version}");
-    name.starts_with(KV_STREAM_PREFIX) && name.ends_with(&suffix)
+fn versioned_entity_names(version: u32) -> Vec<String> {
+    let versioner = NatsVersioner::new(version);
+    let mut names: Vec<String> = MANAGED_STREAMS
+        .iter()
+        .map(|base| versioner.stream(base))
+        .collect();
+    names.extend(
+        MANAGED_BUCKETS
+            .iter()
+            .map(|base| format!("KV_{}", versioner.bucket(base))),
+    );
+    names
 }
 
 pub async fn cleanup_version(
@@ -72,19 +79,7 @@ pub async fn cleanup_version(
     let jetstream = async_nats::jetstream::new(nats_client.clone());
     let mut errors: Vec<String> = Vec::new();
 
-    let all_names: Vec<String> = jetstream
-        .stream_names()
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .filter_map(|r| r.ok())
-        .collect();
-
-    for name in &all_names {
-        if !is_versioned_stream(name, version) && !is_versioned_kv_stream(name, version) {
-            continue;
-        }
-
+    for name in &versioned_entity_names(version) {
         match jetstream.delete_stream(name).await {
             Ok(_) => info!(version, stream = %name, "deleted versioned stream"),
             Err(e)
@@ -124,10 +119,6 @@ impl std::error::Error for CleanupError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dead_letter::DEAD_LETTER_STREAM;
-    use crate::indexing_status::INDEXING_PROGRESS_BUCKET;
-    use crate::locking::INDEXING_LOCKS_BUCKET;
-    use crate::topic::INDEXER_STREAM;
     use crate::types::Subscription;
 
     #[test]
@@ -158,34 +149,23 @@ mod tests {
     }
 
     #[test]
-    fn is_versioned_stream_matches_gkg_streams() {
-        assert!(is_versioned_stream("GKG_INDEXER_V62", 62));
-        assert!(is_versioned_stream("GKG_DEAD_LETTERS_V62", 62));
-        assert!(!is_versioned_stream("GKG_INDEXER_V63", 62));
-        assert!(!is_versioned_stream("siphon_db", 62));
-        assert!(!is_versioned_stream("KV_indexing_locks_v62", 62));
+    fn versioned_entity_names_covers_all_owned_entities() {
+        let names = versioned_entity_names(62);
+
+        assert!(names.contains(&"GKG_INDEXER_V62".to_string()));
+        assert!(names.contains(&"GKG_DEAD_LETTERS_V62".to_string()));
+        assert!(names.contains(&"KV_indexing_locks_v62".to_string()));
+        assert!(names.contains(&"KV_orbit_indexing_progress_v62".to_string()));
+        assert_eq!(names.len(), MANAGED_STREAMS.len() + MANAGED_BUCKETS.len());
     }
 
     #[test]
-    fn is_versioned_kv_stream_matches_kv_buckets() {
-        assert!(is_versioned_kv_stream("KV_indexing_locks_v62", 62));
-        assert!(is_versioned_kv_stream("KV_orbit_indexing_progress_v62", 62));
-        assert!(!is_versioned_kv_stream("KV_indexing_locks_v63", 62));
-        assert!(!is_versioned_kv_stream("GKG_INDEXER_V62", 62));
-        assert!(!is_versioned_kv_stream("indexing_locks_v62", 62));
-    }
+    fn versioned_entity_names_excludes_foreign_entities() {
+        let names = versioned_entity_names(54);
 
-    #[test]
-    fn versioner_output_matches_discovery_predicates() {
-        let v = NatsVersioner::new(62);
-
-        assert!(is_versioned_stream(&v.stream(INDEXER_STREAM), 62));
-        assert!(is_versioned_stream(&v.stream(DEAD_LETTER_STREAM), 62));
-
-        let locks_kv = format!("KV_{}", v.bucket(INDEXING_LOCKS_BUCKET));
-        let progress_kv = format!("KV_{}", v.bucket(INDEXING_PROGRESS_BUCKET));
-        assert!(is_versioned_kv_stream(&locks_kv, 62));
-        assert!(is_versioned_kv_stream(&progress_kv, 62));
+        assert!(!names.contains(&"OTHER_APP_V54".to_string()));
+        assert!(!names.contains(&"KV_someone_else_v54".to_string()));
+        assert!(!names.contains(&"siphon_db".to_string()));
     }
 
     #[test]
