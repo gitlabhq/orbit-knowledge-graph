@@ -1,5 +1,5 @@
 //! Directory walk as a [`FileStreamHooks`] source: enumerate a checked-out
-//! repository honoring `.gitignore`/`.ignore`, run each file through the hooks,
+//! repository with git's own listing semantics, run each file through the hooks,
 //! and record the resulting inventory. Files already live on disk, so nothing is
 //! written; the walk only classifies and records.
 
@@ -10,8 +10,8 @@ use ignore::WalkBuilder;
 
 use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
-/// Walk `root` (honoring `.gitignore`/`.ignore`, including dotfiles so resolver
-/// inputs survive), running every file through `hooks`. Returns the inventory of
+/// Walk `root` (honoring `.gitignore`, including dotfiles so resolver inputs
+/// survive), running every file through `hooks`. Returns the inventory of
 /// recorded files with their [`Decision`]. Paths are relative to `root`.
 pub fn walk_dir<H: FileStreamHooks>(
     root: &Path,
