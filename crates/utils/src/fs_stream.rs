@@ -3,6 +3,10 @@
 //! ([`crate::walk`]) — and both run every entry through one [`FileStreamHooks`]
 //! policy via [`step`]; the sources carry no filtering of their own.
 
+use std::path::{Component, Path};
+
+use rustc_hash::FxHashMap;
+
 /// Per-file outcome of the hook pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
@@ -24,6 +28,42 @@ pub struct FileInventoryEntry {
     pub path: String,
     pub size: u64,
     pub decision: Decision,
+}
+
+/// Normalize each path, drop duplicates (first wins), and sort. Sources call
+/// this so every consumer receives one canonical inventory.
+pub fn canonicalize_inventory(entries: Vec<FileInventoryEntry>) -> Vec<FileInventoryEntry> {
+    let mut by_path: FxHashMap<String, (u64, Decision)> = FxHashMap::default();
+    for entry in entries {
+        let Some(path) = normalize_relative_path(&entry.path) else {
+            continue;
+        };
+        by_path.entry(path).or_insert((entry.size, entry.decision));
+    }
+    let mut entries: Vec<_> = by_path
+        .into_iter()
+        .map(|(path, (size, decision))| FileInventoryEntry {
+            path,
+            size,
+            decision,
+        })
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
+/// Normalize a `/`-joined relative path: drop `.` segments, reject anything that
+/// climbs out (`..`, root, prefix). `None` if nothing remains.
+fn normalize_relative_path(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 /// An aggregate cap tripped mid-stream.
@@ -218,5 +258,23 @@ mod tests {
             matches!(err, StreamError::Cap(_)),
             "a dropped file's bytes must still count toward the cap"
         );
+    }
+
+    #[test]
+    fn canonicalize_dedups_normalizes_and_sorts() {
+        let inv = canonicalize_inventory(vec![
+            entry("./src/main.rs", 10),
+            entry("src/main.rs", 10),
+            entry("a/b.rs", 10),
+        ]);
+        let paths: Vec<&str> = inv.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["a/b.rs", "src/main.rs"]);
+    }
+
+    #[test]
+    fn canonicalize_drops_traversal_entries() {
+        let inv = canonicalize_inventory(vec![entry("../escape", 10), entry("ok.rs", 10)]);
+        let paths: Vec<&str> = inv.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["ok.rs"]);
     }
 }

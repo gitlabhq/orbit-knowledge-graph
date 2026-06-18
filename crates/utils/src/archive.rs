@@ -145,7 +145,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         inventory.retain(|entry| !removed.contains(&entry.path));
     }
 
-    Ok(inventory)
+    Ok(crate::fs_stream::canonicalize_inventory(inventory))
 }
 
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
@@ -399,7 +399,7 @@ mod tests {
 
         assert_eq!(
             paths(&inv),
-            vec!["src/main.rs", "assets/logo.png", "model/weights.onnx"]
+            vec!["assets/logo.png", "model/weights.onnx", "src/main.rs"]
         );
         assert_eq!(
             inv.iter()

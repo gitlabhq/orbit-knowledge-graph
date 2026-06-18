@@ -1,7 +1,6 @@
 use crate::v2::config::Language;
 use crate::v2::inventory::{
-    FamilyFileInput, FileInput, build_file_inventory_graph, canonical_file_inventory,
-    group_parseable_inventory,
+    FamilyFileInput, FileInput, build_file_inventory_graph, group_parseable_inventory,
 };
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
@@ -716,13 +715,12 @@ impl Pipeline {
         config.emit_file_inventory_graph = true;
         let t_pipeline = std::time::Instant::now();
 
-        // 1. Normalize the repository inventory, then group parseable files
-        //    by language family. Files keep their specific Language for
+        // 1. Group parseable files by language family (the stream already
+        //    canonicalized the inventory). Files keep their specific Language for
         //    parser selection; the family determines which files share a
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
-        let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
         let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
@@ -1943,11 +1941,6 @@ mod tests {
             },
             FileInventoryEntry {
                 path: "README.md".into(),
-                size: 12,
-                decision: Decision::Keep,
-            },
-            FileInventoryEntry {
-                path: "./README.md".into(),
                 size: 12,
                 decision: Decision::Keep,
             },

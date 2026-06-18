@@ -1,8 +1,8 @@
-//! Turning a repository file inventory into work: normalize and dedup the raw
-//! entries, select and group the files to parse, and build the structural
-//! file/directory graph. The stream produces the inventory; this consumes it.
+//! Turning a (canonical) repository file inventory into work: select and group
+//! the files to parse, and build the structural file/directory graph. The stream
+//! produces and canonicalizes the inventory; this consumes it.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
 use rustc_hash::FxHashMap;
@@ -19,49 +19,6 @@ pub type FileInput = String;
 pub struct FamilyFileInput {
     pub language: Language,
     pub path: FileInput,
-}
-
-/// Dedup by normalized path and sort. Drops entries whose path escapes the root.
-pub fn canonical_file_inventory(
-    entries: impl IntoIterator<Item = FileInventoryEntry>,
-) -> Vec<FileInventoryEntry> {
-    let mut by_path = FxHashMap::default();
-    for entry in entries {
-        let Some(path) = normalize_inventory_path(&entry.path) else {
-            continue;
-        };
-        by_path.entry(path).or_insert((entry.size, entry.decision));
-    }
-
-    let mut entries: Vec<_> = by_path
-        .into_iter()
-        .map(|(path, (size, decision))| FileInventoryEntry {
-            path,
-            size,
-            decision,
-        })
-        .collect();
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    entries
-}
-
-/// Normalize a `/`-joined relative path: drop `.` segments, reject anything that
-/// climbs out (`..`, root, prefix). `None` if nothing remains.
-fn normalize_inventory_path(path: &str) -> Option<String> {
-    let mut parts = Vec::new();
-    for component in Path::new(path).components() {
-        match component {
-            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("/"))
-    }
 }
 
 /// Select the parse candidates (loaded, language-detected, under `max_files`;
@@ -162,24 +119,5 @@ mod tests {
             1,
             "only Keep files are parse candidates"
         );
-    }
-
-    #[test]
-    fn canonical_inventory_dedups_and_normalizes() {
-        let inventory =
-            canonical_file_inventory([keep("./src/main.rs"), keep("src/main.rs"), keep("a/b.rs")]);
-        let paths: Vec<&str> = inventory.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(paths, vec!["a/b.rs", "src/main.rs"]);
-    }
-
-    #[test]
-    fn normalize_rejects_traversal() {
-        assert_eq!(
-            normalize_inventory_path("src/main.rs").as_deref(),
-            Some("src/main.rs")
-        );
-        assert_eq!(normalize_inventory_path("./a/./b").as_deref(), Some("a/b"));
-        assert_eq!(normalize_inventory_path("../escape"), None);
-        assert_eq!(normalize_inventory_path("."), None);
     }
 }

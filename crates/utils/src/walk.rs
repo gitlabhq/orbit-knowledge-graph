@@ -57,8 +57,7 @@ pub fn walk_dir<H: FileStreamHooks>(
         }
     }
 
-    inventory.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(inventory)
+    Ok(crate::fs_stream::canonicalize_inventory(inventory))
 }
 
 #[cfg(test)]
