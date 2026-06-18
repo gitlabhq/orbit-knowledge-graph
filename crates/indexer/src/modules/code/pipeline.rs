@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -6,17 +5,17 @@ use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{debug, info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
+use super::repository::cache::CachedRepository;
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
 use crate::observer::IndexingObserver;
-use opentelemetry::KeyValue;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -103,6 +102,16 @@ impl CodeIndexingPipeline {
         Some(self.fetch_concurrency + self.indexing_slot_count)
     }
 
+    #[tracing::instrument(
+        name = "code_indexing_project",
+        skip_all,
+        fields(
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %request.branch,
+        )
+    )]
     pub async fn index_project(
         &self,
         context: &HandlerContext,
@@ -117,26 +126,8 @@ impl CodeIndexingPipeline {
                 request.traversal_path
             )));
         };
+        tracing::Span::current().record("namespace_id", namespace_id);
 
-        let span = info_span!(
-            "code_indexing_project",
-            project_id = request.project_id,
-            namespace_id,
-            traversal_path = %request.traversal_path,
-            branch = %request.branch,
-        );
-
-        self.index_project_inner(context, request, observer)
-            .instrument(span)
-            .await
-    }
-
-    async fn index_project_inner(
-        &self,
-        context: &HandlerContext,
-        request: &IndexingRequest,
-        observer: &mut dyn IndexingObserver,
-    ) -> Result<IndexOutcome, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
@@ -167,33 +158,19 @@ impl CodeIndexingPipeline {
                 self.metrics.record_resolution_strategy("empty_repository");
                 self.metrics
                     .record_empty_repository(reason.as_metric_label());
-                self.metrics
-                    .repository_fetch_duration
-                    .record(fetch_start.elapsed().as_secs_f64(), &[]);
-                self.set_checkpoint(
-                    &request.traversal_path,
-                    request.project_id,
-                    &request.branch,
-                    request.task_id,
-                    None,
-                    Utc::now(),
-                )
-                .await?;
+                self.metrics.record_fetch_duration(fetch_start.elapsed());
+                self.set_checkpoint(request, None, Utc::now()).await?;
                 return Ok(IndexOutcome::EmptyRepository);
             }
             Err(ResolveError::Other(err)) => {
-                self.metrics
-                    .errors
-                    .add(1, &[KeyValue::new("stage", "repository_fetch")]);
+                self.metrics.record_stage_error("repository_fetch");
                 return Err(err);
             }
         };
-        let extraction_duration = fetch_start.elapsed();
-        self.metrics
-            .repository_fetch_duration
-            .record(extraction_duration.as_secs_f64(), &[]);
+        let fetch_duration = fetch_start.elapsed();
+        self.metrics.record_fetch_duration(fetch_duration);
         info!(
-            duration_ms = extraction_duration.as_millis() as u64,
+            duration_ms = fetch_duration.as_millis() as u64,
             "repository extraction completed"
         );
 
@@ -208,20 +185,8 @@ impl CodeIndexingPipeline {
         context.progress.notify_in_progress().await;
 
         let indexed_at = Utc::now();
-        let commit_sha = request.commit_sha.as_deref().unwrap_or("");
         let indexing_result = self
-            .run_indexing(
-                context,
-                request.project_id,
-                &request.branch,
-                commit_sha,
-                &request.traversal_path,
-                indexed_at,
-                &repository.path,
-                repository.file_inventory.clone(),
-                request.had_prior_checkpoint,
-                observer,
-            )
+            .run_indexing(context, request, &repository, indexed_at, observer)
             .await;
 
         if let Err(error) = self
@@ -242,33 +207,23 @@ impl CodeIndexingPipeline {
 
         indexing_result?;
 
-        self.set_checkpoint(
-            &request.traversal_path,
-            request.project_id,
-            &request.branch,
-            request.task_id,
-            request.commit_sha.as_deref(),
-            indexed_at,
-        )
-        .await?;
+        self.set_checkpoint(request, request.commit_sha.as_deref(), indexed_at)
+            .await?;
 
         Ok(IndexOutcome::Indexed)
     }
 
     async fn set_checkpoint(
         &self,
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-        task_id: i64,
+        request: &IndexingRequest,
         last_commit: Option<&str>,
         indexed_at: DateTime<Utc>,
     ) -> Result<(), HandlerError> {
         let checkpoint = CodeIndexingCheckpoint {
-            traversal_path: traversal_path.to_string(),
-            project_id,
-            branch: branch.to_string(),
-            last_task_id: task_id,
+            traversal_path: request.traversal_path.clone(),
+            project_id: request.project_id,
+            branch: request.branch.clone(),
+            last_task_id: request.task_id,
             last_commit: last_commit.map(|s| s.to_string()),
             indexed_at,
         };
@@ -280,52 +235,60 @@ impl CodeIndexingPipeline {
             .record_error_stage(&self.metrics, "checkpoint")?;
 
         info!(
-            project_id,
-            branch = %branch,
+            project_id = request.project_id,
+            branch = %request.branch,
             commit = ?last_commit,
-            task_id,
+            task_id = request.task_id,
             "completed code indexing"
         );
 
         Ok(())
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "internal indexing step threads the full per-run context; splitting would not improve clarity"
-    )]
     async fn run_indexing(
         &self,
         context: &HandlerContext,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        traversal_path: &str,
+        request: &IndexingRequest,
+        repository: &CachedRepository,
         indexed_at: DateTime<Utc>,
-        repo_dir: &Path,
-        file_inventory: Arc<[code_graph::v2::FileInventoryEntry]>,
-        had_prior_checkpoint: bool,
         observer: &mut dyn IndexingObserver,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
-        let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
-            Some(std::time::Duration::from_millis(
-                self.pipeline_config.per_file_timeout_ms,
-            ))
-        } else {
-            None
-        };
+        let config = self.build_pipeline_config(context);
+        let (result, per_table_writes) = self
+            .build_code_graph(context, request, repository, indexed_at, config)
+            .await?;
+
+        context.progress.notify_in_progress().await;
+        self.metrics
+            .record_indexing_duration(indexing_start.elapsed());
+
+        self.record_indexing_results(
+            &result,
+            &per_table_writes,
+            observer,
+            request,
+            indexing_start,
+        );
+
+        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during {} for {}: {}",
+                    error.stage, error.file_path, error.error
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
+        }
+
+        context.progress.notify_in_progress().await;
+        self.run_stale_cleanup(request, indexed_at, &result).await;
+
+        Ok(())
+    }
+
+    fn build_pipeline_config(&self, context: &HandlerContext) -> PipelineConfig {
         let to_timeout = |ms: u64| (ms > 0).then(|| std::time::Duration::from_millis(ms));
-        let per_file_parse_timeout = to_timeout(self.pipeline_config.per_file_parse_timeout_ms);
-        let per_file_walk_timeout = to_timeout(self.pipeline_config.per_file_walk_timeout_ms);
-        let per_file_ssa_timeout = to_timeout(self.pipeline_config.per_file_ssa_timeout_ms);
-        let cross_file_resolve_timeout = if self.pipeline_config.cross_file_resolve_timeout_ms > 0 {
-            Some(std::time::Duration::from_millis(
-                self.pipeline_config.cross_file_resolve_timeout_ms,
-            ))
-        } else {
-            None
-        };
         let handle = tokio::runtime::Handle::current();
         let progress = context.progress.clone();
         let on_progress: Option<std::sync::Arc<dyn Fn() + Send + Sync>> =
@@ -339,26 +302,43 @@ impl CodeIndexingPipeline {
             Some(std::sync::Arc::new(move |language, cpu| {
                 phase_cpu_metrics.record_file_phase_cpu(language, cpu)
             }));
-        let config = PipelineConfig {
+        PipelineConfig {
             max_files: self.pipeline_config.max_files,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
-            per_file_timeout,
-            per_file_parse_timeout,
-            per_file_walk_timeout,
-            per_file_ssa_timeout,
-            cross_file_resolve_timeout,
+            per_file_timeout: to_timeout(self.pipeline_config.per_file_timeout_ms),
+            per_file_parse_timeout: to_timeout(self.pipeline_config.per_file_parse_timeout_ms),
+            per_file_walk_timeout: to_timeout(self.pipeline_config.per_file_walk_timeout_ms),
+            per_file_ssa_timeout: to_timeout(self.pipeline_config.per_file_ssa_timeout_ms),
+            cross_file_resolve_timeout: to_timeout(
+                self.pipeline_config.cross_file_resolve_timeout_ms,
+            ),
             on_progress,
             on_phase_cpu,
             ..Default::default()
-        };
-        let tracer = code_graph::v2::trace::Tracer::new(false);
+        }
+    }
 
+    async fn build_code_graph(
+        &self,
+        context: &HandlerContext,
+        request: &IndexingRequest,
+        repository: &CachedRepository,
+        indexed_at: DateTime<Utc>,
+        config: PipelineConfig,
+    ) -> Result<
+        (
+            code_graph::v2::PipelineResult,
+            Vec<arrow_converter::TableWriteTotals>,
+        ),
+        HandlerError,
+    > {
+        let tracer = code_graph::v2::trace::Tracer::new(false);
         let envelope = IndexerEnvelope::new(
-            traversal_path.to_string(),
-            project_id,
-            branch.to_string(),
-            commit_sha.to_string(),
+            request.traversal_path.clone(),
+            request.project_id,
+            request.branch.clone(),
+            request.commit_sha.as_deref().unwrap_or("").to_string(),
             indexed_at,
         );
 
@@ -374,16 +354,10 @@ impl CodeIndexingPipeline {
         let sink: Arc<dyn code_graph::v2::BatchSink> = buffered_sink.clone();
 
         let code_graph_start = Instant::now();
-        let repo_dir_owned = repo_dir.to_path_buf();
+        let repo_dir = repository.path.clone();
+        let file_inventory = repository.file_inventory.clone();
         let result = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(
-                &repo_dir_owned,
-                file_inventory,
-                config,
-                tracer,
-                converter,
-                sink,
-            )
+            Pipeline::run_with_tracer(&repo_dir, file_inventory, config, tracer, converter, sink)
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
@@ -399,7 +373,8 @@ impl CodeIndexingPipeline {
             Err(e) => {
                 return Err(HandlerError::Permanent {
                     message: format!(
-                        "fatal code indexing pipeline error during flush for project {project_id}: {e}"
+                        "fatal code indexing pipeline error during flush for project {}: {e}",
+                        request.project_id
                     ),
                     action: crate::handler::PermanentAction::DeadLetter,
                 });
@@ -410,12 +385,18 @@ impl CodeIndexingPipeline {
             duration_ms = graph_write_duration.as_millis() as u64,
             "graph writing completed"
         );
-        context.progress.notify_in_progress().await;
 
-        self.metrics
-            .indexing_duration
-            .record(indexing_start.elapsed().as_secs_f64(), &[]);
+        Ok((result, per_table_writes))
+    }
 
+    fn record_indexing_results(
+        &self,
+        result: &code_graph::v2::PipelineResult,
+        per_table_writes: &[arrow_converter::TableWriteTotals],
+        observer: &mut dyn IndexingObserver,
+        request: &IndexingRequest,
+        indexing_start: Instant,
+    ) {
         let parsed_count = result
             .stats
             .files_parsed
@@ -464,7 +445,7 @@ impl CodeIndexingPipeline {
         observer.nodes_indexed("imported_symbol", result.stats.imports_count as u64);
         observer.nodes_indexed("edge", result.stats.edges_count as u64);
 
-        for write in &per_table_writes {
+        for write in per_table_writes {
             observer.record_graph_write(&write.table, write.rows, write.bytes);
         }
         observer.record_duration(indexing_start.elapsed().as_millis() as u64);
@@ -473,8 +454,8 @@ impl CodeIndexingPipeline {
             self.metrics
                 .record_file_skipped(skipped.kind.as_metric_label());
             debug!(
-                project_id,
-                branch = %branch,
+                project_id = request.project_id,
+                branch = %request.branch,
                 path = %skipped.path,
                 reason = skipped.kind.as_metric_label(),
                 "file skipped during code indexing"
@@ -486,8 +467,8 @@ impl CodeIndexingPipeline {
         }
         if !result.faults.is_empty() {
             warn!(
-                project_id,
-                branch = %branch,
+                project_id = request.project_id,
+                branch = %request.branch,
                 count = result.faults.len(),
                 "files faulted during code indexing"
             );
@@ -496,66 +477,63 @@ impl CodeIndexingPipeline {
         }
 
         for error in &result.errors {
-            self.metrics
-                .errors
-                .add(1, &[KeyValue::new("stage", error.stage)]);
+            self.metrics.record_stage_error(error.stage);
         }
+    }
 
-        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
-            return Err(HandlerError::Permanent {
-                message: format!(
-                    "fatal code indexing pipeline error during {} for {}: {}",
-                    error.stage, error.file_path, error.error
-                ),
-                action: crate::handler::PermanentAction::DeadLetter,
-            });
-        }
-
-        context.progress.notify_in_progress().await;
-
-        if had_prior_checkpoint {
-            // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
-            info!(
-                project_id,
-                branch = %branch,
-                watermark = %indexed_at,
-                definitions = result.stats.definitions_count,
-                imports = result.stats.imports_count,
-                files = result.stats.files_indexed,
-                directories = result.stats.directories_indexed,
-                files_discovered = result.stats.files_discovered,
-                faulted = result.faults.len(),
-                skipped = result.skipped.len(),
-                "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
-            );
-            let cleanup_start = Instant::now();
-            if let Err(error) = self
-                .stale_data_cleaner
-                .delete_stale_data(traversal_path, project_id, branch, indexed_at)
-                .await
-            {
-                warn!(
-                    project_id,
-                    branch = %branch,
-                    %error,
-                    "failed to delete stale data, will retry on next indexing"
-                );
-            }
-            let stale_data_cleanup_duration = cleanup_start.elapsed();
-            info!(
-                duration_ms = stale_data_cleanup_duration.as_millis() as u64,
-                "stale data cleanup completed"
-            );
-        } else {
+    async fn run_stale_cleanup(
+        &self,
+        request: &IndexingRequest,
+        indexed_at: DateTime<Utc>,
+        result: &code_graph::v2::PipelineResult,
+    ) {
+        if !request.had_prior_checkpoint {
             debug!(
-                project_id,
-                branch = %branch,
-                traversal_path,
+                project_id = request.project_id,
+                branch = %request.branch,
+                traversal_path = request.traversal_path.as_str(),
                 "first-time indexing detected, skipping stale data cleanup"
             );
+            return;
         }
 
-        Ok(())
+        // Breadcrumb for diagnosing a future wipe: what this run emitted before cleanup tombstones what it didn't.
+        info!(
+            project_id = request.project_id,
+            branch = %request.branch,
+            watermark = %indexed_at,
+            definitions = result.stats.definitions_count,
+            imports = result.stats.imports_count,
+            files = result.stats.files_indexed,
+            directories = result.stats.directories_indexed,
+            files_discovered = result.stats.files_discovered,
+            faulted = result.faults.len(),
+            skipped = result.skipped.len(),
+            "cleaning stale code data: tombstoning prior-version rows not re-emitted by this run"
+        );
+        let cleanup_start = Instant::now();
+        if let Err(error) = self
+            .stale_data_cleaner
+            .delete_stale_data(
+                &request.traversal_path,
+                request.project_id,
+                &request.branch,
+                indexed_at,
+            )
+            .await
+        {
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                %error,
+                "failed to delete stale data, will retry on next indexing"
+            );
+        }
+        let stale_data_cleanup_duration = cleanup_start.elapsed();
+        info!(
+            duration_ms = stale_data_cleanup_duration.as_millis() as u64,
+            "stale data cleanup completed"
+        );
     }
 }
 

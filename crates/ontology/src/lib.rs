@@ -3017,6 +3017,24 @@ properties:
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
     }
 
+    #[test]
+    fn derived_emits_are_registered_and_visible_in_schema() {
+        let o = Ontology::load_embedded().expect("should load");
+        let edge_names: Vec<&str> = o.edge_names().collect();
+
+        for derived in o.derived_entities() {
+            for emit in &derived.emits {
+                assert!(
+                    edge_names.contains(&emit.as_str()),
+                    "derived '{}' emits '{emit}' but it is missing from the schema edge list",
+                    derived.name
+                );
+            }
+        }
+
+        assert!(edge_names.contains(&"MENTIONS"));
+    }
+
     // --- Scope annotation tests ---
 
     #[test]

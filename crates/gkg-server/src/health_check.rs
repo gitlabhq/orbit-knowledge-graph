@@ -1,5 +1,6 @@
 use clickhouse_client::ClickHouseConfigurationExt;
-use health_check::{ClickHouseInstance, HealthChecker, run_server};
+use health_check::{ClickHouseInstance, CodeQueueConfig, HealthChecker, run_server};
+use indexer::nats::versioning::{code_work_consumer_name, code_work_stream_name};
 
 use gkg_server_config::AppConfig;
 
@@ -11,7 +12,16 @@ pub enum Error {
 
 pub async fn run(config: &AppConfig) -> Result<(), Error> {
     let instances = build_clickhouse_instances(config);
-    let checker = HealthChecker::new(&config.health_check, instances).await?;
+    let code_queue = CodeQueueConfig {
+        nats: config.nats.clone(),
+        stream_name: code_work_stream_name(),
+        consumer_name: config
+            .nats
+            .consumer_name
+            .as_deref()
+            .map(code_work_consumer_name),
+    };
+    let checker = HealthChecker::new(&config.health_check, instances, code_queue).await?;
 
     run_server(config.health_check.bind_address, checker).await?;
 

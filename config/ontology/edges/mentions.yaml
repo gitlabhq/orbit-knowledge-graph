@@ -1,4 +1,6 @@
-description: Cross-entity mention from system notes (ADR 013)
+description: >-
+  One merge request or work item references another in its description or a
+  comment, recorded from the cross-reference system note GitLab writes on mention.
 
 variants:
   - from_node: { type: MergeRequest, id: id }

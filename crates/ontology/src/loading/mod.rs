@@ -666,8 +666,24 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     validate_auxiliary_dictionaries(&ontology)?;
     validate_traversal_path_lookups(&ontology)?;
     validate_edge_scope_annotations(&ontology)?;
+    validate_derived_emits_registered(&ontology)?;
 
     Ok(ontology)
+}
+
+fn validate_derived_emits_registered(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for derived in ontology.derived_entities() {
+        for edge in &derived.emits {
+            if !ontology.has_edge(edge) {
+                return Err(OntologyError::Validation(format!(
+                    "derived entity '{}' emits '{edge}' but it is not registered in the \
+                     edges: map of schema.yaml",
+                    derived.name
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_traversal_path_lookups(ontology: &crate::Ontology) -> Result<(), OntologyError> {
@@ -854,4 +870,55 @@ fn validate_edge_scope_annotations(ontology: &crate::Ontology) -> Result<(), Ont
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::entities::DerivedEntity;
+    use crate::etl::{EtlConfig, EtlScope};
+
+    fn system_note(emits: &[&str]) -> DerivedEntity {
+        DerivedEntity {
+            name: "SystemNote".to_string(),
+            emits: emits.iter().map(|s| s.to_string()).collect(),
+            transform: "system_notes".to_string(),
+            etl: EtlConfig::Table {
+                scope: EtlScope::Namespaced,
+                source: "siphon_notes".to_string(),
+                watermark: "w".to_string(),
+                deleted: "d".to_string(),
+                order_by: vec![],
+                edges: BTreeMap::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn unregistered_derived_emit_is_rejected() {
+        let mut ontology = crate::Ontology::new().with_edges(["MENTIONS"]);
+        ontology.derived_entities.insert(
+            "SystemNote".to_string(),
+            system_note(&["MENTIONS", "GHOST_EDGE"]),
+        );
+
+        let err = validate_derived_emits_registered(&ontology).unwrap_err();
+        assert!(
+            err.to_string().contains("GHOST_EDGE") && err.to_string().contains("SystemNote"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn registered_derived_emits_pass() {
+        let mut ontology = crate::Ontology::new().with_edges(["MENTIONS", "GHOST_EDGE"]);
+        ontology.derived_entities.insert(
+            "SystemNote".to_string(),
+            system_note(&["MENTIONS", "GHOST_EDGE"]),
+        );
+
+        assert!(validate_derived_emits_registered(&ontology).is_ok());
+    }
 }

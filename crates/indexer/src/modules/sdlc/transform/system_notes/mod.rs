@@ -47,7 +47,7 @@ use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
     EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
-    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks,
+    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks, paths_per_routes_query,
 };
 
 /// Raw row pulled from the extract SQL. The transform parses, resolves, and
@@ -334,7 +334,7 @@ async fn resolve_plan(
     }
 
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-    let routes = query_routes(datalake, &paths, root_prefix, resolve_lookup_batch_size).await?;
+    let routes = query_routes(datalake, &paths, root_prefix).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
@@ -377,10 +377,10 @@ async fn query_routes(
     datalake: &dyn DatalakeQuery,
     paths: &[&str],
     root_prefix: &str,
-    resolve_lookup_batch_size: usize,
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
-    for paths in lookup_chunks(paths, resolve_lookup_batch_size) {
+
+    for paths in lookup_chunks(paths, paths_per_routes_query(paths)) {
         let params = json!({ "root_prefix": root_prefix, "paths": paths });
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
@@ -798,37 +798,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn query_routes_chunks_path_lookups_and_unions_rows() {
+    async fn query_routes_splits_path_lookups_and_unions_rows() {
         let datalake = RecordingDatalake::new();
-        let paths: Vec<_> = (0..(TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7))
-            .map(|i| format!("group/project-{i}"))
-            .collect();
+        let paths: Vec<_> = (0..3_000).map(|i| format!("group/project-{i}")).collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &path_refs, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-            .await
-            .unwrap();
+        let routes = query_routes(&datalake, &path_refs, "1/").await.unwrap();
 
-        let queries = datalake.queries();
-        let chunk_sizes: Vec<_> = queries
-            .iter()
-            .map(|params| params["paths"].as_array().unwrap().len())
-            .collect();
-        assert_eq!(
-            chunk_sizes,
-            vec![
-                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                7
-            ]
+        assert!(
+            datalake.queries().len() > 1,
+            "input must span multiple chunks"
         );
-        assert_eq!(routes.len(), TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 7);
+        assert_eq!(routes.len(), 3_000);
         assert_eq!(routes[0].source_id, 0);
-        assert_eq!(
-            routes[TEST_RESOLVE_LOOKUP_BATCH_SIZE * 3 + 6].source_id,
-            3006
-        );
+        assert_eq!(routes[2_999].source_id, 2_999);
     }
 
     #[tokio::test]
@@ -923,24 +906,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_plan_handles_exact_boundary_and_one_over() {
-        for (count, expected_chunk_sizes) in [
-            (
-                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                vec![
-                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                ],
-            ),
-            (
-                TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1,
-                vec![
-                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                    1,
-                    TEST_RESOLVE_LOOKUP_BATCH_SIZE,
-                    1,
-                ],
-            ),
+    async fn resolve_plan_resolves_boundary_references_across_chunks() {
+        for count in [
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1,
         ] {
             let datalake = RecordingDatalake::new();
             let mut plan = ResolutionPlan::default();
@@ -962,21 +931,6 @@ mod tests {
 
             let resolved = index.resolve(&reference, "").unwrap();
             assert_eq!(resolved.traversal_path, format!("1/{}/", count - 1));
-
-            let chunk_sizes: Vec<_> = datalake
-                .queries()
-                .iter()
-                .map(|params| {
-                    params
-                        .get("paths")
-                        .or_else(|| params.get("project_ids"))
-                        .unwrap()
-                        .as_array()
-                        .unwrap()
-                        .len()
-                })
-                .collect();
-            assert_eq!(chunk_sizes, expected_chunk_sizes);
         }
     }
 }

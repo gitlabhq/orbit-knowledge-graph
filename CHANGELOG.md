@@ -1,3 +1,22 @@
+## [0.78.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.77.0...v0.78.0) (2026-06-18)
+
+### Features
+
+* **orbit-local:** add stateless MCP server (`orbit mcp serve`) ([dc0b2c1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dc0b2c1395c04d8efcd00b981e80d77af8cb7573)) by Michael Angelo Rivera (OOO - June 19th)
+* **orbit-skill:** add boundary clause, compress discovery, add trigger test ([ba2e3c8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ba2e3c84608507f9aae16e242b4669a2c23d4a0e)) by Dmitry Gruzd
+
+### Fixes
+
+* **ci:** avoid SIGPIPE in docker-build version detection ([d4f5597](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4f55976b5c48e4ef8e2c4c8f80cf7d319e88428)) by Jean-Gabriel Doyon
+* **indexer:** scope NATS version cleanup to GKG-owned entities ([61c617f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/61c617f38bdaf1e6df488a19df816173ce42fff1)) by Aaron Algutifan
+* **indexer:** split system-note routes lookup to fit the request URI ([79b2a93](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79b2a9364c244f9b50ebb13659fc0fb80db626d7)) by Jean-Gabriel Doyon
+* **skill:** orbit v0.14.1 — fix broken recipe, schema facts, trigger test ([b4e07a7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b4e07a7338d8d8c5bbe309fcc9a009d84ff00375)) by Dmitry Gruzd
+
+### Other
+
+* fix sentence fragment in README ([3085a90](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3085a90a788a2e905402a1df8c962350a6363019)) by Anil Chowdary
+* **i18n:**  Full translation update to capture all source updates to set baseline ([cc1b6c5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cc1b6c545c0178679d9ba59ebbae0971a4cbbb43)) by Lauren Barker
+
 ## [0.77.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.76.0...v0.77.0) (2026-06-18)
 
 ### Features

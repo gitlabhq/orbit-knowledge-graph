@@ -5401,11 +5401,13 @@ dependencies = [
 name = "health-check"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "axum",
  "clickhouse-client",
  "gkg-server-config",
  "k8s-openapi",
  "kube",
+ "nats-client",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

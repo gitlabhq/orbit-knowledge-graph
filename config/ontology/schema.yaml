@@ -396,3 +396,4 @@ edges:
   CHILD_OF: edges/child_of.yaml
   TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
   BUILT_BY: edges/built_by.yaml
+  MENTIONS: edges/mentions.yaml
