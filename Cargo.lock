@@ -5216,10 +5216,14 @@ dependencies = [
  "arrow 58.3.0",
  "chrono",
  "enum-as-inner",
+ "flate2",
+ "ignore",
  "rustc-hash 2.1.2",
  "serde_json",
  "strum 0.28.0",
+ "tar",
  "tempfile",
+ "thiserror 2.0.18",
  "tracing",
 ]
 

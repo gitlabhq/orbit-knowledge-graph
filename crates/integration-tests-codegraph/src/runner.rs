@@ -9,7 +9,7 @@ use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, FileInventoryEntry, GraphConverter, GraphStatsCounters, NullSink, Pipeline,
+    BatchTx, Decision, FileInventoryEntry, GraphConverter, GraphStatsCounters, NullSink, Pipeline,
     PipelineConfig, PipelineContext,
 };
 
@@ -104,6 +104,7 @@ fn copy_dir_recursive(
             inventory.push(FileInventoryEntry {
                 path: rel.to_string_lossy().to_string(),
                 size: entry.metadata().map_or(0, |metadata| metadata.len()),
+                decision: Decision::Keep,
             });
         }
     }
@@ -158,6 +159,7 @@ pub async fn run_yaml_suite(yaml: &str) {
         file_inventory.push(FileInventoryEntry {
             path: fixture.path.clone(),
             size: fixture.content.len() as u64,
+            decision: Decision::Keep,
         });
     }
 

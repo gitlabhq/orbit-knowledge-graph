@@ -513,9 +513,6 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    /// Total discovered bytes above which the whole repo is skipped (no parse,
-    /// no structural graph) to bound pathologically large repos. 0 = no limit.
-    pub max_total_bytes: u64,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -554,7 +551,6 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             max_files: 0,
-            max_total_bytes: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
@@ -570,11 +566,7 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileInventoryEntry {
-    pub path: String,
-    pub size: u64,
-}
+pub use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -740,24 +732,10 @@ impl Pipeline {
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
         let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
-        let (mut files_by_family, parsed_file_languages) =
-            group_parseable_inventory(root, &file_inventory, &config);
+        let (files_by_family, parsed_file_languages) =
+            group_parseable_inventory(&file_inventory, &config);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
-
-        // Bound pathologically large repos: above the cap, index nothing (skip
-        // parse and the structural file/dir graph). The run still returns a
-        // valid empty result so the task checkpoints instead of retrying forever.
-        let over_size_cap = config.max_total_bytes > 0 && total_bytes > config.max_total_bytes;
-        if over_size_cap {
-            tracing::warn!(
-                total_bytes,
-                max_total_bytes = config.max_total_bytes,
-                total_files,
-                "repository exceeds the total-bytes cap; skipping indexing"
-            );
-            files_by_family.clear();
-        }
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_family
             .iter()
@@ -798,7 +776,7 @@ impl Pipeline {
         let file_discovery_ms = t_discovery.elapsed().as_secs_f64() * 1000.0;
 
         let t_structural = std::time::Instant::now();
-        if !over_size_cap && !file_inventory.is_empty() {
+        if !file_inventory.is_empty() {
             let structural_graph =
                 Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
             write_graph_direct(
@@ -1075,11 +1053,10 @@ impl Pipeline {
 
     #[cfg(test)]
     fn group_inventory(
-        root: &Path,
         inventory: &[FileInventoryEntry],
         config: &PipelineConfig,
     ) -> FxHashMap<Language, Vec<FileInput>> {
-        let (by_family, _) = group_parseable_inventory(root, inventory, config);
+        let (by_family, _) = group_parseable_inventory(inventory, config);
         let mut by_lang: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
         for (_fam, files) in by_family {
             for f in files {
@@ -1106,7 +1083,6 @@ impl Pipeline {
 }
 
 fn group_parseable_inventory(
-    root: &Path,
     inventory: &[FileInventoryEntry],
     config: &PipelineConfig,
 ) -> (
@@ -1119,27 +1095,16 @@ fn group_parseable_inventory(
     let mut accepted_files = 0usize;
 
     for entry in inventory {
-        if entry.size > config.max_file_size {
+        // Only loaded files are parse candidates; the stream already settled
+        // oversize / binary / minified / excluded files as ListOnly and they are
+        // not on disk for the tar source.
+        if entry.decision != Decision::Keep {
             continue;
         }
-
-        let rel_path = Path::new(&entry.path);
-        let Some(lang) = parsable_language(rel_path) else {
+        let Some(lang) = parsable_language(Path::new(&entry.path)) else {
             continue;
         };
-
-        // Vendored third-party source (node_modules/, vendor/, ...) is left on
-        // disk for resolvers but not parsed: it is duplicated across repos and
-        // dominates parse time without adding first-party graph value.
-        if crate::v2::config::is_vendored_path(rel_path) {
-            continue;
-        }
-
         if config.max_files > 0 && accepted_files >= config.max_files {
-            continue;
-        }
-
-        if !root.join(rel_path).is_file() {
             continue;
         }
 
@@ -1165,12 +1130,16 @@ fn canonical_file_inventory(
         let Some(path) = normalize_inventory_path(&entry.path) else {
             continue;
         };
-        by_path.entry(path).or_insert(entry.size);
+        by_path.entry(path).or_insert((entry.size, entry.decision));
     }
 
     let mut entries: Vec<_> = by_path
         .into_iter()
-        .map(|(path, size)| FileInventoryEntry { path, size })
+        .map(|(path, (size, decision))| FileInventoryEntry {
+            path,
+            size,
+            decision,
+        })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     entries
@@ -1890,27 +1859,24 @@ mod tests {
 
     #[test]
     fn inventory_grouping_respects_max_files() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join("a.java"), "class A {}").expect("write a");
-        std::fs::write(dir.path().join("b.java"), "class B {}").expect("write b");
-        std::fs::write(dir.path().join("c.java"), "class C {}").expect("write c");
-
         let inventory = [
             FileInventoryEntry {
                 path: "a.java".into(),
                 size: 10,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "b.java".into(),
                 size: 10,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "c.java".into(),
                 size: 10,
+                decision: Decision::Keep,
             },
         ];
         let groups = Pipeline::group_inventory(
-            dir.path(),
             &inventory,
             &PipelineConfig {
                 max_files: 2,
@@ -1923,65 +1889,23 @@ mod tests {
     }
 
     #[test]
-    fn inventory_grouping_skips_vendored_dirs() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join("app.js"), "export const x = 1;").unwrap();
-        std::fs::create_dir_all(dir.path().join("node_modules/jquery")).unwrap();
-        std::fs::write(
-            dir.path().join("node_modules/jquery/jquery.js"),
-            "var $ = 1;",
-        )
-        .unwrap();
-
+    fn inventory_grouping_keeps_only_loaded_files() {
         let inventory = [
             FileInventoryEntry {
                 path: "app.js".into(),
                 size: 10,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
-                path: "node_modules/jquery/jquery.js".into(),
+                path: "vendor/jquery.min.js".into(),
                 size: 10,
+                decision: Decision::ListOnly,
             },
         ];
-        let groups = Pipeline::group_inventory(dir.path(), &inventory, &PipelineConfig::default());
+        let groups = Pipeline::group_inventory(&inventory, &PipelineConfig::default());
         let accepted = groups.values().map(Vec::len).sum::<usize>();
 
-        assert_eq!(accepted, 1, "vendored node_modules file must not be parsed");
-    }
-
-    #[test]
-    fn repository_over_total_bytes_cap_is_not_indexed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        let source = "def f():\n    return 1\n";
-        std::fs::write(root.join("a.py"), source).unwrap();
-
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(vec![FileInventoryEntry {
-                path: "a.py".into(),
-                size: source.len() as u64,
-            }]),
-            PipelineConfig {
-                max_total_bytes: 1,
-                ..PipelineConfig::default()
-            },
-            crate::v2::trace::Tracer::new(false),
-            Arc::new(TestCapture::new()),
-            Arc::new(NullSink),
-        );
-
-        assert_eq!(result.errors.len(), 0);
-        assert_eq!(result.stats.files_discovered, 1);
-        assert_eq!(result.stats.bytes_discovered, source.len() as u64);
-        assert_eq!(
-            result.stats.files_indexed, 0,
-            "a repo over the total-bytes cap indexes no files"
-        );
-        assert_eq!(
-            result.stats.definitions_count, 0,
-            "a repo over the total-bytes cap parses nothing"
-        );
+        assert_eq!(accepted, 1, "only Keep files are parse candidates");
     }
 
     #[test]
@@ -2011,6 +1935,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
+                decision: Decision::Keep,
             }]),
             PipelineConfig {
                 max_file_size: u64::MAX,
@@ -2042,6 +1967,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.py".into(),
                 size: source.len() as u64,
+                decision: Decision::Keep,
             }]),
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
@@ -2082,10 +2008,12 @@ mod tests {
                 FileInventoryEntry {
                     path: "a.py".into(),
                     size: 22,
+                    decision: Decision::Keep,
                 },
                 FileInventoryEntry {
                     path: "b.py".into(),
                     size: 22,
+                    decision: Decision::Keep,
                 },
             ]),
             PipelineConfig {
@@ -2118,6 +2046,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
+                decision: Decision::Keep,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2153,6 +2082,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
+                decision: Decision::Keep,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2182,26 +2112,32 @@ mod tests {
             FileInventoryEntry {
                 path: "src/main.py".into(),
                 size: 17,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "README.md".into(),
                 size: 12,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "./README.md".into(),
                 size: 12,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "config/app.yml".into(),
                 size: 9,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "assets/logo.png".into(),
                 size: 128,
+                decision: Decision::Keep,
             },
             FileInventoryEntry {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
+                decision: Decision::Keep,
             },
         ];
 
@@ -2256,6 +2192,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "listed.py".into(),
                 size: 19,
+                decision: Decision::Keep,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2438,18 +2375,22 @@ namespace MyApp {
                 FileInventoryEntry {
                     path: "app.py".into(),
                     size: 0,
+                    decision: Decision::Keep,
                 },
                 FileInventoryEntry {
                     path: "Service.java".into(),
                     size: 0,
+                    decision: Decision::Keep,
                 },
                 FileInventoryEntry {
                     path: "App.kt".into(),
                     size: 0,
+                    decision: Decision::Keep,
                 },
                 FileInventoryEntry {
                     path: "Controller.cs".into(),
                     size: 0,
+                    decision: Decision::Keep,
                 },
             ]),
             PipelineConfig::default(),

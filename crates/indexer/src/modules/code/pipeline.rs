@@ -342,7 +342,6 @@ impl CodeIndexingPipeline {
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
-            max_total_bytes: self.pipeline_config.max_total_bytes,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,

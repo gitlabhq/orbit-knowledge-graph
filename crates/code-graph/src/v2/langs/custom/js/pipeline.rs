@@ -207,27 +207,6 @@ mod tests {
     }
 
     #[test]
-    fn line_too_long_js_file_records_skip_not_fault() {
-        use crate::v2::error::FileSkip;
-        let tmp = tempfile::tempdir().expect("temp dir");
-        let root = tmp.path();
-        std::fs::write(root.join("ok.js"), "export const x = 1;\n").unwrap();
-        let long_line: String = "x".repeat(70_000);
-        std::fs::write(root.join("long.js"), format!("const a = '{long_line}';\n")).unwrap();
-
-        let ctx = make_ctx(root);
-        run_js(&ctx, &["ok.js".to_string(), "long.js".to_string()]);
-
-        let skipped = ctx.skipped.lock().unwrap().clone();
-        let faults = ctx.faults.lock().unwrap().clone();
-        assert!(
-            skipped.iter().any(|s| s.kind == FileSkip::LineTooLong),
-            "expected a line_too_long skip, got skipped={skipped:?} faults={faults:?}",
-        );
-        assert!(faults.is_empty(), "line_too_long must not record a fault");
-    }
-
-    #[test]
     fn moderately_long_js_line_is_analyzed() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let root = tmp.path();

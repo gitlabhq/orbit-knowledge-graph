@@ -48,23 +48,6 @@ pub fn is_parsable(rel_path: &Path) -> bool {
     parsable_language(rel_path).is_some()
 }
 
-/// Directory names that hold third-party / vendored source we never want to
-/// parse as first-party code. Matched as a whole path component, so only a real
-/// directory named exactly this is excluded (not `my_vendor.rs`).
-const VENDORED_DIRS: &[&str] = &["node_modules", "vendor", "bower_components", "third_party"];
-
-/// Returns `true` when any component of `rel_path` is a vendored-dependency
-/// directory. Such files are still extracted to disk (resolvers may read a
-/// manifest like `node_modules/<pkg>/package.json`) but are not parsed — this
-/// stops thousands of vendored copies (e.g. `jquery.js` in every `node_modules`)
-/// from being parsed as distinct files.
-pub fn is_vendored_path(rel_path: &Path) -> bool {
-    rel_path.components().any(|c| {
-        matches!(c, std::path::Component::Normal(name)
-            if VENDORED_DIRS.iter().any(|d| name.eq_ignore_ascii_case(d)))
-    })
-}
-
 /// Glob patterns the archive extractor refuses to write to disk.
 ///
 /// Curated denylist of obvious binary blobs and rendered output where
@@ -294,19 +277,6 @@ mod tests {
     #[test]
     fn nul_bearing_utf16_without_bom_is_treated_binary() {
         assert!(looks_binary(&[0x68, 0x00, 0x69, 0x00]));
-    }
-
-    #[test]
-    fn vendored_dirs_are_detected_by_component() {
-        assert!(is_vendored_path(&p("node_modules/jquery/dist/jquery.js")));
-        assert!(is_vendored_path(&p("frontend/node_modules/react/index.js")));
-        assert!(is_vendored_path(&p("vendor/bundle/ruby/gems/foo.rb")));
-        assert!(is_vendored_path(&p("third_party/grpc/x.cc")));
-        assert!(is_vendored_path(&p("web/bower_components/x.js")));
-        // Whole-component match only: a file/dir merely containing the word is kept.
-        assert!(!is_vendored_path(&p("src/vendor_client.rs")));
-        assert!(!is_vendored_path(&p("src/my_node_modules.ts")));
-        assert!(!is_vendored_path(&p("app/models/user.rb")));
     }
 
     #[test]

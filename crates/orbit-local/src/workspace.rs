@@ -110,7 +110,6 @@ pub fn set_status(
 pub struct GitInfo {
     /// Canonical repo path.
     pub repo_path: PathBuf,
-    repository: CoreGitaliskRepository,
     /// Deterministic project ID derived from `repo_path`.
     pub project_id: i64,
     pub branch: String,
@@ -118,12 +117,6 @@ pub struct GitInfo {
     /// For worktrees, the parent repo's canonical path. For regular
     /// repos, same as `repo_path`.
     pub parent_repo_path: PathBuf,
-}
-
-impl GitInfo {
-    pub fn repository(&self) -> &CoreGitaliskRepository {
-        &self.repository
-    }
 }
 
 /// Resolve git metadata (branch, commit, parent repo) for a repo path.
@@ -147,7 +140,6 @@ pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
 
     Ok(GitInfo {
         repo_path: canonical,
-        repository: repo,
         project_id,
         branch,
         commit_sha,

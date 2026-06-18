@@ -128,10 +128,11 @@ impl CodeMetrics {
     pub(in crate::modules::code) fn record_archive_entry_skipped(
         &self,
         reason: &'static str,
+        entries: u64,
         bytes: u64,
     ) {
         let labels = [KeyValue::new(code::labels::REASON, reason)];
-        self.archive_entries_skipped.add(1, &labels);
+        self.archive_entries_skipped.add(entries, &labels);
         self.archive_bytes_skipped.add(bytes, &labels);
     }
 

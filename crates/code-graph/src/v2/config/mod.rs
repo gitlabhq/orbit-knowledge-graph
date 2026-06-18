@@ -1,10 +1,12 @@
+mod code_filter;
 mod filter;
 mod lang;
 mod registry;
 
+pub use code_filter::{CodeFilter, FilterSkip, SkipTally};
 pub use filter::{
-    EXCLUDED_INDEXING_GLOBS, is_excluded_from_indexing, is_parsable, is_vendored_path,
-    looks_binary, parsable_language,
+    EXCLUDED_INDEXING_GLOBS, is_excluded_from_indexing, is_parsable, looks_binary,
+    parsable_language,
 };
 pub use lang::{Language, LanguageFamily};
 pub use registry::{
