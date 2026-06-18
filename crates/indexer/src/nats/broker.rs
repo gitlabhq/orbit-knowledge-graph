@@ -504,7 +504,7 @@ fn max_ack_pending_to_i64(value: Option<u32>) -> i64 {
     value.map(i64::from).unwrap_or(0)
 }
 
-fn escape_subject_for_durable(subject: &str) -> String {
+pub(crate) fn escape_subject_for_durable(subject: &str) -> String {
     subject
         .replace('.', "-")
         .replace('*', "wildcard")

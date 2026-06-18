@@ -5,11 +5,13 @@ edition = "2024"
 license = "LicenseRef-EE"
 
 [dependencies]
+async-nats = { workspace = true }
 axum = { workspace = true }
 clickhouse-client = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 k8s-openapi = { workspace = true }
 kube = { workspace = true }
+nats-client = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
