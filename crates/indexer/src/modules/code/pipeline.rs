@@ -256,7 +256,7 @@ impl CodeIndexingPipeline {
         let indexing_start = Instant::now();
         let config = self.build_pipeline_config(context);
         let (result, per_table_writes) = self
-            .run_code_graph(context, request, repository, indexed_at, config)
+            .build_code_graph(context, request, repository, indexed_at, config)
             .await?;
 
         context.progress.notify_in_progress().await;
@@ -320,7 +320,7 @@ impl CodeIndexingPipeline {
         }
     }
 
-    async fn run_code_graph(
+    async fn build_code_graph(
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
