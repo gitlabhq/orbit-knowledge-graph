@@ -210,16 +210,8 @@ fn sanitize_panic_message(raw: &str) -> String {
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, AnalyzerError> {
     let absolute_path = safe_repo_join(root_path, relative_path)?;
-    let source = std::fs::read_to_string(&absolute_path).map_err(|error| {
-        // Distinguish UTF-8 decode failure from raw I/O so the dashboard
-        // can split "couldn't read disk" (FileRead) from "binary blob"
-        // (NotUtf8) — both currently surface here as io::Error.
-        if error.kind() == std::io::ErrorKind::InvalidData {
-            AnalyzerError::skip(FileSkip::NotUtf8, error.to_string())
-        } else {
-            AnalyzerError::fault(FileFault::FileRead, error.to_string())
-        }
-    })?;
+    let source = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| AnalyzerError::fault(FileFault::FileRead, error.to_string()))?;
     let relative_path = normalize_relative_path(relative_path, root_path);
     let extension = extension_for(&relative_path);
     let language = language_for_extension(extension.as_str());

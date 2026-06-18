@@ -108,7 +108,6 @@ pub enum FileSkip {
     OversizeCombined,
     ParserOversize,
     ArrowOffsetOverflow,
-    NotUtf8,
     UnsafePath,
     Timeout(AbortPhase),
 }
@@ -120,7 +119,6 @@ impl FileSkip {
             Self::OversizeCombined => "oversize_combined",
             Self::ParserOversize => "parser_oversize",
             Self::ArrowOffsetOverflow => "arrow_offset_overflow",
-            Self::NotUtf8 => "not_utf8",
             Self::UnsafePath => "unsafe_path",
             Self::Timeout(AbortPhase::Parse) => "timeout_parse",
             Self::Timeout(AbortPhase::Walk) => "timeout_walk",
@@ -239,7 +237,6 @@ mod tests {
             FileSkip::ArrowOffsetOverflow.as_metric_label(),
             "arrow_offset_overflow"
         );
-        assert_eq!(FileSkip::NotUtf8.as_metric_label(), "not_utf8");
         assert_eq!(FileSkip::UnsafePath.as_metric_label(), "unsafe_path");
         assert_eq!(
             FileSkip::Timeout(AbortPhase::Parse).as_metric_label(),

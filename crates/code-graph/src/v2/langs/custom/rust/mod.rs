@@ -518,14 +518,9 @@ fn parse_rust_file_standalone(
         ));
     };
     let source = std::fs::read_to_string(&abs_path).map_err(|err| {
-        let kind = if err.kind() == std::io::ErrorKind::InvalidData {
-            FileFault::InvalidUtf8
-        } else {
-            FileFault::FileRead
-        };
         (
             file_path.to_string(),
-            AnalyzerError::fault(kind, err.to_string()),
+            AnalyzerError::fault(FileFault::FileRead, err.to_string()),
         )
     })?;
     crate::v2::pipeline::breadcrumb_large_file(file_path, source.len() as u64, "rust");

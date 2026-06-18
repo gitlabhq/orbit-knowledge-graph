@@ -39,6 +39,7 @@ pub enum FilterSkip {
     Oversize,
     ExcludedExtension,
     Binary,
+    NotUtf8,
     Minified,
     LineTooLong,
 }
@@ -98,6 +99,10 @@ impl FileStreamHooks for CodeFilter {
         let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
         if looks_binary(sniff) {
             return self.record(FilterSkip::Binary, file.size);
+        }
+        // Parsers all need `&str`; validate once here so they can assume UTF-8.
+        if std::str::from_utf8(content).is_err() {
+            return self.record(FilterSkip::NotUtf8, file.size);
         }
         if let Some(reason) = minified_skip(content) {
             return self.record(reason, file.size);

@@ -123,8 +123,8 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.skipped",
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
      Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, \
-     `arrow_offset_overflow`, `not_utf8`, `unsafe_path`, and per-phase CPU-budget \
-     timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
+     `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts \
+     `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
     None,
     &[labels::REASON],
     DOMAIN,
@@ -150,8 +150,9 @@ pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
      EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, \
      minified bundles), `oversize` (declared size exceeds the \
      configured per-file ceiling), `binary` (a NUL byte in the first 8000 \
-     bytes, git-style, with a UTF BOM rescue), `minified` / `line_too_long` \
-     (content has a high average line length or a >64 KiB line).",
+     bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid \
+     UTF-8), `minified` / `line_too_long` (high average line length or a \
+     >64 KiB line).",
     None,
     &[labels::REASON],
     DOMAIN,
