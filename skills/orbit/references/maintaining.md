@@ -30,8 +30,10 @@ Bump the `version` field in `SKILL.md` frontmatter on every change under
 ## Trigger test
 
 Canonical prompts for validating skill-discovery routing between `orbit` and its
-sibling `glab` skill. Re-run with `opencode run` after changing the `description`
-field — present both descriptions and ask the model to route each prompt.
+sibling `glab` skill. After changing the `description` field, present both skill
+descriptions to the model and ask it to route each prompt to exactly one skill,
+then check the routing matches the expectations below. This is harness-agnostic -
+any agent runner that exposes skill descriptions to the model works.
 
 ### Should fire orbit
 
@@ -46,8 +48,8 @@ field — present both descriptions and ask the model to route each prompt.
 
 ### Should fire glab (not orbit)
 
-1. "Show me the diff of MR !1216" — single-entity lookup (`glab mr diff`)
-2. "Create a new merge request for my branch" — write operation (`glab mr create`)
-3. "What is the current pipeline status for MR !500?" — single-entity lookup (`glab ci status`)
-4. "Approve MR !789" — write operation (`glab mr approve`)
-5. "List open MRs in gitlab-org/gitlab" — simple list (`glab mr list`)
+1. "Show me the diff of MR !1216" - single-entity lookup (`glab mr diff`)
+2. "Create a new merge request for my branch" - write operation (`glab mr create`)
+3. "What is the current pipeline status for MR !500?" - single-entity lookup (`glab ci status`)
+4. "Approve MR !789" - write operation (`glab mr approve`)
+5. "List open MRs in gitlab-org/gitlab" - simple list (`glab mr list`)
