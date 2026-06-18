@@ -43,9 +43,12 @@ carries no counter-signal. Keep this in mind when evaluating borderline cases.
 **Tie-break rule for boundary cases:** when a prompt names a **single known
 entity** (one MR, one project) but phrases the question relationally (e.g.
 "who reviewed MR !X?"), route to **glab** unless the question explicitly spans
-**multiple entities/projects** or requires **aggregation**. `glab mr view` and
-similar commands surface relationship metadata (reviewers, labels, pipelines)
-for a single entity without a graph query.
+**multiple entities/projects** or requires a **group-by or multi-entity
+aggregation**. A simple single-entity count that `glab mr list | wc` can
+answer stays with glab; a group-by breakdown (e.g. "how many MRs per state")
+or a count that joins across entities needs Orbit. `glab mr view` and similar
+commands surface relationship metadata (reviewers, labels, pipelines) for a
+single entity without a graph query.
 
 ### Should fire orbit
 
