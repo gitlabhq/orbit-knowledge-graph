@@ -74,7 +74,12 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         if relative_path.as_os_str().is_empty() {
             continue;
         }
-        reject_unsafe_relative_path(&relative_path)?;
+        if !crate::fs::is_safe_relative_path(&relative_path) {
+            return Err(StreamError::Io(std::io::Error::other(format!(
+                "path traversal detected: {}",
+                relative_path.display()
+            ))));
+        }
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
@@ -108,7 +113,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
                 Decision::Drop => continue,
                 Decision::ListOnly => inventory.push(meta),
                 Decision::Keep => {
-                    let dest_canonical = resolve_dest(&dest, &relative_path, &target_canonical)?;
+                    let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
                     let mut file = std::fs::File::create(&dest_canonical)?;
                     file.write_all(&content)?;
                     inventory.push(meta);
@@ -117,7 +122,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             continue;
         }
 
-        let dest_canonical = resolve_dest(&dest, &relative_path, &target_canonical)?;
+        let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
         entry
             .unpack(&dest_canonical)
             .map_err(std::io::Error::other)?;
@@ -143,26 +148,6 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     Ok(inventory)
 }
 
-fn resolve_dest(
-    dest: &Path,
-    relative_path: &Path,
-    target_canonical: &Path,
-) -> Result<PathBuf, StreamError> {
-    if dest.exists() {
-        // Canonicalizes and confirms the real target lives under the root.
-        crate::fs::contained_canonical_path(target_canonical, dest).ok_or_else(|| {
-            StreamError::Io(std::io::Error::other(format!(
-                "path traversal detected: {}",
-                relative_path.display()
-            )))
-        })
-    } else {
-        // `safe_create_dir_all` validates the existing ancestor is within the
-        // root and returns a path under it, so no extra containment check.
-        Ok(crate::fs::safe_create_dir_all(dest, target_canonical)?)
-    }
-}
-
 /// Strip the Gitaly archive root (`<slug>-<ref>/`). The first entry records the
 /// root; later entries must share it. Returns an empty path for the root entry.
 fn strip_archive_root(
@@ -186,24 +171,6 @@ fn strip_archive_root(
         _ => {}
     }
     Ok(components.as_path().to_path_buf())
-}
-
-fn reject_unsafe_relative_path(path: &Path) -> Result<(), StreamError> {
-    if path.components().any(|c| {
-        matches!(
-            c,
-            std::path::Component::ParentDir
-                | std::path::Component::CurDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_)
-        )
-    }) {
-        return Err(StreamError::Io(std::io::Error::other(format!(
-            "path traversal detected: {}",
-            path.display()
-        ))));
-    }
-    Ok(())
 }
 
 #[cfg(test)]
