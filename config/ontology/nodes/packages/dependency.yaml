@@ -1,0 +1,80 @@
+# config/ontology/nodes/packages/dependency.yaml
+
+node_type: Dependency
+domain: packages
+description: A dependency declared by a package in the GitLab package registry (name and version pattern)
+label: name
+destination_table: gl_dependency
+default_columns: [id, name, version_pattern]
+
+style:
+  size: 24
+  color: "#FCD34D"
+
+redaction:
+  resource_type: dependency
+  id_column: id
+  ability: read_package
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Unique ID."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Dependency name."
+
+  version_pattern:
+    type: string
+    source: version_pattern
+    nullable: false
+    description: "Declared version pattern (for example, ^1.2.0)."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Owning project ID."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+etl:
+  type: table
+  source: siphon_packages_dependencies
+  order_by: [traversal_path, id]
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+
+storage:
+  primary_key: [traversal_path, id]
+  settings:
+    allow_part_offset_column_in_projections: "1"
+    add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: version_pattern, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_name, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+  projections:
+    - {type: lightweight, name: by_id, versioned_sort_key: [id]}
+    - {type: lightweight, name: by_project_id, versioned_sort_key: [project_id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

@@ -1478,6 +1478,49 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+CREATE TABLE IF NOT EXISTS siphon_packages_dependencies
+(
+    `id` Int64,
+    `name` String,
+    `version_pattern` String,
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+CREATE TABLE IF NOT EXISTS siphon_packages_dependency_links
+(
+    `id` Int64,
+    `package_id` Int64,
+    `dependency_id` Int64,
+    `dependency_type` Int16,
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for container repositories
 CREATE TABLE IF NOT EXISTS siphon_container_repositories
 (

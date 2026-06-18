@@ -382,6 +382,7 @@ domains:
     description: "Entities related to packages published to the package registry."
     nodes:
       Package: nodes/packages/package.yaml
+      Dependency: nodes/packages/dependency.yaml
   container_registry:
     description: "Entities related to container image repositories in the container registry."
     nodes:
@@ -445,3 +446,4 @@ edges:
   BUILT_BY: edges/built_by.yaml
   MENTIONS: edges/mentions.yaml
   REOPENED: edges/reopened.yaml
+  DECLARES_DEPENDENCY: edges/declares_dependency.yaml
