@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use gkg_server_config::CodeIndexingPipelineConfig;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{Instrument, debug, info, info_span, warn};
+use tracing::{debug, info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
@@ -102,6 +102,16 @@ impl CodeIndexingPipeline {
         Some(self.fetch_concurrency + self.indexing_slot_count)
     }
 
+    #[tracing::instrument(
+        name = "code_indexing_project",
+        skip_all,
+        fields(
+            project_id = request.project_id,
+            namespace_id,
+            traversal_path = %request.traversal_path,
+            branch = %request.branch,
+        )
+    )]
     pub async fn index_project(
         &self,
         context: &HandlerContext,
@@ -116,26 +126,8 @@ impl CodeIndexingPipeline {
                 request.traversal_path
             )));
         };
+        tracing::Span::current().record("namespace_id", namespace_id);
 
-        let span = info_span!(
-            "code_indexing_project",
-            project_id = request.project_id,
-            namespace_id,
-            traversal_path = %request.traversal_path,
-            branch = %request.branch,
-        );
-
-        self.index_project_inner(context, request, observer)
-            .instrument(span)
-            .await
-    }
-
-    async fn index_project_inner(
-        &self,
-        context: &HandlerContext,
-        request: &IndexingRequest,
-        observer: &mut dyn IndexingObserver,
-    ) -> Result<IndexOutcome, HandlerError> {
         // Phase 1: Fetch — bounded by fetch_slots so we don't overwhelm
         // Gitaly with concurrent downloads while still pre-fetching ahead
         // of the processing phase.
