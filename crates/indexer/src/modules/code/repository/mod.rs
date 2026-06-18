@@ -4,9 +4,6 @@ pub mod cache;
 pub mod resolver;
 pub(crate) mod service;
 
-#[cfg(test)]
-mod extraction_tests;
-
 pub use cache::{LocalRepositoryCache, RepositoryCache};
 pub use resolver::{EmptyRepositoryReason, RepositoryResolver, ResolveError};
 pub use service::{

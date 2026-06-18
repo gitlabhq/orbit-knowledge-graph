@@ -12,6 +12,7 @@ publish = false
 clickhouse-client = { path = "../clickhouse-client" }
 compiler = { path = "../query-engine/compiler" }
 gkg-analytics = { path = "../gkg-analytics" }
+code-graph = { path = "../code-graph" }
 gkg-server = { path = "../gkg-server", features = ["testkit"] }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
@@ -49,7 +50,7 @@ tonic = { workspace = true }
 tower = { workspace = true }
 tempfile = { workspace = true }
 cargo_metadata = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "rustls"] }
 labkit = { workspace = true, features = ["http"] }
 labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
