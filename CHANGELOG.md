@@ -1,3 +1,26 @@
+## [0.77.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.76.0...v0.77.0) (2026-06-18)
+
+### Features
+
+* **indexer:** add NATS entity versioning for blue-green deployments ([44aba2f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/44aba2f6f638b81ccecb25836a48260ca0c1ca2b)) by Aaron Algutifan
+* **indexer:** durable page writes for incremental SDLC indexing ([e745b6f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e745b6f1ed0c8472050021cb2b12bf2ebd4ffca7)) by Jean-Gabriel Doyon
+* **indexer:** skip binary files during code archive extraction ([c617a07](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c617a07b874cf6fb21c5025ed6830653028e7658)) by Bohdan Parkhomchuk
+* **observability:** per-file parse/walk/ssa CPU-time histogram ([fe11fc0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fe11fc04853164882b7e2788fdd31163c1783459)) by Michael Usachenko
+
+### Fixes
+
+* **code-graph:** add per-file CPU budgets for parse/walk/ssa + guards for custom langs ([421a3c9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/421a3c90213817a61114bd909daf2ebd1f857433)) by Michael Usachenko
+* **code-graph:** guard SSA reaching-def recursion against stack overflow ([cdb6d03](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cdb6d03a518a656fd5fc743ef9994dc5d77af4a8)) by Michael Usachenko
+* **code-graph:** route parse-loop skips through ParseOutcome::Skip ([77b0890](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/77b0890faf9ba794da896c039b978cc3dcd4643b)) by Michael Usachenko
+* **indexer:** drop to the floor block size on an Arrow 2 GiB string overflow ([443a935](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/443a935c78307671fcf22d08497e5dcd270ecae2)) by Jean-Gabriel Doyon
+* **ontology:** left join namespace_details for group node ([ac63785](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ac63785bf8e5a44418a10bddf11448851e00b66e)) by Bohdan Parkhomchuk
+* **ontology:** prune Group details join by traversal_path prefix ([7717887](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7717887d10b193f3066e5b4a8d2bd4e370ab0730)) by Jean-Gabriel Doyon
+* **skill:** add missing rel_types to path_finding recipe ([af8e8cc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/af8e8cc200a8debeaad7459b3762f95a11e02958)) by Eszter Kovacs
+
+### Other
+
+* **indexer:** remove note-derived WorkItem CONTAINS edges ([cd1d42e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cd1d42ed818c350c223b96f53ac139a143a6ed10)) by Dmitry Gruzd
+
 ## [0.76.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.75.1...v0.76.0) (2026-06-16)
 
 ### Features
