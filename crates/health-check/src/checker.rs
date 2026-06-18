@@ -1,9 +1,9 @@
 use crate::clickhouse::{ClickHouseChecker, ClickHouseInstance};
 use crate::error::Error;
 use crate::k8s::K8sChecker;
-use crate::nats::NatsDepthChecker;
+use crate::nats::{CodeQueueConfig, NatsDepthChecker};
 use crate::types::{HealthStatus, QueueDepth};
-use gkg_server_config::{HealthCheckConfig, NamespaceTarget, NatsConfiguration};
+use gkg_server_config::{HealthCheckConfig, NamespaceTarget};
 
 pub struct HealthChecker {
     k8s: K8sChecker,
@@ -16,13 +16,11 @@ impl HealthChecker {
     pub async fn new(
         config: &HealthCheckConfig,
         clickhouse_instances: Vec<ClickHouseInstance>,
-        nats_config: &NatsConfiguration,
-        code_stream_name: String,
-        code_consumer_name: Option<String>,
+        code_queue: CodeQueueConfig,
     ) -> Result<Self, Error> {
         let k8s = K8sChecker::new().await?;
         let clickhouse = ClickHouseChecker::new(clickhouse_instances);
-        let nats_depth = NatsDepthChecker::new(nats_config, code_stream_name, code_consumer_name);
+        let nats_depth = NatsDepthChecker::new(code_queue);
 
         Ok(Self {
             k8s,

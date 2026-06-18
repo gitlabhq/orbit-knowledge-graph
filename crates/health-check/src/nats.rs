@@ -6,6 +6,12 @@ use tracing::warn;
 
 use crate::types::QueueDepth;
 
+pub struct CodeQueueConfig {
+    pub nats: NatsConfiguration,
+    pub stream_name: String,
+    pub consumer_name: Option<String>,
+}
+
 pub struct NatsDepthChecker {
     config: NatsConfiguration,
     stream_name: String,
@@ -14,15 +20,11 @@ pub struct NatsDepthChecker {
 }
 
 impl NatsDepthChecker {
-    pub fn new(
-        config: &NatsConfiguration,
-        stream_name: String,
-        consumer_name: Option<String>,
-    ) -> Self {
+    pub fn new(code_queue: CodeQueueConfig) -> Self {
         Self {
-            config: config.clone(),
-            stream_name,
-            consumer_name,
+            config: code_queue.nats,
+            stream_name: code_queue.stream_name,
+            consumer_name: code_queue.consumer_name,
             client: OnceCell::new(),
         }
     }
