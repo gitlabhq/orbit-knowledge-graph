@@ -2,75 +2,63 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Planned MCP server for Orbit Local. Not yet available.
+description: Connect Claude Code, Codex, OpenCode, or any MCP-compatible AI agent to your local Orbit graph.
 title: Connect to Orbit Local via MCP
 ---
 
-> [!warning]
-> **Not yet available.** Orbit Local cannot run as an MCP server yet. The
-> `orbit mcp serve` and `glab orbit local mcp serve` commands do not exist in
-> any released version of the Orbit CLI. The configuration examples below
-> describe the **planned** interface, not a feature you can use today. If you
-> add this MCP config to your agent, it will fail silently: the server never
-> starts and the agent cannot query anything.
->
-> Until the MCP server ships, use the [workaround](#workaround-query-from-the-terminal)
-> below. Track progress in
-> [merge request !1377](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1377).
+{{< details >}}
 
-When it ships, Orbit Local will run as a stateless MCP server over stdio,
-pointed at the local DuckDB graph instead of a GitLab instance. Unlike Orbit
-Remote (which exposes a JSON query DSL), Orbit Local speaks raw DuckDB SQL -
-agents compose SQL directly against the property graph tables.
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
+- Status: Experiment
+
+{{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/643) in GitLab 19.2 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+
+{{< /history >}}
+
+Orbit Local runs as a stateless MCP server over stdio, pointed at the local
+DuckDB graph instead of a GitLab instance. Unlike Orbit Remote (which exposes
+a JSON query DSL), Orbit Local speaks raw DuckDB SQL: agents compose SQL
+directly against the property graph tables.
+
+> [!note]
+> The MCP server is experimental. Capabilities and config shape may change
+> before GA.
 
 ## Prerequisites
 
 - The Orbit CLI (`orbit`) is installed. See [Use the Orbit CLI directly](cli.md).
 - A local repository has been indexed (`orbit index <path>` or
-  `glab orbit local index <path>`).
+  `glab orbit local index <path>`). Agents can also index through the `index`
+  MCP tool.
 
-## Workaround: query from the terminal
-
-Until the MCP server ships, query your local graph directly from a terminal
-with `glab orbit local`. This is the supported way to use Orbit Local today.
-
-Run a raw read-only SQL query against the local DuckDB graph:
-
-```shell
-glab orbit local sql "SELECT name, definition_type FROM gl_definition LIMIT 10"
-```
-
-Describe the graph schema (table names, columns, and data types). Add `--raw`
-for JSON instead of the default table view:
-
-```shell
-glab orbit local schema
-```
-
-You can paste the output of these commands into your AI agent as context. You
-can also [install the Orbit skill manually](../../ai_coding_agents.md) today to
-give the agent query recipes, SQL guidance, and troubleshooting.
-
-## Planned interface
-
-> [!note]
-> Everything in this section describes the planned MCP server. None of these
-> commands or config blocks work yet. They are preserved here as the
-> specification for the contributor who implements the feature, and so you can
-> see what is coming.
-
-### Planned MCP tools
+## MCP tools
 
 | Tool | Description |
 |------|-------------|
-| `run_sql` | Execute a read-only SQL query against the local DuckDB graph. Returns JSON rows. |
+| `run_sql` | Execute read-only SQL against the local DuckDB graph. Takes an array of statements; returns one JSON row array per statement, at the same index. |
 | `get_graph_schema` | Fetch the schema: table names, columns, and data types present in the local DuckDB. |
 | `index` | Index a repository (or a directory of repositories) into the local graph. |
 
-### Planned config: Claude Code
+The server is stateless: every tool call opens the DuckDB file on demand and
+releases it before returning, so multiple editors can run one server process
+each against the same graph.
 
-The planned interface will let you add the following to
-`~/.claude/mcp_servers.json` or your project's `.claude/mcp_servers.json`:
+Large `run_sql` results are rejected before serialisation (about 1 MB of
+Arrow data) with an error asking the agent to add `LIMIT` or narrow the
+projection, so a runaway `SELECT *` cannot freeze your editor.
+
+## Connect Claude Code
+
+```shell
+claude mcp add orbit-local -- orbit mcp serve
+```
+
+Or add the equivalent to your project's `.mcp.json`:
 
 ```json
 {
@@ -83,28 +71,37 @@ The planned interface will let you add the following to
 }
 ```
 
-Or, if you prefer to drive it through `glab`:
+## Connect Codex
+
+```shell
+codex mcp add orbit-local -- orbit mcp serve
+```
+
+## Connect OpenCode
+
+Add to `opencode.json` (project or global):
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "orbit-local": {
-      "command": "glab",
-      "args": ["orbit", "local", "mcp", "serve"]
+      "type": "local",
+      "command": ["orbit", "mcp", "serve"],
+      "enabled": true
     }
   }
 }
 ```
 
-### Planned config: other MCP clients
+## Connect other MCP clients
 
-Any MCP client will be able to connect by running `orbit mcp serve` (or
-`glab orbit local mcp serve`). The server will speak MCP over stdio and expose
-`run_sql`, `get_graph_schema`, and `index`.
+Any MCP client can connect by running `orbit mcp serve` (or
+`glab orbit local mcp serve`) as a stdio server. For Cursor, use the
+`.mcp.json` block above in `.cursor/mcp.json`.
 
-### Planned usage
+## Using the tools
 
-Once connected, you will instruct your AI agent to use Orbit directly.
+Once connected, instruct your AI agent to use Orbit directly.
 
 Discover the schema:
 > "Use `get_graph_schema` to show me what tables are in my local graph."
@@ -117,11 +114,14 @@ Map a module:
 > "Use Orbit to list every definition declared in `src/auth/` and show its
 > kind."
 
+The `_orbit_manifest` table lists the indexed repositories, so "what repos are
+in my local graph?" is one `run_sql` call away.
+
 ## What's in the local graph
 
 Orbit Local indexes code only: files, directories, definitions, and
 imported symbols across all 11 supported languages. SDLC data (merge requests,
-pipelines, users, vulnerabilities) is not available locally - that requires
+pipelines, users, vulnerabilities) is not available locally. That requires
 [Orbit Remote](../../remote/_index.md).
 
 ## Billing

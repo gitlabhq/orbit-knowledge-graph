@@ -130,3 +130,51 @@ pub fn create_test_repo() -> gitalisk_core::repository::testing::local::LocalGit
     repo.add_all().commit("initial");
     repo
 }
+
+// ── MCP helpers ─────────────────────────────────────────────────
+
+pub fn mcp_roundtrip(data_dir: &Path, requests: &[Value]) -> Vec<Value> {
+    use std::io::{BufRead, BufReader, Write};
+
+    let mut child = orbit_cmd()
+        .args(["mcp", "serve"])
+        .env("ORBIT_DATA_DIR", data_dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut send = |req: &Value| writeln!(stdin, "{req}").unwrap();
+    let mut recv = || -> Value { serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap() };
+
+    send(&serde_json::json!({
+        "jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                   "clientInfo": {"name": "testkit", "version": "0"}}
+    }));
+    assert_eq!(recv()["result"]["serverInfo"]["name"], "orbit-local");
+    send(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+
+    let responses = requests
+        .iter()
+        .map(|req| {
+            send(req);
+            recv()
+        })
+        .collect();
+    drop(stdin);
+    child.wait().unwrap();
+    responses
+}
+
+pub fn mcp_tool_call(id: u64, tool: &str, arguments: Value) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments}
+    })
+}
+
+pub fn mcp_tool_text(resp: &Value) -> &str {
+    resp["result"]["content"][0]["text"].as_str().unwrap()
+}
