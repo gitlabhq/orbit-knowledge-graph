@@ -58,6 +58,19 @@ impl NatsVersioner {
     }
 }
 
+pub fn code_work_stream_name() -> String {
+    NATS_VERSIONER.stream(INDEXER_STREAM)
+}
+
+pub fn code_work_consumer_name(consumer_name: &str) -> String {
+    let versioned_subject =
+        NATS_VERSIONER.subject(crate::topic::CODE_INDEXING_TASK_SUBJECT_PATTERN);
+    format!(
+        "{consumer_name}-{}",
+        super::broker::escape_subject_for_durable(&versioned_subject)
+    )
+}
+
 fn versioned_entity_names(version: u32) -> Vec<String> {
     let versioner = NatsVersioner::new(version);
     let mut names: Vec<String> = MANAGED_STREAMS
@@ -189,5 +202,23 @@ mod tests {
 
         assert_eq!(stream, "siphon_db");
         assert_eq!(subject, "tables.merge_requests");
+    }
+
+    #[test]
+    fn code_work_stream_name_is_versioned() {
+        let v = *SCHEMA_VERSION;
+        assert_eq!(
+            super::code_work_stream_name(),
+            format!("{INDEXER_STREAM}_V{v}")
+        );
+    }
+
+    #[test]
+    fn code_work_consumer_name_matches_handler_durable() {
+        let v = *SCHEMA_VERSION;
+        assert_eq!(
+            super::code_work_consumer_name("gkg-indexer"),
+            format!("gkg-indexer-v{v}-code-task-indexing-requested-wildcard-wildcard")
+        );
     }
 }

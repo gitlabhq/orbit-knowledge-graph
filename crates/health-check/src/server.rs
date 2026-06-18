@@ -1,7 +1,12 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::Json;
+use axum::Router;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::get;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -13,11 +18,23 @@ async fn health(State(checker): State<Arc<HealthChecker>>) -> Json<HealthStatus>
     Json(checker.check().await)
 }
 
+async fn queue_depth(State(checker): State<Arc<HealthChecker>>) -> impl IntoResponse {
+    match checker.queue_depth().await {
+        Ok(depth) => (StatusCode::OK, Json(serde_json::json!(depth))).into_response(),
+        Err(error) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn run_server(bind_address: SocketAddr, checker: HealthChecker) -> Result<(), Error> {
     let checker = Arc::new(checker);
 
     let app = Router::new()
         .route("/health", get(health))
+        .route("/queue-depth", get(queue_depth))
         .with_state(checker);
 
     let listener = TcpListener::bind(bind_address)
