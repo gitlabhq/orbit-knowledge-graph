@@ -272,7 +272,7 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 
 The Indexer and Dispatcher expose `/live` and `/ready` endpoints on dedicated health ports (default 4202 and 4203 respectively). The `/ready` probe checks downstream dependencies (NATS, ClickHouse graph, ClickHouse datalake) and returns HTTP 503 when any are unreachable. Traffic is only routed to healthy instances.
 
-The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending", "code_in_flight" }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
+The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n> }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
 
 ## Self-Managed Instances
 
