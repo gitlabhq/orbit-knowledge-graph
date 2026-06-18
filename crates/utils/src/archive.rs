@@ -81,10 +81,12 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
+            // A symlink is a node, never a parse candidate — we'd be parsing the
+            // link, not source. (The dir walk likewise never yields symlinks.)
             inventory.push(FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.header().size().unwrap_or(0),
-                decision: Decision::Keep,
+                decision: Decision::ListOnly,
             });
             let link_target = entry
                 .link_name()

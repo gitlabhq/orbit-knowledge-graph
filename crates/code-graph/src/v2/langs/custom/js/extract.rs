@@ -132,12 +132,6 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Analy
             format!("stat {}: {err}", joined.display()),
         )
     })?;
-    if !meta.file_type().is_file() {
-        return Err(AnalyzerError::skip(
-            FileSkip::NonRegularFile,
-            format!("refusing non-regular file: {}", joined.display()),
-        ));
-    }
     if meta.len() > MAX_FILE_BYTES {
         return Err(AnalyzerError::skip(
             FileSkip::Oversize,
