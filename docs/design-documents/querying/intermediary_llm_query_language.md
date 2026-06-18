@@ -335,6 +335,7 @@ The `options` object controls presentation behavior without changing query seman
 |-------|------|---------|-------------|
 | `dynamic_columns` | `string` | `"default"` | Columns fetched for dynamically-discovered entities during PathFinding/Neighbors hydration. `"default"` returns the entity's `default_columns` from the ontology. `"*"` returns all columns. |
 | `include_debug_sql` | `boolean` | `false` | When `true`, includes compiled ClickHouse SQL in response metadata. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). |
+| `expand` | `string[]` | `[]` | Property names returned at full length in GOON output, bypassing long-text truncation (e.g. `["description"]`). Unlisted long-text values stay capped. |
 
 This is relevant for PathFinding and Neighbors queries where entity types are discovered at runtime. For Search and Traversal queries, column selection is controlled per-node via the `columns` field and this option has no effect.
 

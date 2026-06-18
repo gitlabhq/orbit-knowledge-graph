@@ -30,6 +30,35 @@ Use the Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 
+## Request envelope
+
+When submitting a query via the REST API or `glab orbit remote query`, wrap the
+query object in a top-level `query` field:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "node_ids": [12345],
+      "columns": ["iid", "title", "state"]
+    },
+    "limit": 1
+  },
+  "response_format": "raw"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `query` | Yes | The query object documented below. |
+| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+
+The `orbit query` CLI (for local graphs) takes the raw query body **without**
+the envelope.
+
 ## Query shape
 
 Every query has a `query_type` and either `node` or `nodes`.
@@ -562,6 +591,7 @@ a filter, provide IDs, or use a narrow `id_range`.
 |--------|-------------|
 | `dynamic_columns` | For `path_finding` and `neighbors` hydration. Use `default` for each entity's default columns, or `"*"` for all non-restricted ClickHouse-backed columns. Default `default`. |
 | `include_debug_sql` | Include compiled ClickHouse SQL in response metadata when the caller is allowed to see it. |
+| `expand` | List of property names returned at full length, bypassing the GOON formatter's long-text truncation (e.g. `["description"]`). Other long-text values stay capped. Default `[]`. |
 | `skip_dedup` | Skip the ReplacingMergeTree deduplication pass for traversal, neighbors, and path finding queries. Not allowed for aggregation. |
 | `materialize_ctes` | Mark reused CTEs as materialized. |
 | `use_semi_join` | Rewrite eligible `IN` subqueries into semi joins. |

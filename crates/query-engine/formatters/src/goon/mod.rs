@@ -54,6 +54,11 @@ impl ResultFormatter for GoonFormatter {
 
     fn format(&self, output: &PipelineOutput) -> Value {
         let response = GraphFormatter.build_response(output);
-        Value::String(encode::encode(&response, &GOON_OUTPUT_FORMAT_VERSION))
+        let expand = &output.compiled.input.options.expand;
+        Value::String(encode::encode(
+            &response,
+            &GOON_OUTPUT_FORMAT_VERSION,
+            expand,
+        ))
     }
 }

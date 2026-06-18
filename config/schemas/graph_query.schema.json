@@ -795,7 +795,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Optional presentation hints that control response shape without affecting query semantics. Only 'dynamic_columns' and 'include_debug_sql' are recognized; all other fields are ignored.",
+      "description": "Optional presentation hints that control response shape without affecting query semantics. Only 'dynamic_columns', 'include_debug_sql', and 'expand' are recognized; all other fields are ignored.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
@@ -806,6 +806,12 @@
           "type": "boolean",
           "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. On SaaS: honored for GitLab team members. On self-managed/Dedicated: honored for instance admins. Defaults to false.",
           "default": false
+        },
+        "expand": {
+          "type": "array",
+          "description": "Property names returned at full length in GOON output, bypassing the formatter's long-text truncation (e.g. ['description']). Unlisted long-text fields stay capped. Defaults to [].",
+          "items": { "$ref": "#/$defs/Identifier" },
+          "default": []
         }
       },
       "additionalProperties": false

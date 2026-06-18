@@ -102,6 +102,8 @@ For aggregation queries with node-kind group columns, the encoder lifts each uni
 | Long text (`body`, `description`, `name`, `note`, `title`) over 200 chars | truncated with `...` plus a sibling `<key>_len=N` breadcrumb | `description="..." description_len=2308` |
 | Any other string over 1000 chars | same truncation + breadcrumb | |
 
+A caller can opt specific properties out of truncation with the query option `options.expand` (a list of property names). Listed properties render at full length with no `<key>_len` breadcrumb; all other long-text values stay capped. This lets an agent recover a full description for the rows it cares about without paying for full text on every value.
+
 Datetime validation goes through `chrono::NaiveDateTime::parse_from_str` and `DateTime::parse_from_rfc3339`. The output is built byte-for-byte from the input with at most one byte (the space at position 10) swapped to `T`; the source's fractional precision is preserved exactly rather than being round-tripped through chrono's nanosecond default.
 
 Property order within a node row is column-priority then alphabetical: identity (`iid`, `username`, `name`, `full_path`, `path`, `uuid`) first, then status enums (`state`, `status`, `visibility_level`), then everything else, then timestamps (`created_at`, `updated_at`, `merged_at`, `closed_at`), then long text (`title`, `description`, `body`, `note`) last. This means a truncated description never hides a shorter identity field.

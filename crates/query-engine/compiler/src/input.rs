@@ -26,7 +26,7 @@ pub enum DynamicColumnMode {
 }
 
 /// Optional presentation hints that control response shape without affecting query
-/// semantics. Only `dynamic_columns` and `include_debug_sql` are recognized.
+/// semantics. Only `dynamic_columns`, `include_debug_sql`, and `expand` are recognized.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct QueryOptions {
     /// Columns fetched for dynamically-discovered entities during hydration.
@@ -38,6 +38,10 @@ pub struct QueryOptions {
     /// honored for instance admins only.
     #[serde(default)]
     pub include_debug_sql: bool,
+    /// Property names returned at full length, bypassing the GOON formatter's
+    /// long-text truncation. Other long-text values stay capped.
+    #[serde(default)]
+    pub expand: Vec<String>,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried

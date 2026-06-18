@@ -10,7 +10,7 @@ fn version() -> Version {
 }
 
 fn enc(response: &crate::graph::GraphResponse) -> String {
-    encode(response, &version())
+    encode(response, &version(), &[])
 }
 
 // ---------------------------------------------------------------------------
@@ -326,6 +326,27 @@ fn unknown_long_key_truncates_at_hard_limit() {
     let out = enc(&r);
     assert!(out.contains("ref_name_len=2000"));
     assert!(out.matches('y').count() <= 1000);
+}
+
+#[test]
+fn expanded_key_renders_full_text_without_breadcrumb() {
+    let description: String = "x".repeat(500);
+    let r = response(
+        "traversal",
+        vec![node(
+            "WorkItem",
+            1,
+            &[
+                ("description", Value::String(description)),
+                ("note", Value::String("z".repeat(500))),
+            ],
+        )],
+        vec![],
+    );
+    let out = encode(&r, &version(), &["description".to_string()]);
+    assert_eq!(out.matches('x').count(), 500);
+    assert!(!out.contains("description_len="));
+    assert!(out.contains("note_len=500"));
 }
 
 // ---------------------------------------------------------------------------

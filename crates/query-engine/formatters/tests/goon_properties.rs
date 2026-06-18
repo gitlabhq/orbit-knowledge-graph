@@ -9,7 +9,7 @@ use formatters::{GraphEdge, GraphNode, GraphResponse};
 static FORMAT_VERSION: LazyLock<Version> = LazyLock::new(|| Version::new(1, 0, 0));
 
 fn run(response: &GraphResponse) -> String {
-    formatters::goon_encode(response, &FORMAT_VERSION)
+    formatters::goon_encode(response, &FORMAT_VERSION, &[])
 }
 
 fn arb_node() -> impl Strategy<Value = GraphNode> {

@@ -591,6 +591,7 @@ a filter, provide IDs, or use a narrow `id_range`.
 |--------|-------------|
 | `dynamic_columns` | For `path_finding` and `neighbors` hydration. Use `default` for each entity's default columns, or `"*"` for all non-restricted ClickHouse-backed columns. Default `default`. |
 | `include_debug_sql` | Include compiled ClickHouse SQL in response metadata when the caller is allowed to see it. |
+| `expand` | List of property names returned at full length, bypassing the GOON formatter's long-text truncation (e.g. `["description"]`). Other long-text values stay capped. Default `[]`. |
 | `skip_dedup` | Skip the ReplacingMergeTree deduplication pass for traversal, neighbors, and path finding queries. Not allowed for aggregation. |
 | `materialize_ctes` | Mark reused CTEs as materialized. |
 | `use_semi_join` | Rewrite eligible `IN` subqueries into semi joins. |

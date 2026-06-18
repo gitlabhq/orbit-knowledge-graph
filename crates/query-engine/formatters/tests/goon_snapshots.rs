@@ -19,7 +19,7 @@ fn props(pairs: &[(&str, Value)]) -> Map<String, Value> {
 }
 
 fn run(response: GraphResponse) -> String {
-    formatters::goon_encode(&response, &FORMAT_VERSION)
+    formatters::goon_encode(&response, &FORMAT_VERSION, &[])
 }
 
 fn empty_response(query_type: &str) -> GraphResponse {

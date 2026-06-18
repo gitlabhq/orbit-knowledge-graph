@@ -23,11 +23,11 @@ fn column_priority(key: &str) -> u8 {
     }
 }
 
-pub fn encode(response: &GraphResponse, format_version: &Version) -> String {
+pub fn encode(response: &GraphResponse, format_version: &Version, expand: &[String]) -> String {
     let mut out = String::with_capacity(estimate_capacity(response));
     let extra_nodes = aggregation_grouped_nodes(response);
     write_header(&mut out, response, format_version, extra_nodes.len());
-    write_nodes(&mut out, response, &extra_nodes);
+    write_nodes(&mut out, response, &extra_nodes, expand);
     if response.query_type == "path_finding" {
         write_paths(&mut out, response);
     } else {
@@ -173,7 +173,7 @@ fn format_group_descriptor(group: &GroupColumnDescriptor) -> String {
     }
 }
 
-fn write_nodes(out: &mut String, response: &GraphResponse, extra: &[GraphNode]) {
+fn write_nodes(out: &mut String, response: &GraphResponse, extra: &[GraphNode], expand: &[String]) {
     out.push_str("@nodes\n");
     if response.nodes.is_empty() && extra.is_empty() {
         return;
@@ -186,19 +186,19 @@ fn write_nodes(out: &mut String, response: &GraphResponse, extra: &[GraphNode]) 
     for (entity_type, indices) in groups {
         let _ = writeln!(out, "{}({}):", entity_type, indices.len());
         for idx in indices {
-            write_node_row(out, combined[idx]);
+            write_node_row(out, combined[idx], expand);
         }
     }
 }
 
-fn write_node_row(out: &mut String, node: &GraphNode) {
+fn write_node_row(out: &mut String, node: &GraphNode, expand: &[String]) {
     let _ = write!(out, "{}", node.id);
     for (key, val) in ordered_pairs(&node.properties) {
-        let formatted = format_value(val, key);
+        let formatted = format_value(val, key, expand);
         if formatted.is_empty() {
             continue;
         }
-        let original_len = string_len_for_breadcrumb(val, key);
+        let original_len = string_len_for_breadcrumb(val, key, expand);
         let _ = write!(out, " {key}={formatted}");
         if let Some(len) = original_len {
             let _ = write!(out, " {key}_len={len}");
@@ -294,9 +294,9 @@ fn format_row_cell(value: &Value, key: &str) -> String {
         Value::Null => "null".to_string(),
         Value::Object(obj) => match (obj.get("type"), obj.get("id")) {
             (Some(Value::String(t)), Some(Value::String(id))) => format!("{t}:{id}"),
-            _ => format_value(value, key),
+            _ => format_value(value, key, &[]),
         },
-        _ => format_value(value, key),
+        _ => format_value(value, key, &[]),
     }
 }
 
@@ -423,7 +423,7 @@ fn ordered_pairs(props: &Map<String, Value>) -> Vec<(&str, &Value)> {
 // Value formatting
 // ---------------------------------------------------------------------------
 
-fn format_value(value: &Value, key: &str) -> String {
+fn format_value(value: &Value, key: &str, expand: &[String]) -> String {
     match value {
         Value::Null => String::new(),
         Value::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
@@ -432,16 +432,20 @@ fn format_value(value: &Value, key: &str) -> String {
             _ => String::new(),
         },
         Value::Number(n) => n.to_string(),
-        Value::String(s) => format_string(s, key),
-        other => format_string(&serde_json::to_string(other).unwrap_or_default(), key),
+        Value::String(s) => format_string(s, key, expand),
+        other => format_string(
+            &serde_json::to_string(other).unwrap_or_default(),
+            key,
+            expand,
+        ),
     }
 }
 
-fn format_string(raw: &str, key: &str) -> String {
+fn format_string(raw: &str, key: &str, expand: &[String]) -> String {
     if raw.is_empty() {
         return String::new();
     }
-    let truncated = truncate(raw, key);
+    let truncated = truncate(raw, key, expand);
     if let Some(normalized) = normalize_iso_datetime(&truncated) {
         return normalized;
     }
@@ -453,7 +457,10 @@ fn format_string(raw: &str, key: &str) -> String {
     quote_escaped(&truncated)
 }
 
-fn truncate<'a>(raw: &'a str, key: &str) -> std::borrow::Cow<'a, str> {
+fn truncate<'a>(raw: &'a str, key: &str, expand: &[String]) -> std::borrow::Cow<'a, str> {
+    if expand.iter().any(|f| f == key) {
+        return std::borrow::Cow::Borrowed(raw);
+    }
     let limit = if LONG_TEXT_KEYS.contains(&key) {
         LONG_TEXT_LIMIT
     } else {
@@ -467,8 +474,11 @@ fn truncate<'a>(raw: &'a str, key: &str) -> std::borrow::Cow<'a, str> {
     std::borrow::Cow::Owned(format!("{head}..."))
 }
 
-fn string_len_for_breadcrumb(value: &Value, key: &str) -> Option<usize> {
+fn string_len_for_breadcrumb(value: &Value, key: &str, expand: &[String]) -> Option<usize> {
     let Value::String(s) = value else { return None };
+    if expand.iter().any(|f| f == key) {
+        return None;
+    }
     let limit = if LONG_TEXT_KEYS.contains(&key) {
         LONG_TEXT_LIMIT
     } else {
