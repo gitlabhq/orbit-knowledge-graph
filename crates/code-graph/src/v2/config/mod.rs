@@ -1,13 +1,8 @@
-mod code_filter;
 mod filter;
 mod lang;
 mod registry;
 
-pub use code_filter::{CodeFilter, FilterSkip, SkipTally};
-pub use filter::{
-    EXCLUDED_INDEXING_GLOBS, is_excluded_from_indexing, is_parsable, looks_binary,
-    parsable_language,
-};
+pub use filter::{CodeFilter, EXCLUDED_INDEXING_GLOBS, FilterSkip, SkipTally};
 pub use lang::{Language, LanguageFamily};
 pub use registry::{
     detect_language_from_extension, detect_language_from_name, detect_language_from_path,

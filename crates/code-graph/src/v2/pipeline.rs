@@ -1,4 +1,4 @@
-use crate::v2::config::{Language, parsable_language};
+use crate::v2::config::{Language, detect_language_from_path};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
@@ -1101,7 +1101,7 @@ fn group_parseable_inventory(
         if entry.decision != Decision::Keep {
             continue;
         }
-        let Some(lang) = parsable_language(Path::new(&entry.path)) else {
+        let Some(lang) = detect_language_from_path(&entry.path) else {
             continue;
         };
         if config.max_files > 0 && accepted_files >= config.max_files {
