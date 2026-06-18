@@ -26,3 +26,30 @@ drift. Do **not** edit `references/query_language.md` directly.
 
 Bump the `version` field in `SKILL.md` frontmatter on every change under
 `skills/orbit/`. The lefthook `skill-version-bump` job enforces this.
+
+## Trigger test
+
+Canonical prompts for validating skill-discovery routing between `orbit` and its
+sibling `glab` skill. After changing the `description` field, present both skill
+descriptions to the model and ask it to route each prompt to exactly one skill,
+then check the routing matches the expectations below. This is harness-agnostic -
+any agent runner that exposes skill descriptions to the model works.
+
+### Should fire orbit
+
+1. "Who calls the `process_event` function in gitlab-org/gitlab?"
+2. "What is the blast radius of changing the `users` table across all projects?"
+3. "List all subclasses of ApplicationRecord in gitlab-org/gitlab"
+4. "Which contributors touched the most files in gitlab-org/gitlab last quarter?"
+5. "Give me a repo map of gitlab-org/gitlab"
+6. "How many MRs were merged per project in the gitlab-org group last month?"
+7. "Which projects depend on the gitlab-shell gem?"
+8. "Which MRs touched both app/models/user.rb and app/models/project.rb?"
+
+### Should fire glab (not orbit)
+
+1. "Show me the diff of MR !1216" - single-entity lookup (`glab mr diff`)
+2. "Create a new merge request for my branch" - write operation (`glab mr create`)
+3. "What is the current pipeline status for MR !500?" - single-entity lookup (`glab ci status`)
+4. "Approve MR !789" - write operation (`glab mr approve`)
+5. "List open MRs in gitlab-org/gitlab" - simple list (`glab mr list`)
