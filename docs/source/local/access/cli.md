@@ -145,6 +145,17 @@ prints nothing; structured formats emit valid empty output (`[]` for `json`,
 no records for `ndjson`) so pipelines like `orbit list -F json | jq` keep
 working.
 
+## Run as an MCP server
+
+Expose the local graph to any MCP-compatible AI agent over stdio:
+
+```shell
+orbit mcp serve
+```
+
+It serves `run_sql`, `get_graph_schema`, and `index` against
+`~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for per-client config.
+
 ## Storage
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
@@ -156,8 +167,8 @@ Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
-- [Connect via MCP](mcp.md) - planned MCP server for Claude Code, Codex, and
-  other agents.
+- [Connect via MCP](mcp.md) - connect Claude Code, Codex, and other agents to
+  the local graph.
 - [Use Orbit Local with glab](glab.md) - call the CLI through `glab orbit local`.
 - [Schema reference](../../remote/schema.md) - available node types and properties.
 - [Cookbook](../../remote/cookbook.md) - copy-paste queries for common use cases.

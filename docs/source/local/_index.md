@@ -45,7 +45,7 @@ GitLab account, no network connection required.
 |---|---|
 | [The Orbit CLI (`orbit`)](access/cli.md) | Run the `orbit` binary directly to index and query |
 | [The GitLab CLI (`glab`)](access/glab.md) | Drive Orbit Local through `glab orbit local` |
-| [MCP](access/mcp.md) | Planned: will expose the local graph to Claude Code, Codex, and other agents |
+| [MCP](access/mcp.md) | Expose the local graph to Claude Code, Codex, and other agents |
 
 ## Billing
 

@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup. The local mcp serve command is planned.
+description: Install, index, and query Orbit Local through the GitLab CLI with glab orbit local and glab orbit setup.
 title: Use Orbit Local with the GitLab CLI (`glab`)
 ---
 
@@ -30,8 +30,6 @@ instance or your local machine.
 
 > [!note]
 > `glab orbit local` and `glab orbit setup` ship today, in `glab` 1.94 or later.
-> An MCP server subcommand (`glab orbit local mcp serve`) is planned but not yet
-> available, and is marked as such below.
 
 Two top-level commands:
 
@@ -130,17 +128,13 @@ glab orbit local schema gl_definition gl_edge      # scoped to two tables
 
 ## Run as an MCP server
 
-> [!note]
-> `glab orbit local mcp serve` is planned, not yet shipped.
-
-Once shipped, this command will expose the local graph to any MCP-compatible
-AI agent:
+Expose the local graph to any MCP-compatible AI agent:
 
 ```shell
 glab orbit local mcp serve
 ```
 
-It will serve `run_sql` and `get_graph_schema` over the MCP protocol
+It serves `run_sql`, `get_graph_schema`, and `index` over the MCP protocol
 against `~/.orbit/graph.duckdb`. See [Connect via MCP](mcp.md) for the full
 agent integration guide.
 
