@@ -18,12 +18,11 @@ impl HealthChecker {
         clickhouse_instances: Vec<ClickHouseInstance>,
         nats_config: &NatsConfiguration,
         code_stream_name: String,
-        code_consumer_name: String,
+        code_consumer_name: Option<String>,
     ) -> Result<Self, Error> {
         let k8s = K8sChecker::new().await?;
         let clickhouse = ClickHouseChecker::new(clickhouse_instances);
-        let nats_depth =
-            NatsDepthChecker::new(nats_config, code_stream_name, code_consumer_name).await?;
+        let nats_depth = NatsDepthChecker::new(nats_config, code_stream_name, code_consumer_name);
 
         Ok(Self {
             k8s,

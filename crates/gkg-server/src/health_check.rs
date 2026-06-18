@@ -12,17 +12,17 @@ pub enum Error {
 
 pub async fn run(config: &AppConfig) -> Result<(), Error> {
     let instances = build_clickhouse_instances(config);
-    let consumer_base = config
+    let code_consumer_name = config
         .nats
         .consumer_name
         .as_deref()
-        .unwrap_or("gkg-indexer");
+        .map(code_work_consumer_name);
     let checker = HealthChecker::new(
         &config.health_check,
         instances,
         &config.nats,
         code_work_stream_name(),
-        code_work_consumer_name(consumer_base),
+        code_consumer_name,
     )
     .await?;
 

@@ -20,7 +20,7 @@ async fn health(State(checker): State<Arc<HealthChecker>>) -> Json<HealthStatus>
 
 async fn queue_depth(State(checker): State<Arc<HealthChecker>>) -> impl IntoResponse {
     match checker.queue_depth().await {
-        Ok(depth) => (StatusCode::OK, Json(serde_json::json!(depth))).into_response(),
+        Ok(depth) => (StatusCode::OK, Json(depth)).into_response(),
         Err(error) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({ "error": error })),
