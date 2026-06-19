@@ -1,7 +1,7 @@
 ---
 title: "GKG ADR 013: SOX Scoping for Billing Event Emission"
 creation-date: "2026-05-15"
-last-updated: "2026-05-21"
+last-updated: "2026-06-19"
 authors: [ "snachnolkar" ]
 toc_hide: true
 ---
@@ -28,7 +28,7 @@ Because GKG now emits its own billable usage events, the work falls under SOX IT
 The MR's original folder layout (`crates/gkg-server/src/billing/`) has since been refactored into an isolated crate. As of this ADR:
 
 - All billing-specific code lives in `crates/gkg-billing/`.
-- The only data crossing into the billing crate is `BillingInputs` and `QuotaInputs`, both constructed exclusively in `crates/gkg-server/src/billing_adapter.rs` from `auth::Claims`.
+- The only data crossing into the billing crate is `BillingInputs` and `QuotaCheckInputs`, both constructed exclusively in `crates/gkg-server/src/billing_adapter.rs` from `auth::Claims`.
 
 This makes a *crate-level* (folder-level) limited scope feasible: the crate is small, its inputs flow through one declared seam, and the remaining hook points that can influence billing correctness are enumerable.
 
@@ -46,7 +46,7 @@ Every path in scope is locked down with required-reviewer `CODEOWNERS` rules.
 
 ### Primary scope
 
-- `crates/gkg-billing/**` — `BillingObserver`, `BillingTracker`, `BillingInputs`, `QuotaInputs`, constants, metrics, the `quota/` submodule, and all tests within the crate.
+- `crates/gkg-billing/**` — `BillingObserver`, `BillingTracker`, `BillingInputs`, `QuotaCheckInputs`, `QuotaService`, constants, metrics, the `quota/` submodule, and all tests within the crate.
 - `crates/gkg-server/src/billing_adapter.rs` — the single declared seam between `auth::Claims` and the billing crate's input structs.
 
 ### Extended hook points
@@ -61,7 +61,7 @@ These components live outside `gkg-billing` but can change billing correctness w
 | **Authorization gate** | Controls whether a query reaches the pipeline. If a request is rejected here, no billing event is emitted. |
 | **Billing observer construction** | Where `BillingObserver` is instantiated and `BillingInputs` are populated from claims. The actual point where billing data is assembled and attached to the pipeline. |
 | **Pipeline billing wiring** | Where the billing tracker is wired into the query pipeline. Removing or reordering this silently stops emission. |
-| **Tracker startup** | Constructs the Snowplow billing tracker from config and wires it into the service. Misconfiguration here silently loses all events. |
+| **Tracker startup** | Constructs the Snowplow billing tracker and `QuotaService` from config and wires them into the service. Misconfiguration here silently loses all events or quota enforcement. |
 | **Pipeline security gate** | Controls whether the pipeline proceeds far enough to reach `finish()`. |
 | **Billing config struct** | Contains the `enabled` flag and `collector_url`. These fields gate emission entirely. |
 
@@ -88,15 +88,9 @@ The `CODEOWNERS` file itself is listed as a SOX-scoped path so changes to the re
 
 `AGENTS.md` and `CLAUDE.md` are extended with a row in the "Where to find things" table pointing at this ADR, so agents and contributors touching the in-scope paths are nudged toward the policy before changing billing emission or quota check related code.
 
-### Architecture test (proposed)
+### Architecture test
 
-To make the boundary self-enforcing, a CI check is proposed that fails any MR where a file outside the adapter or the enumerated hook points imports types from `gkg_billing`. Options under consideration:
-
-- A clippy lint via `cargo-deny` or a workspace-level `disallowed_methods` configuration.
-- A bespoke integration test under `crates/integration-tests` that walks the workspace `Cargo.toml` graph and rejects unexpected `gkg-billing` dependents.
-- A lightweight pre-commit / CI script (similar to `scripts/check-response-schema-version.sh`) that greps the source tree.
-
-The bespoke integration test is the most defensible from a SOX evidence standpoint (test run is recorded in CI logs and can be cited as control evidence). Sizing this and choosing the mechanism is captured as a follow-up issue and is not part of this ADR's implementation.
+To make the boundary self-enforcing, [MR !1372](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1372) added `crates/integration-tests/tests/billing_boundary.rs` — an integration test that walks the workspace `Cargo.toml` graph and fails if any crate outside the permitted list (`gkg-server`) declares a dependency on `gkg-billing`. A failing run in CI is control evidence that the billing crate's dependency surface has not silently expanded.
 
 ## Why not the alternatives
 
