@@ -83,7 +83,8 @@ This emits three files:
 - `db/siphon/tables/<table>.yml` — CDC config (`dedup_by`, `dedup_by_columns_lookup_table`, `reconcile`).
 
 > If `bundle exec rails …` fails with a missing gem (e.g. a `gdk-toogle` version
-> mismatch), your local bundle is behind `master`. Run `bundle install` and retry.
+> mismatch — yes, that gem is intentionally spelled "toogle"), your local bundle is
+> behind `master`. Run `bundle install` and retry.
 
 ### 3.2 Post-generation edits (the review-tested conventions)
 
@@ -105,7 +106,7 @@ gdk stop clickhouse                       # free port 8123
 docker rm -f gl-ch-dump 2>/dev/null
 docker run -d --name gl-ch-dump -e CLICKHOUSE_SKIP_USER_SETUP=1 \
   -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:25.12.3-alpine
-# wait for /ping to return Ok, then:
+until curl -sf http://localhost:8123/ping | grep -q Ok; do sleep 1; done   # wait for CH to be ready
 curl -s http://localhost:8123/ --data "CREATE DATABASE IF NOT EXISTS gitlab_clickhouse_development"
 bundle exec rake gitlab:clickhouse:migrate:main
 bundle exec rake gitlab:clickhouse:schema:dump:main   # writes main.sql + schema_cache/*.yml
@@ -190,6 +191,7 @@ Model it on the closest existing node (e.g. `nodes/packages/package.yaml`). Requ
 - `redaction: { resource_type: <type>, id_column: id, ability: <ability> }` — **must match the monolith registration** (Section 4).
 - `properties:` — **every property needs a `description`** (CI-enforced). **`nullable` must match the siphon source column**: don't mark a `NOT NULL` source nullable, and don't mark a `Nullable(...)` source `nullable: false` without a comment explaining the NULL→default coercion. Reviewers flag both directions.
 - `etl: { type: table, scope: namespaced, source: siphon_<table>, order_by: [traversal_path, id], edges: { project_id: { to: Project, as: IN_PROJECT, direction: outgoing } } }`.
+  - **Which edge mechanism to use:** the inline `edges:` block here is for edges derived from an **FK column on this node's own source table** (like `IN_PROJECT` from `project_id`). Use a **separate edge YAML (§5.2)** only for **join-table edges** (e.g. `DECLARES_DEPENDENCY` from `packages_dependency_links`), where the relationship lives in its own table.
 - `storage:` — `primary_key`, `columns`, `indexes`, `projections`. Copy the shape from the template node.
 
 ### 5.2 Edge YAML — `config/ontology/edges/<edge>.yaml`
