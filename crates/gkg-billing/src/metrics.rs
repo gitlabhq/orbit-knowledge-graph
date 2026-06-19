@@ -59,6 +59,7 @@ pub fn register() {
         REASON_NON_RETRIABLE_STATUS,
         REASON_RETRIES_EXHAUSTED,
         REASON_AUTH,
+        REASON_UNKNOWN,
     ] {
         METRICS
             .delivery_failed
