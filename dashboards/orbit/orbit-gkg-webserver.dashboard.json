@@ -5643,7 +5643,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_billing_events_delivered_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "delivered",
                      "refId": "A"
                   }
                ],
