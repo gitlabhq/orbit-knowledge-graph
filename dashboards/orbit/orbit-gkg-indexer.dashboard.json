@@ -2752,7 +2752,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -5985,7 +5985,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -6126,7 +6126,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "(sum(increase(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))) or vector(0)",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -6540,7 +6540,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],

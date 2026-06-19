@@ -228,7 +228,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_in_msgs{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -279,7 +279,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_out_msgs{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -330,7 +330,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_in_bytes{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -381,7 +381,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_out_bytes{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -432,7 +432,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_slow_consumers{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],

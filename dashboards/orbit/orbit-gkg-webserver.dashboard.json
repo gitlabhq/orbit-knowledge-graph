@@ -2079,7 +2079,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_content_gitaly_calls_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -5171,7 +5171,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_content_gitaly_calls_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -5643,7 +5643,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_billing_events_delivered_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "delivered",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -5796,7 +5796,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_billing_events_emitted_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -5847,7 +5847,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(rate(gkg_billing_events_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -5963,7 +5963,7 @@
                         "uid": "$ORBIT_DS"
                      },
                      "expr": "sum(gkg_billing_quota_cache_entries{container=\"gkg-webserver\", cluster=~\"$cluster\"})",
-                     "legendFormat": "{{instance}}",
+                     "legendFormat": "total",
                      "refId": "A"
                   }
                ],
@@ -7393,7 +7393,7 @@
                   "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
@@ -7444,7 +7444,7 @@
                   "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "{{instance}}",
+               "legendFormat": "total",
                "refId": "A"
             }
          ],
