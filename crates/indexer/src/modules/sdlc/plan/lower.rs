@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
+use super::fragments::{EdgeFilter, ExtractColumn, NodeColumn};
 use super::input::{
-    DenormalizedColumnProjection, DerivedEntityPlan, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql,
-    ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput,
-    StandaloneEdgePlan,
+    DenormalizedColumnProjection, DerivedEntityPlan, EnrichmentSql, ExtractPlan, ExtractSource,
+    FkEdgeTransform, NodePlan, PlanInput, StandaloneEdgePlan,
 };
 use super::{Plan, Plans, SOURCE_DATA_TABLE, TransformSpec, Transformation};
 
@@ -194,11 +194,11 @@ struct EdgeTableMetadata {
 fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
     let meta = edge_table_metadata(&fk_edge.relationship_kind, ontology);
     let sql = build_edge_transform_sql(
-        &lower_edge_id(&fk_edge.source_id),
-        &lower_edge_kind(&fk_edge.source_kind),
+        &fk_edge.source_id.to_sql(),
+        &fk_edge.source_kind.to_sql(),
         &fk_edge.relationship_kind,
-        &lower_edge_id(&fk_edge.target_id),
-        &lower_edge_kind(&fk_edge.target_kind),
+        &fk_edge.target_id.to_sql(),
+        &fk_edge.target_kind.to_sql(),
         fk_edge.namespaced,
         &fk_edge.denormalized_columns,
         &fk_edge.filters,
@@ -212,37 +212,10 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Tr
 }
 
 fn lower_node_transform(columns: &[NodeColumn]) -> String {
-    let mut select_list: Vec<String> = columns.iter().map(lower_node_column).collect();
+    let mut select_list: Vec<String> = columns.iter().map(NodeColumn::to_sql).collect();
     select_list.push(VERSION_ALIAS.to_string());
     select_list.push(DELETED_ALIAS.to_string());
     format!("SELECT {} FROM {SOURCE_DATA_TABLE}", select_list.join(", "))
-}
-
-fn lower_node_column(column: &NodeColumn) -> String {
-    match column {
-        NodeColumn::Identity(name) => name.clone(),
-        NodeColumn::Rename { source, target } => format!("{source} AS {target}"),
-        NodeColumn::IntEnum {
-            source,
-            target,
-            values,
-            nullable,
-        } => {
-            let cases: Vec<String> = values
-                .iter()
-                .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
-                .collect();
-            let null_case = if *nullable {
-                format!("WHEN {source} IS NULL THEN NULL ")
-            } else {
-                format!("WHEN {source} IS NULL THEN '' ")
-            };
-            format!(
-                "CASE {null_case}{} ELSE 'unknown' END AS {target}",
-                cases.join(" ")
-            )
-        }
-    }
 }
 
 fn lower_standalone_edge_plan(
@@ -255,11 +228,11 @@ fn lower_standalone_edge_plan(
     let mut plan = lower_extract_plan(input.extract, batch_size);
     let meta = edge_table_metadata(&input.relationship_kind, ontology);
     let sql = build_edge_transform_sql(
-        &lower_edge_id(&input.source_id),
-        &lower_edge_kind(&input.source_kind),
+        &input.source_id.to_sql(),
+        &input.source_kind.to_sql(),
         &input.relationship_kind,
-        &lower_edge_id(&input.target_id),
-        &lower_edge_kind(&input.target_kind),
+        &input.target_id.to_sql(),
+        &input.target_kind.to_sql(),
         input.namespaced,
         &input.denormalized_columns,
         &input.filters,
@@ -281,47 +254,6 @@ fn plan_name(relationship_kind: &str, source: &ExtractSource) -> String {
     }
 }
 
-fn lower_edge_id(id: &EdgeId) -> String {
-    match id {
-        EdgeId::Column(column) => column.clone(),
-        EdgeId::Exploded { column, delimiter } => {
-            format!("CAST(NULLIF(unnest(string_to_array({column}, '{delimiter}')), '') AS BIGINT)")
-        }
-        EdgeId::ArrayElement { column, field } => format!("unnest({column})['{field}']"),
-        EdgeId::ArrayUnnest { column } => format!("unnest({column})"),
-    }
-}
-
-fn lower_edge_kind(kind: &EdgeKind) -> String {
-    match kind {
-        EdgeKind::Literal(value) => format!("'{value}'"),
-        EdgeKind::Column { column, mapping } if mapping.is_empty() => column.clone(),
-        EdgeKind::Column { column, mapping } => {
-            let cases: Vec<String> = mapping
-                .iter()
-                .map(|(from, to)| format!("WHEN {column} = '{from}' THEN '{to}'"))
-                .collect();
-            format!("CASE {} ELSE {column} END", cases.join(" "))
-        }
-    }
-}
-
-fn lower_filter(filter: &EdgeFilter) -> String {
-    match filter {
-        EdgeFilter::IsNotNull(column) => format!("({column} IS NOT NULL)"),
-        EdgeFilter::NotEmpty(column) => format!("({column} != '')"),
-        EdgeFilter::ArrayNotEmpty(column) => format!("(cardinality({column}) > 0)"),
-        EdgeFilter::TypeIn { column, types } => {
-            let types_list = types
-                .iter()
-                .map(|t| format!("'{t}'"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{column} IN ({types_list})")
-        }
-    }
-}
-
 fn lower_filters(filters: &[EdgeFilter]) -> Option<String> {
     if filters.is_empty() {
         return None;
@@ -329,7 +261,7 @@ fn lower_filters(filters: &[EdgeFilter]) -> Option<String> {
     Some(
         filters
             .iter()
-            .map(lower_filter)
+            .map(EdgeFilter::to_sql)
             .collect::<Vec<_>>()
             .join(" AND "),
     )
@@ -497,7 +429,7 @@ fn build_extract_select_list(
     watermark: &str,
     deleted: &str,
 ) -> Vec<String> {
-    let mut select_list: Vec<String> = columns.iter().map(lower_extract_column).collect();
+    let mut select_list: Vec<String> = columns.iter().map(ExtractColumn::to_sql).collect();
     select_list.push(format!("{watermark} AS {VERSION_ALIAS}"));
     select_list.push(format!("{deleted} AS {DELETED_ALIAS}"));
     select_list
@@ -530,8 +462,8 @@ fn render_cte_template(
     let outer_cols: Vec<String> = columns
         .iter()
         .map(|c| {
-            let name = extract_column_alias(c);
-            format!("_batch.{name} AS {name}")
+            let alias = c.alias();
+            format!("_batch.{alias} AS {alias}")
         })
         .chain([
             format!("_batch.{VERSION_ALIAS} AS {VERSION_ALIAS}"),
@@ -554,32 +486,9 @@ fn render_cte_template(
     )
 }
 
-fn extract_column_alias(column: &ExtractColumn) -> String {
-    let raw = match column {
-        ExtractColumn::Bare(name) => name.as_str(),
-        ExtractColumn::ToString(name) => name.as_str(),
-        ExtractColumn::DateClamp(name) => name.as_str(),
-    };
-    raw.rsplit_once(" AS ")
-        .map(|(_, alias)| alias.trim().to_string())
-        .unwrap_or_else(|| raw.to_string())
-}
-
-fn lower_extract_column(column: &ExtractColumn) -> String {
-    match column {
-        ExtractColumn::Bare(name) => name.clone(),
-        ExtractColumn::ToString(name) => format!("toString({name}) AS {name}"),
-        // Postgres `date` is wider than ClickHouse `Date32` (1900-01-01..2299-12-31).
-        // Clamp at the projection layer; a single out-of-range row would
-        // poison the whole Arrow batch.
-        ExtractColumn::DateClamp(name) => format!(
-            "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL) AS {name}"
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::fragments::{EdgeId, EdgeKind};
     use super::super::input;
     use super::super::{Cursor, CursorFilter, TraversalPathFilter, WatermarkFilter};
     use super::*;

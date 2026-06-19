@@ -496,9 +496,8 @@ mod tests {
 
     #[test]
     fn build_strategies_resolves_composite_key_for_overridden_entities() {
-        use crate::modules::sdlc::plan::input::{
-            ExtractColumn, ExtractPlan, ExtractSource, NodePlan,
-        };
+        use crate::modules::sdlc::plan::fragments::ExtractColumn;
+        use crate::modules::sdlc::plan::input::{ExtractPlan, ExtractSource, NodePlan};
         use ontology::EtlScope;
 
         let inputs = PlanInput {

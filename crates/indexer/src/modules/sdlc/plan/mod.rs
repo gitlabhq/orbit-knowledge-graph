@@ -1,3 +1,4 @@
+pub(crate) mod fragments;
 pub(crate) mod input;
 pub(crate) mod lower;
 

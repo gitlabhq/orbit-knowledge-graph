@@ -5,6 +5,7 @@ use ontology::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::fragments::{EdgeFilter, EdgeId, EdgeKind, ExtractColumn, NodeColumn};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
 // CTE fragments for standalone-edge enrichment. lower::render_cte_template
@@ -53,20 +54,6 @@ pub(in crate::modules::sdlc) struct NodePlan {
     pub extract: ExtractPlan,
 }
 
-pub(in crate::modules::sdlc) enum NodeColumn {
-    Identity(String),
-    Rename {
-        source: String,
-        target: String,
-    },
-    IntEnum {
-        source: String,
-        target: String,
-        values: BTreeMap<i64, String>,
-        nullable: bool,
-    },
-}
-
 /// An FK edge is derived from the same source data as its parent node.
 /// It produces edge rows by reading FK columns from the already-extracted batch.
 pub(in crate::modules::sdlc) struct FkEdgeTransform {
@@ -99,28 +86,6 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
-pub(in crate::modules::sdlc) enum EdgeId {
-    Column(String),
-    Exploded { column: String, delimiter: String },
-    ArrayElement { column: String, field: String },
-    ArrayUnnest { column: String },
-}
-
-pub(in crate::modules::sdlc) enum EdgeKind {
-    Literal(String),
-    Column {
-        column: String,
-        mapping: BTreeMap<String, String>,
-    },
-}
-
-pub(in crate::modules::sdlc) enum EdgeFilter {
-    IsNotNull(String),
-    NotEmpty(String),
-    ArrayNotEmpty(String),
-    TypeIn { column: String, types: Vec<String> },
-}
-
 pub(in crate::modules::sdlc) struct ExtractPlan {
     pub destination_table: String,
     pub columns: Vec<ExtractColumn>,
@@ -136,25 +101,6 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
     /// that do point lookups by FK, avoiding full namespace scans.
     pub enrichment: Option<EnrichmentSql>,
-}
-
-pub(in crate::modules::sdlc) enum ExtractColumn {
-    Bare(String),
-    ToString(String),
-    /// Postgres `date` is wider than ClickHouse `Date32` (1900-01-01..2299-12-31).
-    /// A single out-of-range row would poison the whole Arrow batch, so we clamp
-    /// at the SQL projection layer and let NULL propagate.
-    DateClamp(String),
-}
-
-impl ExtractColumn {
-    fn name(&self) -> &str {
-        match self {
-            ExtractColumn::Bare(name)
-            | ExtractColumn::ToString(name)
-            | ExtractColumn::DateClamp(name) => name,
-        }
-    }
 }
 
 pub(in crate::modules::sdlc) enum ExtractSource {
