@@ -39,7 +39,7 @@ impl SnowplowBillingTracker {
                 tracing::info!(
                     events = event_ids.len(),
                     event_ids = ?event_ids,
-                    "billing batch delivered to Snowplow collector"
+                    "billing event delivery: success"
                 );
             }))
             .on_failure(Arc::new(|event_ids: &[Uuid], reason: DeliveryFailure| {
@@ -60,7 +60,7 @@ impl SnowplowBillingTracker {
                     event_ids = ?event_ids,
                     reason = reason_label,
                     status = ?status,
-                    "billing batch permanently dropped before delivery"
+                    "billing event delivery: failed"
                 );
             }))
             .build()?;

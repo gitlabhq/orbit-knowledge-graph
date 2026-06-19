@@ -25,7 +25,9 @@ uuid = { workspace = true }
 [dev-dependencies]
 axum = { workspace = true }
 rustls = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "time"] }
+tracing-subscriber = { workspace = true }
 
 [lints.rust]
 unsafe_code = "forbid"
