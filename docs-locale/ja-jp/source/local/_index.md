@@ -10,7 +10,7 @@ title: Orbit Local
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 

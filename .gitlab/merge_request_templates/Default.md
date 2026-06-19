@@ -1,13 +1,13 @@
 <!--
 TEMPLATE CONVENTION — read before filling this out
 
-Each section below is for the *important* content a reviewer needs: the
-headline, the diagram, the screenshot, the one number that proves the fix.
-Keep it short.
+The top sections are for a REVIEWER skimming in 30 seconds: what changed, why,
+how it was verified. They must read as plain prose.
 
-Long-form output — file-by-file walkthroughs, profiler dumps, alternatives
-considered, full benchmark tables, raw logs, agent reasoning — goes in the
-Agent context block at the bottom, not in the sections above.
+ALL implementation mechanics — function names, type names, constants, encoder
+details, wire-format traces, file-by-file walkthroughs, alternatives
+considered, full benchmark tables, raw logs, agent reasoning — go in the Agent
+context block at the bottom. Never above it.
 
 Agents: if you feel the urge to write a wall of text, write it inside the
 Agent context block. The top sections stay terse.
@@ -16,11 +16,22 @@ Agent context block. The top sections stay terse.
 ### What does this MR do and why?
 
 <!--
-Describe at a high level what your merge request does and why. Keep this
-description updated as discussion happens.
+HARD LIMITS for this section:
+  - At most 80 words.
+  - At most 3 inline `code` spans.
+  - NO bare function/type/constant names in prose (no foo_bar, Foo::bar,
+    do_thing(), CONST_NAME). If you need them, you are writing for the wrong
+    section — move it to Agent context.
 
-Headline first, supporting detail below. Diagrams, screenshots, and the key
-numbers belong here. Long narratives belong in the Agent context block.
+Write 2-3 plain sentences: the operator/user-visible effect, and why. State the
+symptom that motivated it, not the code path that implements it. Keep this
+updated as discussion happens.
+
+Example of the RIGHT level:
+  "Indexing froze when a large batch produced an over-long request URL that the
+   HTTP layer rejected. This guards the URL length at the single point every
+   datalake lookup passes through, so an oversized batch is split instead of
+   wedging the pipeline."
 -->
 
 ### Related Issues
