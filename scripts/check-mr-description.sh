@@ -36,13 +36,13 @@ skip() {
 have_glab() { command -v glab >/dev/null 2>&1; }
 
 fetch_description() {
-    # Args: <iid>. Echoes the raw description on success.
+    # Args: <iid>. Echoes the raw description on success, empty on no-glab.
+    # Must NOT call skip() here — this runs inside a command substitution
+    # (subshell), so exit would only leave the subshell, not the script.
     local iid="$1"
     if have_glab; then
         glab api "projects/${PROJECT//\//%2F}/merge_requests/${iid}" 2>/dev/null \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("description") or "")'
-    else
-        skip "glab not available to fetch the description"
+            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("description") or "")' 2>/dev/null
     fi
 }
 
@@ -67,6 +67,8 @@ print(mrs[0]["iid"] if mrs else "")'
 
 IID="$(resolve_iid || true)"
 [ -n "${IID:-}" ] || skip "no open MR for this branch"
+
+have_glab || skip "glab not available to fetch the description"
 
 DESC="$(fetch_description "$IID")"
 if [ -z "$DESC" ]; then

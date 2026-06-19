@@ -3,6 +3,7 @@ glob_matcher: doublestar
 output:
   - summary
   - failure
+  - execution_out
 
 commit-msg:
   jobs:

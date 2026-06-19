@@ -169,11 +169,14 @@ agent-file-sync-check:
     - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
 
 # Narration-comment lint (task #2933). Dependency-free Python scorer
-# (scripts/narration_score.py); no network or git-diff context needed, so it
-# also runs as a lefthook pre-commit hook (AGENTS.md "prefer build-time
-# validation"). The script exits non-zero when narration flags are found;
-# allow_failure keeps this advisory (yellow) for now — remove it to promote
-# to a blocking gate.
+# (scripts/narration_score.py); also runs as a lefthook pre-commit hook
+# (AGENTS.md "prefer build-time validation"). The script exits non-zero
+# when narration flags are found; allow_failure keeps this advisory (yellow)
+# for now — remove it to promote to a blocking gate.
+#
+# On merge_request_event pipelines: scoped to lines the MR added/changed
+# (--diff-base), so pre-existing legacy narration is not noise.
+# On main: whole-tree scan (no MR diff available).
 lint:narration:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
@@ -184,8 +187,13 @@ lint:narration:
   needs: []
   allow_failure: true
   script:
-    - apk add --no-cache bash
-    - bash ./scripts/check-narration.sh
+    - apk add --no-cache bash git
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        bash ./scripts/check-narration.sh --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        bash ./scripts/check-narration.sh
+      fi
 
 # MR-description headline gate (task #2933). Unlike the other lint jobs this is
 # CI-ONLY by necessity: the description lives in the GitLab API, not the repo,

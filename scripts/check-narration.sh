@@ -12,18 +12,91 @@
 # controlled externally — CI `allow_failure: true` (one-line change to
 # promote) and lefthook's per-job config — not inside this script.
 #
-# Usage:
-#   scripts/check-narration.sh                 # scan crates/
-#   scripts/check-narration.sh a.rs b.rs ...   # scan specific files (lefthook)
+# Modes:
+#   Whole-tree / explicit files (lefthook, main-branch CI):
+#     scripts/check-narration.sh                 # scan crates/
+#     scripts/check-narration.sh a.rs b.rs ...   # scan specific files
+#
+#   MR-diff-scoped (merge_request CI pipelines):
+#     scripts/check-narration.sh --diff-base <sha>
+#     Scans only .rs files changed since <sha> and reports only flags on
+#     added/modified lines, so pre-existing legacy narration is not noise.
+#     Falls back to whole-tree if the base SHA is unreachable.
 set -uo pipefail
 
 SCORER="$(dirname "$0")/narration_score.py"
+DIFF_BASE=""
 
-if [ "$#" -gt 0 ]; then
-    files=("$@")
-else
-    # Default scan target: the whole Rust source tree.
-    mapfile -t files < <(find crates -name '*.rs' -type f | sort)
+# Parse --diff-base flag (must be first arg if present).
+if [ "${1:-}" = "--diff-base" ]; then
+    if [ "$#" -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "error: --diff-base requires a SHA argument" >&2
+        exit 2
+    fi
+    DIFF_BASE="$2"
+    shift 2
+fi
+
+# ── Diff-scoped mode ──────────────────────────────────────────────────
+# When --diff-base is set, only report flags on lines the MR added/changed.
+# The scorer runs over whole files (it needs the next-code-line context for
+# token_overlap), but we post-filter its output to the MR's changed hunks.
+if [ -n "$DIFF_BASE" ]; then
+    # Ensure the base SHA is reachable (CI shallow clones may not have it).
+    if ! git cat-file -e "${DIFF_BASE}^{commit}" 2>/dev/null; then
+        git fetch origin "$DIFF_BASE" --depth=1 2>/dev/null || true
+        if ! git cat-file -e "${DIFF_BASE}^{commit}" 2>/dev/null; then
+            echo ""
+            echo "⚠️  narration scorer error: diff-base $DIFF_BASE is unreachable."
+            echo "   Cannot scope to MR changes — the lint did not run."
+            exit 2
+        fi
+    fi
+
+    # Changed .rs files (exclude pure deletions — no lines to flag).
+    mapfile -t files < <(git diff --name-only --diff-filter=d "${DIFF_BASE}...HEAD" -- '*.rs' | sort)
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "✅ narration lint: no Rust files changed in this MR."
+        exit 0
+    fi
+
+    # Build a set of added/modified line numbers per file from hunk headers.
+    # Output: one "file:line" per added line, consumed as a lookup set below.
+    ADDED_LINES_FILE="$(mktemp)"
+    trap 'rm -f "$ADDED_LINES_FILE"' EXIT
+    git diff --unified=0 "${DIFF_BASE}...HEAD" -- '*.rs' \
+        | python3 -c '
+import sys, re
+# Parse unified diff: extract file path from +++ and added-line ranges from @@.
+current_file = None
+for line in sys.stdin:
+    m = re.match(r"^\+\+\+ b/(.+)$", line)
+    if m:
+        current_file = m.group(1)
+        continue
+    m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", line)
+    if m and current_file:
+        start = int(m.group(1))
+        count = int(m.group(2)) if m.group(2) is not None else 1
+        if count == 0:
+            continue
+        for ln in range(start, start + count):
+            print(f"{current_file}:{ln}")
+' > "$ADDED_LINES_FILE"
+
+    echo "narration lint (MR-diff-scoped, base ${DIFF_BASE:0:12}):"
+    echo "  scanning ${#files[@]} changed .rs file(s)..."
+    echo ""
+fi
+
+# ── Scoring loop ──────────────────────────────────────────────────────
+if [ -z "$DIFF_BASE" ]; then
+    if [ "$#" -gt 0 ]; then
+        files=("$@")
+    else
+        # Default scan target: the whole Rust source tree.
+        mapfile -t files < <(find crates -name '*.rs' -type f | sort)
+    fi
 fi
 
 total=0
@@ -45,20 +118,44 @@ for f in "${files[@]}"; do
         continue
     fi
     if [ -n "$out" ]; then
-        echo "$out"
-        n=$(printf '%s\n' "$out" | grep -c $'\t' || true)
-        total=$((total + n))
-        flagged_files=$((flagged_files + 1))
+        if [ -n "$DIFF_BASE" ]; then
+            # Post-filter: only keep flags on lines the MR added/changed.
+            # Scorer output format: "file:line<TAB>detector<TAB>text"
+            filtered=""
+            while IFS= read -r flag_line; do
+                # Extract "file:line" from the flag (everything before first tab).
+                file_and_line="${flag_line%%	*}"
+                if grep -qFx "$file_and_line" "$ADDED_LINES_FILE"; then
+                    filtered="${filtered:+${filtered}
+}${flag_line}"
+                fi
+            done <<< "$out"
+            out="$filtered"
+        fi
+        if [ -n "$out" ]; then
+            echo "$out"
+            n=$(printf '%s\n' "$out" | grep -c $'\t' || true)
+            total=$((total + n))
+            flagged_files=$((flagged_files + 1))
+        fi
     fi
 done
 
 if [ "$total" -gt 0 ]; then
     echo ""
-    echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s)."
+    if [ -n "$DIFF_BASE" ]; then
+        echo "⚠️  narration lint: $total new flagged comment(s) across $flagged_files file(s) in this MR."
+    else
+        echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s)."
+    fi
     echo "   A comment must say *why* (a constraint, gotcha, ADR/issue link), never *what*."
     echo "   See AGENTS.md \"Code quality\". Rewrite or delete."
 elif [ "$scorer_errors" -eq 0 ]; then
-    echo "✅ narration lint: no narration comments flagged."
+    if [ -n "$DIFF_BASE" ]; then
+        echo "✅ narration lint: no new narration comments in this MR."
+    else
+        echo "✅ narration lint: no narration comments flagged."
+    fi
 fi
 
 if [ "$scorer_errors" -gt 0 ]; then
