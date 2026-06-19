@@ -19,7 +19,7 @@
 # build-time/lint-friendly, dependency-free subset.
 #
 # Usage:
-#   mise exec -- ast-grep scan --rule tmp/guidance-refine/narration-comments.yml crates/
+#   mise exec -- ast-grep scan --rule lint/ast-grep/narration-comments.yml crates/
 #
 id: narration-comment-block-label
 language: rust

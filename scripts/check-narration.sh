@@ -11,6 +11,11 @@
 # not block the commit or pipeline. (Rollout plan #2933: promote to blocking
 # once the new-commit false-positive rate is acceptable.)
 #
+# TODO(#2933, promote-to-blocking): this is NOT a config toggle. narration_score.py
+# signals via printed text only and always exits 0; making this gate blocking
+# requires a deliberate code change in BOTH the scorer (emit a non-zero exit when
+# flags are found) AND this wrapper (propagate that exit instead of `exit 0`).
+#
 # Usage:
 #   scripts/check-narration.sh                 # scan crates/
 #   scripts/check-narration.sh a.rs b.rs ...   # scan specific files (lefthook)
@@ -27,13 +32,22 @@ fi
 
 total=0
 flagged_files=0
+scorer_errors=0
 for f in "${files[@]}"; do
     [ -f "$f" ] || continue
     case "$f" in
         *.rs) ;;
         *) continue ;;
     esac
-    out="$(python3 "$SCORER" "$f" 2>/dev/null)"
+    # Capture the scorer's own exit status separately from its output so a
+    # script/scorer error (missing file, syntax error, no python3) is NOT
+    # mistaken for a clean "no narration" result. stderr stays visible.
+    out="$(python3 "$SCORER" "$f")"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        scorer_errors=$((scorer_errors + 1))
+        continue
+    fi
     if [ -n "$out" ]; then
         echo "$out"
         n=$(printf '%s\n' "$out" | grep -c $'\t' || true)
@@ -47,9 +61,16 @@ if [ "$total" -gt 0 ]; then
     echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s) (warning-mode, non-blocking)."
     echo "   A comment must say *why* (a constraint, gotcha, ADR/issue link), never *what*."
     echo "   See AGENTS.md \"Code quality\". Rewrite or delete; this does not fail the build."
-else
+elif [ "$scorer_errors" -eq 0 ]; then
     echo "✅ narration lint: no narration comments flagged."
 fi
 
-# Warning-mode: never fail.
+if [ "$scorer_errors" -gt 0 ]; then
+    echo ""
+    echo "⚠️  narration scorer error (gate inactive): the scorer failed on $scorer_errors file(s)."
+    echo "   The lint did not run cleanly — do not read this as 'no narration'."
+    echo "   Check that $SCORER exists and python3 is available."
+fi
+
+# Warning-mode: never fail, even when the scorer itself errored.
 exit 0

@@ -14,6 +14,11 @@
 # WARNING-MODE: this always exits 0. It also no-ops cleanly (exit 0) when the
 # branch has no MR yet — push-before-MR is the common case.
 #
+# TODO(#2933, promote-to-blocking): this is NOT a config toggle. score_description.py
+# signals PASS/FAIL via printed text only and always exits 0; making this gate
+# blocking requires a deliberate code change in BOTH the scorer (emit a non-zero
+# exit on FAIL) AND this wrapper (propagate that exit instead of `exit 0`).
+#
 # MR resolution order:
 #   1. CI_MERGE_REQUEST_IID         (GitLab predefined, merge_request pipelines)
 #   2. source_branch lookup via the API (CI fallback / local runs)
