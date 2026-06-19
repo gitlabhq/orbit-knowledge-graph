@@ -22,6 +22,9 @@ pre-commit:
     - name: fmt
       run: mise run lint:fmt
       glob: "**/*.rs"
+    - name: narration
+      run: bash ./scripts/check-narration.sh {staged_files}
+      glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:
