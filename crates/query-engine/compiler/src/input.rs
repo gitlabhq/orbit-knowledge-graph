@@ -372,8 +372,7 @@ pub struct InputNode {
     /// Whether the node table has a traversal_path column. Set during normalization.
     #[serde(skip)]
     pub has_traversal_path: bool,
-    /// Whether the entity is declared `global: true` in the ontology (non-namespaced
-    /// hub reached only via FK). Set during normalization.
+    /// Whether the entity is declared `global: true` in the ontology. Set during normalization.
     #[serde(skip)]
     pub is_global: bool,
     /// Narrowed traversal paths extracted from base query results. Used by the

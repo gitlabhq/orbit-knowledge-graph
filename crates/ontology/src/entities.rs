@@ -329,10 +329,7 @@ pub struct NodeEntity {
     /// Whether this entity's table has a `traversal_path` column.
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
-    /// Whether this entity is a global hub: not namespace-scoped, reached only via
-    /// FK from scoped nodes (e.g. User, Runner). Declared `global: true` in the node
-    /// YAML; defaults to false. Read by the query planner to allow FK-chain elision
-    /// past the hub without losing namespace scope.
+    /// Non-namespaced global hub (e.g. User, Runner), declared `global: true`.
     pub global: bool,
     /// ClickHouse-specific storage metadata for DDL generation.
     pub storage: NodeStorage,

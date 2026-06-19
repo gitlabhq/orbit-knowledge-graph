@@ -25,8 +25,6 @@ pub(crate) struct NodeYaml {
     )]
     node_type: String,
     domain: String,
-    /// Global hub: not namespace-scoped, reached only via FK (e.g. User, Runner).
-    /// Read by the query planner for FK-chain elision. Defaults to false.
     #[serde(default)]
     global: bool,
     #[serde(default)]
@@ -456,8 +454,7 @@ impl NodeYaml {
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
-        // A global hub is non-namespaced by definition; if it carried a traversal_path the
-        // FK-chain elision could drop a real scope filter. Fail closed at load time.
+        // A global hub must be non-namespaced; a traversal_path would let elision drop a scope filter.
         if self.global && has_traversal_path {
             return Err(OntologyError::Validation(format!(
                 "node '{name}' is `global: true` but declares a `traversal_path` column; global hubs must be non-namespaced"

@@ -925,7 +925,7 @@
         "domain": { "$ref": "#/definitions/domainName" },
         "global": {
           "type": "boolean",
-          "description": "Global hub: not namespace-scoped, reached only via FK from scoped nodes (e.g. User, Runner). Read by the query planner to allow FK-chain elision past the hub without losing namespace scope. Defaults to false."
+          "description": "Non-namespaced global hub (e.g. User, Runner) reached only via FK. Defaults to false."
         },
         "description": {
           "type": "string",

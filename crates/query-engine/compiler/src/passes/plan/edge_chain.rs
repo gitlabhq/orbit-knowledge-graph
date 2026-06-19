@@ -534,8 +534,7 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
             .get(alias)
             .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
     };
-    // Global hub = a node declared `global: true` in the ontology (User, Runner): no
-    // namespace, reached only via FK, so the chain can elide past it without losing scope.
+    // Global hub (`global: true`): non-namespaced, reached only via FK; safe to elide past.
     let reaches_global_hub = |h: &Hop| {
         [h.from_node.as_str(), h.to_node.as_str()]
             .iter()
