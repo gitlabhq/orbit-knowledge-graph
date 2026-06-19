@@ -19,61 +19,106 @@ pub(in crate::modules::sdlc) fn lower(
     namespaced_batch_size: u64,
     batch_size_overrides: &std::collections::HashMap<String, u64>,
 ) -> Plans {
-    let mut global = Vec::new();
-    let mut namespaced = Vec::new();
+    let router = ScopeRouter {
+        global_batch_size,
+        namespaced_batch_size,
+        overrides: batch_size_overrides,
+    };
+    let mut plans = Plans {
+        global: Vec::new(),
+        namespaced: Vec::new(),
+    };
 
-    for node in inputs.node_plans {
-        let scope_default = match node.scope {
-            EtlScope::Global => global_batch_size,
-            EtlScope::Namespaced => namespaced_batch_size,
+    lower_all(inputs.node_plans, &router, ontology, &mut plans);
+    lower_all(inputs.standalone_edge_plans, &router, ontology, &mut plans);
+    lower_all(inputs.derived_entity_plans, &router, ontology, &mut plans);
+
+    plans
+}
+
+/// Resolves a plan's page size and routes the lowered `Plan` into the correct
+/// scope bucket. Owns the batch-size policy (scope default + per-name override)
+/// that the three plan kinds previously each copy-pasted.
+struct ScopeRouter<'a> {
+    global_batch_size: u64,
+    namespaced_batch_size: u64,
+    overrides: &'a std::collections::HashMap<String, u64>,
+}
+
+impl ScopeRouter<'_> {
+    fn batch_size(&self, scope: EtlScope, override_key: &str) -> u64 {
+        let default = match scope {
+            EtlScope::Global => self.global_batch_size,
+            EtlScope::Namespaced => self.namespaced_batch_size,
         };
-        let batch_size = batch_size_overrides
-            .get(&node.name)
-            .copied()
-            .unwrap_or(scope_default);
-        let scope = node.scope;
-        let plan = lower_node_plan(node, batch_size, ontology);
-        match scope {
-            EtlScope::Global => global.push(plan),
-            EtlScope::Namespaced => namespaced.push(plan),
-        }
+        self.overrides.get(override_key).copied().unwrap_or(default)
     }
 
-    for edge in inputs.standalone_edge_plans {
-        let scope_default = match edge.scope {
-            EtlScope::Global => global_batch_size,
-            EtlScope::Namespaced => namespaced_batch_size,
-        };
-        let batch_size = batch_size_overrides
-            .get(&edge.relationship_kind)
-            .copied()
-            .unwrap_or(scope_default);
-        let scope = edge.scope;
-        let plan = lower_standalone_edge_plan(edge, batch_size, ontology);
+    fn route(&self, plans: &mut Plans, scope: EtlScope, plan: Plan) {
         match scope {
-            EtlScope::Global => global.push(plan),
-            EtlScope::Namespaced => namespaced.push(plan),
+            EtlScope::Global => plans.global.push(plan),
+            EtlScope::Namespaced => plans.namespaced.push(plan),
         }
     }
+}
 
-    for derived in inputs.derived_entity_plans {
-        let scope_default = match derived.scope {
-            EtlScope::Global => global_batch_size,
-            EtlScope::Namespaced => namespaced_batch_size,
-        };
-        let batch_size = batch_size_overrides
-            .get(&derived.name)
-            .copied()
-            .unwrap_or(scope_default);
-        let scope = derived.scope;
-        let plan = lower_derived_entity_plan(derived, batch_size);
-        match scope {
-            EtlScope::Global => global.push(plan),
-            EtlScope::Namespaced => namespaced.push(plan),
-        }
+/// A plan input that knows its scope, the key its batch-size override is looked
+/// up under, and how to lower itself into a `Plan`. Adding a new plan kind is
+/// one `impl` plus one `lower_all` call — no new scope/batch-size loop.
+trait LowerablePlan {
+    fn scope(&self) -> EtlScope;
+    fn override_key(&self) -> &str;
+    fn lower(self, batch_size: u64, ontology: &Ontology) -> Plan;
+}
+
+fn lower_all<P: LowerablePlan>(
+    items: Vec<P>,
+    router: &ScopeRouter,
+    ontology: &Ontology,
+    plans: &mut Plans,
+) {
+    for item in items {
+        let scope = item.scope();
+        let batch_size = router.batch_size(scope, item.override_key());
+        let plan = item.lower(batch_size, ontology);
+        router.route(plans, scope, plan);
     }
+}
 
-    Plans { global, namespaced }
+impl LowerablePlan for NodePlan {
+    fn scope(&self) -> EtlScope {
+        self.scope
+    }
+    fn override_key(&self) -> &str {
+        &self.name
+    }
+    fn lower(self, batch_size: u64, ontology: &Ontology) -> Plan {
+        lower_node_plan(self, batch_size, ontology)
+    }
+}
+
+impl LowerablePlan for StandaloneEdgePlan {
+    fn scope(&self) -> EtlScope {
+        self.scope
+    }
+    fn override_key(&self) -> &str {
+        &self.relationship_kind
+    }
+    fn lower(self, batch_size: u64, ontology: &Ontology) -> Plan {
+        lower_standalone_edge_plan(self, batch_size, ontology)
+    }
+}
+
+impl LowerablePlan for DerivedEntityPlan {
+    fn scope(&self) -> EtlScope {
+        self.scope
+    }
+    fn override_key(&self) -> &str {
+        &self.name
+    }
+    fn lower(self, batch_size: u64, _ontology: &Ontology) -> Plan {
+        lower_derived_entity_plan(self, batch_size)
+    }
 }
 
 fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {

@@ -448,6 +448,49 @@ fn resolve_standalone_edge(
         filters.push(f);
     }
 
+    let extract_columns = collect_edge_extract_columns(config, namespaced);
+    let (enrichment, denormalized_columns) =
+        resolve_enrichment(config, relationship_kind, ontology);
+
+    let source = ExtractSource::Table(config.source.clone());
+    let base_table = config.source.clone();
+    let order_by = config.order_by.clone();
+    let watermark = config.watermark.clone();
+    let deleted = config.deleted.clone();
+    let traversal_path_filter = None;
+
+    StandaloneEdgePlan {
+        relationship_kind: relationship_kind.to_string(),
+        scope,
+        source_id,
+        source_kind,
+        target_id,
+        target_kind,
+        filters,
+        namespaced,
+        denormalized_columns,
+        extract: ExtractPlan {
+            destination_table: edge_table,
+            columns: extract_columns,
+            source,
+            base_table,
+            watermark,
+            deleted,
+            order_by,
+            namespaced,
+            traversal_path_filter,
+            additional_where: None,
+            enrichment,
+        },
+    }
+}
+
+/// The id columns of both endpoints, plus any polymorphic type-discriminator
+/// columns, the `order_by` keys, and (for namespaced edges) `traversal_path`.
+fn collect_edge_extract_columns(
+    config: &EdgeSourceEtlConfig,
+    namespaced: bool,
+) -> Vec<ExtractColumn> {
     let mut extract_columns = vec![
         ExtractColumn::Bare(config.from.id_column.clone()),
         ExtractColumn::Bare(config.to.id_column.clone()),
@@ -466,12 +509,20 @@ fn resolve_standalone_edge(
             std::iter::once(&TRAVERSAL_PATH_COLUMN.to_string()),
         );
     }
+    extract_columns
+}
 
-    // Build CTE-based enrichment for endpoint columns declared in the ETL config.
-    // Each endpoint can request extra columns from its node's datalake table.
-    // Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
-    // query in a _batch CTE and build enrichment CTEs that do point lookups
-    // via `id IN (SELECT DISTINCT fk FROM _batch)`.
+/// Builds CTE-based enrichment for endpoint columns declared in the ETL config.
+/// Each endpoint can request extra columns from its node's datalake table.
+/// Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
+/// query in a `_batch` CTE and build enrichment CTEs that do point lookups via
+/// `id IN (SELECT DISTINCT fk FROM _batch)`. Returns the enrichment SQL (when
+/// any endpoint enriches) and the denormalized projections it produces.
+fn resolve_enrichment(
+    config: &EdgeSourceEtlConfig,
+    relationship_kind: &str,
+    ontology: &Ontology,
+) -> (Option<EnrichmentSql>, Vec<DenormalizedColumnProjection>) {
     let endpoints_with_cols: [(&EdgeSourceEtlConfig, &str, DenormDirection); 2] = [
         (config, "from", DenormDirection::Source),
         (config, "to", DenormDirection::Target),
@@ -559,11 +610,12 @@ fn resolve_standalone_edge(
         }
     }
 
+    // Enriched columns are projected in the outer SELECT by the lowering via
+    // EnrichmentSql.select_exprs, so they are deliberately not added to the
+    // base extract columns.
     let enrichment = if cte_defs.is_empty() {
         None
     } else {
-        // Don't add enriched columns to extract_columns -- they'll be projected
-        // in the outer SELECT by the lowering via EnrichmentSql.select_exprs.
         Some(EnrichmentSql {
             cte_defs,
             join_clauses,
@@ -571,37 +623,7 @@ fn resolve_standalone_edge(
         })
     };
 
-    let source = ExtractSource::Table(config.source.clone());
-    let base_table = config.source.clone();
-    let order_by = config.order_by.clone();
-    let watermark = config.watermark.clone();
-    let deleted = config.deleted.clone();
-    let traversal_path_filter = None;
-
-    StandaloneEdgePlan {
-        relationship_kind: relationship_kind.to_string(),
-        scope,
-        source_id,
-        source_kind,
-        target_id,
-        target_kind,
-        filters,
-        namespaced,
-        denormalized_columns,
-        extract: ExtractPlan {
-            destination_table: edge_table,
-            columns: extract_columns,
-            source,
-            base_table,
-            watermark,
-            deleted,
-            order_by,
-            namespaced,
-            traversal_path_filter,
-            additional_where: None,
-            enrichment,
-        },
-    }
+    (enrichment, denormalized_columns)
 }
 
 fn resolve_endpoint(
