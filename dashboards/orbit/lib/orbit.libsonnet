@@ -115,10 +115,9 @@ local gaugeExpr(prom_name, selector, by) = (
 );
 
 // Format a Grafana legend like `{{label1}} / {{label2}}`. Falls back to
-// "total" for unlabelled metrics because the counter expr uses bare sum()
-// which drops the instance label, rendering {{instance}} as an empty string.
+// the instance label when no grouping labels are supplied.
 local legendFor(labels) = (
-  if std.length(labels) == 0 then 'total'
+  if std.length(labels) == 0 then '{{instance}}'
   else std.join(' / ', ['{{' + l + '}}' for l in labels])
 );
 

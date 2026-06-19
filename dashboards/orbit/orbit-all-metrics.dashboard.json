@@ -4044,7 +4044,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -4228,7 +4228,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -4902,7 +4902,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-dispatcher\", cluster=~\"$cluster\"})",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -4953,7 +4953,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-dispatcher\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -6549,7 +6549,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_content_gitaly_calls_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7019,7 +7019,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_billing_events_delivered_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7172,7 +7172,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_billing_events_emitted_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7223,7 +7223,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(gkg_billing_events_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7338,7 +7338,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(gkg_billing_quota_cache_entries{container=\"gkg-webserver\", cluster=~\"$cluster\"})",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7867,7 +7867,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_in_msgs{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7918,7 +7918,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_out_msgs{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -7969,7 +7969,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_in_bytes{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -8020,7 +8020,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_out_bytes{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -8071,7 +8071,7 @@
                   "uid": "$ORBIT_DS"
                },
                "expr": "sum(rate(nats_varz_slow_consumers{cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -9414,7 +9414,7 @@
                   "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -9465,7 +9465,7 @@
                   "uid": "mimir-gitlab-${rails_env}"
                },
                "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
-               "legendFormat": "total",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
