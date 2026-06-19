@@ -1970,11 +1970,13 @@ mod tests {
                 && sql.contains("gl_job"),
             "must join the node tables; got:\n{sql}"
         );
-        // authz boundary preserved: in-namespace node scoped, global hub not.
+        // authz boundary preserved: every in-namespace node scoped, global hub not.
         assert!(
             sql.contains("startsWith(mr.traversal_path")
+                && sql.contains("startsWith(pipe.traversal_path")
+                && sql.contains("startsWith(j.traversal_path")
                 && !sql.contains("startsWith(u.traversal_path"),
-            "in-namespace node scoped, global User hub unscoped; got:\n{sql}"
+            "all in-namespace nodes (mr, pipe, j) scoped, global User hub unscoped; got:\n{sql}"
         );
     }
 
