@@ -1,6 +1,7 @@
 # config/ontology/edges/occurrence.yaml
 
 description: Vulnerability occurrence is an occurrence of a vulnerability
+table: gl_sec_edge
 
 variants:
   - from_node: { type: VulnerabilityOccurrence, id: id }

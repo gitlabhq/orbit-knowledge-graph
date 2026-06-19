@@ -1,6 +1,7 @@
 # config/ontology/edges/detected_by.yaml
 
 description: Finding was detected by a vulnerability scanner
+table: gl_sec_edge
 
 variants:
   - from_node: { type: Finding, id: id }
