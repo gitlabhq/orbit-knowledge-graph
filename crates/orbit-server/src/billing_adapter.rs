@@ -1,12 +1,14 @@
-//! The single permitted orbit-server↔orbit-billing seam.
+//! The single permitted orbit-server↔orbit-billing seam (ADR 013:
+//! `docs/design-documents/decisions/013_billing_sox_scope.md`).
 //!
 //! Billing logic lives in `crates/orbit-billing/`. The only data that crosses
-//! the boundary is `BillingInputs` (defined there). This file is the
-//! complete declaration of which `auth::Claims` fields populate that struct.
-//! All billing-related call sites in orbit-server consume `BillingInputs`
-//! built via `billing_inputs` — they never construct `BillingInputs`
-//! directly. Per SOX boundary policy, this file plus the `orbit-billing`
-//! crate are the entire auditable surface for billing in this repository.
+//! the boundary is `BillingInputs` and `QuotaCheckInputs`, defined there.
+//! This file is the complete declaration of which `auth::Claims` fields
+//! populate them. All billing-related call sites in orbit-server consume
+//! these inputs via `billing_inputs` and the `From` impl below — they never
+//! construct the structs directly. Per SOX boundary policy, this file plus
+//! the `orbit-billing` crate are the primary auditable surface for billing
+//! in this repository.
 
 use orbit_billing::{BillingInputs, QuotaCheckInputs};
 
