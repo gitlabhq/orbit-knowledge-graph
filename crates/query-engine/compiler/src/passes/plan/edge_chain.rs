@@ -523,19 +523,30 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 }
 
 /// Linear FK chain the node-join path answers without edge scans. Each hop must be
-/// FK-backed, scope-preserving, single fixed-length, edge-filter-free, and not
-/// `Both`; gated out of point-selective endpoints (SIP narrowing on the edge scan
-/// beats a full leaf-node scan there) and non-emittable shapes.
+/// FK-backed, single fixed-length, edge-filter-free, and not `Both`; gated out of
+/// point-selective endpoints (SIP narrowing on the edge scan beats a full leaf-node
+/// scan there) and non-emittable shapes.
+///
+/// A hop must be scope-preserving OR reach a global hub (an endpoint with no
+/// `traversal_path`, e.g. User/Runner/Label). The latter covers `prune_to_target`/
+/// `prune_to_source` edges: the in-namespace endpoint keeps its scope while the hub
+/// is reached only via the FK off that scoped node, so no scope is lost and the
+/// authz boundary stays on the scoped side -- same as the edge path.
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
             .get(alias)
             .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
     };
+    let reaches_global_hub = |h: &Hop| {
+        [h.from_node.as_str(), h.to_node.as_str()]
+            .iter()
+            .any(|a| nodes.get(*a).is_some_and(|np| !np.has_traversal_path))
+    };
     hops.len() >= 2
         && hops.iter().all(|h| {
             h.fk.is_some()
-                && h.scope_preserving
+                && (h.scope_preserving || reaches_global_hub(h))
                 && h.max_hops == 1
                 && h.filters.is_empty()
                 && !matches!(h.direction, Direction::Both)
