@@ -543,7 +543,16 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
             .iter()
             .any(|a| nodes.get(*a).is_some_and(|np| !np.has_traversal_path))
     };
+    // Authz guard: a global-hub hop is only sound while the chain still has an
+    // in-namespace node carrying the traversal_path scope, so the boundary is
+    // never lost (a hub is reached only via the FK off a scoped node).
+    let has_scope_anchor = hops.iter().any(|h| {
+        [h.from_node.as_str(), h.to_node.as_str()]
+            .iter()
+            .any(|a| nodes.get(*a).is_some_and(|np| np.has_traversal_path))
+    });
     hops.len() >= 2
+        && has_scope_anchor
         && hops.iter().all(|h| {
             h.fk.is_some()
                 && (h.scope_preserving || reaches_global_hub(h))
