@@ -238,6 +238,8 @@ def main():
         for ln, kind, txt in flags:
             print(f"{name}:{ln}\t{kind}\t// {txt}")
         print(f"# {name}: {len(flags)} narration comment(s)", file=sys.stderr)
+    if flags:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

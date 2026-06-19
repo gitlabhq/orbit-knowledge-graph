@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Warning-mode MR-description headline gate.
+# MR-description headline gate.
 #
 # The MR description lives in the GitLab API, not the repo, so unlike most
 # checks this CANNOT be a build.rs/lint — it is the one check that legitimately
@@ -11,13 +11,10 @@
 # (research-tuned: word_cap=100, span_cap=3, bare_idents<=3 with the v2
 # acronym/ref-aware regex). It prints a verdict and any warnings.
 #
-# WARNING-MODE: this always exits 0. It also no-ops cleanly (exit 0) when the
-# branch has no MR yet — push-before-MR is the common case.
-#
-# TODO(#2933, promote-to-blocking): this is NOT a config toggle. score_description.py
-# signals PASS/FAIL via printed text only and always exits 0; making this gate
-# blocking requires a deliberate code change in BOTH the scorer (emit a non-zero
-# exit on FAIL) AND this wrapper (propagate that exit instead of `exit 0`).
+# Exit codes: non-zero when the description FAILS the scorer; zero on PASS or
+# when there is nothing to check (no MR, empty description, no auth, no glab).
+# Blocking-ness is controlled by CI `allow_failure: true` (one-line change to
+# promote), not inside this script.
 #
 # MR resolution order:
 #   1. CI_MERGE_REQUEST_IID         (GitLab predefined, merge_request pipelines)
@@ -80,12 +77,15 @@ TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 printf '%s' "$DESC" > "$TMP"
 
-echo "MR !$IID description headline check (warning-mode, non-blocking):"
-python3 "$(dirname "$0")/score_description.py" "$TMP" | sed 's/^/  /'
+echo "MR !$IID description headline check:"
+# Capture the scorer's exit code before piping through sed; pipefail would
+# propagate it but we need it explicitly for the final exit decision.
+scorer_out="$(python3 "$(dirname "$0")/score_description.py" "$TMP")"
+scorer_rc=$?
+printf '%s\n' "$scorer_out" | sed 's/^/  /'
 echo ""
 echo "⚠️  Limits: <=100 words, <=3 inline-code spans, <=3 bare identifiers in the"
 echo "   headline section. Long-form mechanics belong in the Agent context"
-echo "   <details> block. This is warning-mode; it does not fail the pipeline."
+echo "   <details> block."
 
-# Warning-mode: never fail.
-exit 0
+exit "$scorer_rc"

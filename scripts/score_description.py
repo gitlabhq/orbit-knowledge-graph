@@ -176,6 +176,8 @@ def main():
         print(f"{path}: {verdict}  words={words} spans={spans} bare_idents={bare}")
         if fails:
             print("  fails:", "; ".join(fails))
+    if verdict == "FAIL":
+        sys.exit(1)
 
 
 if __name__ == "__main__":

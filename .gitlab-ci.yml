@@ -168,10 +168,12 @@ agent-file-sync-check:
   script:
     - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
 
-# Warning-mode narration-comment lint (task #2933). Dependency-free Python
-# scorer (scripts/narration_score.py); no network or git-diff context needed,
-# so it also runs as a lefthook pre-commit hook (AGENTS.md "prefer build-time
-# validation"). Warning-mode: prints flags, exits 0 — non-blocking for now.
+# Narration-comment lint (task #2933). Dependency-free Python scorer
+# (scripts/narration_score.py); no network or git-diff context needed, so it
+# also runs as a lefthook pre-commit hook (AGENTS.md "prefer build-time
+# validation"). The script exits non-zero when narration flags are found;
+# allow_failure keeps this advisory (yellow) for now — remove it to promote
+# to a blocking gate.
 lint:narration:
   stage: lint
   image: ghcr.io/astral-sh/uv:python3.12-alpine
@@ -180,15 +182,17 @@ lint:narration:
   extends:
     - .mr-and-main-rules
   needs: []
+  allow_failure: true
   script:
     - apk add --no-cache bash
     - bash ./scripts/check-narration.sh
 
-# Warning-mode MR-description headline gate (task #2933). Unlike the other lint
-# jobs this is CI-ONLY by necessity: the description lives in the GitLab API,
-# not the repo, so it cannot be a build.rs/lint (AGENTS.md "prefer build-time
-# validation" only applies to data checkable without network). No-ops cleanly
-# when the branch has no MR. Warning-mode: prints a verdict, exits 0.
+# MR-description headline gate (task #2933). Unlike the other lint jobs this is
+# CI-ONLY by necessity: the description lives in the GitLab API, not the repo,
+# so it cannot be a build.rs/lint (AGENTS.md "prefer build-time validation"
+# only applies to data checkable without network). No-ops cleanly when the
+# branch has no MR. The script exits non-zero on FAIL; allow_failure keeps
+# this advisory (yellow) for now — remove it to promote to a blocking gate.
 lint:mr-description:
   stage: lint
   image: registry.gitlab.com/gitlab-org/cli:latest
@@ -197,6 +201,7 @@ lint:mr-description:
   extends:
     - .mr-only-rules
   needs: []
+  allow_failure: true
   before_script:
     - apk add --no-cache bash python3
   script:

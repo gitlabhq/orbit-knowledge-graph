@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Warning-mode narration-comment lint for Rust sources.
+# Narration-comment lint for Rust sources.
 #
 # Runs scripts/narration_score.py over the given .rs files (or, with no args,
 # the whole crates/ tree) and prints any flagged narration comments. A comment
@@ -7,14 +7,10 @@
 # content (see AGENTS.md "Code quality"). This is the primary, higher-precision
 # lint; lint/ast-grep/narration-comments.yml is a lower-precision fallback.
 #
-# WARNING-MODE: this always exits 0. It reports flags for awareness; it does
-# not block the commit or pipeline. (Rollout plan #2933: promote to blocking
-# once the new-commit false-positive rate is acceptable.)
-#
-# TODO(#2933, promote-to-blocking): this is NOT a config toggle. narration_score.py
-# signals via printed text only and always exits 0; making this gate blocking
-# requires a deliberate code change in BOTH the scorer (emit a non-zero exit when
-# flags are found) AND this wrapper (propagate that exit instead of `exit 0`).
+# Exit codes: non-zero when narration flags are found OR when the scorer
+# itself errors; zero only on a genuinely clean run. Blocking-ness is
+# controlled externally — CI `allow_failure: true` (one-line change to
+# promote) and lefthook's per-job config — not inside this script.
 #
 # Usage:
 #   scripts/check-narration.sh                 # scan crates/
@@ -39,12 +35,12 @@ for f in "${files[@]}"; do
         *.rs) ;;
         *) continue ;;
     esac
-    # Capture the scorer's own exit status separately from its output so a
-    # script/scorer error (missing file, syntax error, no python3) is NOT
-    # mistaken for a clean "no narration" result. stderr stays visible.
+    # Capture the scorer's exit status: 0 = clean, 1 = flags found (output
+    # contains the flagged lines), >=2 = usage/crash error. Command
+    # substitution does not trigger pipefail, so $? is the scorer's real exit.
     out="$(python3 "$SCORER" "$f")"
     rc=$?
-    if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ge 2 ]; then
         scorer_errors=$((scorer_errors + 1))
         continue
     fi
@@ -58,19 +54,22 @@ done
 
 if [ "$total" -gt 0 ]; then
     echo ""
-    echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s) (warning-mode, non-blocking)."
+    echo "⚠️  narration lint: $total flagged comment(s) across $flagged_files file(s)."
     echo "   A comment must say *why* (a constraint, gotcha, ADR/issue link), never *what*."
-    echo "   See AGENTS.md \"Code quality\". Rewrite or delete; this does not fail the build."
+    echo "   See AGENTS.md \"Code quality\". Rewrite or delete."
 elif [ "$scorer_errors" -eq 0 ]; then
     echo "✅ narration lint: no narration comments flagged."
 fi
 
 if [ "$scorer_errors" -gt 0 ]; then
     echo ""
-    echo "⚠️  narration scorer error (gate inactive): the scorer failed on $scorer_errors file(s)."
+    echo "⚠️  narration scorer error: the scorer failed on $scorer_errors file(s)."
     echo "   The lint did not run cleanly — do not read this as 'no narration'."
     echo "   Check that $SCORER exists and python3 is available."
 fi
 
-# Warning-mode: never fail, even when the scorer itself errored.
-exit 0
+# Exit non-zero when narration flags are found or the scorer itself errored.
+# Blocking-ness is controlled by CI allow_failure / lefthook job config.
+if [ "$scorer_errors" -gt 0 ] || [ "$total" -gt 0 ]; then
+    exit 1
+fi
