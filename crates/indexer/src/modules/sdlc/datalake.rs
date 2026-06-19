@@ -85,6 +85,12 @@ pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 pub(crate) struct Datalake {
     client: DatalakeClient,
     default_max_block_size: u64,
+    /// The URI-length cap `build_query` enforces. Defaults to
+    /// [`uri_guard::MAX_REQUEST_URI_LEN`] (the `http` crate's hard limit);
+    /// overridable in tests via [`Datalake::with_uri_len_cap`] so an overflow
+    /// test can use a small cap + small batch instead of fabricating a real
+    /// 64 KB+ payload.
+    uri_len_cap: usize,
 }
 
 impl Datalake {
@@ -92,7 +98,14 @@ impl Datalake {
         Self {
             client,
             default_max_block_size,
+            uri_len_cap: uri_guard::MAX_REQUEST_URI_LEN,
         }
+    }
+
+    #[cfg(test)]
+    fn with_uri_len_cap(mut self, cap: usize) -> Self {
+        self.uri_len_cap = cap;
+        self
     }
 
     /// Builds an [`ArrowQuery`] from `sql` + `params`, the single chokepoint
@@ -106,16 +119,20 @@ impl Datalake {
     /// [`DatalakeError::UriTooLong`] is the release-build backstop so production
     /// degrades to a loud, attributable failure instead of a panic.
     fn build_query(&self, sql: &str, params: Value) -> Result<ArrowQuery, DatalakeError> {
-        if let Some(len) = uri_guard::request_uri_overflow(
+        let len = uri_guard::request_uri_len(
             self.client.base_url(),
             self.client.database(),
             &self.client.request_scaffold_pairs(),
             &params,
-        ) {
-            let limit = uri_guard::MAX_REQUEST_URI_LEN;
+        );
+        if len > self.uri_len_cap {
+            let limit = self.uri_len_cap;
+            // The debug_assert fires against the real http cap, not the
+            // (potentially lowered) test cap, so injected-cap tests don't panic.
             debug_assert!(
-                len <= limit,
-                "datalake query URI is {len} bytes, over the {limit}-byte http cap"
+                len <= uri_guard::MAX_REQUEST_URI_LEN,
+                "datalake query URI is {len} bytes, over the {}-byte http cap",
+                uri_guard::MAX_REQUEST_URI_LEN,
             );
             return Err(DatalakeError::UriTooLong { len, limit });
         }
@@ -369,6 +386,40 @@ mod tests {
         assert!(
             measured_uri_len(&datalake, &json!({ "p": over_cap })) > uri_guard::MAX_REQUEST_URI_LEN
         );
+    }
+
+    // With an injected cap just below the measured URI, a small batch triggers
+    // the guard without fabricating a real 64 KB+ payload. Exercises the same
+    // code path as the real-cap tests above but with a lightweight input.
+    // With an injected cap just below the measured URI, a small batch triggers
+    // the guard without fabricating a real 64 KB+ payload. Exercises the same
+    // code path as the real-cap tests above but with a lightweight input.
+    #[test]
+    fn build_query_rejects_over_injected_cap() {
+        let params = json!({ "paths": ["group/project-1", "group/project-2"] });
+        let datalake = test_datalake();
+        let measured = measured_uri_len(&datalake, &params);
+
+        let datalake = test_datalake().with_uri_len_cap(measured - 1);
+        let result = datalake.build_query("SELECT 1", params).map(|_| ());
+
+        match result {
+            Err(DatalakeError::UriTooLong { len, limit }) => {
+                assert_eq!(len, measured);
+                assert_eq!(limit, measured - 1);
+            }
+            other => panic!("expected UriTooLong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn build_query_passes_at_injected_cap() {
+        let params = json!({ "paths": ["group/project-1"] });
+        let datalake = test_datalake();
+        let measured = measured_uri_len(&datalake, &params);
+
+        let datalake = test_datalake().with_uri_len_cap(measured);
+        assert!(datalake.build_query("SELECT 1", params).is_ok());
     }
 
     #[test]
