@@ -21,7 +21,8 @@
 #     scripts/check-narration.sh --diff-base <sha>
 #     Scans only .rs files changed since <sha> and reports only flags on
 #     added/modified lines, so pre-existing legacy narration is not noise.
-#     Falls back to whole-tree if the base SHA is unreachable.
+#     Errors out (exit 2) if the base SHA is unreachable — never silently
+#     falls back to a whole-tree scan that would report a false "clean".
 set -uo pipefail
 
 SCORER="$(dirname "$0")/narration_score.py"
@@ -111,7 +112,14 @@ for f in "${files[@]}"; do
     # Capture the scorer's exit status: 0 = clean, 1 = flags found (output
     # contains the flagged lines), >=2 = usage/crash error. Command
     # substitution does not trigger pipefail, so $? is the scorer's real exit.
-    out="$(python3 "$SCORER" "$f")"
+    # In diff-scoped mode, suppress the scorer's per-file stderr header
+    # ("# file: N narration comment(s)") — it shows the whole-file count
+    # which would contradict the filtered diff-scoped count.
+    if [ -n "$DIFF_BASE" ]; then
+        out="$(python3 "$SCORER" "$f" 2>/dev/null)"
+    else
+        out="$(python3 "$SCORER" "$f")"
+    fi
     rc=$?
     if [ "$rc" -ge 2 ]; then
         scorer_errors=$((scorer_errors + 1))
