@@ -458,6 +458,100 @@ fn collect_edge_extract_columns(
     extract_columns
 }
 
+/// A point-lookup against a referenced node table: read `enrich` columns for
+/// just the FK values present in the page, rather than LEFT JOINing the whole
+/// namespace. One of these becomes one `_eN` enrichment CTE.
+struct PointLookup<'a> {
+    /// Datalake table (or JOIN expr) the node is extracted from.
+    node_table: &'a str,
+    /// Soft-delete column on that table.
+    deleted_col: &'a str,
+    /// Watermark column used to `argMax`-dedup the enriched values.
+    watermark_col: &'a str,
+    /// The node's id expression, qualified for Query-type ETLs where bare `id`
+    /// is ambiguous across the JOIN.
+    qualified_id: &'a str,
+    /// The `_batch` column holding the FK into this node.
+    fk_col: &'a str,
+    /// Columns to read from the node and project onto the edge row.
+    enrich: &'a [String],
+}
+
+/// Accumulates enrichment CTEs, owning the `_eN` alias numbering so callers
+/// never track an index by hand. `into_sql` yields `None` when nothing enriched.
+struct Enrichment {
+    next_alias: usize,
+    cte_defs: Vec<String>,
+    join_clauses: Vec<String>,
+    select_exprs: Vec<String>,
+}
+
+impl Enrichment {
+    fn new() -> Self {
+        Self {
+            next_alias: 0,
+            cte_defs: Vec::new(),
+            join_clauses: Vec::new(),
+            select_exprs: Vec::new(),
+        }
+    }
+
+    /// Adds one point-lookup CTE + its join, and returns, per enriched column,
+    /// the `(column, projected_alias)` pair the caller maps to denormalization.
+    fn point_lookup(&mut self, lookup: PointLookup<'_>) -> Vec<(String, String)> {
+        let PointLookup {
+            node_table,
+            deleted_col,
+            watermark_col,
+            qualified_id,
+            fk_col,
+            enrich,
+        } = lookup;
+
+        let alias = format!("_e{}", self.next_alias);
+        self.next_alias += 1;
+
+        let sub_cols = std::iter::once(format!("{qualified_id} AS id"))
+            .chain(
+                enrich
+                    .iter()
+                    .map(|c| format!("argMax({c}, {watermark_col}) AS {c}")),
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        self.cte_defs.push(format!(
+            "{alias} AS (SELECT {sub_cols} FROM {node_table} \
+             WHERE {deleted_col} = false \
+             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             GROUP BY {qualified_id})"
+        ));
+        self.join_clauses
+            .push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));
+
+        enrich
+            .iter()
+            .map(|c| {
+                let projected = format!("{alias}_{c}");
+                self.select_exprs
+                    .push(format!("{alias}.{c} AS {projected}"));
+                (c.clone(), projected)
+            })
+            .collect()
+    }
+
+    fn into_sql(self) -> Option<EnrichmentSql> {
+        if self.cte_defs.is_empty() {
+            return None;
+        }
+        Some(EnrichmentSql {
+            cte_defs: self.cte_defs,
+            join_clauses: self.join_clauses,
+            select_exprs: self.select_exprs,
+        })
+    }
+}
+
 /// Builds CTE-based enrichment for endpoint columns declared in the ETL config.
 /// Each endpoint can request extra columns from its node's datalake table.
 /// Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
@@ -473,11 +567,8 @@ fn resolve_enrichment(
         (config, "from", DenormDirection::Source),
         (config, "to", DenormDirection::Target),
     ];
+    let mut enrichment = Enrichment::new();
     let mut denormalized_columns = Vec::new();
-    let mut cte_defs: Vec<String> = Vec::new();
-    let mut join_clauses: Vec<String> = Vec::new();
-    let mut enriched_select_exprs: Vec<String> = Vec::new();
-    let mut enrich_idx = 0usize;
 
     for (cfg, side, direction) in &endpoints_with_cols {
         let endpoint = if *side == "from" { &cfg.from } else { &cfg.to };
@@ -496,9 +587,6 @@ fn resolve_enrichment(
             EtlConfig::Table { source, .. } => source.as_str(),
             EtlConfig::Query { from, .. } => from.as_str(),
         };
-        let watermark_col = etl.watermark();
-        let deleted_col = etl.deleted();
-        let fk_col = &endpoint.id_column;
 
         // For Query-type ETLs the `from` is a JOIN expression and bare `id`
         // is ambiguous. Use the explicit table_alias to qualify `id`.
@@ -508,32 +596,16 @@ fn resolve_enrichment(
             "id".to_string()
         };
 
-        let alias = format!("_e{enrich_idx}");
-        enrich_idx += 1;
+        let projected = enrichment.point_lookup(PointLookup {
+            node_table,
+            deleted_col: etl.deleted(),
+            watermark_col: etl.watermark(),
+            qualified_id: &qualified_id,
+            fk_col: &endpoint.id_column,
+            enrich: &endpoint.enrich,
+        });
 
-        let agg_cols: Vec<String> = endpoint
-            .enrich
-            .iter()
-            .map(|c| format!("argMax({c}, {watermark_col}) AS {c}"))
-            .collect();
-        let sub_cols = std::iter::once(format!("{qualified_id} AS id"))
-            .chain(agg_cols)
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        cte_defs.push(format!(
-            "{alias} AS (SELECT {sub_cols} FROM {node_table} \
-             WHERE {deleted_col} = false \
-             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch) \
-             GROUP BY {qualified_id})"
-        ));
-
-        join_clauses.push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));
-
-        for col_name in &endpoint.enrich {
-            let mem_col = format!("{alias}_{col_name}");
-            enriched_select_exprs.push(format!("{alias}.{col_name} AS {mem_col}"));
-
+        for (col_name, source_column) in projected {
             if let Some(dp) = ontology.denormalized_properties().iter().find(|dp| {
                 dp.relationship_kind == relationship_kind
                     && dp.direction == *direction
@@ -547,7 +619,7 @@ fn resolve_enrichment(
                     }
             }) {
                 denormalized_columns.push(DenormalizedColumnProjection {
-                    source_column: mem_col,
+                    source_column,
                     edge_column: dp.edge_column.clone(),
                     tag_key: dp.tag_key.clone(),
                     enum_mapping: dp.enum_values.clone(),
@@ -556,20 +628,7 @@ fn resolve_enrichment(
         }
     }
 
-    // Enriched columns are projected in the outer SELECT by the lowering via
-    // EnrichmentSql.select_exprs, so they are deliberately not added to the
-    // base extract columns.
-    let enrichment = if cte_defs.is_empty() {
-        None
-    } else {
-        Some(EnrichmentSql {
-            cte_defs,
-            join_clauses,
-            select_exprs: enriched_select_exprs,
-        })
-    };
-
-    (enrichment, denormalized_columns)
+    (enrichment.into_sql(), denormalized_columns)
 }
 
 fn resolve_endpoint(
@@ -585,7 +644,7 @@ fn resolve_endpoint(
             type_mapping,
         } => {
             // The TypeIn filter runs in the source table before the CASE in
-            // `lower_edge_kind` rewrites raw Rails values to ontology names.
+            // `EdgeKind::Column` rewrites raw Rails values to ontology names.
             // Include mapping source values so polymorphic rows survive.
             let mut filter_types = resolve_allowed_types();
             for raw in type_mapping.keys() {
