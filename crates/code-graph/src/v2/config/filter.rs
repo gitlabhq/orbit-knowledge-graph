@@ -1,17 +1,16 @@
 //! The single filtering policy for code indexing, shared by every file source
 //! as a [`FileStreamHooks`] implementation. Per file it produces the full
-//! [`Decision`]: `Parse` (source), `Load` (resolver inputs + content
-//! duplicates: on disk, not parsed), `ListOnly` (excluded/oversize/binary/
-//! minified: a node, no bytes), or `Drop`. Resolver inputs are never in the
-//! denylist, so they survive. A total-bytes [`Counter`] aborts an oversized repo.
+//! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
+//! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
+//! `Drop`. Resolver inputs are never in the denylist, so they survive. A
+//! total-bytes [`Counter`] aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
 
 use gkg_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use rustc_hash::{FxHashMap, FxHashSet};
-use sha2::{Digest, Sha256};
+use rustc_hash::FxHashMap;
 
 use super::Language;
 
@@ -55,14 +54,12 @@ pub struct SkipTally {
 
 /// The code-indexing filter. Construct one per repository stream. Classifies
 /// each file fully (load+parse / load-only / node / drop): the language detector
-/// is injected so the filter never hard-wires the registry, and a content-hash
-/// set dedups parse candidates (a vendored library is parsed once).
+/// is injected so the filter never hard-wires the registry.
 pub struct CodeFilter {
     max_file_size: u64,
     total_bytes: Counter,
     skips: FxHashMap<FilterSkip, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
-    seen_parsed: FxHashSet<[u8; 32]>,
 }
 
 impl CodeFilter {
@@ -78,7 +75,6 @@ impl CodeFilter {
             total_bytes: Counter::new("total_bytes", max_total_bytes),
             skips: FxHashMap::default(),
             detect_language,
-            seen_parsed: FxHashSet::default(),
         }
     }
 
@@ -122,11 +118,9 @@ impl FileStreamHooks for CodeFilter {
         if let Some(reason) = minified_skip(content) {
             return self.record(reason, file.size);
         }
-        // A parse candidate is parsed once; a non-parsable file (resolver input)
-        // or a content-duplicate is loaded for resolvers but not parsed.
-        if (self.detect_language)(&file.path).is_some()
-            && self.seen_parsed.insert(Sha256::digest(content).into())
-        {
+        // A parse candidate is parsed; a non-parsable file (resolver input) is
+        // loaded for resolvers but not parsed.
+        if (self.detect_language)(&file.path).is_some() {
             Decision::Parse
         } else {
             Decision::Load
@@ -297,17 +291,13 @@ mod tests {
     }
 
     #[test]
-    fn dedups_identical_parse_candidates() {
+    fn identical_parse_candidates_are_each_parsed() {
+        // Byte-identical files at different paths are distinct graph entities
+        // (different module/FQN), so both parse; content is never deduped.
         let mut f = filter();
-        let jquery = b"export const x = 1;\n";
-        // First copy parsed; identical copies loaded for resolvers, not re-parsed.
-        assert_eq!(f.on_content(&entry("a/x.js", 19), jquery), Decision::Parse);
-        assert_eq!(f.on_content(&entry("b/x.js", 19), jquery), Decision::Load);
-        // Distinct content is parsed.
-        assert_eq!(
-            f.on_content(&entry("c/y.js", 19), b"export const y = 2;\n"),
-            Decision::Parse
-        );
+        let src = b"export const x = 1;\n";
+        assert_eq!(f.on_content(&entry("a/x.js", 19), src), Decision::Parse);
+        assert_eq!(f.on_content(&entry("b/x.js", 19), src), Decision::Parse);
     }
 
     #[test]

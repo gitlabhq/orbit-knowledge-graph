@@ -31,7 +31,6 @@ rust-embed = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2 = { workspace = true }
 smallvec = { workspace = true }
 smol_str = "0.3"
 stacker = { workspace = true }
