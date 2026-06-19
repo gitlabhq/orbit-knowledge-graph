@@ -388,12 +388,6 @@ mod tests {
         );
     }
 
-    // With an injected cap just below the measured URI, a small batch triggers
-    // the guard without fabricating a real 64 KB+ payload. Exercises the same
-    // code path as the real-cap tests above but with a lightweight input.
-    // With an injected cap just below the measured URI, a small batch triggers
-    // the guard without fabricating a real 64 KB+ payload. Exercises the same
-    // code path as the real-cap tests above but with a lightweight input.
     #[test]
     fn build_query_rejects_over_injected_cap() {
         let params = json!({ "paths": ["group/project-1", "group/project-2"] });
