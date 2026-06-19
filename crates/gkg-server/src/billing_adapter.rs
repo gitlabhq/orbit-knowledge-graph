@@ -1,12 +1,13 @@
-//! The single permitted gkg-server↔gkg-billing seam.
+//! The single permitted gkg-server↔gkg-billing seam (ADR 013:
+//! `docs/design-documents/decisions/013_billing_sox_scope.md`).
 //!
 //! Billing logic lives in `crates/gkg-billing/`. The only data that crosses
-//! the boundary is `BillingInputs` (defined there). This file is the
-//! complete declaration of which `auth::Claims` fields populate that struct.
-//! All billing-related call sites in gkg-server consume `BillingInputs`
-//! built via this `From` impl — they never construct `BillingInputs`
-//! directly. Per SOX boundary policy, this file plus the `gkg-billing`
-//! crate are the entire auditable surface for billing in this repository.
+//! the boundary is `BillingInputs` and `QuotaCheckInputs`, defined there.
+//! This file is the complete declaration of which `auth::Claims` fields
+//! populate them. All billing-related call sites in gkg-server consume these
+//! inputs via the `From` impls below — they never construct the structs
+//! directly. Per SOX boundary policy, this file plus the `gkg-billing` crate
+//! are the primary auditable surface for billing in this repository.
 
 use gkg_billing::{BillingInputs, QuotaCheckInputs};
 
