@@ -167,7 +167,6 @@ properties:
 
 etl:
   type: table
-  scope: global
   source: siphon_users
 
 storage:

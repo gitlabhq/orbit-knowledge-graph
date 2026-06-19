@@ -106,7 +106,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_security_scans
   edges:
     project_id:

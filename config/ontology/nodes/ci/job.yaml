@@ -280,7 +280,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_p_ci_builds
   order_by: [traversal_path, id, partition_id]
   edges:

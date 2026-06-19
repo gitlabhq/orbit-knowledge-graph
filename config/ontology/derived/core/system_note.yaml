@@ -8,7 +8,6 @@ emits: [MENTIONS]
 etl:
   type: query
   transform: system_notes
-  scope: namespaced
   source: siphon_notes
   from: siphon_notes AS sn
   select: >-

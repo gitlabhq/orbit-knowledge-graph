@@ -32,16 +32,19 @@ internal_col!(neighbor_type_column, "neighbor_type");
 internal_col!(relationship_type_column, "relationship_type");
 internal_col!(neighbor_is_outgoing_column, "neighbor_is_outgoing");
 
-/// Tables that should NOT have traversal path security filters applied.
-/// Loaded once from ontology (`settings.skip_security_filter_for_tables`).
-pub fn skip_security_filter_tables() -> &'static [String] {
+/// Physical tables of `global` nodes (User, Runner). These skip the
+/// traversal-path security filter because they are non-namespaced hubs with
+/// no `traversal_path` to scope on. Derived from the `global` node flag.
+pub fn global_tables() -> &'static [String] {
     use std::sync::OnceLock;
     static TABLES: OnceLock<Vec<String>> = OnceLock::new();
     TABLES.get_or_init(|| {
         ontology::Ontology::load_embedded()
             .expect("embedded ontology must load")
-            .skip_security_filter_tables()
-            .to_vec()
+            .global_tables()
+            .iter()
+            .map(|t| t.to_string())
+            .collect()
     })
 }
 

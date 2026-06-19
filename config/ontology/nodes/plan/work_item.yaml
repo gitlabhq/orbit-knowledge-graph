@@ -152,7 +152,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: work_items
   edges:
     author_id:

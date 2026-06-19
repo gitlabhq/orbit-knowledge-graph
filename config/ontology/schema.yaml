@@ -217,7 +217,6 @@ settings:
     exclude:
       - {node: Note, columns: [st_diff]}
   internal_column_prefix: "_gkg_"
-  skip_security_filter_for_entities: [User, Runner]
   local_db:
     entities:
       - name: Directory

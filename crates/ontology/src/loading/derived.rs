@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::OntologyError;
 use crate::entities::DerivedEntity;
-use crate::etl::DEFAULT_TRANSFORM;
+use crate::etl::{DEFAULT_TRANSFORM, EtlScope};
 use crate::loading::EtlSettings;
 use crate::loading::node::EtlYaml;
 
@@ -12,6 +12,8 @@ pub(crate) struct DerivedYaml {
     name: Option<String>,
     #[serde(default)]
     emits: Vec<String>,
+    #[serde(default)]
+    global: bool,
     etl: EtlYaml,
 }
 
@@ -40,7 +42,12 @@ impl DerivedYaml {
             }
         };
 
-        let etl = self.etl.into_config(&name, etl_settings)?;
+        let scope = if self.global {
+            EtlScope::Global
+        } else {
+            EtlScope::Namespaced
+        };
+        let etl = self.etl.into_config(&name, etl_settings, scope)?;
         Ok(DerivedEntity {
             name,
             emits: self.emits,

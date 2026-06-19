@@ -103,7 +103,6 @@ properties:
 
 etl:
   type: table
-  scope: global
   source: siphon_ci_runners
   order_by: [id, runner_type]
 

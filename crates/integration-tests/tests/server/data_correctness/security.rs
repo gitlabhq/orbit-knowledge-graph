@@ -1547,8 +1547,8 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
 // ─────────────────────────────────────────────────────────────────────────────
 // Aggregation: globally-scoped entity guard (work_items/347)
 //
-// The User entity has no traversal_path column and is listed in
-// skip_security_filter_for_entities, so direct aggregation on User alone
+// The User entity has no traversal_path column and is a `global` node, so it
+// skips the traversal_path filter; direct aggregation on User alone
 // would bypass both the traversal_path filter and the post-query Rails
 // redaction layer (aggregation results are row-less). Reject at compile
 // time unless the query contains at least one traversal_path-scoped node.

@@ -71,7 +71,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_container_repositories
   order_by: [traversal_path, id]
   edges:

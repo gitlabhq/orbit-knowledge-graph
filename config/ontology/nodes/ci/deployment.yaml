@@ -143,7 +143,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_deployments
   edges:
     project_id:

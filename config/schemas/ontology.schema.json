@@ -270,7 +270,6 @@
           "description": "Table ETL: simple extraction from a single source table.",
           "properties": {
             "type": { "type": "string", "const": "table" },
-            "scope": { "$ref": "#/definitions/etlScope" },
             "source": {
               "type": "string",
               "description": "Source table name."
@@ -309,14 +308,13 @@
               }
             }
           },
-          "required": ["type", "scope", "source"],
+          "required": ["type", "source"],
           "additionalProperties": false
         },
         {
           "description": "Query ETL: structured extraction with JOINs and custom conditions.",
           "properties": {
             "type": { "type": "string", "const": "query" },
-            "scope": { "$ref": "#/definitions/etlScope" },
             "source": {
               "type": "string",
               "description": "Underlying primary table."
@@ -413,7 +411,7 @@
               }
             }
           },
-          "required": ["type", "scope", "source", "select", "from"],
+          "required": ["type", "source", "select", "from"],
           "additionalProperties": false
         }
       ]
@@ -623,11 +621,6 @@
           "pattern": "^_[a-z_]+$",
           "minLength": 5,
           "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
-        },
-        "skip_security_filter_for_entities": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
         },
         "local_db": {
           "type": "object",
@@ -1134,6 +1127,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Edge relationship kinds this entity is expected to emit (informational)."
+        },
+        "global": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the entity is non-namespaced and indexed globally rather than per-namespace. Defaults to false (namespaced). Mirrors the node-level `global` flag."
         },
         "etl": { "$ref": "#/definitions/etlConfig" }
       },
