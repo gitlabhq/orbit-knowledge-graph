@@ -1,106 +1,31 @@
-//! Centralized URI-length guard for datalake queries.
+//! Measures the request URI `clickhouse::Query::do_execute` would dispatch, so
+//! a caller can reject an over-cap query before `http` rejects it with an opaque
+//! "uri too long" and re-fails every retry (KG#881).
 //!
-//! Every batched datalake lookup turns its params into named ClickHouse
-//! `param_*` settings that `clickhouse 0.15` percent-encodes into the request
-//! URL at dispatch (`Query::do_execute`). The `http` crate caps a URI at
-//! [`MAX_REQUEST_URI_LEN`] bytes and rejects anything longer with an opaque `uri
-//! too long`: the production stall in KG#881, where a batched routes lookup
-//! overflowed the cap and re-failed every dispatch.
-//!
-//! [`request_uri_len`] reproduces that URL so a caller can reject an over-limit
-//! request before it reaches `hyper`/`http`. Two compounding encoders make the
-//! **encoded** length, not the raw param bytes, the thing to measure:
-//!
-//! 1. ClickHouse param serialization (`clickhouse::sql::ser::ParamSerializer`):
-//!    an array becomes `['a','b',...]`, with `'` and `\` backslash-doubled.
-//! 2. URL percent-encoding (`url`, via `query_pairs_mut`), as `do_execute`
-//!    builds the dispatched URL.
-//!
-//! `'` and `\` are doubled by stage 1 *then* tripled by stage 2 (6 bytes per raw
-//! byte), so a naive raw-byte proxy undercounts the wire size (KG !1822 review,
-//! §3). The measured URL also includes the client's compression flag and query
-//! settings (`scaffold_pairs`), which `do_execute` appends and `http` counts.
+//! Two encoders compound: ClickHouse param serialization (an array becomes
+//! `['a','b']`, with `'` and `\` backslash-doubled) then `url` percent-encoding,
+//! so `'`/`\` cost 6 bytes each and a raw-byte proxy undercounts the wire size.
+//! Driven by `ArrowClickHouseClient`, which feeds its own `base_url`,
+//! `database`, and scaffold pairs.
 
 use serde_json::Value;
 use url::Url;
 
-/// The client-level URI components that [`request_uri_len`] and
-/// [`chunk_params_to_fit_uri`] need to measure a query's serialized URI.
-///
-/// Captures `base_url`, `database`, and the `scaffold_pairs` (compression flag +
-/// query settings) at client construction time so they can be threaded to any
-/// call site that needs URI-aware chunking without carrying three loose values.
-/// Build one from an [`ArrowClickHouseClient`] via [`UriContext::from_client`].
-///
-/// [`ArrowClickHouseClient`]: crate::ArrowClickHouseClient
-#[derive(Debug, Clone)]
-pub struct UriContext {
-    pub base_url: String,
-    pub database: String,
-    pub scaffold_pairs: Vec<(String, String)>,
-}
-
-impl UriContext {
-    /// Snapshot the URI context from a live client.
-    pub fn from_client(client: &crate::ArrowClickHouseClient) -> Self {
-        Self {
-            base_url: client.base_url().to_string(),
-            database: client.database().to_string(),
-            scaffold_pairs: client.request_scaffold_pairs(),
-        }
-    }
-
-    /// Convenience: measure the URI for `sql_params` using this context.
-    pub fn request_uri_len(&self, sql_params: &Value) -> usize {
-        request_uri_len(
-            &self.base_url,
-            &self.database,
-            &self.scaffold_pairs,
-            sql_params,
-        )
-    }
-
-    /// Convenience: chunk `items` using this context and [`MAX_REQUEST_URI_LEN`].
-    pub fn chunk_params<'a, T>(
-        &self,
-        items: &'a [T],
-        build_params: impl Fn(&[T]) -> Value,
-    ) -> Vec<&'a [T]> {
-        chunk_params_to_fit_uri(
-            &self.base_url,
-            &self.database,
-            &self.scaffold_pairs,
-            items,
-            build_params,
-            MAX_REQUEST_URI_LEN,
-        )
-    }
-}
-
 /// Maximum request-URI length, in bytes, that the `http` crate accepts.
 ///
-/// `http`'s `Uri::from_shared` rejects any URI whose serialized length exceeds
-/// `MAX_LEN = (u16::MAX - 1) = 65534` with `ErrorKind::TooLong` ("uri too
-/// long"). This is the single source of truth for the cap; the limit is the
-/// length of the whole URI string (scheme + authority + path + query), which is
-/// what we measure below.
+/// `http`'s `Uri::from_shared` rejects any URI longer than `MAX_LEN =
+/// u16::MAX - 1 = 65534` with `ErrorKind::TooLong`; the cap is the whole URI
+/// string (scheme + authority + path + query).
 pub const MAX_REQUEST_URI_LEN: usize = 65534;
 
-/// Compute the byte length of the request URI that a fetch of `sql_params`
-/// against `base_url`/`database` will serialize to on the wire.
+/// Byte length of the request URI a fetch of `sql_params` against
+/// `base_url`/`database` serializes to on the wire.
 ///
-/// Reproduces the URL `clickhouse::query::Query::do_execute` builds: it appends
-/// `default_format`, `database`, every pair in `scaffold_pairs` (the client's
-/// compression flag, baseline query settings, and any `session_settings` /
-/// `roles`; see [`ArrowClickHouseClient::request_scaffold_pairs`]), then one
-/// `param_<name>` pair per object entry, all via the same `url` crate, and
-/// returns `url.as_str().len()`. Omitting `scaffold_pairs` would undercount the
-/// real URI (the B1 gap: ~206 bytes of baseline settings plus the open-ended
-/// session settings the client sends but a params-only measure ignores). The SQL
-/// body is dispatched separately and does not count toward the URI cap.
-///
-/// [`ArrowClickHouseClient::request_scaffold_pairs`]: crate::ArrowClickHouseClient::request_scaffold_pairs
-pub fn request_uri_len(
+/// Reproduces the URL `do_execute` builds: `default_format`, `database`, every
+/// `scaffold_pairs` entry, then one `param_<name>` pair per object entry, all
+/// via the same `url` crate. The SQL body dispatches separately and does not
+/// count toward the URI cap.
+pub(crate) fn measure_uri(
     base_url: &str,
     database: &str,
     scaffold_pairs: &[(String, String)],
@@ -108,9 +33,8 @@ pub fn request_uri_len(
 ) -> usize {
     let mut url = match Url::parse(base_url) {
         Ok(url) => url,
-        // A malformed base URL is a configuration bug, not a per-query data
-        // problem; fall back to the raw length so the guard never panics on the
-        // data path. In practice `base_url` is the validated client URL.
+        // A malformed base URL is a configuration bug, not per-query data, so
+        // never panic on the data path.
         Err(_) => return base_url.len(),
     };
 
@@ -136,46 +60,29 @@ pub fn request_uri_len(
     url.as_str().len()
 }
 
-/// Whether the request URI for `sql_params` would exceed [`MAX_REQUEST_URI_LEN`].
+/// `Some(len)` when the URI for `sql_params` would exceed
+/// [`MAX_REQUEST_URI_LEN`], `None` when it fits.
 ///
-/// Returns `Some(len)` with the measured length when over the cap, `None` when
-/// it fits (`len <= MAX_REQUEST_URI_LEN`). Strictly-over fails; a URI exactly at
-/// the cap passes, matching `http`'s `s.len() > MAX_LEN` boundary.
-pub fn request_uri_overflow(
+/// Strictly-over fails; a URI exactly at the cap passes, matching `http`'s
+/// `s.len() > MAX_LEN` boundary.
+pub(crate) fn overflow(
     base_url: &str,
     database: &str,
     scaffold_pairs: &[(String, String)],
     sql_params: &Value,
 ) -> Option<usize> {
-    let len = request_uri_len(base_url, database, scaffold_pairs, sql_params);
+    let len = measure_uri(base_url, database, scaffold_pairs, sql_params);
     (len > MAX_REQUEST_URI_LEN).then_some(len)
 }
 
-/// Split `items` into the fewest chunks such that **every** chunk's serialized
-/// request URI stays at or under `max_uri_len` bytes.
+/// Split `items` into the fewest chunks whose serialized request URIs stay at
+/// or under `max_uri_len` bytes.
 ///
-/// `build_params` renders a sub-slice of `items` into the full
-/// `serde_json::Value` the query would send (including any fixed params like
-/// `root_prefix`). The chunker measures the *real* encoded URI via
-/// [`request_uri_len`] — escape-then-percent-encode, scaffold pairs, and all —
-/// so it is immune to the 3×-per-char undercount that a raw-byte proxy suffers
-/// on quote-heavy or backslash-heavy input (a `'` doubles then percent-encodes
-/// to 6 bytes, not 3).
-///
-/// The algorithm finds the maximum single-item encoded cost (measuring every
-/// item against the real encoder), divides the budget by that cost for the
-/// initial chunk-size estimate, then validates **every** produced chunk and
-/// shrinks `chunk_size` until all chunks fit. The per-item measurement is
-/// string-only (no I/O), and the validation loop typically converges in 0–1
-/// iterations (the only source of overshoot is the array separator overhead,
-/// a few bytes per item).
-///
-/// Returns at least one chunk even if the very first item alone overflows (there
-/// is no smaller split possible); the downstream [`build_query`] guard will
-/// catch that single-item overflow.
-///
-/// [`build_query`]: crate (downstream `Datalake::build_query`)
-pub fn chunk_params_to_fit_uri<'a, T>(
+/// `build_params` renders a sub-slice into the full `Value` the query sends
+/// (including fixed params like `root_prefix`). Returns at least one chunk even
+/// when the first item alone overflows; the downstream `build_query` guard
+/// catches that single-item overflow.
+pub(crate) fn chunk_to_fit<'a, T>(
     base_url: &str,
     database: &str,
     scaffold_pairs: &[(String, String)],
@@ -187,12 +94,12 @@ pub fn chunk_params_to_fit_uri<'a, T>(
         return Vec::new();
     }
 
-    let full_len = request_uri_len(base_url, database, scaffold_pairs, &build_params(items));
+    let full_len = measure_uri(base_url, database, scaffold_pairs, &build_params(items));
     if full_len <= max_uri_len {
         return vec![items];
     }
 
-    let baseline_len = request_uri_len(
+    let baseline_len = measure_uri(
         base_url,
         database,
         scaffold_pairs,
@@ -200,12 +107,11 @@ pub fn chunk_params_to_fit_uri<'a, T>(
     );
     let budget = max_uri_len.saturating_sub(baseline_len);
 
-    // Find the maximum single-item encoded cost across all items.
     let max_item_cost = items
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            let one_len = request_uri_len(
+            let one_len = measure_uri(
                 base_url,
                 database,
                 scaffold_pairs,
@@ -219,14 +125,12 @@ pub fn chunk_params_to_fit_uri<'a, T>(
 
     let mut chunk_size = (budget / max_item_cost).max(1);
 
-    // Validate every chunk, not just the first: the solo-measured cost misses
-    // the per-item array separator (`,` → `%2C`, 3 bytes) that each item after
-    // the first adds inside a packed chunk. With mixed-cost items a later chunk
-    // of costlier items can overflow even though the first-chunk probe passes.
-    // Shrink until all chunks fit.
+    // The solo-measured cost misses the per-item array separator (`,` → `%2C`)
+    // that each item after the first adds, so a later chunk of costlier items
+    // can overflow even when the first-chunk probe passed. Shrink until all fit.
     while chunk_size > 1 {
         let all_fit = items.chunks(chunk_size).all(|chunk| {
-            request_uri_len(base_url, database, scaffold_pairs, &build_params(chunk)) <= max_uri_len
+            measure_uri(base_url, database, scaffold_pairs, &build_params(chunk)) <= max_uri_len
         });
         if all_fit {
             break;
@@ -239,7 +143,7 @@ pub fn chunk_params_to_fit_uri<'a, T>(
 
 /// A `serde_json::Value` rendered the way `ParamSerializer` would, before
 /// percent-encoding. Mirrors `clickhouse::sql::ser` for the JSON value domain
-/// that flows through datalake params (the only `Value` variants used there).
+/// datalake params use.
 enum ParamRepr {
     Scalar(String),
     Null,
@@ -261,7 +165,6 @@ fn value_into_param(value: &Value) -> ParamRepr {
     }
 }
 
-/// Nested (inside-array) rendering: strings are single-quoted, unlike top level.
 fn value_into_nested(value: &Value) -> ParamRepr {
     match value {
         Value::String(s) => ParamRepr::QuotedScalar(s.clone()),
@@ -293,17 +196,16 @@ fn write_param(repr: &ParamRepr, out: &mut String) {
 }
 
 /// Backslash-escape the characters ClickHouse's string escaper doubles
-/// (`clickhouse::sql::escape::escape`): `\ ' \` \t \n`. These doublings are what
-/// defeat a naive 3x percent-encoding factor, so they must be reproduced here to
-/// measure the true wire length.
+/// (`clickhouse::sql::escape::escape`): `\ ' \` \t \n`. These doublings defeat a
+/// naive 3x percent-encoding factor, so they must be reproduced to measure the
+/// true wire length.
 ///
-/// This and the `write_param`/`value_into_*` replica mirror
-/// `clickhouse::sql::ser::ParamSerializer`, which is not public, so it cannot be
-/// round-tripped against directly. Mirrored from **clickhouse 0.15.1** (pinned
-/// `clickhouse = "0.15"`); `quoted_element_matches_clickhouse_escape_string_fixture`
-/// pins the output to that version's `escape::string` test. Re-verify the
-/// `REPLACE` set and the array/quote framing against `sql/ser.rs` + `sql/escape.rs`
-/// on any `clickhouse` bump.
+/// Mirrors the non-public `clickhouse::sql::ser::ParamSerializer` from
+/// **clickhouse 0.15.1** (pinned `clickhouse = "0.15"`);
+/// `quoted_element_matches_clickhouse_escape_string_fixture` pins the output to
+/// that version's `escape::string` test. Re-verify the `REPLACE` set and the
+/// array/quote framing against `sql/ser.rs` + `sql/escape.rs` on any
+/// `clickhouse` bump.
 fn escape(src: &str, out: &mut String) {
     const REPLACE: &[char] = &['\\', '\'', '`', '\t', '\n'];
     let mut rest = src;
@@ -335,7 +237,7 @@ mod tests {
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
-        client.request_scaffold_pairs()
+        client.scaffold_pairs()
     }
 
     #[test]
@@ -345,20 +247,19 @@ mod tests {
 
     #[test]
     fn no_scaffold_measures_only_format_and_database() {
-        let len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({}));
+        let len = measure_uri(BASE, DB, NO_SCAFFOLD, &json!({}));
         let expected = "http://clickhouse:8123/?default_format=ArrowStream&database=datalake".len();
         assert_eq!(len, expected);
     }
 
-    // B1 regression: the client's compression flag and baseline query settings
-    // are on the wire and `http` counts them, so the measured scaffold must
-    // grow by exactly their encoded `&name=value` framing. Pins that the guard
-    // includes them (omitting them is what let the guard under-report the URI).
+    // The client's compression flag and baseline query settings are on the wire
+    // and `http` counts them, so the measured scaffold must grow by exactly
+    // their encoded `&name=value` framing; omitting them under-reports the URI.
     #[test]
     fn scaffold_pairs_add_the_client_settings_to_the_measure() {
-        let base = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({}));
+        let base = measure_uri(BASE, DB, NO_SCAFFOLD, &json!({}));
         let scaffold = baseline_scaffold();
-        let with_settings = request_uri_len(BASE, DB, &scaffold, &json!({}));
+        let with_settings = measure_uri(BASE, DB, &scaffold, &json!({}));
 
         let expected_extra: usize = scaffold
             .iter()
@@ -422,11 +323,10 @@ mod tests {
     fn quote_heavy_input_measures_larger_encoded_than_raw() {
         let raw_heavy: String = std::iter::repeat_n('\'', 500).collect();
         let plain: String = std::iter::repeat_n('a', 500).collect();
-        let heavy_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [raw_heavy] }));
-        let plain_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [plain] }));
+        let heavy_len = measure_uri(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [raw_heavy] }));
+        let plain_len = measure_uri(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [plain] }));
         // Same raw byte count, but `'` is doubled then percent-encoded, so the
-        // quote-heavy URI must be materially longer, the exact effect a
-        // raw-byte proxy would miss.
+        // quote-heavy URI must be materially longer.
         assert!(
             heavy_len > plain_len,
             "quote-heavy {heavy_len} should exceed plain {plain_len}"
@@ -435,11 +335,11 @@ mod tests {
 
     #[test]
     fn overflow_is_strictly_over_the_cap() {
-        let small = request_uri_overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": ["x"] }));
+        let small = overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": ["x"] }));
         assert_eq!(small, None);
 
         let huge_path: String = std::iter::repeat_n('a', 70_000).collect();
-        let over = request_uri_overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [huge_path] }));
+        let over = overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [huge_path] }));
         assert!(matches!(over, Some(len) if len > MAX_REQUEST_URI_LEN));
     }
 
@@ -450,7 +350,7 @@ mod tests {
     #[test]
     fn chunk_params_returns_single_chunk_when_all_fit() {
         let paths = vec!["group/project-1", "group/project-2"];
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -465,7 +365,7 @@ mod tests {
     #[test]
     fn chunk_params_returns_empty_vec_for_empty_input() {
         let paths: Vec<&str> = Vec::new();
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -480,7 +380,7 @@ mod tests {
     fn chunk_params_splits_when_batch_overflows() {
         let path = "a".repeat(200);
         let paths: Vec<&str> = std::iter::repeat_n(path.as_str(), 1_000).collect();
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -492,7 +392,7 @@ mod tests {
         let total: usize = chunks.iter().map(|c| c.len()).sum();
         assert_eq!(total, 1_000);
         for chunk in &chunks {
-            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            let uri_len = measure_uri(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
             assert!(
                 uri_len <= MAX_REQUEST_URI_LEN,
                 "chunk URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap"
@@ -500,16 +400,14 @@ mod tests {
         }
     }
 
-    // The old 3×/char estimate would produce chunks that overflow on
-    // all-single-quote paths because `'` doubles to `\'` (ClickHouse escape)
-    // then percent-encodes to `%5C%27` — 6 bytes per raw byte. This test
-    // asserts the real-measurement chunker keeps every chunk under the cap.
+    // `'` doubles to `\'` then percent-encodes to `%5C%27` — 6 bytes per raw
+    // byte — so a 3×/char estimate would pack chunks that overflow on the wire.
     #[test]
     fn chunk_params_handles_adversarial_quote_heavy_paths() {
         let quote_heavy: String = std::iter::repeat_n('\'', 300).collect();
         let paths: Vec<&str> = std::iter::repeat_n(quote_heavy.as_str(), 200).collect();
 
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -526,7 +424,7 @@ mod tests {
         assert_eq!(total, 200);
 
         for (i, chunk) in chunks.iter().enumerate() {
-            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            let uri_len = measure_uri(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
             assert!(
                 uri_len <= MAX_REQUEST_URI_LEN,
                 "chunk {i} URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap"
@@ -537,11 +435,9 @@ mod tests {
     #[test]
     fn chunk_params_with_low_cap_produces_single_item_chunks() {
         let paths = vec!["group/project-1", "group/project-2", "group/project-3"];
-        let tiny_cap =
-            request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths[..1])) + 1;
+        let tiny_cap = measure_uri(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths[..1])) + 1;
 
-        let chunks =
-            chunk_params_to_fit_uri(BASE, DB, NO_SCAFFOLD, &paths, routes_build_params, tiny_cap);
+        let chunks = chunk_to_fit(BASE, DB, NO_SCAFFOLD, &paths, routes_build_params, tiny_cap);
 
         assert_eq!(chunks.len(), 3);
         for chunk in &chunks {
@@ -555,12 +451,11 @@ mod tests {
         let paths = vec![huge_path.as_str()];
 
         assert!(
-            request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths))
-                > MAX_REQUEST_URI_LEN,
+            measure_uri(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths)) > MAX_REQUEST_URI_LEN,
             "precondition: the single item must overflow alone"
         );
 
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -573,16 +468,11 @@ mod tests {
         assert_eq!(chunks[0].len(), 1);
     }
 
-    // Regression for the later-chunk overflow: the solo-measured max_item_cost
-    // misses the array separator (`,` → `%2C`, +3 bytes) that every item after
-    // the first adds. With a cheap first item followed by costlier items, the
-    // first-chunk probe passed but a later full-size chunk of costlier items
-    // overflowed. The fix validates every chunk, not just the first.
+    // The solo-measured max_item_cost misses the array separator (`,` → `%2C`,
+    // +3 bytes) each item after the first adds, so a cheap first item followed
+    // by costlier items let chunk 0 fit but a later full-size chunk overflow.
     #[test]
     fn chunk_params_mixed_cost_items_all_chunks_fit() {
-        // One cheaper item then many costlier items, reproducing the reviewer's
-        // scenario where chunk 0 (containing the cheap item) fit but chunk 1
-        // (all costly items) overflowed by the separator margin.
         let cheap: String = std::iter::repeat_n('\'', 361).collect();
         let costly: String = std::iter::repeat_n('\'', 362).collect();
         let mut paths: Vec<&str> = Vec::with_capacity(4001);
@@ -591,7 +481,7 @@ mod tests {
             paths.push(costly.as_str());
         }
 
-        let chunks = chunk_params_to_fit_uri(
+        let chunks = chunk_to_fit(
             BASE,
             DB,
             NO_SCAFFOLD,
@@ -605,7 +495,7 @@ mod tests {
         assert_eq!(total, 4001);
 
         for (i, chunk) in chunks.iter().enumerate() {
-            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            let uri_len = measure_uri(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
             assert!(
                 uri_len <= MAX_REQUEST_URI_LEN,
                 "chunk {i} ({} items) URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap",

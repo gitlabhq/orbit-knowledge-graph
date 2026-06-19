@@ -25,7 +25,7 @@ use crate::error::ClickHouseError;
 /// The settings every read query carries, seeded on the underlying
 /// `clickhouse::Client`. `do_execute` appends one URL query pair per entry, so
 /// they count toward the request-URI length the `http` crate caps; the URI
-/// guard measures them via [`ArrowClickHouseClient::request_scaffold_pairs`].
+/// measurement on the client includes them via `scaffold_pairs`.
 const BASELINE_QUERY_SETTINGS: &[(&str, &str)] = &[
     ("output_format_arrow_string_as_string", "1"),
     ("output_format_arrow_fixed_string_as_fixed_byte_array", "1"),
@@ -89,25 +89,55 @@ impl ArrowClickHouseClient {
         &self.database
     }
 
-    /// The base ClickHouse HTTP URL (scheme + authority), used to measure the
-    /// serialized request URI against the `http` crate's length cap. See
-    /// [`crate::uri_guard`].
-    pub fn base_url(&self) -> &str {
-        &self.base_url
+    /// Byte length of the request URI `do_execute` would dispatch for
+    /// `sql_params`, faithful to both encoding stages (ClickHouse param
+    /// serialization → url-crate percent-encoding) and all scaffold pairs.
+    pub fn request_uri_len(&self, sql_params: &Value) -> usize {
+        crate::uri_len::measure_uri(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs(),
+            sql_params,
+        )
     }
 
-    /// The URL query pairs `clickhouse::Query::do_execute` appends to every read
-    /// request *besides* `default_format`, `database`, and the per-query
-    /// `param_*` settings: the compression flag and the seeded query settings
-    /// (baseline + `session_settings`). The URI guard sums these so it measures
-    /// the same bytes `http` sees, not just the params (see [`crate::uri_guard`]
-    /// and the B1 gap they close).
-    ///
-    /// `new` never overrides compression, so the client keeps the
-    /// `clickhouse::Compression` default (LZ4 with the `lz4` feature on), which
-    /// `do_execute` serializes as `compress=1`. `roles` are never set here, so
-    /// none are emitted.
-    pub fn request_scaffold_pairs(&self) -> Vec<(String, String)> {
+    /// `Some(len)` when the URI for `sql_params` would exceed
+    /// [`MAX_REQUEST_URI_LEN`](crate::MAX_REQUEST_URI_LEN), `None` when it fits.
+    pub fn request_uri_overflow(&self, sql_params: &Value) -> Option<usize> {
+        crate::uri_len::overflow(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs(),
+            sql_params,
+        )
+    }
+
+    /// Split `items` into the fewest chunks whose serialized request URIs stay
+    /// at or under `max_uri_len`. `build_params` renders a sub-slice into the
+    /// full `Value` the query sends.
+    pub fn chunk_params_to_fit_uri<'a, T>(
+        &self,
+        items: &'a [T],
+        build_params: impl Fn(&[T]) -> Value,
+        max_uri_len: usize,
+    ) -> Vec<&'a [T]> {
+        crate::uri_len::chunk_to_fit(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs(),
+            items,
+            build_params,
+            max_uri_len,
+        )
+    }
+
+    /// The URL query pairs `do_execute` appends to every read request besides
+    /// `default_format`, `database`, and the per-query `param_*` settings: the
+    /// compression flag and the seeded query settings (baseline +
+    /// `session_settings`). `new` never overrides compression, so the client
+    /// keeps the `clickhouse::Compression` default (LZ4 with the `lz4` feature
+    /// on), serialized as `compress=1`; `roles` are never set, so none emit.
+    pub(crate) fn scaffold_pairs(&self) -> Vec<(String, String)> {
         let mut pairs = Vec::with_capacity(self.query_settings.len() + 1);
         pairs.push(("compress".to_string(), "1".to_string()));
         pairs.extend(self.query_settings.iter().cloned());
@@ -644,5 +674,51 @@ mod tests {
             client.build_insert_sql_with_overrides("t", &overrides),
             "INSERT INTO t SETTINGS async_insert=1, wait_for_async_insert=1 FORMAT ArrowStream"
         );
+    }
+
+    #[test]
+    fn request_uri_len_includes_the_clients_scaffold_pairs() {
+        let client = client_with_settings(HashMap::new());
+        let len = client.request_uri_len(&serde_json::json!({}));
+        let scaffold_extra: usize = client
+            .scaffold_pairs()
+            .iter()
+            .map(|(k, v)| format!("&{k}={v}").len())
+            .sum();
+        let bare = "http://localhost:8123/?default_format=ArrowStream&database=default".len();
+        assert_eq!(len, bare + scaffold_extra);
+    }
+
+    #[test]
+    fn request_uri_overflow_flags_an_oversized_param() {
+        let client = client_with_settings(HashMap::new());
+        assert_eq!(
+            client.request_uri_overflow(&serde_json::json!({ "p": "x" })),
+            None
+        );
+        let huge: String = std::iter::repeat_n('a', 70_000).collect();
+        assert!(matches!(
+            client.request_uri_overflow(&serde_json::json!({ "p": huge })),
+            Some(len) if len > crate::MAX_REQUEST_URI_LEN
+        ));
+    }
+
+    #[test]
+    fn chunk_params_to_fit_uri_splits_an_oversized_batch() {
+        let client = client_with_settings(HashMap::new());
+        let path = "a".repeat(200);
+        let paths: Vec<&str> = std::iter::repeat_n(path.as_str(), 1_000).collect();
+        let chunks = client.chunk_params_to_fit_uri(
+            &paths,
+            |chunk| serde_json::json!({ "paths": chunk }),
+            crate::MAX_REQUEST_URI_LEN,
+        );
+        assert!(chunks.len() > 1);
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(total, 1_000);
+        for chunk in &chunks {
+            let len = client.request_uri_len(&serde_json::json!({ "paths": chunk }));
+            assert!(len <= crate::MAX_REQUEST_URI_LEN);
+        }
     }
 }

@@ -37,10 +37,9 @@ pub async fn register_handlers(
 
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
-    let uri_ctx = clickhouse_client::uri_guard::UriContext::from_client(&datalake_client);
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
-        datalake_client,
+        Arc::clone(&datalake_client),
         entity_handler_config.stream_block_size,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
@@ -65,7 +64,7 @@ pub async fn register_handlers(
         transform::system_notes::register(
             &mut transform_registry,
             Arc::clone(&datalake),
-            uri_ctx.clone(),
+            Arc::clone(&datalake_client),
             ontology.edge_table(),
             entity_handler_config.system_notes_resolve_lookup_batch_size,
         );
