@@ -555,11 +555,15 @@ mod tests {
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
 
     fn test_uri_ctx() -> UriContext {
-        UriContext {
-            base_url: "http://clickhouse:8123".to_string(),
-            database: "datalake".to_string(),
-            scaffold_pairs: Vec::new(),
-        }
+        let client = clickhouse_client::ArrowClickHouseClient::new(
+            "http://clickhouse:8123",
+            "datalake",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        UriContext::from_client(&client)
     }
 
     fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {

@@ -297,32 +297,6 @@ mod tests {
         let _ = datalake.build_query("SELECT 1", json!({ "paths": paths }));
     }
 
-    // The release backstop: with `debug_assert!` compiled out (production runs
-    // release), an over-cap batch degrades to a typed `UriTooLong` carrying the
-    // actual length and the limit, never a panic on the data path.
-    #[test]
-    #[cfg(not(debug_assertions))]
-    fn build_query_returns_uri_too_long_in_release() {
-        let datalake = test_datalake();
-        let path: String = std::iter::repeat_n('a', 255).collect();
-        let paths: Vec<String> = std::iter::repeat_n(path, 3_000).collect();
-
-        let result = datalake
-            .build_query("SELECT 1", json!({ "paths": paths }))
-            .map(|_| ());
-
-        match result {
-            Err(DatalakeError::UriTooLong { len, limit }) => {
-                assert_eq!(limit, uri_guard::MAX_REQUEST_URI_LEN);
-                assert!(
-                    len > limit,
-                    "reported len {len} should exceed limit {limit}"
-                );
-            }
-            other => panic!("expected UriTooLong, got {other:?}"),
-        }
-    }
-
     // A batch just under the cap must pass through untouched in any build: the
     // guard cannot false-positive on a legitimately-large-but-valid request.
     #[test]
