@@ -56,6 +56,7 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - local: .gitlab/ci/release-local.yml
   - local: .gitlab/ci/stale-mr.yml
+  - local: .gitlab/ci/comment-guard.yml
   - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
     ref: '3.3.0'
     file: 'templates/gcp_auth.yaml'
@@ -168,49 +169,9 @@ agent-file-sync-check:
   script:
     - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
 
-# Narration-comment lint (task #2933). Dependency-free Python scorer
-# (scripts/narration_score.py); also runs as a lefthook pre-commit hook
-# (AGENTS.md "prefer build-time validation"). The script exits non-zero
-# when narration flags are found; allow_failure keeps this advisory (yellow)
-# for now — remove it to promote to a blocking gate.
-#
-# On merge_request_event pipelines: scoped to lines the MR added/changed
-# (--diff-base), so pre-existing legacy narration is not noise.
-# On main: whole-tree scan (no MR diff available).
-lint:narration:
-  stage: lint
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-and-main-rules
-  needs: []
-  allow_failure: true
-  script:
-    - apk add --no-cache bash git
-    - |
-      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
-        bash ./scripts/check-narration.sh --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
-      else
-        bash ./scripts/check-narration.sh
-      fi
-
-# MR-description headline gate (task #2933). Reads the description from the
-# predefined CI_MERGE_REQUEST_DESCRIPTION variable (no API token needed).
-# The script exits non-zero on FAIL; allow_failure keeps this advisory
-# (yellow) for now — remove it to promote to a blocking gate.
-lint:mr-description:
-  stage: lint
-  image: python:3.12-alpine
-  tags:
-    - saas-linux-medium-amd64
-  extends:
-    - .mr-only-rules
-  needs: []
-  allow_failure: true
-  script:
-    - apk add --no-cache bash
-    - bash ./scripts/check-mr-description.sh
+# comment-guard lint gates (lint:narration, lint:mr-description) live in
+# .gitlab/ci/comment-guard.yml (included above) — kept self-contained so the
+# whole feature is removable as a unit. See scripts/comment-guard/README.md.
 
 mr-title-check:
   stage: lint

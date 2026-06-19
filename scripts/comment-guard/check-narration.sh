@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Narration-comment lint for Rust sources.
 #
-# Runs scripts/narration_score.py over the given .rs files (or, with no args,
+# Runs narration_score.py (co-located) over the given .rs files (or, with no args,
 # the whole crates/ tree) and prints any flagged narration comments. A comment
 # is narration when it restates the next line / labels a block with no "why"
 # content (see AGENTS.md "Code quality"). This is the primary, higher-precision
-# lint; lint/ast-grep/narration-comments.yml is a lower-precision fallback.
+# lint; narration-comments.yml (co-located) is a lower-precision fallback.
 #
 # Exit codes: non-zero when narration flags are found OR when the scorer
 # itself errors; zero only on a genuinely clean run. Blocking-ness is
@@ -14,11 +14,11 @@
 #
 # Modes:
 #   Whole-tree / explicit files (lefthook, main-branch CI):
-#     scripts/check-narration.sh                 # scan crates/
-#     scripts/check-narration.sh a.rs b.rs ...   # scan specific files
+#     scripts/comment-guard/check-narration.sh                 # scan crates/
+#     scripts/comment-guard/check-narration.sh a.rs b.rs ...   # scan specific files
 #
 #   MR-diff-scoped (merge_request CI pipelines):
-#     scripts/check-narration.sh --diff-base <sha>
+#     scripts/comment-guard/check-narration.sh --diff-base <sha>
 #     Scans only .rs files changed since <sha> and reports only flags on
 #     added/modified lines, so pre-existing legacy narration is not noise.
 #     Errors out (exit 2) if the base SHA is unreachable — never silently
@@ -112,15 +112,21 @@ for f in "${files[@]}"; do
     # Capture the scorer's exit status: 0 = clean, 1 = flags found (output
     # contains the flagged lines), >=2 = usage/crash error. Command
     # substitution does not trigger pipefail, so $? is the scorer's real exit.
-    # In diff-scoped mode, suppress the scorer's per-file stderr header
-    # ("# file: N narration comment(s)") — it shows the whole-file count
-    # which would contradict the filtered diff-scoped count.
+    # In diff-scoped mode, drop only the scorer's per-file summary header
+    # ("# <file>: N narration comment(s)") — it shows the whole-file count
+    # which would contradict the filtered diff-scoped count — while still
+    # surfacing any real stderr (tracebacks, import errors) so a crashing
+    # scorer is diagnosable in CI instead of silently swallowed.
     if [ -n "$DIFF_BASE" ]; then
-        out="$(python3 "$SCORER" "$f" 2>/dev/null)"
+        err_file="$(mktemp)"
+        out="$(python3 "$SCORER" "$f" 2>"$err_file")"
+        rc=$?
+        grep -v ' narration comment(s)$' "$err_file" >&2 || true
+        rm -f "$err_file"
     else
         out="$(python3 "$SCORER" "$f")"
+        rc=$?
     fi
-    rc=$?
     if [ "$rc" -ge 2 ]; then
         scorer_errors=$((scorer_errors + 1))
         continue

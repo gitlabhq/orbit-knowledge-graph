@@ -2,7 +2,7 @@
 # MR-description headline gate.
 #
 # Scores the headline section ("What does this MR do and why?") of the MR
-# description using scripts/score_description.py (research-tuned: word_cap=100,
+# description using score_description.py (co-located; research-tuned: word_cap=100,
 # span_cap=3, bare_idents<=3 with the v2 acronym/ref-aware regex).
 #
 # Sources the description from the predefined CI variable
@@ -36,7 +36,7 @@ if [ "${CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED:-}" = "true" ]; then
     # Check for <details (Agent context block) or a second ### heading.
     if printf '%s' "$DESC" | grep -q '<details'; then
         has_boundary=1
-    elif [ "$(printf '%s\n' "$DESC" | grep -c '^###\s')" -ge 2 ]; then
+    elif [ "$(printf '%s\n' "$DESC" | grep -cE '^### ')" -ge 2 ]; then
         has_boundary=1
     fi
     if [ -z "$has_boundary" ]; then

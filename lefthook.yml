@@ -29,7 +29,7 @@ pre-commit:
     # has no per-job allow_failure primitive — this is the standard workaround.)
     # To promote to a blocking gate, remove `|| true`.
     - name: narration
-      run: bash ./scripts/check-narration.sh {staged_files} || true
+      run: ./scripts/comment-guard/check-narration.sh {staged_files} || true
       glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md

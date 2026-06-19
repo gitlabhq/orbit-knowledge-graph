@@ -52,7 +52,7 @@ CAMEL = re.compile(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b")      # FooBar
 DOTPATH = re.compile(r"\b\w+(?:\.\w+){2,}\b")                      # a.b.c.d (>=3 segs)
 
 INLINE_CODE = re.compile(r"`[^`]+`")
-ISSUE_REF = re.compile(r"(Closes|Close|Fixes|Fix|Relates to|Related to|See)\s+[!#&][0-9]+",
+ISSUE_REF = re.compile(r"(Closes|Close|Fixes|Fix|Relates to|Related to|See)\s+[!#][0-9]+",
                        re.IGNORECASE)
 BARE_REF = re.compile(r"[!#][0-9]+")
 

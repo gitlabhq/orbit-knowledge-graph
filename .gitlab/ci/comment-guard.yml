@@ -1,0 +1,54 @@
+# comment-guard lint gates (task #2933).
+#
+# Deterministic gates that catch mechanical review feedback before it reaches a
+# human: a narration-comment scorer and an MR-description headline scorer. The
+# scorers and wrappers live in scripts/comment-guard/ and are documented in
+# scripts/comment-guard/README.md.
+#
+# Both jobs are advisory (allow_failure: true → yellow). The scripts exit
+# non-zero on findings; remove allow_failure here to promote a gate to blocking.
+#
+# This file is the CI half of the comment-guard kill-switch: deleting it plus
+# the scripts/comment-guard/ folder and the two one-line references (the
+# `- local:` include in .gitlab-ci.yml and the lefthook `narration` job) removes
+# the gates entirely.
+
+# Narration-comment lint. Dependency-free Python scorer
+# (scripts/comment-guard/narration_score.py); also runs as a lefthook
+# pre-commit hook (AGENTS.md "prefer build-time validation").
+#
+# On merge_request_event pipelines: scoped to lines the MR added/changed
+# (--diff-base), so pre-existing legacy narration is not noise.
+# On main: whole-tree scan (no MR diff available).
+lint:narration:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-and-main-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache bash git
+    - |
+      if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        bash ./scripts/comment-guard/check-narration.sh --diff-base "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      else
+        bash ./scripts/comment-guard/check-narration.sh
+      fi
+
+# MR-description headline gate. Reads the description from the predefined
+# CI_MERGE_REQUEST_DESCRIPTION variable (no API token needed).
+lint:mr-description:
+  stage: lint
+  image: python:3.12-alpine
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  allow_failure: true
+  script:
+    - apk add --no-cache bash
+    - bash ./scripts/comment-guard/check-mr-description.sh
