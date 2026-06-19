@@ -31,9 +31,13 @@ ci_skip_requested() {
 
     # Commit messages in the MR range. This is the reliable fallback
     # when the description was edited after the pipeline started.
-    # Fetch the merge base so the three-dot range resolves in shallow clones.
     if [[ -n "${BASE_REF:-}" ]]; then
-        git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1 2>/dev/null || true
+        # Fetch the merge base so the three-dot range resolves in shallow CI
+        # clones. Unset outside CI (e.g. local lefthook), where the full range
+        # is already present, so skip the fetch rather than tripping `set -u`.
+        if [[ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]]; then
+            git fetch origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --depth=1 2>/dev/null || true
+        fi
         # Buffer git log output before grepping to avoid SIGPIPE.
         # grep -q closes the pipe on first match, which SIGPIPEs the
         # producer (exit 141). Under set -o pipefail the pipeline takes
