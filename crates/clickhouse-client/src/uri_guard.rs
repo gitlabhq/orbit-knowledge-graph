@@ -151,7 +151,7 @@ pub fn request_uri_overflow(
     (len > MAX_REQUEST_URI_LEN).then_some(len)
 }
 
-/// Split `items` into the fewest chunks such that each chunk's serialized
+/// Split `items` into the fewest chunks such that **every** chunk's serialized
 /// request URI stays at or under `max_uri_len` bytes.
 ///
 /// `build_params` renders a sub-slice of `items` into the full
@@ -164,10 +164,11 @@ pub fn request_uri_overflow(
 ///
 /// The algorithm finds the maximum single-item encoded cost (measuring every
 /// item against the real encoder), divides the budget by that cost for the
-/// initial chunk-size estimate, then validates the first full chunk and adjusts
-/// downward if the estimate overshoots. For typical batches (hundreds to low
-/// thousands of items, each a project path or numeric pair) the per-item
-/// measurement is string-only, no I/O.
+/// initial chunk-size estimate, then validates **every** produced chunk and
+/// shrinks `chunk_size` until all chunks fit. The per-item measurement is
+/// string-only (no I/O), and the validation loop typically converges in 0–1
+/// iterations (the only source of overshoot is the array separator overhead,
+/// a few bytes per item).
 ///
 /// Returns at least one chunk even if the very first item alone overflows (there
 /// is no smaller split possible); the downstream [`build_query`] guard will
@@ -218,17 +219,16 @@ pub fn chunk_params_to_fit_uri<'a, T>(
 
     let mut chunk_size = (budget / max_item_cost).max(1);
 
-    // Validate: the estimate uses worst-case-per-item so it is almost always
-    // correct, but rounding can overshoot by one item. Shrink until the first
-    // chunk fits.
+    // Validate every chunk, not just the first: the solo-measured cost misses
+    // the per-item array separator (`,` → `%2C`, 3 bytes) that each item after
+    // the first adds inside a packed chunk. With mixed-cost items a later chunk
+    // of costlier items can overflow even though the first-chunk probe passes.
+    // Shrink until all chunks fit.
     while chunk_size > 1 {
-        let probe_len = request_uri_len(
-            base_url,
-            database,
-            scaffold_pairs,
-            &build_params(&items[..chunk_size.min(items.len())]),
-        );
-        if probe_len <= max_uri_len {
+        let all_fit = items.chunks(chunk_size).all(|chunk| {
+            request_uri_len(base_url, database, scaffold_pairs, &build_params(chunk)) <= max_uri_len
+        });
+        if all_fit {
             break;
         }
         chunk_size -= 1;
@@ -546,6 +546,71 @@ mod tests {
         assert_eq!(chunks.len(), 3);
         for chunk in &chunks {
             assert_eq!(chunk.len(), 1);
+        }
+    }
+
+    #[test]
+    fn chunk_params_single_oversized_item_returns_one_chunk() {
+        let huge_path: String = std::iter::repeat_n('a', 70_000).collect();
+        let paths = vec![huge_path.as_str()];
+
+        assert!(
+            request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths))
+                > MAX_REQUEST_URI_LEN,
+            "precondition: the single item must overflow alone"
+        );
+
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+
+        assert_eq!(chunks.len(), 1, "no smaller split is possible");
+        assert_eq!(chunks[0].len(), 1);
+    }
+
+    // Regression for the later-chunk overflow: the solo-measured max_item_cost
+    // misses the array separator (`,` → `%2C`, +3 bytes) that every item after
+    // the first adds. With a cheap first item followed by costlier items, the
+    // first-chunk probe passed but a later full-size chunk of costlier items
+    // overflowed. The fix validates every chunk, not just the first.
+    #[test]
+    fn chunk_params_mixed_cost_items_all_chunks_fit() {
+        // One cheaper item then many costlier items, reproducing the reviewer's
+        // scenario where chunk 0 (containing the cheap item) fit but chunk 1
+        // (all costly items) overflowed by the separator margin.
+        let cheap: String = std::iter::repeat_n('\'', 361).collect();
+        let costly: String = std::iter::repeat_n('\'', 362).collect();
+        let mut paths: Vec<&str> = Vec::with_capacity(4001);
+        paths.push(cheap.as_str());
+        for _ in 0..4000 {
+            paths.push(costly.as_str());
+        }
+
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+
+        assert!(chunks.len() > 1);
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(total, 4001);
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            assert!(
+                uri_len <= MAX_REQUEST_URI_LEN,
+                "chunk {i} ({} items) URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap",
+                chunk.len(),
+            );
         }
     }
 }

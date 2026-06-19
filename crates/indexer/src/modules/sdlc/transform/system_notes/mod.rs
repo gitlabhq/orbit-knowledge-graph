@@ -390,6 +390,10 @@ fn pairs_with_project_id(
         .collect()
 }
 
+fn routes_params(root_prefix: &str, paths: &[&str]) -> serde_json::Value {
+    json!({ "root_prefix": root_prefix, "paths": paths })
+}
+
 async fn query_routes(
     datalake: &dyn DatalakeQuery,
     uri_ctx: &UriContext,
@@ -398,13 +402,10 @@ async fn query_routes(
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
     let root_prefix_owned = root_prefix.to_string();
-    let chunks = uri_ctx.chunk_params(
-        paths,
-        |chunk| json!({ "root_prefix": root_prefix_owned, "paths": chunk }),
-    );
+    let chunks = uri_ctx.chunk_params(paths, |chunk| routes_params(&root_prefix_owned, chunk));
 
     for paths in chunks {
-        let params = json!({ "root_prefix": root_prefix, "paths": paths });
+        let params = routes_params(root_prefix, paths);
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
             .await
