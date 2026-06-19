@@ -36,9 +36,9 @@ pub fn group_parseable_inventory(
     let mut accepted_files = 0usize;
 
     for entry in inventory {
-        // Only loaded files are parse candidates; the stream settled the rest as
-        // ListOnly.
-        if entry.decision != Decision::Keep {
+        // The stream already settled parse candidacy (parsable, loaded, deduped);
+        // here we only group them by language.
+        if entry.decision != Decision::Parse {
             continue;
         }
         let Some(lang) = detect_language_from_path(&entry.path) else {
@@ -86,7 +86,7 @@ mod tests {
         FileInventoryEntry {
             path: path.into(),
             size: 10,
-            decision: Decision::Keep,
+            decision: Decision::Parse,
         }
     }
 

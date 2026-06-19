@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use code_graph::v2::FileInventoryEntry;
-use code_graph::v2::config::CodeFilter;
+use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use futures::StreamExt;
 use gkg_utils::archive::extract_tar_gz;
 use gkg_utils::fs_stream::StreamError;
@@ -134,7 +134,11 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
-        let mut filter = CodeFilter::new(self.max_file_size, self.max_total_bytes);
+        let mut filter = CodeFilter::new(
+            self.max_file_size,
+            self.max_total_bytes,
+            detect_language_from_path,
+        );
         let (file_inventory, filter) = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
             extract_tar_gz(bridge, &repo_dir_owned, &mut filter).map(|inv| (inv, filter))

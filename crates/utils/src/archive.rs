@@ -1,6 +1,6 @@
 //! Tar.gz extraction as a [`FileStreamHooks`] source: untar, safety-check each
-//! path, hand the entry to the hooks, and materialize only the files they
-//! [`Decision::Keep`]. No filtering of its own.
+//! path, hand the entry to the hooks, and write the bytes of the files they
+//! load ([`Decision::Parse`] or [`Decision::Load`]). No filtering of its own.
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -12,7 +12,7 @@ use tracing::warn;
 use crate::fs_stream::{Decision, FileInventoryEntry, FileStreamHooks, StreamError, step};
 
 /// Extract a gzipped tar from `reader` into `target_dir`, running every regular
-/// file through `hooks`. `Keep` files are written to disk; every non-dropped
+/// file through `hooks`. Loaded files are written to disk; every non-dropped
 /// file (and symlink) is returned in the inventory.
 pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
     reader: R,
@@ -101,7 +101,7 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.header().size().unwrap_or(0),
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             };
             // The tar Entry Read stops at the declared entry size, so this is
             // bounded by it; oversize files are settled in `on_header` and never
@@ -112,7 +112,9 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
             match meta.decision {
                 Decision::Drop => continue,
                 Decision::ListOnly => inventory.push(meta),
-                Decision::Keep => {
+                // Both loaded states materialize the bytes; only the parse axis
+                // differs, which the pipeline acts on, not the extractor.
+                Decision::Parse | Decision::Load => {
                     let dest_canonical = crate::fs::resolve_dest_within(&target_canonical, &dest)?;
                     let mut file = std::fs::File::create(&dest_canonical)?;
                     file.write_all(&content)?;
@@ -179,26 +181,23 @@ mod tests {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
-    /// Records every file as Keep — the archive's mechanism with no filtering.
-    struct KeepAll;
-    impl FileStreamHooks for KeepAll {}
+    /// Parses every file — the archive's mechanism with no filtering (defaults).
+    struct ParseAll;
+    impl FileStreamHooks for ParseAll {}
 
     /// Drops files by extension (header) and by a NUL in content; mirrors the
     /// shape of the production `CodeFilter` without depending on code-graph.
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Decision {
-            if Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png") {
-                Decision::ListOnly
-            } else {
-                Decision::Keep
-            }
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+            (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
+                .then_some(Decision::ListOnly)
         }
         fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
             if content.contains(&0) {
                 Decision::ListOnly
             } else {
-                Decision::Keep
+                Decision::Parse
             }
         }
     }
@@ -246,7 +245,7 @@ mod tests {
             Entry::File("project-main/src/main.rs", b"fn main() {}"),
             Entry::File("project-main/src/lib.rs", b"pub mod lib;"),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -289,7 +288,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("src/main.rs")).unwrap(),
             "fn main() {}"
@@ -303,7 +302,7 @@ mod tests {
             Entry::File("root-a/file1.rs", b"a"),
             Entry::File("root-b/file2.rs", b"b"),
         ]);
-        let err = extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap_err();
+        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
         assert!(err.to_string().contains("not under the expected root"));
     }
 
@@ -326,7 +325,7 @@ mod tests {
         enc.write_all(&tar_bytes).unwrap();
         let data = enc.finish().unwrap();
 
-        let err = extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap_err();
+        let err = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap_err();
         assert!(err.to_string().contains("path traversal"), "got: {err}");
     }
 
@@ -338,7 +337,7 @@ mod tests {
             Entry::File("root/legit.txt", b"hello"),
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
             "hello"
@@ -354,7 +353,7 @@ mod tests {
             Entry::File("root/legit.txt", b"hello"),
             Entry::Symlink("root/escape", outside.path().to_str().unwrap()),
         ]);
-        let inv = extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        let inv = extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(paths(&inv), vec!["legit.txt"]);
     }
 
@@ -365,7 +364,7 @@ mod tests {
             Entry::File("root/src/lib.rs", b"real content"),
             Entry::Symlink("root/bin/run", "../src/lib.rs"),
         ]);
-        extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.path().join("bin/run")).unwrap(),
             "real content"
@@ -376,13 +375,13 @@ mod tests {
     fn empty_and_truncated_bodies_are_classified_empty() {
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            extract_tar_gz(&[][..], dir.path(), &mut KeepAll),
+            extract_tar_gz(&[][..], dir.path(), &mut ParseAll),
             Err(StreamError::Empty)
         ));
         let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
         let truncated = &full[..full.len() / 2];
         assert!(matches!(
-            extract_tar_gz(truncated, dir.path(), &mut KeepAll),
+            extract_tar_gz(truncated, dir.path(), &mut ParseAll),
             Err(StreamError::Empty)
         ));
     }
@@ -406,7 +405,7 @@ mod tests {
                 .find(|e| e.path == "src/main.rs")
                 .unwrap()
                 .decision,
-            Decision::Keep
+            Decision::Parse
         );
         assert_eq!(
             inv.iter()
@@ -432,7 +431,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let body: Vec<u8> = (0..12_000).map(|i| ((i % 254) + 1) as u8).collect();
         let data = build_archive(&[Entry::File("project-main/big.txt", &body)]);
-        extract_tar_gz(&data[..], dir.path(), &mut KeepAll).unwrap();
+        extract_tar_gz(&data[..], dir.path(), &mut ParseAll).unwrap();
         assert_eq!(std::fs::read(dir.path().join("big.txt")).unwrap(), body);
     }
 }

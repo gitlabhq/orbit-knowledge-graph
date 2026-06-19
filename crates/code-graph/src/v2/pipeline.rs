@@ -1763,7 +1763,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -1792,7 +1792,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.py".into(),
                 size: source.len() as u64,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             }]),
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
@@ -1833,12 +1833,12 @@ mod tests {
                 FileInventoryEntry {
                     path: "a.py".into(),
                     size: 22,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "b.py".into(),
                     size: 22,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
             ]),
             PipelineConfig {
@@ -1871,7 +1871,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -1907,7 +1907,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -1937,17 +1937,17 @@ mod tests {
             FileInventoryEntry {
                 path: "src/main.py".into(),
                 size: 17,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "README.md".into(),
                 size: 12,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "config/app.yml".into(),
                 size: 9,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "assets/logo.png".into(),
@@ -2012,7 +2012,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "listed.py".into(),
                 size: 19,
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
@@ -2195,22 +2195,22 @@ namespace MyApp {
                 FileInventoryEntry {
                     path: "app.py".into(),
                     size: 0,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "Service.java".into(),
                     size: 0,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "App.kt".into(),
                     size: 0,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "Controller.cs".into(),
                     size: 0,
-                    decision: Decision::Keep,
+                    decision: Decision::Parse,
                 },
             ]),
             PipelineConfig::default(),

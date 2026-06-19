@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use code_graph::v2::config::CodeFilter;
+use code_graph::v2::config::{CodeFilter, detect_language_from_path};
 use code_graph::v2::linker::CodeGraph;
 use code_graph::v2::linker::graph::GraphNode;
 use code_graph::v2::types::EdgeKind;
@@ -109,7 +109,12 @@ async fn extract_via_archive_endpoint(
     let handle = tokio::runtime::Handle::current();
     let inventory = tokio::task::spawn_blocking(move || {
         let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
-        extract_tar_gz(bridge, &target, &mut CodeFilter::new(0, 0)).unwrap()
+        extract_tar_gz(
+            bridge,
+            &target,
+            &mut CodeFilter::new(0, 0, detect_language_from_path),
+        )
+        .unwrap()
     })
     .await
     .unwrap();

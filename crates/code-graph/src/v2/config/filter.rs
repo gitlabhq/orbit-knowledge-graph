@@ -1,16 +1,19 @@
 //! The single filtering policy for code indexing, shared by every file source
-//! as a [`FileStreamHooks`] implementation. Per file it decides load
-//! ([`Decision::Keep`]) vs record-as-bare-node ([`Decision::ListOnly`]):
-//! excluded extensions and oversize from the header, binary and minified bundles
-//! from the content. Resolver inputs are never in the denylist, so they survive.
-//! A total-bytes [`Counter`] across every file aborts an oversized repo.
+//! as a [`FileStreamHooks`] implementation. Per file it produces the full
+//! [`Decision`]: `Parse` (source), `Load` (resolver inputs + content
+//! duplicates: on disk, not parsed), `ListOnly` (excluded/oversize/binary/
+//! minified: a node, no bytes), or `Drop`. Resolver inputs are never in the
+//! denylist, so they survive. A total-bytes [`Counter`] aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
 
 use gkg_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use sha2::{Digest, Sha256};
+
+use super::Language;
 
 /// git's binary heuristic looks at the first 8 KiB; matching it keeps a NUL deep
 /// inside a large text file from being misread as binary.
@@ -50,20 +53,32 @@ pub struct SkipTally {
     pub bytes: u64,
 }
 
-/// The code-indexing filter. Construct one per repository stream.
+/// The code-indexing filter. Construct one per repository stream. Classifies
+/// each file fully (load+parse / load-only / node / drop): the language detector
+/// is injected so the filter never hard-wires the registry, and a content-hash
+/// set dedups parse candidates (a vendored library is parsed once).
 pub struct CodeFilter {
     max_file_size: u64,
     total_bytes: Counter,
     skips: FxHashMap<FilterSkip, SkipTally>,
+    detect_language: fn(&str) -> Option<Language>,
+    seen_parsed: FxHashSet<[u8; 32]>,
 }
 
 impl CodeFilter {
-    /// `max_file_size` and `max_total_bytes` are byte caps; `0` means unlimited.
-    pub fn new(max_file_size: u64, max_total_bytes: u64) -> Self {
+    /// `max_file_size` and `max_total_bytes` are byte caps (`0` = unlimited).
+    /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
+    pub fn new(
+        max_file_size: u64,
+        max_total_bytes: u64,
+        detect_language: fn(&str) -> Option<Language>,
+    ) -> Self {
         Self {
             max_file_size,
             total_bytes: Counter::new("total_bytes", max_total_bytes),
             skips: FxHashMap::default(),
+            detect_language,
+            seen_parsed: FxHashSet::default(),
         }
     }
 
@@ -85,14 +100,14 @@ impl FileStreamHooks for CodeFilter {
         self.total_bytes.add(file.size)
     }
 
-    fn on_header(&mut self, file: &FileInventoryEntry) -> Decision {
+    fn on_header(&mut self, file: &FileInventoryEntry) -> Option<Decision> {
         if self.max_file_size != 0 && file.size > self.max_file_size {
-            return self.record(FilterSkip::Oversize, file.size);
+            return Some(self.record(FilterSkip::Oversize, file.size));
         }
         if is_excluded_from_indexing(Path::new(&file.path)) {
-            return self.record(FilterSkip::ExcludedExtension, file.size);
+            return Some(self.record(FilterSkip::ExcludedExtension, file.size));
         }
-        Decision::Keep
+        None
     }
 
     fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> Decision {
@@ -107,7 +122,15 @@ impl FileStreamHooks for CodeFilter {
         if let Some(reason) = minified_skip(content) {
             return self.record(reason, file.size);
         }
-        Decision::Keep
+        // A parse candidate is parsed once; a non-parsable file (resolver input)
+        // or a content-duplicate is loaded for resolvers but not parsed.
+        if (self.detect_language)(&file.path).is_some()
+            && self.seen_parsed.insert(Sha256::digest(content).into())
+        {
+            Decision::Parse
+        } else {
+            Decision::Load
+        }
     }
 }
 
@@ -205,32 +228,47 @@ fn looks_binary(prefix: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::config::detect_language_from_path;
 
     fn entry(path: &str, size: u64) -> FileInventoryEntry {
         FileInventoryEntry {
             path: path.into(),
             size,
-            decision: Decision::Keep,
+            decision: Decision::Parse,
         }
     }
 
+    fn filter() -> CodeFilter {
+        CodeFilter::new(0, 0, detect_language_from_path)
+    }
+
     #[test]
-    fn keeps_source_and_resolver_inputs() {
-        let mut f = CodeFilter::new(0, 0);
-        for path in ["src/main.rs", "Cargo.toml", "package.json", ".gitignore"] {
-            assert_eq!(f.on_header(&entry(path, 100)), Decision::Keep, "{path}");
-            assert_eq!(
-                f.on_content(&entry(path, 100), b"contents\n"),
-                Decision::Keep
-            );
-        }
+    fn parses_source_and_loads_resolver_inputs() {
+        let mut f = filter();
+        assert_eq!(f.on_header(&entry("src/main.rs", 100)), None);
+        assert_eq!(
+            f.on_content(&entry("src/main.rs", 100), b"fn main() {}\n"),
+            Decision::Parse
+        );
+        // Non-parsable resolver inputs: on disk for resolvers, never parsed.
+        assert_eq!(
+            f.on_content(&entry("Cargo.toml", 100), b"[package]\n"),
+            Decision::Load
+        );
+        assert_eq!(
+            f.on_content(&entry(".gitignore", 100), b"target/\n"),
+            Decision::Load
+        );
     }
 
     #[test]
     fn list_only_for_excluded_oversize_binary_minified() {
-        let mut f = CodeFilter::new(50, 0);
-        assert_eq!(f.on_header(&entry("logo.png", 10)), Decision::ListOnly);
-        assert_eq!(f.on_header(&entry("big.rs", 999)), Decision::ListOnly);
+        let mut f = CodeFilter::new(50, 0, detect_language_from_path);
+        assert_eq!(
+            f.on_header(&entry("logo.png", 10)),
+            Some(Decision::ListOnly)
+        );
+        assert_eq!(f.on_header(&entry("big.rs", 999)), Some(Decision::ListOnly));
         assert_eq!(
             f.on_content(&entry("x.bin", 10), b"a\x00b"),
             Decision::ListOnly
@@ -243,20 +281,38 @@ mod tests {
     }
 
     #[test]
-    fn minified_bundles_are_list_only_by_name_without_reading() {
-        let mut f = CodeFilter::new(0, 0);
+    fn minified_bundles_settled_by_name_in_header() {
+        let mut f = filter();
         for path in ["vendor/jquery.min.js", "a/b.min.mjs", "c.min.cjs"] {
-            assert_eq!(f.on_header(&entry(path, 200)), Decision::ListOnly, "{path}");
+            assert_eq!(
+                f.on_header(&entry(path, 200)),
+                Some(Decision::ListOnly),
+                "{path}"
+            );
         }
         // The leading dot must be literal — these are real source, not bundles.
         for path in ["src/admin.js", "src/examine.js"] {
-            assert_eq!(f.on_header(&entry(path, 200)), Decision::Keep, "{path}");
+            assert_eq!(f.on_header(&entry(path, 200)), None, "{path}");
         }
     }
 
     #[test]
+    fn dedups_identical_parse_candidates() {
+        let mut f = filter();
+        let jquery = b"export const x = 1;\n";
+        // First copy parsed; identical copies loaded for resolvers, not re-parsed.
+        assert_eq!(f.on_content(&entry("a/x.js", 19), jquery), Decision::Parse);
+        assert_eq!(f.on_content(&entry("b/x.js", 19), jquery), Decision::Load);
+        // Distinct content is parsed.
+        assert_eq!(
+            f.on_content(&entry("c/y.js", 19), b"export const y = 2;\n"),
+            Decision::Parse
+        );
+    }
+
+    #[test]
     fn total_bytes_cap_charges_every_file_then_trips() {
-        let mut f = CodeFilter::new(0, 100);
+        let mut f = CodeFilter::new(0, 100, detect_language_from_path);
         assert!(f.admit(&entry("a.png", 60)).is_ok());
         assert!(
             f.admit(&entry("b.png", 60)).is_err(),

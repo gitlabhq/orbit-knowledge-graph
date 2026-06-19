@@ -46,7 +46,7 @@ pub fn walk_dir<H: FileStreamHooks>(
         let mut meta = FileInventoryEntry {
             path: rel_path.to_string_lossy().into_owned(),
             size,
-            decision: Decision::Keep,
+            decision: Decision::Parse,
         };
 
         meta.decision = step(hooks, &meta, &mut content, |buf| {
@@ -66,18 +66,15 @@ mod tests {
 
     struct TestFilter;
     impl FileStreamHooks for TestFilter {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Decision {
-            if Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png") {
-                Decision::ListOnly
-            } else {
-                Decision::Keep
-            }
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+            (Path::new(&f.path).extension().and_then(|e| e.to_str()) == Some("png"))
+                .then_some(Decision::ListOnly)
         }
         fn on_content(&mut self, _f: &FileInventoryEntry, content: &[u8]) -> Decision {
             if content.contains(&0) {
                 Decision::ListOnly
             } else {
-                Decision::Keep
+                Decision::Parse
             }
         }
     }
@@ -139,7 +136,7 @@ mod tests {
             by_path("ignored/secret.rs").is_none(),
             "gitignored file must be skipped"
         );
-        assert_eq!(by_path("src/main.rs").unwrap().decision, Decision::Keep);
+        assert_eq!(by_path("src/main.rs").unwrap().decision, Decision::Parse);
         assert_eq!(
             by_path("assets/logo.png").unwrap().decision,
             Decision::ListOnly

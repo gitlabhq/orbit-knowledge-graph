@@ -104,7 +104,7 @@ fn copy_dir_recursive(
             inventory.push(FileInventoryEntry {
                 path: rel.to_string_lossy().to_string(),
                 size: entry.metadata().map_or(0, |metadata| metadata.len()),
-                decision: Decision::Keep,
+                decision: Decision::Parse,
             });
         }
     }
@@ -159,7 +159,7 @@ pub async fn run_yaml_suite(yaml: &str) {
         file_inventory.push(FileInventoryEntry {
             path: fixture.path.clone(),
             size: fixture.content.len() as u64,
-            decision: Decision::Keep,
+            decision: Decision::Parse,
         });
     }
 

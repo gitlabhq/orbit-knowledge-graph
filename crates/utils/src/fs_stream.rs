@@ -7,14 +7,19 @@ use std::path::{Component, Path};
 
 use rustc_hash::FxHashMap;
 
-/// Per-file outcome of the hook pipeline.
+/// Per-file outcome of the hook pipeline. The two loaded states split the
+/// materialize axis from the parse axis: both `Parse` and `Load` make the bytes
+/// available (on disk for the tar source); only `Parse` is sent to a parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::Display, strum::AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum Decision {
-    /// Load the bytes and record the file; the only parse candidate downstream.
+    /// Load the bytes and parse them. The only parse candidate downstream.
     #[default]
-    Keep,
-    /// Record the file as a node without reading its bytes.
+    Parse,
+    /// Load the bytes but don't parse — resolver inputs (manifests, etc.) and
+    /// content duplicates: available to resolvers, never sent to a parser.
+    Load,
+    /// Record the file as a node without loading its bytes.
     ListOnly,
     /// Exclude the file entirely.
     Drop,
@@ -98,22 +103,22 @@ pub trait FileStreamHooks {
     fn admit(&mut self, _file: &FileInventoryEntry) -> Result<(), CapExceeded> {
         Ok(())
     }
-    /// Decide from path + size alone, before any bytes are read; a non-`Keep`
-    /// verdict is final.
-    fn on_header(&mut self, _file: &FileInventoryEntry) -> Decision {
-        Decision::Keep
+    /// Settle from path + size alone, before any bytes are read. `Some` is final
+    /// (and must not be `Parse` — that needs content); `None` reads the content.
+    fn on_header(&mut self, _file: &FileInventoryEntry) -> Option<Decision> {
+        None
     }
-    /// Decide with the file's full (size-capped) content; only reached for files
-    /// `on_header` kept.
+    /// Decide with the file's full (size-capped) content; only reached when
+    /// `on_header` returned `None`.
     fn on_content(&mut self, _file: &FileInventoryEntry, _content: &[u8]) -> Decision {
-        Decision::Keep
+        Decision::Parse
     }
 }
 
-/// Run the per-file hook sequence: `admit` charges caps for every file, then a
-/// non-`Keep` `on_header` settles it without reading, and only `Keep` fills
-/// `content` via `sniff` and consults `on_content`. `content` is caller-owned
-/// to reuse across entries.
+/// Run the per-file hook sequence: `admit` charges caps for every file, then
+/// `on_header` may settle it without reading, and otherwise `content` is filled
+/// via `sniff` and `on_content` gives the final [`Decision`]. `content` is
+/// caller-owned to reuse across entries.
 pub fn step<H: FileStreamHooks>(
     hooks: &mut H,
     file: &FileInventoryEntry,
@@ -122,9 +127,8 @@ pub fn step<H: FileStreamHooks>(
 ) -> Result<Decision, StreamError> {
     hooks.admit(file)?;
     content.clear();
-    match hooks.on_header(file) {
-        Decision::Keep => {}
-        settled => return Ok(settled),
+    if let Some(settled) = hooks.on_header(file) {
+        return Ok(settled);
     }
     sniff(content)?;
     Ok(hooks.on_content(file, content))
@@ -190,12 +194,8 @@ mod tests {
     }
 
     impl FileStreamHooks for TestHooks {
-        fn on_header(&mut self, f: &FileInventoryEntry) -> Decision {
-            if f.path.ends_with(".png") {
-                Decision::Drop
-            } else {
-                Decision::Keep
-            }
+        fn on_header(&mut self, f: &FileInventoryEntry) -> Option<Decision> {
+            f.path.ends_with(".png").then_some(Decision::Drop)
         }
         fn admit(&mut self, f: &FileInventoryEntry) -> Result<(), CapExceeded> {
             self.bytes.add(f.size)
@@ -206,7 +206,7 @@ mod tests {
         FileInventoryEntry {
             path: path.into(),
             size,
-            decision: Decision::Keep,
+            decision: Decision::Parse,
         }
     }
 
@@ -234,7 +234,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(d, Decision::Keep);
+        assert_eq!(d, Decision::Parse);
     }
 
     #[test]
