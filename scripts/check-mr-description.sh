@@ -1,87 +1,59 @@
 #!/usr/bin/env bash
 # MR-description headline gate.
 #
-# The MR description lives in the GitLab API, not the repo, so unlike most
-# checks this CANNOT be a build.rs/lint — it is the one check that legitimately
-# must run in CI (network-only data), per the AGENTS.md "prefer build-time
-# validation" rationale.
+# Scores the headline section ("What does this MR do and why?") of the MR
+# description using scripts/score_description.py (research-tuned: word_cap=100,
+# span_cap=3, bare_idents<=3 with the v2 acronym/ref-aware regex).
 #
-# It resolves the MR for the current branch, fetches its `description` field,
-# and scores the headline section with scripts/score_description.py
-# (research-tuned: word_cap=100, span_cap=3, bare_idents<=3 with the v2
-# acronym/ref-aware regex). It prints a verdict and any warnings.
+# Sources the description from the predefined CI variable
+# CI_MERGE_REQUEST_DESCRIPTION (set on merge_request_event pipelines) — no
+# API token or glab needed. Follows the same pattern as check-mr-title.sh.
 #
 # Exit codes: non-zero when the description FAILS the scorer; zero on PASS or
-# when there is nothing to check (no MR, empty description, no auth, no glab).
+# when there is nothing to check (not an MR pipeline, empty description).
 # Blocking-ness is controlled by CI `allow_failure: true` (one-line change to
 # promote), not inside this script.
-#
-# MR resolution order:
-#   1. CI_MERGE_REQUEST_IID         (GitLab predefined, merge_request pipelines)
-#   2. source_branch lookup via the API (CI fallback / local runs)
 set -uo pipefail
-
-PROJECT="${CI_PROJECT_ID:-${CI_PROJECT_PATH:-}}"
 
 skip() {
     echo "ℹ️  mr-description lint: $1 — skipping (no-op, exit 0)."
     exit 0
 }
 
-# glab is the simplest authenticated client both locally and in CI. In CI it
-# reads GITLAB_TOKEN from the environment; a read-API token must be provided as
-# a CI variable for the API call to succeed (CI_JOB_TOKEN cannot read MR
-# descriptions). If auth is missing, fetch_description returns empty and the
-# check no-ops cleanly — it never blocks.
-have_glab() { command -v glab >/dev/null 2>&1; }
+# Not a merge_request pipeline — nothing to check.
+[ -n "${CI_MERGE_REQUEST_IID:-}" ] || skip "not a merge request pipeline"
 
-fetch_description() {
-    # Args: <iid>. Echoes the raw description on success, empty on no-glab.
-    # Must NOT call skip() here — this runs inside a command substitution
-    # (subshell), so exit would only leave the subshell, not the script.
-    local iid="$1"
-    if have_glab; then
-        glab api "projects/${PROJECT//\//%2F}/merge_requests/${iid}" 2>/dev/null \
-            | python3 -c 'import sys,json; print(json.load(sys.stdin).get("description") or "")' 2>/dev/null
+DESC="${CI_MERGE_REQUEST_DESCRIPTION:-}"
+[ -n "$DESC" ] || skip "MR !${CI_MERGE_REQUEST_IID} has an empty description"
+
+# Truncation guard: CI_MERGE_REQUEST_DESCRIPTION is capped at 2700 chars.
+# The headline section is at the top and almost always fits, but if the text
+# was truncated and the headline boundary markers (next ### heading or
+# <details> block) were cut off, the scorer would score non-headline content.
+# Detect this: truncated + no section boundary after the headline heading.
+if [ "${CI_MERGE_REQUEST_DESCRIPTION_IS_TRUNCATED:-}" = "true" ]; then
+    has_boundary=""
+    # Check for <details (Agent context block) or a second ### heading.
+    if printf '%s' "$DESC" | grep -q '<details'; then
+        has_boundary=1
+    elif [ "$(printf '%s\n' "$DESC" | grep -c '^###\s')" -ge 2 ]; then
+        has_boundary=1
     fi
-}
-
-resolve_iid() {
-    # Prefer the predefined var (only set on merge_request_event pipelines).
-    if [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
-        echo "$CI_MERGE_REQUEST_IID"
-        return 0
+    if [ -z "$has_boundary" ]; then
+        echo "ℹ️  mr-description lint: description was truncated at 2700 chars and the"
+        echo "   headline section boundary is missing — cannot score reliably."
+        echo "   (The headline is likely longer than the truncation window.)"
+        exit 0
     fi
-    # Fallback: look the MR up by source branch.
-    local branch="${CI_COMMIT_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
-    [ -n "$branch" ] || return 1
-    [ -n "$PROJECT" ] || return 1
-    have_glab || return 1
-    glab api "projects/${PROJECT//\//%2F}/merge_requests?source_branch=${branch}&state=opened" 2>/dev/null \
-        | python3 -c 'import sys,json
-mrs=json.load(sys.stdin)
-print(mrs[0]["iid"] if mrs else "")'
-}
-
-[ -n "$PROJECT" ] || skip "no project id (CI_PROJECT_ID/CI_PROJECT_PATH unset)"
-
-IID="$(resolve_iid || true)"
-[ -n "${IID:-}" ] || skip "no open MR for this branch"
-
-have_glab || skip "glab not available to fetch the description"
-
-DESC="$(fetch_description "$IID")"
-if [ -z "$DESC" ]; then
-    skip "MR !$IID has an empty description"
 fi
 
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 printf '%s' "$DESC" > "$TMP"
 
-echo "MR !$IID description headline check:"
-# Capture the scorer's exit code before piping through sed; pipefail would
-# propagate it but we need it explicitly for the final exit decision.
+echo "MR !${CI_MERGE_REQUEST_IID} description headline check:"
+# Capture the scorer's exit code; command substitution does not trigger
+# pipefail, so $? is the scorer's real exit.
 scorer_out="$(python3 "$(dirname "$0")/score_description.py" "$TMP")"
 scorer_rc=$?
 printf '%s\n' "$scorer_out" | sed 's/^/  /'
