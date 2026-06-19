@@ -34,21 +34,6 @@ pub(super) fn lookup_chunks<T>(items: &[T], batch_size: usize) -> impl Iterator<
     items.chunks(batch_size.max(1))
 }
 
-/// `http` caps the request URI at ~64 KiB and the clickhouse crate puts array
-/// params there, so a large `path IN (...)` list must be split to fit.
-const MAX_ROUTES_PATHS_BYTES: usize = 48 * 1024;
-const MAX_URL_ENCODED_BYTES_PER_CHAR: usize = 3;
-const PARAM_FRAMING_BYTES: usize = 12;
-
-/// How many project paths fit in one routes query before the serialized URL
-/// exceeds the cap, sized from the longest path's worst-case encoded length.
-pub(super) fn paths_per_routes_query(paths: &[&str]) -> usize {
-    let longest_path = paths.iter().map(|path| path.len()).max().unwrap_or(0);
-    let worst_case_path_bytes = longest_path * MAX_URL_ENCODED_BYTES_PER_CHAR + PARAM_FRAMING_BYTES;
-
-    (MAX_ROUTES_PATHS_BYTES / worst_case_path_bytes).max(1)
-}
-
 /// Batch path -> route lookup. Params: `{paths:Array(String)}`. Returns
 /// `(source_id, path, traversal_path)`; `source_type = 'Project'` because an
 /// owning route is always a project.
@@ -338,18 +323,6 @@ mod tests {
 
         let chunk_sizes: Vec<_> = lookup_chunks(&values, 0).map(<[_]>::len).collect();
         assert_eq!(chunk_sizes, vec![1; TEST_RESOLVE_LOOKUP_BATCH_SIZE + 1]);
-    }
-
-    #[test]
-    fn paths_per_routes_query_keeps_chunks_under_uri_cap() {
-        let long_path = "x".repeat(500);
-        let paths = vec![long_path.as_str(); 100];
-
-        let count = paths_per_routes_query(&paths);
-
-        assert!(count > 1);
-        let worst_case = 500 * MAX_URL_ENCODED_BYTES_PER_CHAR + PARAM_FRAMING_BYTES;
-        assert!(count * worst_case <= MAX_ROUTES_PATHS_BYTES);
     }
 
     #[test]

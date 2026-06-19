@@ -24,6 +24,59 @@
 use serde_json::Value;
 use url::Url;
 
+/// The client-level URI components that [`request_uri_len`] and
+/// [`chunk_params_to_fit_uri`] need to measure a query's serialized URI.
+///
+/// Captures `base_url`, `database`, and the `scaffold_pairs` (compression flag +
+/// query settings) at client construction time so they can be threaded to any
+/// call site that needs URI-aware chunking without carrying three loose values.
+/// Build one from an [`ArrowClickHouseClient`] via [`UriContext::from_client`].
+///
+/// [`ArrowClickHouseClient`]: crate::ArrowClickHouseClient
+#[derive(Debug, Clone)]
+pub struct UriContext {
+    pub base_url: String,
+    pub database: String,
+    pub scaffold_pairs: Vec<(String, String)>,
+}
+
+impl UriContext {
+    /// Snapshot the URI context from a live client.
+    pub fn from_client(client: &crate::ArrowClickHouseClient) -> Self {
+        Self {
+            base_url: client.base_url().to_string(),
+            database: client.database().to_string(),
+            scaffold_pairs: client.request_scaffold_pairs(),
+        }
+    }
+
+    /// Convenience: measure the URI for `sql_params` using this context.
+    pub fn request_uri_len(&self, sql_params: &Value) -> usize {
+        request_uri_len(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs,
+            sql_params,
+        )
+    }
+
+    /// Convenience: chunk `items` using this context and [`MAX_REQUEST_URI_LEN`].
+    pub fn chunk_params<'a, T>(
+        &self,
+        items: &'a [T],
+        build_params: impl Fn(&[T]) -> Value,
+    ) -> Vec<&'a [T]> {
+        chunk_params_to_fit_uri(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs,
+            items,
+            build_params,
+            MAX_REQUEST_URI_LEN,
+        )
+    }
+}
+
 /// Maximum request-URI length, in bytes, that the `http` crate accepts.
 ///
 /// `http`'s `Uri::from_shared` rejects any URI whose serialized length exceeds
@@ -96,6 +149,92 @@ pub fn request_uri_overflow(
 ) -> Option<usize> {
     let len = request_uri_len(base_url, database, scaffold_pairs, sql_params);
     (len > MAX_REQUEST_URI_LEN).then_some(len)
+}
+
+/// Split `items` into the fewest chunks such that each chunk's serialized
+/// request URI stays at or under `max_uri_len` bytes.
+///
+/// `build_params` renders a sub-slice of `items` into the full
+/// `serde_json::Value` the query would send (including any fixed params like
+/// `root_prefix`). The chunker measures the *real* encoded URI via
+/// [`request_uri_len`] — escape-then-percent-encode, scaffold pairs, and all —
+/// so it is immune to the 3×-per-char undercount that a raw-byte proxy suffers
+/// on quote-heavy or backslash-heavy input (a `'` doubles then percent-encodes
+/// to 6 bytes, not 3).
+///
+/// The algorithm finds the maximum single-item encoded cost (measuring every
+/// item against the real encoder), divides the budget by that cost for the
+/// initial chunk-size estimate, then validates the first full chunk and adjusts
+/// downward if the estimate overshoots. For typical batches (hundreds to low
+/// thousands of items, each a project path or numeric pair) the per-item
+/// measurement is string-only, no I/O.
+///
+/// Returns at least one chunk even if the very first item alone overflows (there
+/// is no smaller split possible); the downstream [`build_query`] guard will
+/// catch that single-item overflow.
+///
+/// [`build_query`]: crate (downstream `Datalake::build_query`)
+pub fn chunk_params_to_fit_uri<'a, T>(
+    base_url: &str,
+    database: &str,
+    scaffold_pairs: &[(String, String)],
+    items: &'a [T],
+    build_params: impl Fn(&[T]) -> Value,
+    max_uri_len: usize,
+) -> Vec<&'a [T]> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    let full_len = request_uri_len(base_url, database, scaffold_pairs, &build_params(items));
+    if full_len <= max_uri_len {
+        return vec![items];
+    }
+
+    let baseline_len = request_uri_len(
+        base_url,
+        database,
+        scaffold_pairs,
+        &build_params(&items[..0]),
+    );
+    let budget = max_uri_len.saturating_sub(baseline_len);
+
+    // Find the maximum single-item encoded cost across all items.
+    let max_item_cost = items
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let one_len = request_uri_len(
+                base_url,
+                database,
+                scaffold_pairs,
+                &build_params(&items[i..i + 1]),
+            );
+            one_len.saturating_sub(baseline_len)
+        })
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let mut chunk_size = (budget / max_item_cost).max(1);
+
+    // Validate: the estimate uses worst-case-per-item so it is almost always
+    // correct, but rounding can overshoot by one item. Shrink until the first
+    // chunk fits.
+    while chunk_size > 1 {
+        let probe_len = request_uri_len(
+            base_url,
+            database,
+            scaffold_pairs,
+            &build_params(&items[..chunk_size.min(items.len())]),
+        );
+        if probe_len <= max_uri_len {
+            break;
+        }
+        chunk_size -= 1;
+    }
+
+    items.chunks(chunk_size).collect()
 }
 
 /// A `serde_json::Value` rendered the way `ParamSerializer` would, before
@@ -302,5 +441,111 @@ mod tests {
         let huge_path: String = std::iter::repeat_n('a', 70_000).collect();
         let over = request_uri_overflow(BASE, DB, NO_SCAFFOLD, &json!({ "paths": [huge_path] }));
         assert!(matches!(over, Some(len) if len > MAX_REQUEST_URI_LEN));
+    }
+
+    fn routes_build_params(paths: &[&str]) -> Value {
+        json!({ "root_prefix": "1/", "paths": paths })
+    }
+
+    #[test]
+    fn chunk_params_returns_single_chunk_when_all_fit() {
+        let paths = vec!["group/project-1", "group/project-2"];
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].len(), 2);
+    }
+
+    #[test]
+    fn chunk_params_returns_empty_vec_for_empty_input() {
+        let paths: Vec<&str> = Vec::new();
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_params_splits_when_batch_overflows() {
+        let path = "a".repeat(200);
+        let paths: Vec<&str> = std::iter::repeat_n(path.as_str(), 1_000).collect();
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+        assert!(chunks.len() > 1);
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(total, 1_000);
+        for chunk in &chunks {
+            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            assert!(
+                uri_len <= MAX_REQUEST_URI_LEN,
+                "chunk URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap"
+            );
+        }
+    }
+
+    // The old 3×/char estimate would produce chunks that overflow on
+    // all-single-quote paths because `'` doubles to `\'` (ClickHouse escape)
+    // then percent-encodes to `%5C%27` — 6 bytes per raw byte. This test
+    // asserts the real-measurement chunker keeps every chunk under the cap.
+    #[test]
+    fn chunk_params_handles_adversarial_quote_heavy_paths() {
+        let quote_heavy: String = std::iter::repeat_n('\'', 300).collect();
+        let paths: Vec<&str> = std::iter::repeat_n(quote_heavy.as_str(), 200).collect();
+
+        let chunks = chunk_params_to_fit_uri(
+            BASE,
+            DB,
+            NO_SCAFFOLD,
+            &paths,
+            routes_build_params,
+            MAX_REQUEST_URI_LEN,
+        );
+
+        assert!(
+            chunks.len() > 1,
+            "adversarial input must require multiple chunks"
+        );
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(total, 200);
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let uri_len = request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(chunk));
+            assert!(
+                uri_len <= MAX_REQUEST_URI_LEN,
+                "chunk {i} URI is {uri_len} bytes, over the {MAX_REQUEST_URI_LEN}-byte cap"
+            );
+        }
+    }
+
+    #[test]
+    fn chunk_params_with_low_cap_produces_single_item_chunks() {
+        let paths = vec!["group/project-1", "group/project-2", "group/project-3"];
+        let tiny_cap =
+            request_uri_len(BASE, DB, NO_SCAFFOLD, &routes_build_params(&paths[..1])) + 1;
+
+        let chunks =
+            chunk_params_to_fit_uri(BASE, DB, NO_SCAFFOLD, &paths, routes_build_params, tiny_cap);
+
+        assert_eq!(chunks.len(), 3);
+        for chunk in &chunks {
+            assert_eq!(chunk.len(), 1);
+        }
     }
 }

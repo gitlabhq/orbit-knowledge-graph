@@ -32,6 +32,8 @@ use tracing::warn;
 
 use gkg_utils::arrow::ArrowUtils;
 
+use clickhouse_client::uri_guard::UriContext;
+
 use crate::handler::HandlerError;
 use crate::modules::sdlc::datalake::DatalakeQuery;
 use crate::modules::sdlc::transform::{
@@ -47,7 +49,7 @@ use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
     EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
-    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks, paths_per_routes_query,
+    ResolvedTarget, RouteRow, WORK_ITEMS_SQL, lookup_chunks,
 };
 
 /// Raw row pulled from the extract SQL. The transform parses, resolves, and
@@ -67,6 +69,7 @@ type DefaultProjectLookup = HashMap<i64, String>;
 
 pub(in crate::modules::sdlc) struct SystemNotesTransform {
     datalake: Arc<dyn DatalakeQuery>,
+    uri_ctx: UriContext,
     outputs: Vec<String>,
     resolve_lookup_batch_size: usize,
 }
@@ -74,11 +77,13 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
 impl SystemNotesTransform {
     fn new(
         datalake: Arc<dyn DatalakeQuery>,
+        uri_ctx: UriContext,
         edge_table: String,
         resolve_lookup_batch_size: usize,
     ) -> Self {
         Self {
             datalake,
+            uri_ctx,
             outputs: vec![edge_table],
             resolve_lookup_batch_size,
         }
@@ -111,6 +116,7 @@ impl BlockTransform for SystemNotesTransform {
 
         let edges = resolve_and_emit(
             &*self.datalake,
+            &self.uri_ctx,
             &notes,
             &root_prefix,
             self.resolve_lookup_batch_size,
@@ -134,6 +140,7 @@ impl BlockTransform for SystemNotesTransform {
 pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
+    uri_ctx: UriContext,
     edge_table: &str,
     resolve_lookup_batch_size: usize,
 ) {
@@ -145,6 +152,7 @@ pub(in crate::modules::sdlc) fn register(
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(
             Arc::clone(&datalake),
+            uri_ctx.clone(),
             edge_table.clone(),
             resolve_lookup_batch_size,
         ))
@@ -204,6 +212,7 @@ fn batch_to_notes(block: &RecordBatch) -> Result<Vec<ExtractedNote>, HandlerErro
 
 async fn resolve_and_emit(
     datalake: &dyn DatalakeQuery,
+    uri_ctx: &UriContext,
     notes: &[ExtractedNote],
     root_prefix: &str,
     resolve_lookup_batch_size: usize,
@@ -211,7 +220,14 @@ async fn resolve_and_emit(
     let default_projects =
         resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
     let plan = plan_for_batch(notes, &default_projects);
-    let index = resolve_plan(datalake, &plan, root_prefix, resolve_lookup_batch_size).await?;
+    let index = resolve_plan(
+        datalake,
+        uri_ctx,
+        &plan,
+        root_prefix,
+        resolve_lookup_batch_size,
+    )
+    .await?;
 
     let edges = process_batch(notes, &default_projects, |r, default_project| {
         index.resolve(r, default_project)
@@ -325,6 +341,7 @@ async fn resolve_default_projects(
 
 async fn resolve_plan(
     datalake: &dyn DatalakeQuery,
+    uri_ctx: &UriContext,
     plan: &ResolutionPlan,
     root_prefix: &str,
     resolve_lookup_batch_size: usize,
@@ -334,7 +351,7 @@ async fn resolve_plan(
     }
 
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-    let routes = query_routes(datalake, &paths, root_prefix).await?;
+    let routes = query_routes(datalake, uri_ctx, &paths, root_prefix).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
@@ -375,12 +392,18 @@ fn pairs_with_project_id(
 
 async fn query_routes(
     datalake: &dyn DatalakeQuery,
+    uri_ctx: &UriContext,
     paths: &[&str],
     root_prefix: &str,
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
+    let root_prefix_owned = root_prefix.to_string();
+    let chunks = uri_ctx.chunk_params(
+        paths,
+        |chunk| json!({ "root_prefix": root_prefix_owned, "paths": chunk }),
+    );
 
-    for paths in lookup_chunks(paths, paths_per_routes_query(paths)) {
+    for paths in chunks {
         let params = json!({ "root_prefix": root_prefix, "paths": paths });
         let batches = datalake
             .query_batches(&ROUTES_SQL, params, None)
@@ -529,6 +552,14 @@ mod tests {
 
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
+
+    fn test_uri_ctx() -> UriContext {
+        UriContext {
+            base_url: "http://clickhouse:8123".to_string(),
+            database: "datalake".to_string(),
+            scaffold_pairs: Vec::new(),
+        }
+    }
 
     fn make_note(action: &str, body: &str, noteable_type: &str, noteable_id: i64) -> ExtractedNote {
         ExtractedNote {
@@ -803,7 +834,9 @@ mod tests {
         let paths: Vec<_> = (0..3_000).map(|i| format!("group/project-{i}")).collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &path_refs, "1/").await.unwrap();
+        let routes = query_routes(&datalake, &test_uri_ctx(), &path_refs, "1/")
+            .await
+            .unwrap();
 
         assert!(
             datalake.queries().len() > 1,
@@ -812,6 +845,47 @@ mod tests {
         assert_eq!(routes.len(), 3_000);
         assert_eq!(routes[0].source_id, 0);
         assert_eq!(routes[2_999].source_id, 2_999);
+    }
+
+    // `'` is doubled by ClickHouse escaping then percent-encoded, producing
+    // 6 bytes per raw byte — the old `MAX_URL_ENCODED_BYTES_PER_CHAR = 3`
+    // estimate would let these paths through in a single chunk that actually
+    // overflows the `http` crate's URI cap on the wire. The shared
+    // `chunk_params_to_fit_uri` measures the real encoded length, so every
+    // produced chunk's URI stays under the cap.
+    #[tokio::test]
+    async fn query_routes_chunks_quote_heavy_paths_under_uri_cap() {
+        let datalake = RecordingDatalake::new();
+        let uri_ctx = test_uri_ctx();
+
+        // 300 single-quote chars × 200 paths: raw bytes are well under 64 KiB
+        // but the escaped+percent-encoded URI is far over.
+        let quote_heavy: String = std::iter::repeat_n('\'', 300).collect();
+        let paths: Vec<String> = (0..200)
+            .map(|i| format!("group/{quote_heavy}-{i}"))
+            .collect();
+        let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+
+        let routes = query_routes(&datalake, &uri_ctx, &path_refs, "1/")
+            .await
+            .unwrap();
+
+        assert!(
+            datalake.queries().len() > 1,
+            "adversarial input must require multiple chunks"
+        );
+        assert_eq!(routes.len(), 200);
+
+        for params in &datalake.queries() {
+            let chunk_paths = params["paths"].as_array().unwrap();
+            let chunk_refs: Vec<&str> = chunk_paths.iter().map(|v| v.as_str().unwrap()).collect();
+            let uri_len =
+                uri_ctx.request_uri_len(&json!({ "root_prefix": "1/", "paths": chunk_refs }));
+            assert!(
+                uri_len <= clickhouse_client::uri_guard::MAX_REQUEST_URI_LEN,
+                "chunk URI is {uri_len} bytes, over the cap"
+            );
+        }
     }
 
     #[tokio::test]
@@ -860,9 +934,15 @@ mod tests {
             plan.issue_pairs.insert((path, i as i64));
         }
 
-        let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-            .await
-            .unwrap();
+        let index = resolve_plan(
+            &datalake,
+            &test_uri_ctx(),
+            &plan,
+            "1/",
+            TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+        )
+        .await
+        .unwrap();
 
         for i in [
             0,
@@ -889,6 +969,7 @@ mod tests {
         let datalake = RecordingDatalake::new();
         let index = resolve_plan(
             &datalake,
+            &test_uri_ctx(),
             &ResolutionPlan::default(),
             "1/",
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
@@ -919,9 +1000,15 @@ mod tests {
                 plan.issue_pairs.insert((path, i as i64));
             }
 
-            let index = resolve_plan(&datalake, &plan, "1/", TEST_RESOLVE_LOOKUP_BATCH_SIZE)
-                .await
-                .unwrap();
+            let index = resolve_plan(
+                &datalake,
+                &test_uri_ctx(),
+                &plan,
+                "1/",
+                TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            )
+            .await
+            .unwrap();
             let reference = Reference {
                 kind: RefKind::Issue,
                 project_path: Some(format!("group/project-{}", count - 1)),
