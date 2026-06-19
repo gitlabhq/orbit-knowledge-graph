@@ -348,6 +348,8 @@ mod tests {
         assert!(measured_uri_len(&datalake, &json!({ "p": over_cap })) > MAX_REQUEST_URI_LEN);
     }
 
+    // Injects a sub-measured cap so a tiny batch trips `UriTooLong` without
+    // fabricating a real 64 KB+ payload.
     #[test]
     fn build_query_rejects_over_injected_cap() {
         let params = json!({ "paths": ["group/project-1", "group/project-2"] });
