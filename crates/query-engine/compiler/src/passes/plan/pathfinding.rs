@@ -81,6 +81,7 @@ fn node_plan_from(node: &InputNode) -> NodePlan {
         node_ids: node.node_ids.clone(),
         id_range: node.id_range.clone(),
         has_traversal_path: node.has_traversal_path,
+        is_global: node.is_global,
         redaction_id_column: node.redaction_id_column.clone(),
         columns: node.columns.clone(),
         dedup_columns: vec![],

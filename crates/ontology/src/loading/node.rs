@@ -26,6 +26,8 @@ pub(crate) struct NodeYaml {
     node_type: String,
     domain: String,
     #[serde(default)]
+    global: bool,
+    #[serde(default)]
     description: String,
     #[serde(default)]
     label: String,
@@ -452,6 +454,13 @@ impl NodeYaml {
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
 
+        // A global hub must be non-namespaced; a traversal_path would let elision drop a scope filter.
+        if self.global && has_traversal_path {
+            return Err(OntologyError::Validation(format!(
+                "node '{name}' is `global: true` but declares a `traversal_path` column; global hubs must be non-namespaced"
+            )));
+        }
+
         let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
         Ok(NodeEntity {
@@ -468,6 +477,7 @@ impl NodeYaml {
             redaction: self.redaction,
             style: self.style,
             has_traversal_path,
+            global: self.global,
             storage,
         })
     }
@@ -865,6 +875,45 @@ mod tests {
             err.contains("nonexistent_field"),
             "error should mention the bad field name, got: {err}"
         );
+    }
+
+    #[test]
+    fn global_node_with_traversal_path_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            global: true
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              traversal_path:
+                type: string
+                source: traversal_path
+            "#,
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("global") && err.contains("traversal_path"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn global_defaults_false_and_parses_when_true() {
+        let scoped = parse_test_node(
+            "node_type: entity\ndomain: test\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n",
+        )
+        .unwrap();
+        assert!(!scoped.global);
+
+        let hub = parse_test_node(
+            "node_type: entity\ndomain: test\nglobal: true\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n",
+        )
+        .unwrap();
+        assert!(hub.global);
     }
 
     #[test]

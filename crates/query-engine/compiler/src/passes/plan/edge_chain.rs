@@ -84,6 +84,7 @@ pub struct NodePlan {
     pub node_ids: Vec<i64>,
     pub id_range: Option<InputIdRange>,
     pub has_traversal_path: bool,
+    pub is_global: bool,
     pub redaction_id_column: String,
     pub columns: Option<ColumnSelection>,
     pub dedup_columns: Vec<String>,
@@ -334,6 +335,7 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     selectivity: Selectivity::from_node(n),
                     hydration: HydrationStrategy::Skip,
                     has_traversal_path: n.has_traversal_path,
+                    is_global: n.is_global,
                     redaction_id_column: n.redaction_id_column.clone(),
                     filters: n
                         .filters
@@ -532,11 +534,11 @@ fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
             .get(alias)
             .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
     };
-    // No traversal_path == global hub (not namespace-scoped, reached only via FK); a scoped entity must always carry one.
+    // Global hub (`global: true`): non-namespaced, reached only via FK; safe to elide past.
     let reaches_global_hub = |h: &Hop| {
         [h.from_node.as_str(), h.to_node.as_str()]
             .iter()
-            .any(|a| nodes.get(*a).is_some_and(|np| !np.has_traversal_path))
+            .any(|a| nodes.get(*a).is_some_and(|np| np.is_global))
     };
     // Authz guard: only keep eliding while the chain retains an in-namespace (scoped) node.
     let has_scope_anchor = || {
@@ -912,7 +914,7 @@ fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
 mod tests {
     use super::*;
 
-    fn node(alias: &str, has_traversal_path: bool) -> NodePlan {
+    fn node(alias: &str, has_traversal_path: bool, is_global: bool) -> NodePlan {
         NodePlan {
             alias: alias.to_string(),
             entity: None,
@@ -923,6 +925,7 @@ mod tests {
             node_ids: Vec::new(),
             id_range: None,
             has_traversal_path,
+            is_global,
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             columns: None,
             dedup_columns: Vec::new(),
@@ -955,34 +958,38 @@ mod tests {
         }
     }
 
-    fn node_map(pairs: &[(&str, bool)]) -> HashMap<String, NodePlan> {
+    fn node_map(pairs: &[(&str, bool, bool)]) -> HashMap<String, NodePlan> {
         pairs
             .iter()
-            .map(|(a, tp)| (a.to_string(), node(a, *tp)))
+            .map(|(a, tp, global)| (a.to_string(), node(a, *tp, *global)))
             .collect()
     }
 
     #[test]
     fn fk_chain_with_global_hub_and_scope_anchor_elides() {
-        // scoped a→b, then b→hub (non-scope-preserving, hub has no traversal_path).
+        // scoped a→b, then b→hub (non-scope-preserving, hub is the global node).
         let hops = [fk_hop("a", "b", true), fk_hop("b", "hub", false)];
-        let nodes = node_map(&[("a", true), ("b", true), ("hub", false)]);
+        let nodes = node_map(&[("a", true, false), ("b", true, false), ("hub", false, true)]);
         assert!(detect_fk_chain(&hops, &nodes));
     }
 
     #[test]
     fn fk_chain_all_global_hubs_does_not_elide() {
-        // no node carries traversal_path: no scope anchor, so the chain must stay on the edge path.
+        // every node is global: no scope anchor, so the chain must stay on the edge path.
         let hops = [fk_hop("h1", "h2", false), fk_hop("h2", "h3", false)];
-        let nodes = node_map(&[("h1", false), ("h2", false), ("h3", false)]);
+        let nodes = node_map(&[
+            ("h1", false, true),
+            ("h2", false, true),
+            ("h3", false, true),
+        ]);
         assert!(!detect_fk_chain(&hops, &nodes));
     }
 
     #[test]
     fn fk_chain_non_scope_preserving_between_scoped_nodes_does_not_elide() {
-        // non-scope-preserving hop with no hub endpoint could cross namespaces, so it must not elide.
+        // non-scope-preserving hop with no global endpoint could cross namespaces, so it must not elide.
         let hops = [fk_hop("a", "b", true), fk_hop("b", "c", false)];
-        let nodes = node_map(&[("a", true), ("b", true), ("c", true)]);
+        let nodes = node_map(&[("a", true, false), ("b", true, false), ("c", true, false)]);
         assert!(!detect_fk_chain(&hops, &nodes));
     }
 }

@@ -2,6 +2,7 @@
 
 node_type: User
 domain: core
+global: true
 description: A GitLab user account
 label: username
 destination_table: gl_user

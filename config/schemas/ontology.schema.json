@@ -923,6 +923,10 @@
           "description": "Name of the node type (e.g., 'Project', 'User')."
         },
         "domain": { "$ref": "#/definitions/domainName" },
+        "global": {
+          "type": "boolean",
+          "description": "Non-namespaced global hub (e.g. User, Runner) reached only via FK. Defaults to false."
+        },
         "description": {
           "type": "string",
           "description": "Human-readable description of the node."
