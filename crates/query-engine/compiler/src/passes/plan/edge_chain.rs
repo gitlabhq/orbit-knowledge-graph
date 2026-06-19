@@ -523,36 +523,31 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
 }
 
 /// Linear FK chain the node-join path answers without edge scans. Each hop must be
-/// FK-backed, single fixed-length, edge-filter-free, and not `Both`; gated out of
-/// point-selective endpoints (SIP narrowing on the edge scan beats a full leaf-node
-/// scan there) and non-emittable shapes.
-///
-/// A hop must be scope-preserving OR reach a global hub (an endpoint with no
-/// `traversal_path`, e.g. User/Runner/Label). The latter covers `prune_to_target`/
-/// `prune_to_source` edges: the in-namespace endpoint keeps its scope while the hub
-/// is reached only via the FK off that scoped node, so no scope is lost and the
-/// authz boundary stays on the scoped side -- same as the edge path.
+/// FK-backed, single fixed-length, edge-filter-free, not `Both`, and either
+/// scope-preserving or reaching a global hub; gated out of point-selective endpoints
+/// and non-emittable shapes. The chain must keep one scoped node (the authz anchor).
 fn detect_fk_chain(hops: &[Hop], nodes: &HashMap<String, NodePlan>) -> bool {
     let point_selective = |alias: &str| {
         nodes
             .get(alias)
             .is_some_and(|np| matches!(np.selectivity, Selectivity::Pinned | Selectivity::IdRange))
     };
+    // No traversal_path == global hub (not namespace-scoped, reached only via FK); a scoped entity must always carry one.
     let reaches_global_hub = |h: &Hop| {
         [h.from_node.as_str(), h.to_node.as_str()]
             .iter()
             .any(|a| nodes.get(*a).is_some_and(|np| !np.has_traversal_path))
     };
-    // Authz guard: a global-hub hop is only sound while the chain still has an
-    // in-namespace node carrying the traversal_path scope, so the boundary is
-    // never lost (a hub is reached only via the FK off a scoped node).
-    let has_scope_anchor = hops.iter().any(|h| {
-        [h.from_node.as_str(), h.to_node.as_str()]
-            .iter()
-            .any(|a| nodes.get(*a).is_some_and(|np| np.has_traversal_path))
-    });
+    // Authz guard: only keep eliding while the chain retains an in-namespace (scoped) node.
+    let has_scope_anchor = || {
+        hops.iter().any(|h| {
+            [h.from_node.as_str(), h.to_node.as_str()]
+                .iter()
+                .any(|a| nodes.get(*a).is_some_and(|np| np.has_traversal_path))
+        })
+    };
     hops.len() >= 2
-        && has_scope_anchor
+        && has_scope_anchor()
         && hops.iter().all(|h| {
             h.fk.is_some()
                 && (h.scope_preserving || reaches_global_hub(h))
@@ -910,5 +905,84 @@ fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
         push(DELETED_COLUMN);
 
         nodes.get_mut(&alias).unwrap().dedup_columns = cols;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(alias: &str, has_traversal_path: bool) -> NodePlan {
+        NodePlan {
+            alias: alias.to_string(),
+            entity: None,
+            table: None,
+            selectivity: Selectivity::Filtered,
+            hydration: HydrationStrategy::Skip,
+            filters: Vec::new(),
+            node_ids: Vec::new(),
+            id_range: None,
+            has_traversal_path,
+            redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
+            columns: None,
+            dedup_columns: Vec::new(),
+            use_narrowing: false,
+            needs_elevated_filter: false,
+            fk_needs_join: false,
+            emit_select: true,
+        }
+    }
+
+    fn fk_hop(from: &str, to: &str, scope_preserving: bool) -> Hop {
+        Hop {
+            rel_types: vec!["REL".to_string()],
+            edge_table: "gl_edge".to_string(),
+            from_node: from.to_string(),
+            to_node: to.to_string(),
+            direction: Direction::Outgoing,
+            min_hops: 1,
+            max_hops: 1,
+            fk: Some(HopFk {
+                fk_node: from.to_string(),
+                fk_column: "fk_id".to_string(),
+                target_node: to.to_string(),
+            }),
+            filters: Vec::new(),
+            join_prev: None,
+            scope_prefix: None,
+            scope_preserving,
+            cascade_anchor: false,
+        }
+    }
+
+    fn node_map(pairs: &[(&str, bool)]) -> HashMap<String, NodePlan> {
+        pairs
+            .iter()
+            .map(|(a, tp)| (a.to_string(), node(a, *tp)))
+            .collect()
+    }
+
+    #[test]
+    fn fk_chain_with_global_hub_and_scope_anchor_elides() {
+        // scoped a→b, then b→hub (non-scope-preserving, hub has no traversal_path).
+        let hops = [fk_hop("a", "b", true), fk_hop("b", "hub", false)];
+        let nodes = node_map(&[("a", true), ("b", true), ("hub", false)]);
+        assert!(detect_fk_chain(&hops, &nodes));
+    }
+
+    #[test]
+    fn fk_chain_all_global_hubs_does_not_elide() {
+        // no node carries traversal_path: no scope anchor, so the chain must stay on the edge path.
+        let hops = [fk_hop("h1", "h2", false), fk_hop("h2", "h3", false)];
+        let nodes = node_map(&[("h1", false), ("h2", false), ("h3", false)]);
+        assert!(!detect_fk_chain(&hops, &nodes));
+    }
+
+    #[test]
+    fn fk_chain_non_scope_preserving_between_scoped_nodes_does_not_elide() {
+        // non-scope-preserving hop with no hub endpoint could cross namespaces, so it must not elide.
+        let hops = [fk_hop("a", "b", true), fk_hop("b", "c", false)];
+        let nodes = node_map(&[("a", true), ("b", true), ("c", true)]);
+        assert!(!detect_fk_chain(&hops, &nodes));
     }
 }

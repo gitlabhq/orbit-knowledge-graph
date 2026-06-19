@@ -1942,10 +1942,7 @@ mod tests {
 
     #[test]
     fn cross_namespace_fk_chain_elides_to_node_joins() {
-        // User ─AUTHORED→ MR ─HAS_HEAD_PIPELINE→ Pipeline ─HAS_JOB→ Job: every hop is
-        // FK-backed and AUTHORED reaches the global User hub (prune_to_target), so the
-        // chain FK-elides to node joins rather than edge scans. The in-namespace nodes
-        // keep their traversal_path scope; the hub is reached via the FK off a scoped node.
+        // FK-backed chain reaching the global User hub: elides to node joins, scoping the in-namespace nodes but not the hub.
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
