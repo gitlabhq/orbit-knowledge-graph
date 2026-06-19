@@ -179,7 +179,7 @@ agent-file-sync-check:
 # On main: whole-tree scan (no MR diff available).
 lint:narration:
   stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  image: python:3.12-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -201,7 +201,7 @@ lint:narration:
 # (yellow) for now — remove it to promote to a blocking gate.
 lint:mr-description:
   stage: lint
-  image: ghcr.io/astral-sh/uv:python3.12-alpine
+  image: python:3.12-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
