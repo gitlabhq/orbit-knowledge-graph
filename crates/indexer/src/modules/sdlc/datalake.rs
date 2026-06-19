@@ -284,8 +284,8 @@ mod tests {
 
     // A `paths` batch whose *encoded* URI clears the cap must be caught at the
     // chokepoint. In a debug build the `debug_assert!` is the loud signal, so
-    // `build_query` panics here (this is what CI exercises); the release path is
-    // covered by `build_query_returns_uri_too_long_in_release`.
+    // `build_query` panics here (this is what CI exercises); the `UriTooLong`
+    // return path is covered unconditionally by `build_query_rejects_over_injected_cap`.
     #[test]
     #[cfg(debug_assertions)]
     #[should_panic(expected = "over the")]
