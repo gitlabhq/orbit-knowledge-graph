@@ -35,6 +35,7 @@ pub fn plan_neighbors(input: &Input) -> Result<Plan> {
         node_ids: center_node.node_ids.clone(),
         id_range: center_node.id_range.clone(),
         has_traversal_path: center_node.has_traversal_path,
+        is_global: center_node.is_global,
         redaction_id_column: center_node.redaction_id_column.clone(),
         columns: center_node.columns.clone(),
         dedup_columns: vec![],

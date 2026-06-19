@@ -372,6 +372,10 @@ pub struct InputNode {
     /// Whether the node table has a traversal_path column. Set during normalization.
     #[serde(skip)]
     pub has_traversal_path: bool,
+    /// Whether the entity is declared `global: true` in the ontology (non-namespaced
+    /// hub reached only via FK). Set during normalization.
+    #[serde(skip)]
+    pub is_global: bool,
     /// Narrowed traversal paths extracted from base query results. Used by the
     /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
     /// queries, pruning granules through the primary key.
@@ -394,6 +398,7 @@ impl Default for InputNode {
             virtual_columns: Vec::new(),
             virtual_filters: Vec::new(),
             has_traversal_path: false,
+            is_global: false,
             traversal_paths: Vec::new(),
         }
     }
