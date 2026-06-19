@@ -169,10 +169,6 @@ agent-file-sync-check:
   script:
     - diff AGENTS.md CLAUDE.md || (echo "AGENTS.md and CLAUDE.md are out of sync. Please ensure they have identical content." && exit 1)
 
-# comment-guard lint gates (lint:narration, lint:mr-description) live in
-# .gitlab/ci/comment-guard.yml (included above) — kept self-contained so the
-# whole feature is removable as a unit. See scripts/comment-guard/README.md.
-
 mr-title-check:
   stage: lint
   image: oven/bun:1.3-alpine
