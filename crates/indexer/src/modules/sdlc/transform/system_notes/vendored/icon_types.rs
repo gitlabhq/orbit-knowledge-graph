@@ -37,8 +37,12 @@ pub const HANDLED_CROSS_REFERENCE_ACTIONS: &[&str] = &[
 
 /// Lifecycle actions whose body is a fixed verb and which the parser emits
 /// `User → Noteable` edges for directly.
+///
+/// `reopened` is intentionally absent: reopen is never a system-note action.
+/// It is a `resource_state_events` row (state = 5), and REOPENED edges are
+/// emitted by the standalone `reopened.yaml` ETL. See ADR 013.
 #[cfg(test)]
-pub const HANDLED_LIFECYCLE_ACTIONS: &[&str] = &["closed", "reopened", "merged", "opened"];
+pub const HANDLED_LIFECYCLE_ACTIONS: &[&str] = &["closed", "merged", "opened"];
 
 #[cfg(test)]
 mod tests {
@@ -55,16 +59,8 @@ mod tests {
     }
 
     #[test]
-    fn handled_lifecycle_actions_are_subset_of_icon_types_except_reopened() {
-        // `reopened` is a known omission from Rails ICON_TYPES: the action
-        // value is emitted by the lifecycle service but Rails doesn't render
-        // an icon for it (the timeline shows the entity reopening visually
-        // via the state change instead). Document the exception so the drift
-        // check doesn't flag it.
+    fn handled_lifecycle_actions_are_subset_of_icon_types() {
         for action in HANDLED_LIFECYCLE_ACTIONS {
-            if *action == "reopened" {
-                continue;
-            }
             assert!(
                 ICON_TYPES.contains(action),
                 "handled lifecycle action `{action}` is not in vendored ICON_TYPES"

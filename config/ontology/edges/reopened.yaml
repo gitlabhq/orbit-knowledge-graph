@@ -1,0 +1,46 @@
+# config/ontology/edges/reopened.yaml
+
+description: User who reopened a merge request or work item (ADR 013)
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User reopened a merge request."
+
+  - from_node: { type: User, id: id }
+    to_node: { type: WorkItem, id: id }
+    description: "User reopened a work item."
+
+# Reopen is a `resource_state_events` row (state = 5), never a system-note
+# action. The CHECK on `resource_state_events` guarantees exactly one of
+# (issue_id, merge_request_id, epic_id) is set per row, so each issuable side
+# is its own ETL filtered on the relevant FK plus the reopened state.
+#
+# `state = 5` == `reopened` in Rails `ResourceStateEvent`:
+#   app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
+#   app/models/concerns/issuable.rb STATE_ID_MAP (opened:1, closed:2, merged:3, locked:4)
+etl:
+  - scope: namespaced
+    source: siphon_resource_state_events
+    order_by: [traversal_path, id]
+    where: "state = 5"
+    from:
+      id: user_id
+      type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
+    to:
+      id: merge_request_id
+      type: MergeRequest
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]
+  - scope: namespaced
+    source: siphon_resource_state_events
+    order_by: [traversal_path, id]
+    where: "state = 5"
+    from:
+      id: user_id
+      type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
+    to:
+      id: issue_id
+      type: WorkItem
+      enrich: [state_id, work_item_type_id, confidential]

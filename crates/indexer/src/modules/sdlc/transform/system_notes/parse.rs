@@ -56,7 +56,6 @@ pub enum Action {
     Commit,
     Merge,
     Closed,
-    Reopened,
     Merged,
     Opened,
 }
@@ -77,7 +76,6 @@ impl Action {
             "commit" => Self::Commit,
             "merge" => Self::Merge,
             "closed" => Self::Closed,
-            "reopened" => Self::Reopened,
             "merged" => Self::Merged,
             "opened" => Self::Opened,
             _ => return None,
@@ -103,25 +101,25 @@ impl Action {
             Self::Commit => "commit",
             Self::Merge => "merge",
             Self::Closed => "closed",
-            Self::Reopened => "reopened",
             Self::Merged => "merged",
             Self::Opened => "opened",
         }
     }
 
     /// Lifecycle actions whose body is a fixed verb (`"closed"`, `"merged"`,
-    /// `"reopened"`, `"opened"`) and which do not need text parsing. The
-    /// resolved edge is `User --ACTION--> Noteable` from the note row alone.
+    /// `"opened"`) and which do not need text parsing. The resolved edge is
+    /// `User --ACTION--> Noteable` from the note row alone.
+    ///
+    /// `reopened` is intentionally absent: reopen is a `resource_state_events`
+    /// row (state = 5), never a system-note action, and REOPENED edges are
+    /// emitted by the standalone `reopened.yaml` ETL instead. See ADR 013.
     ///
     /// Test-only: `emit::build_edges` matches on the concrete `Action`
     /// variants directly, so this predicate is documentation/assertion sugar
     /// rather than a production branch.
     #[cfg(test)]
     pub fn is_lifecycle(self) -> bool {
-        matches!(
-            self,
-            Self::Closed | Self::Reopened | Self::Merged | Self::Opened
-        )
+        matches!(self, Self::Closed | Self::Merged | Self::Opened)
     }
 }
 
@@ -183,7 +181,7 @@ static COMMIT_REF: LazyLock<Regex> = LazyLock::new(|| {
 pub fn extract(action: Action, body: &str) -> Vec<Reference> {
     match action {
         // Lifecycle: body is the bare verb, no cross-entity ref.
-        Action::Closed | Action::Reopened | Action::Merged | Action::Opened => Vec::new(),
+        Action::Closed | Action::Merged | Action::Opened => Vec::new(),
 
         // Body: "mentioned in <ref>".
         Action::CrossReference => first_ref_any(body).into_iter().collect(),
@@ -379,13 +377,18 @@ mod tests {
             "commit",
             "merge",
             "closed",
-            "reopened",
             "merged",
             "opened",
         ] {
             let a = Action::parse(s).unwrap_or_else(|| panic!("action {s} should parse"));
             assert_eq!(a.as_str(), s);
         }
+    }
+
+    #[test]
+    fn reopened_is_not_a_system_note_action() {
+        // Reopen is a resource_state_events row (state = 5), not a note action.
+        assert!(Action::parse("reopened").is_none());
     }
 
     #[test]
@@ -412,7 +415,6 @@ mod tests {
     fn action_lifecycle_classification() {
         assert!(Action::Closed.is_lifecycle());
         assert!(Action::Merged.is_lifecycle());
-        assert!(Action::Reopened.is_lifecycle());
         assert!(Action::Opened.is_lifecycle());
         assert!(!Action::CrossReference.is_lifecycle());
         assert!(!Action::Merge.is_lifecycle());
@@ -649,12 +651,7 @@ mod tests {
 
     #[test]
     fn lifecycle_actions_extract_nothing() {
-        for action in [
-            Action::Closed,
-            Action::Reopened,
-            Action::Merged,
-            Action::Opened,
-        ] {
+        for action in [Action::Closed, Action::Merged, Action::Opened] {
             assert!(extract(action, "closed").is_empty());
             assert!(extract(action, "merged").is_empty());
             // Even a body that happens to look like a cross-reference is

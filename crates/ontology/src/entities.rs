@@ -420,6 +420,11 @@ pub struct EdgeSourceEtlConfig {
     pub deleted: String,
     /// Columns for ORDER BY in extract queries and cursor-based pagination.
     pub order_by: Vec<String>,
+    /// Optional extra `WHERE` predicate pushed into the extraction SQL, ANDed
+    /// with the watermark/deleted/IsNotNull filters. Lets a standalone edge
+    /// select a row subset of a shared source table (e.g. one Rails enum value)
+    /// without a dedicated source table or a Rust transform.
+    pub filter: Option<String>,
     /// Source endpoint configuration.
     pub from: EdgeEndpoint,
     /// Target endpoint configuration.

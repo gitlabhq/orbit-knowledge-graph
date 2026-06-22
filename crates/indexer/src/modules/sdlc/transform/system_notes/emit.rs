@@ -68,7 +68,6 @@ impl From<RefKind> for NoteableKind {
 /// edge YAML filenames under `config/ontology/edges/`.
 pub mod edge_kinds {
     pub const MENTIONS: &str = "MENTIONS";
-    pub const REOPENED: &str = "REOPENED";
     pub const CLOSED: &str = "CLOSED";
     pub const MERGED: &str = "MERGED";
 }
@@ -110,7 +109,6 @@ pub struct NoteRow {
 fn lifecycle_edge_kind(action: Action) -> Option<&'static str> {
     match action {
         Action::Closed => Some(edge_kinds::CLOSED),
-        Action::Reopened => Some(edge_kinds::REOPENED),
         Action::Merged => Some(edge_kinds::MERGED),
         _ => None,
     }
@@ -129,13 +127,13 @@ where
     for row in rows {
         match row.action {
             // Lifecycle: User → Noteable.
-            Action::Closed | Action::Reopened | Action::Merged => {
+            Action::Closed | Action::Merged => {
                 let Some(author_id) = row.author_id else {
                     continue;
                 };
                 // Drop targets the edge YAML doesn't declare: `merged` only on
-                // MergeRequest, `closed`/`reopened` on MR or WorkItem. Keeps the
-                // emitter honest if Rails or a manual edit sends an odd noteable.
+                // MergeRequest, `closed` on MR or WorkItem. Keeps the emitter
+                // honest if Rails or a manual edit sends an odd noteable.
                 let declared_target = match row.action {
                     Action::Merged => row.noteable_kind == NoteableKind::MergeRequest,
                     _ => matches!(
@@ -293,23 +291,10 @@ mod tests {
     }
 
     #[test]
-    fn reopened_lifecycle_emits_user_reopened_target_edge() {
-        let row = row_for(Action::Reopened, "reopened", NoteableKind::MergeRequest, 42);
-        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].relationship_kind, "REOPENED");
-        assert_eq!(edges[0].target_kind, "MergeRequest");
-    }
-
-    #[test]
     fn lifecycle_edge_kind_maps_actions_and_skips_non_lifecycle() {
         assert_eq!(
             lifecycle_edge_kind(Action::Closed),
             Some(edge_kinds::CLOSED)
-        );
-        assert_eq!(
-            lifecycle_edge_kind(Action::Reopened),
-            Some(edge_kinds::REOPENED)
         );
         assert_eq!(
             lifecycle_edge_kind(Action::Merged),
@@ -331,18 +316,11 @@ mod tests {
 
     #[test]
     fn closed_on_commit_noteable_is_dropped() {
-        // `closed.yaml` / `reopened.yaml` declare only MergeRequest and
-        // WorkItem targets; there is no `Commit` node yet. A `closed`
-        // action landing on a `Commit` noteable must drop rather than emit
-        // an undeclared `User → Commit CLOSED` edge.
+        // `closed.yaml` declares only MergeRequest and WorkItem targets; there
+        // is no `Commit` node yet. A `closed` action landing on a `Commit`
+        // noteable must drop rather than emit an undeclared
+        // `User → Commit CLOSED` edge.
         let row = row_for(Action::Closed, "closed", NoteableKind::Commit, 5);
-        let edges = build_edges(&[row], always_resolve(0, "1/2/"));
-        assert!(edges.is_empty());
-    }
-
-    #[test]
-    fn reopened_on_commit_noteable_is_dropped() {
-        let row = row_for(Action::Reopened, "reopened", NoteableKind::Commit, 5);
         let edges = build_edges(&[row], always_resolve(0, "1/2/"));
         assert!(edges.is_empty());
     }

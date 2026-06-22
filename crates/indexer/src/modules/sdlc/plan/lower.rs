@@ -206,7 +206,11 @@ fn lower_standalone_edge_plan(
     ontology: &Ontology,
 ) -> Plan {
     let destination_table = input.extract.destination_table.clone();
-    let name = plan_name(&input.relationship_kind, &input.extract.source);
+    let name = plan_name(
+        &input.relationship_kind,
+        &input.extract.source,
+        &input.target_kind,
+    );
     let mut plan = lower_extract_plan(input.extract, batch_size);
     let meta = edge_table_metadata(&input.relationship_kind, ontology);
     let sql = build_edge_transform_sql(
@@ -229,10 +233,19 @@ fn lower_standalone_edge_plan(
     plan
 }
 
-fn plan_name(relationship_kind: &str, source: &ExtractSource) -> String {
+fn plan_name(relationship_kind: &str, source: &ExtractSource, target_kind: &EdgeKind) -> String {
+    // A relationship kind can have several ETLs over the same source table that
+    // differ only by their target (REOPENED: one MR-targeted, one WorkItem-
+    // targeted, both filtered on `siphon_resource_state_events`). The plan name
+    // is the handler name and checkpoint key, so it must be unique per ETL; a
+    // literal target kind disambiguates them.
+    let target_suffix = match target_kind {
+        EdgeKind::Literal(t) => format!("_{t}"),
+        EdgeKind::Column { .. } => String::new(),
+    };
     match source {
-        ExtractSource::Table(table) => format!("{relationship_kind}_{table}"),
-        ExtractSource::Raw(_) => relationship_kind.to_string(),
+        ExtractSource::Table(table) => format!("{relationship_kind}_{table}{target_suffix}"),
+        ExtractSource::Raw(_) => format!("{relationship_kind}{target_suffix}"),
     }
 }
 

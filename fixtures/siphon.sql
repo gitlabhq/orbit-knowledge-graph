@@ -1025,6 +1025,40 @@ PRIMARY KEY (traversal_path, issue_id, id)
 ORDER BY (traversal_path, issue_id, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source table for resource state events (issuable lifecycle transitions).
+-- A CHECK on the source guarantees exactly one of (epic_id, issue_id,
+-- merge_request_id) is set per row. The `state` column is the issuable state
+-- enum where reopened = 5. See app/models/resource_state_event.rb.
+CREATE TABLE IF NOT EXISTS siphon_resource_state_events
+(
+    `id` Int64,
+    `user_id` Nullable(Int64),
+    `issue_id` Nullable(Int64),
+    `merge_request_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC'),
+    `state` Int8,
+    `epic_id` Nullable(Int64),
+    `source_commit` Nullable(String),
+    `close_after_error_tracking_resolve` Bool DEFAULT false,
+    `close_auto_resolve_prometheus_alert` Bool DEFAULT false,
+    `source_merge_request_id` Nullable(Int64),
+    `imported_from` Int8 DEFAULT 0,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_watermark` DateTime64(6, 'UTC') DEFAULT _siphon_replicated_at,
+    INDEX idx_siphon_watermark_minmax _siphon_watermark TYPE minmax GRANULARITY 1,
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+ORDER BY (traversal_path, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for work item parent links (join table)
 CREATE TABLE IF NOT EXISTS siphon_work_item_parent_links
 (

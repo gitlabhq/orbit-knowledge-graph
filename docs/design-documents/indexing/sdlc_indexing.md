@@ -233,6 +233,8 @@ If the worker fails unexpectedly, the unacked message is redelivered by NATS to 
 
 ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/ontology/edges/`. Each node entity with an `etl` config becomes a `Plan` with an extraction query and one or more transforms. FK edges defined on a node are folded into the parent node's plan so they share the same extracted batch instead of querying the datalake twice. Standalone edges get their own plans. Plans split by `EtlScope` into global (instance-wide entities like User) and namespaced (entities under a namespace like Project or Issue).
 
+A standalone edge ETL may set an optional `where:` predicate that is pushed into the extraction SQL (ANDed with the watermark/deleted/not-null filters), so a single shared source table can back multiple edge kinds without a dedicated table or a Rust transform. For example, `REOPENED` is two ETLs over `siphon_resource_state_events` filtered to `state = 5` (the Rails `reopened` issuable state) — one targeting `MergeRequest` via `merge_request_id`, one targeting `WorkItem` via `issue_id`.
+
 **Pipeline: extract, transform, write**
 
 Each `EntityHandler` invocation runs its plan through a shared `Pipeline` struct. The loop works like this:
