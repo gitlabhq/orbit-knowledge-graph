@@ -41,7 +41,7 @@ regex = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
+siphon-proto = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
