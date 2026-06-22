@@ -56,6 +56,7 @@ impl QuotaService {
             cfg.api_token.as_deref().unwrap_or(""),
             Duration::from_millis(cfg.request_timeout_ms),
             Duration::from_secs(cfg.fallback_cache_ttl_secs),
+            cfg.entitlement_fail_closed,
         )?;
         let cache = QuotaCache::new(Arc::new(client), QUOTA_MAX_CACHE_ENTRIES);
 
@@ -139,13 +140,17 @@ impl QuotaService {
 }
 
 fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &str) {
-    use gkg_observability::billing::quota::labels::{CACHE as CACHE_LABEL, DECISION, SOURCE_TYPE};
-    use gkg_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
+    use gkg_observability::billing::quota::labels::{
+        CACHE as CACHE_LABEL, DECISION, DENY_REASON, SOURCE_TYPE,
+    };
+    use gkg_observability::billing::quota::values::{
+        ALLOW, DENY, FAIL_OPEN, HIT, MISS, REASON_NONE,
+    };
 
-    let decision_label = match gate {
-        QuotaGateDecision::Allow => ALLOW,
-        QuotaGateDecision::Deny(_) => DENY,
-        QuotaGateDecision::FailOpen => FAIL_OPEN,
+    let (decision_label, reason_label) = match gate {
+        QuotaGateDecision::Allow => (ALLOW, REASON_NONE),
+        QuotaGateDecision::FailOpen => (FAIL_OPEN, REASON_NONE),
+        QuotaGateDecision::Deny(reason) => (DENY, reason.metric_value()),
     };
     let cache_label = match cache {
         CacheOutcome::Hit => HIT,
@@ -158,6 +163,7 @@ fn record_decision(gate: &QuotaGateDecision, cache: CacheOutcome, source_type: &
             opentelemetry::KeyValue::new(DECISION, decision_label),
             opentelemetry::KeyValue::new(CACHE_LABEL, cache_label),
             opentelemetry::KeyValue::new(SOURCE_TYPE, metered_source_type_label(source_type)),
+            opentelemetry::KeyValue::new(DENY_REASON, reason_label),
         ],
     );
     #[cfg(test)]
@@ -251,6 +257,7 @@ mod tests {
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
+                entitlement_fail_closed: true,
             },
         }
     }
@@ -278,6 +285,7 @@ mod tests {
                 api_token: Some("test-token".into()),
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
+                entitlement_fail_closed: true,
             },
         };
         let svc = QuotaService::from_config(&cfg).unwrap();
@@ -314,6 +322,7 @@ mod tests {
                 api_token: None,
                 request_timeout_ms: 5_000,
                 fallback_cache_ttl_secs: 3_600,
+                entitlement_fail_closed: true,
             },
         };
         let svc = QuotaService::from_config(&cfg).unwrap();
@@ -404,6 +413,14 @@ mod tests {
         let err = svc.check(&inputs).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn mcp_saas_403_denies_with_resource_exhausted() {
+        let (url, _counter) = counting_server(AxumStatus::FORBIDDEN).await;
+        let svc = service_for(url);
+        let err = svc.check(&inputs_with_source("mcp")).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
     }
 
     #[tokio::test]
