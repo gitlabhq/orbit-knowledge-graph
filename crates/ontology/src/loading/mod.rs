@@ -269,7 +269,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     // Graph-column -> datalake-column per node. A unified `edges:` entry names
     // the graph column; its extract column is the node property's `source`, so
-    // the siphon name lives only on the node, never in the edge file.
+    // the datalake column lives only on the node, never in the edge file.
     let node_columns: std::collections::BTreeMap<
         String,
         std::collections::BTreeMap<String, String>,
@@ -285,7 +285,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             (name.clone(), cols)
         })
         .collect();
-    let resolve_siphon = |node: &str, key: &str| -> Result<String, OntologyError> {
+    let resolve_datalake_column = |node: &str, key: &str| -> Result<String, OntologyError> {
         node_columns
             .get(node)
             .and_then(|m| m.get(key))
@@ -340,7 +340,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let sources = edge_def.into_sources(edge_name, &etl_settings, &resolve_siphon)?;
+        let sources = edge_def.into_sources(edge_name, &etl_settings, &resolve_datalake_column)?;
         if !sources.table_etls.is_empty() {
             ontology
                 .edge_etl_configs

@@ -23,7 +23,7 @@ pub(crate) struct EdgeYaml {
     scope: Option<EdgeVariantScope>,
     /// Unified graph-native form: each entry is one relationship declared once
     /// in graph terms. The query entity and the ETL node binding both derive
-    /// from it — the siphon extract column is resolved through the owning
+    /// from it — the datalake extract column is resolved through the owning
     /// node's property map, never written here.
     #[serde(default)]
     edges: Vec<UnifiedEdgeYaml>,
@@ -210,21 +210,21 @@ impl EdgeYaml {
         Ok(entities)
     }
 
-    /// `resolve_siphon(node, graph_key)` returns the datalake column that the
-    /// node's extract emits for the graph column `graph_key` (the node's
-    /// property `source`). This is what keeps the siphon name out of the edge
-    /// file — it lives only on the owning node's property.
+    /// `resolve_datalake_column(node, graph_key)` returns the datalake column
+    /// that the node's extract emits for the graph column `graph_key` (the
+    /// node's property `source`). This is what keeps the datalake column name
+    /// out of the edge file — it lives only on the owning node's property.
     pub(crate) fn into_sources(
         self,
         relationship_kind: &str,
         etl_settings: &EtlSettings,
-        resolve_siphon: &dyn Fn(&str, &str) -> Result<String, OntologyError>,
+        resolve_datalake_column: &dyn Fn(&str, &str) -> Result<String, OntologyError>,
     ) -> Result<EdgeSources, OntologyError> {
         let mut sources = EdgeSources::default();
 
         for entry in &self.edges {
             let split = split_unified(relationship_kind, entry)?;
-            let column = resolve_siphon(&split.owner.node, &split.owner.key)?;
+            let column = resolve_datalake_column(&split.owner.node, &split.owner.key)?;
             sources.node_bindings.push(NodeEdgeBinding {
                 node: split.owner.node.clone(),
                 column,
@@ -439,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn unified_edge_binding_resolves_siphon_column_via_node() {
+    fn unified_edge_binding_resolves_datalake_column_via_node() {
         let edge = parse(
             r#"
             edges:
@@ -447,7 +447,7 @@ mod tests {
                 to:   {node: MergeRequest, key: closed_by_id}
             "#,
         );
-        // MergeRequest.closed_by_id maps to the siphon column below.
+        // MergeRequest.closed_by_id maps to the datalake column below.
         let resolve = |node: &str, key: &str| {
             assert_eq!((node, key), ("MergeRequest", "closed_by_id"));
             Ok("metric_latest_closed_by_id".to_string())
