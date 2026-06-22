@@ -73,12 +73,13 @@
     {
       "otel_name": "gkg.billing.quota.decisions",
       "prom_name": "gkg_billing_quota_decisions_total",
-      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result (hit/miss), and source_type (mcp/rest). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
+      "description": "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result (hit/miss), source_type (mcp/rest), and deny_reason (none/quota_exhausted/not_entitled/unprocessable; non-deny decisions carry none). cache=miss on fail_open does not imply a 1:1 CDot call ratio — see gkg.billing.quota.cdot.duration for actual upstream call counts.",
       "kind": "counter",
       "labels": [
         "decision",
         "cache",
-        "source_type"
+        "source_type",
+        "deny_reason"
       ],
       "stability": "stable",
       "domain": "billing.quota"
