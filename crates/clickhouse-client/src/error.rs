@@ -20,6 +20,16 @@ pub enum ClickHouseError {
 
     #[error("circuit open for service {service}")]
     CircuitOpen { service: &'static str },
+
+    /// The request URI a query would dispatch exceeds the `http` crate's length
+    /// cap. Caught before dispatch so an over-limit batch fails loudly instead
+    /// of re-failing every retry with an opaque `uri too long` (KG#881). The
+    /// caller must split the batch into smaller chunks.
+    #[error(
+        "request URI is {len} bytes, over the {limit}-byte http limit; \
+         the batched param list is too large and must be split into smaller chunks"
+    )]
+    UriTooLong { len: usize, limit: usize },
 }
 
 fn is_clickhouse_error_transient(error: &clickhouse::error::Error) -> bool {

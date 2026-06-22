@@ -25,6 +25,10 @@ impl From<ClickHouseError> for DestinationError {
             ClickHouseError::CircuitOpen { service } => {
                 DestinationError::Connection(format!("circuit open for {service}"), None)
             }
+            ClickHouseError::UriTooLong { len, limit } => DestinationError::Write(
+                format!("request URI is {len} bytes, over the {limit}-byte http limit"),
+                None,
+            ),
         }
     }
 }

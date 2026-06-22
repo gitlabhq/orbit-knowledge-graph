@@ -147,6 +147,12 @@ impl ArrowClickHouseClient {
     pub fn query(&self, sql: &str) -> ArrowQuery {
         ArrowQuery {
             inner: self.client.query(sql),
+            uri_guard: UriGuard {
+                base_url: self.base_url.clone(),
+                database: self.database.clone(),
+                scaffold_pairs: self.scaffold_pairs(),
+                params: serde_json::Map::new(),
+            },
         }
     }
 
@@ -394,12 +400,51 @@ impl std::fmt::Debug for ArrowClickHouseClient {
     }
 }
 
+/// The query's request-URI measurement context, captured from the client at
+/// construction so the dispatch guard fires without a back-reference. Holds a
+/// copy of every `param_*` value (the overflow-prone, caller-controlled term).
+struct UriGuard {
+    base_url: String,
+    database: String,
+    scaffold_pairs: Vec<(String, String)>,
+    params: serde_json::Map<String, Value>,
+}
+
+impl UriGuard {
+    /// `Err(UriTooLong)` when the accumulated params would dispatch a URI over
+    /// the `http` cap. Called at the top of every dispatch method so the guard
+    /// is automatic for every consumer, datalake or not.
+    fn check(&self) -> Result<(), ClickHouseError> {
+        let params = Value::Object(self.params.clone());
+        if let Some(len) = crate::uri_len::overflow(
+            &self.base_url,
+            &self.database,
+            &self.scaffold_pairs,
+            &params,
+        ) {
+            return Err(ClickHouseError::UriTooLong {
+                len,
+                limit: crate::MAX_REQUEST_URI_LEN,
+            });
+        }
+        Ok(())
+    }
+}
+
 pub struct ArrowQuery {
     pub(crate) inner: Query,
+    uri_guard: UriGuard,
 }
 
 impl ArrowQuery {
     pub fn param(mut self, name: &str, value: impl Serialize) -> Self {
+        // Retain a measurement copy alongside the value handed to the query.
+        // Serialization mirrors what the query itself does; a failure here would
+        // also fail the query, so fall back to skipping the param in the guard
+        // rather than poisoning the call.
+        if let Ok(json) = serde_json::to_value(&value) {
+            self.uri_guard.params.insert(name.to_string(), json);
+        }
         self.inner = self.inner.param(name, value);
         self
     }
@@ -410,6 +455,7 @@ impl ArrowQuery {
     }
 
     pub async fn execute(self) -> Result<(), ClickHouseError> {
+        self.uri_guard.check()?;
         self.inner.execute().await.map_err(ClickHouseError::Query)
     }
 
@@ -423,6 +469,7 @@ impl ArrowQuery {
     pub async fn fetch_arrow_with_summary(
         self,
     ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
+        self.uri_guard.check()?;
         let mut cursor = self
             .inner
             .fetch_bytes("ArrowStream")
@@ -456,6 +503,7 @@ impl ArrowQuery {
     pub async fn fetch_arrow_stream(
         self,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
+        self.uri_guard.check()?;
         let mut cursor = self
             .inner
             .fetch_bytes("ArrowStream")
@@ -486,6 +534,7 @@ impl ArrowQuery {
         mut self,
         max_block_size: u64,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
+        self.uri_guard.check()?;
         self.inner = self
             .inner
             .with_setting("max_block_size", max_block_size.to_string());
@@ -532,6 +581,7 @@ impl ArrowQuery {
         ),
         ClickHouseError,
     > {
+        self.uri_guard.check()?;
         self.inner = self
             .inner
             .with_setting("max_block_size", max_block_size.to_string());
@@ -720,5 +770,37 @@ mod tests {
             let len = client.request_uri_len(&serde_json::json!({ "paths": chunk }));
             assert!(len <= crate::MAX_REQUEST_URI_LEN);
         }
+    }
+
+    #[tokio::test]
+    async fn dispatch_rejects_an_over_cap_param_before_hitting_the_wire() {
+        let client = client_with_settings(HashMap::new());
+        let huge: String = std::iter::repeat_n('a', 70_000).collect();
+        let result = client
+            .query("SELECT 1")
+            .param("p", huge)
+            .fetch_arrow_streamed(1)
+            .await;
+        assert!(matches!(
+            result,
+            Err(ClickHouseError::UriTooLong { len, limit })
+                if len > crate::MAX_REQUEST_URI_LEN && limit == crate::MAX_REQUEST_URI_LEN
+        ));
+    }
+
+    #[tokio::test]
+    async fn dispatch_measures_escaped_encoded_length_not_raw_bytes() {
+        let client = client_with_settings(HashMap::new());
+        // 500 single-quotes × 40 paths: raw bytes are well under the cap, but
+        // ClickHouse doubles `'` then `url` percent-encodes it (6 B each), so the
+        // wire URI clears the cap — only an encoded measurement catches it.
+        let quote_heavy: String = std::iter::repeat_n('\'', 500).collect();
+        let paths: Vec<String> = std::iter::repeat_n(quote_heavy, 40).collect();
+        let result = client
+            .query("SELECT 1")
+            .param("paths", paths)
+            .fetch_arrow_streamed(1)
+            .await;
+        assert!(matches!(result, Err(ClickHouseError::UriTooLong { .. })));
     }
 }
