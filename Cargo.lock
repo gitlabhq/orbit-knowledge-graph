@@ -12152,13 +12152,10 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 [[package]]
 name = "siphon-proto"
 version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/analytics-section/siphon.git?tag=0.0.103-beta#33d23acc0dbafdd2b33dedcf83adb448ff3827f7"
 dependencies = [
  "prost 0.14.4",
- "prost-build 0.14.3",
  "prost-types 0.14.3",
- "protoc-bin-vendored",
- "tonic-build",
- "tonic-prost-build",
 ]
 
 [[package]]
