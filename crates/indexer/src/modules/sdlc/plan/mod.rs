@@ -10,6 +10,8 @@ use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
+use ontology::{Marker, QueryTemplate, Resolve};
+
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
 use crate::clickhouse::TIMESTAMP_FORMAT;
@@ -223,7 +225,8 @@ impl Filter for CursorFilter<'_> {
 }
 
 // `extract_template` carries `{{filters}}` (dynamic WHERE conditions) and
-// `{{batch_size}}` markers that `PreparedQuery::to_sql` substitutes.
+// `{{limit}}` (the paging clause) markers that `PreparedQuery::to_sql`
+// resolves through `QueryTemplate::render`.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
@@ -263,7 +266,7 @@ pub(in crate::modules::sdlc) struct Transformation {
 
 #[derive(Clone)]
 pub(in crate::modules::sdlc) struct PreparedQuery {
-    template: String,
+    template: QueryTemplate,
     filters: Vec<String>,
     params: serde_json::Map<String, Value>,
     batch_size: u64,
@@ -271,8 +274,13 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
 
 impl Plan {
     pub fn prepare(&self) -> PreparedQuery {
+        // Extract templates are validated at ontology load (verbatim `query:`
+        // files via `parse_full`) or synthesized here, so a parse failure is an
+        // internal invariant violation, not bad input.
+        let template = QueryTemplate::parse("extract template", &self.extract_template)
+            .expect("extract template must be a valid marker template");
         PreparedQuery {
-            template: self.extract_template.clone(),
+            template,
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
@@ -305,9 +313,12 @@ impl PreparedQuery {
                 .join(" AND ");
             format!("AND {joined}")
         };
-        self.template
-            .replace("{{filters}}", &filters_sql)
-            .replace("{{batch_size}}", &self.batch_size.to_string())
+        let limit_sql = format!("LIMIT {}", self.batch_size);
+        self.template.render(|marker| match marker {
+            Marker::Filters => Resolve::Sub(filters_sql.clone()),
+            Marker::Limit => Resolve::Sub(limit_sql.clone()),
+            Marker::WatermarkColumn | Marker::DeletedColumn => Resolve::Keep,
+        })
     }
 
     pub fn params(&self) -> Value {
@@ -370,7 +381,7 @@ mod tests {
                  FROM source_table \
                  WHERE 1=1 {{{{filters}}}} \
                  ORDER BY {sort_key_sql} \
-                 LIMIT {{{{batch_size}}}}"
+                 {{{{limit}}}}"
             ),
             watermark_column: "_siphon_watermark".to_string(),
             sort_key,
@@ -531,7 +542,7 @@ mod tests {
         assert!(sql.contains("ORDER BY traversal_path, id"), "sql: {sql}");
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
         assert!(!sql.contains("{{filters}}"), "sql: {sql}");
-        assert!(!sql.contains("{{batch_size}}"), "sql: {sql}");
+        assert!(!sql.contains("{{limit}}"), "sql: {sql}");
         // No filters → no `AND` added to the bare `WHERE 1=1`.
         assert!(!sql.contains("WHERE 1=1 AND"), "sql: {sql}");
     }

@@ -17,4 +17,4 @@ SELECT
 FROM siphon_security_findings
 WHERE startsWith(traversal_path, {traversal_path:String}) {{filters}}
 ORDER BY traversal_path, id, partition_number
-LIMIT {{batch_size}}
+{{limit}}

@@ -67,7 +67,7 @@ pub(crate) enum EtlYaml {
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
     /// A complete extract from a sibling `query: <file>.sql`, used verbatim.
-    /// The file owns its own paging via the `{{filters}}`/`{{batch_size}}`
+    /// The file owns its own paging via the `{{filters}}`/`{{limit}}`
     /// markers and emits the `_version`/`_deleted` output columns itself.
     #[serde(rename = "verbatim")]
     Verbatim {
@@ -549,7 +549,7 @@ fn resolve_etl_marker(marker: Marker, watermark: &str, deleted: &str) -> Resolve
     match marker {
         Marker::WatermarkColumn => Resolve::Sub(watermark.to_string()),
         Marker::DeletedColumn => Resolve::Sub(deleted.to_string()),
-        Marker::Filters | Marker::BatchSize => Resolve::Keep,
+        Marker::Filters | Marker::Limit => Resolve::Keep,
     }
 }
 
@@ -597,7 +597,7 @@ impl EtlYaml {
     /// Lowers the surface onto [`EtlConfig`]: `type: table` → declarative
     /// `Table`; `type: verbatim` → `Verbatim` holding the sibling `query:`
     /// file's complete extract (it owns its own paging via the
-    /// `{{filters}}`/`{{batch_size}}` markers). No SQL is assembled from YAML —
+    /// `{{filters}}`/`{{limit}}` markers). No SQL is assembled from YAML —
     /// the only SQL lives in the sibling `.sql` file.
     pub(crate) fn into_config(
         self,
@@ -1258,8 +1258,7 @@ mod tests {
 
     #[test]
     fn query_file_used_verbatim_as_full_query() {
-        let full_query =
-            "SELECT 1 AS id, traversal_path {{filters}} ORDER BY id LIMIT {{batch_size}}";
+        let full_query = "SELECT 1 AS id, traversal_path {{filters}} ORDER BY id {{limit}}";
         let node =
             parse_test_node_with_files(VERBATIM_YAML, &[("nodes/test/test.sql", full_query)])
                 .expect("verbatim etl should parse");
@@ -1294,7 +1293,7 @@ mod tests {
                 "nodes/test/test.sql",
                 "SELECT id, t.{{watermark_column}} AS _version, \
                  t.{{deleted_column}} AS _deleted FROM t \
-                 WHERE 1=1 {{filters}} ORDER BY id LIMIT {{batch_size}}",
+                 WHERE 1=1 {{filters}} ORDER BY id {{limit}}",
             )],
         )
         .expect("placeholders in sql file should render");
@@ -1306,7 +1305,7 @@ mod tests {
             "got: {sql}"
         );
         assert!(
-            sql.contains("{{filters}}") && sql.contains("{{batch_size}}"),
+            sql.contains("{{filters}}") && sql.contains("{{limit}}"),
             "runtime markers must pass through: {sql}"
         );
         assert!(
@@ -1335,7 +1334,7 @@ mod tests {
             &[(
                 "nodes/test/test.sql",
                 "SELECT argMax(x, {{typo_column}}) AS x FROM t \
-                 WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+                 WHERE 1=1 {{filters}} {{limit}}",
             )],
         )
         .expect_err("unknown placeholder should fail");

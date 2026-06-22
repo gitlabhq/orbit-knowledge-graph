@@ -40,6 +40,7 @@ pub use entities::{
     TraversalPathLookup, TraversalPathLookupSpec, VirtualSource,
 };
 pub use etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+pub use template::{Marker, QueryTemplate, Resolve};
 
 use std::collections::BTreeMap;
 use std::fmt;

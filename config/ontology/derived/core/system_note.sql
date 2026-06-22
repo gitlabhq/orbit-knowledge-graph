@@ -18,7 +18,7 @@ WITH _batch AS (
       AND sn.{{deleted_column}} = false
       AND startsWith(sn.traversal_path, {traversal_path:String}) {{filters}}
     ORDER BY traversal_path, id
-    LIMIT {{batch_size}}
+    {{limit}}
 ),
 _e0 AS (
     SELECT

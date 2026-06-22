@@ -32,4 +32,4 @@ FROM (
 ) AS src
 WHERE 1=1 {{filters}}
 ORDER BY traversal_path, merge_request_diff_id, relative_order
-LIMIT {{batch_size}}
+{{limit}}

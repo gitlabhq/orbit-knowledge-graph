@@ -516,7 +516,7 @@ mod tests {
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{filters}} \
-                 ORDER BY id LIMIT {{batch_size}}"
+                 ORDER BY id {{limit}}"
                 .to_string(),
             watermark_column: "_siphon_watermark".to_string(),
             sort_key: vec!["id".to_string()],

@@ -213,7 +213,7 @@ mod tests {
             "enrichment must LEFT JOIN back onto _batch: {template}"
         );
         assert!(template.contains("sn.system = true"));
-        assert!(template.contains("LIMIT {{batch_size}}"));
+        assert!(template.contains("{{limit}}"));
         assert!(template.contains("ORDER BY traversal_path, id"));
         assert_eq!(system_note.watermark_column, "_siphon_watermark");
     }

@@ -151,4 +151,4 @@ FROM (
 ) AS src
 WHERE 1=1 {{filters}}
 ORDER BY traversal_path, id
-LIMIT {{batch_size}}
+{{limit}}

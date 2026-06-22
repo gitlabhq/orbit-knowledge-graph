@@ -1,7 +1,7 @@
 use ontology::{
     DataType, DenormDirection, DerivedEntity, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig,
-    EdgeTarget, EnumType, EtlConfig, EtlScope, NodeEntity, Ontology,
-    constants::TRAVERSAL_PATH_COLUMN,
+    EdgeTarget, EnumType, EtlConfig, EtlScope, Marker, NodeEntity, Ontology, QueryTemplate,
+    Resolve, constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -606,9 +606,15 @@ fn enrichment_source(etl: &EtlConfig) -> String {
     match etl {
         EtlConfig::Table { source, .. } => source.clone(),
         EtlConfig::Verbatim { sql, .. } => {
-            let unpaged = sql
-                .replace("{{filters}}", "")
-                .replace("LIMIT {{batch_size}}", "");
+            // The enrichment supplies its own FK bound, so the verbatim query's
+            // paging markers are elided whole — `{{limit}}` carries its `LIMIT`,
+            // so dropping it cannot leave a dangling keyword.
+            let template = QueryTemplate::parse("enrichment source", sql)
+                .expect("verbatim query is validated at ontology load");
+            let unpaged = template.render(|marker| match marker {
+                Marker::Filters | Marker::Limit => Resolve::Elide,
+                Marker::WatermarkColumn | Marker::DeletedColumn => Resolve::Keep,
+            });
             format!("(\n{unpaged}\n) AS _src")
         }
     }
@@ -705,7 +711,7 @@ fn build_extract_plan(
             ..
         } => {
             // The `.sql` file is the complete extract, used verbatim; it owns
-            // its own paging via the `{{filters}}`/`{{batch_size}}` markers.
+            // its own paging via the `{{filters}}`/`{{limit}}` markers.
             ExtractPlan {
                 destination_table: destination_table.to_string(),
                 columns: Vec::new(),

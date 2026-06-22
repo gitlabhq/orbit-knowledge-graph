@@ -445,7 +445,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
         ),
         None => format!(
             "SELECT {select} FROM {from_sql} WHERE {where_clause} {{{{filters}}}} \
-             ORDER BY {order_by_sql} LIMIT {{{{batch_size}}}}",
+             ORDER BY {order_by_sql} {{{{limit}}}}",
             select = select_list.join(", "),
         ),
     };
@@ -512,7 +512,7 @@ fn render_cte_template(
         "WITH _batch AS (\
          SELECT {select} FROM {from_sql} \
          WHERE {where_clause} {{{{filters}}}} \
-         ORDER BY {order_by_sql} LIMIT {{{{batch_size}}}}\
+         ORDER BY {order_by_sql} {{{{limit}}}}\
          ), {cte_defs} \
          SELECT {outer_select} FROM _batch {joins}",
         select = select_list.join(", "),
@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(plan.sort_key, vec!["id"]);
         assert_eq!(plan.batch_size, 1000);
         assert!(plan.extract_template.contains("{{filters}}"));
-        assert!(plan.extract_template.contains("{{batch_size}}"));
+        assert!(plan.extract_template.contains("{{limit}}"));
     }
 
     #[test]
@@ -1055,8 +1055,8 @@ mod tests {
                 "{name}: unresolved {{filters}}: {sql}"
             );
             assert!(
-                !sql.contains("{{batch_size}}"),
-                "{name}: unresolved {{batch_size}}: {sql}"
+                !sql.contains("{{limit}}"),
+                "{name}: unresolved {{limit}}: {sql}"
             );
             assert!(
                 !sql.contains("WHERE WHERE"),

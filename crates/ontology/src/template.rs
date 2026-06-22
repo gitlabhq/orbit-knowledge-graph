@@ -4,18 +4,21 @@
 //! are legal in a `config/ontology/**/*.sql` file, but only resolves the
 //! markers whose values are ontology config — `{{watermark_column}}` and
 //! `{{deleted_column}}` (from `etl_settings`). The runtime paging markers
-//! `{{filters}}` and `{{batch_size}}` are recognized here so an unknown marker
-//! is rejected by name, but their *values* are the indexer extract phase's to
-//! compute per batch, so ontology keeps them verbatim and passes them through.
+//! `{{filters}}` and `{{limit}}` are recognized here so an unknown marker is
+//! rejected by name, but their *values* are the indexer extract phase's to
+//! supply per batch — substituted for the page query, elided for an FK-bounded
+//! enrichment — via [`QueryTemplate::render`].
 
 use crate::OntologyError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Marker {
+pub enum Marker {
     WatermarkColumn,
     DeletedColumn,
     Filters,
-    BatchSize,
+    /// The whole paging clause (`LIMIT n`), so it can be substituted or elided
+    /// as a unit — there is no adjacent author keyword left to dangle.
+    Limit,
 }
 
 impl Marker {
@@ -24,7 +27,7 @@ impl Marker {
             "watermark_column" => Some(Self::WatermarkColumn),
             "deleted_column" => Some(Self::DeletedColumn),
             "filters" => Some(Self::Filters),
-            "batch_size" => Some(Self::BatchSize),
+            "limit" => Some(Self::Limit),
             _ => None,
         }
     }
@@ -34,7 +37,7 @@ impl Marker {
             Self::WatermarkColumn => "{{watermark_column}}",
             Self::DeletedColumn => "{{deleted_column}}",
             Self::Filters => "{{filters}}",
-            Self::BatchSize => "{{batch_size}}",
+            Self::Limit => "{{limit}}",
         }
     }
 }
@@ -46,22 +49,26 @@ enum Segment {
 }
 
 /// How [`QueryTemplate::render`] resolves one marker site.
-pub(crate) enum Resolve {
+pub enum Resolve {
+    /// Replace the marker with this SQL.
     Sub(String),
+    /// Leave the marker's literal `{{token}}` in place (still unresolved).
     Keep,
+    /// Drop the marker, emitting nothing.
+    Elide,
 }
 
 /// ETL SQL lexed into text and `{{marker}}` sites. Only marker boundaries are
 /// parsed; the surrounding SQL is opaque, which is what lets a page-bounded
 /// CTE live in a plain `.sql` file.
 #[derive(Debug, Clone)]
-pub(crate) struct QueryTemplate {
+pub struct QueryTemplate {
     segments: Vec<Segment>,
     len_hint: usize,
 }
 
 impl QueryTemplate {
-    pub(crate) fn parse(context: &str, sql: &str) -> Result<Self, OntologyError> {
+    pub fn parse(context: &str, sql: &str) -> Result<Self, OntologyError> {
         let mut segments = Vec::new();
         let mut rest = sql;
         while let Some(start) = rest.find("{{") {
@@ -92,14 +99,14 @@ impl QueryTemplate {
     }
 
     /// Parses a verbatim extract, which must drive its own paging — so the
-    /// `{{filters}}` and `{{batch_size}}` markers are a construction invariant,
-    /// not something a caller checks afterwards.
-    pub(crate) fn parse_full(context: &str, sql: &str) -> Result<Self, OntologyError> {
+    /// `{{filters}}` and `{{limit}}` markers are a construction invariant, not
+    /// something a caller checks afterwards.
+    pub fn parse_full(context: &str, sql: &str) -> Result<Self, OntologyError> {
         let template = Self::parse(context, sql)?;
         if !template.is_full_query() {
             return Err(OntologyError::Validation(format!(
                 "{context}: must be a complete extract that drives its own paging \
-                 with the {{{{filters}}}} and {{{{batch_size}}}} markers"
+                 with the {{{{filters}}}} and {{{{limit}}}} markers"
             )));
         }
         Ok(template)
@@ -107,17 +114,17 @@ impl QueryTemplate {
 
     fn is_full_query(&self) -> bool {
         let mut filters = false;
-        let mut batch_size = false;
+        let mut limit = false;
         for seg in &self.segments {
             if let Segment::Marker(marker) = seg {
                 filters |= *marker == Marker::Filters;
-                batch_size |= *marker == Marker::BatchSize;
+                limit |= *marker == Marker::Limit;
             }
         }
-        filters && batch_size
+        filters && limit
     }
 
-    pub(crate) fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
+    pub fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
         let mut out = String::with_capacity(self.len_hint);
         for seg in &self.segments {
             match seg {
@@ -125,6 +132,7 @@ impl QueryTemplate {
                 Segment::Marker(marker) => match resolve(*marker) {
                     Resolve::Sub(sql) => out.push_str(&sql),
                     Resolve::Keep => out.push_str(marker.token()),
+                    Resolve::Elide => {}
                 },
             }
         }
@@ -140,7 +148,7 @@ mod tests {
         match marker {
             Marker::WatermarkColumn => Resolve::Sub("_siphon_watermark".into()),
             Marker::DeletedColumn => Resolve::Sub("_siphon_deleted".into()),
-            Marker::Filters | Marker::BatchSize => Resolve::Keep,
+            Marker::Filters | Marker::Limit => Resolve::Keep,
         }
     }
 
@@ -148,19 +156,26 @@ mod tests {
     fn renders_column_markers_and_keeps_paging_markers() {
         let template = QueryTemplate::parse(
             "test",
-            "SELECT {{watermark_column}} AS _version FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}",
+            "SELECT {{watermark_column}} AS _version FROM t WHERE 1=1 {{filters}} {{limit}}",
         )
         .unwrap();
         let sql = template.render(keep_paging);
         assert_eq!(
             sql,
-            "SELECT _siphon_watermark AS _version FROM t WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
+            "SELECT _siphon_watermark AS _version FROM t WHERE 1=1 {{filters}} {{limit}}"
         );
     }
 
     #[test]
+    fn elide_drops_the_marker() {
+        let template = QueryTemplate::parse("test", "SELECT 1 {{filters}} {{limit}}").unwrap();
+        let sql = template.render(|_| Resolve::Elide);
+        assert_eq!(sql, "SELECT 1  ");
+    }
+
+    #[test]
     fn parse_full_requires_both_paging_markers() {
-        assert!(QueryTemplate::parse_full("test", "x {{filters}} y {{batch_size}}").is_ok());
+        assert!(QueryTemplate::parse_full("test", "x {{filters}} y {{limit}}").is_ok());
         let err = QueryTemplate::parse_full("test", "x {{filters}} y").unwrap_err();
         assert!(
             err.to_string().contains("drives its own paging"),

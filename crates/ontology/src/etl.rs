@@ -63,7 +63,7 @@ pub enum EtlConfig {
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
     /// A complete extract from a sibling `.sql` file, used verbatim. The file
-    /// owns its own paging via the `{{filters}}`/`{{batch_size}}` markers and
+    /// owns its own paging via the `{{filters}}`/`{{limit}}` markers and
     /// emits the `_version`/`_deleted` output columns itself.
     Verbatim {
         scope: EtlScope,
@@ -140,8 +140,7 @@ mod tests {
         EtlConfig::Verbatim {
             scope: EtlScope::Global,
             source: "source_table".to_string(),
-            sql: "SELECT id FROM source_table WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
-                .to_string(),
+            sql: "SELECT id FROM source_table WHERE 1=1 {{filters}} {{limit}}".to_string(),
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],

@@ -20,4 +20,4 @@ SELECT
 FROM siphon_notes
 WHERE system = false {{filters}}
 ORDER BY traversal_path, noteable_type, noteable_id, id
-LIMIT {{batch_size}}
+{{limit}}
