@@ -27,7 +27,6 @@ members = [
   "crates/ontology",
 
   "crates/health-check",
-  "crates/siphon-proto",
   "crates/gitaly-protos",
   "crates/gitlab-client",
   "crates/xtask",
