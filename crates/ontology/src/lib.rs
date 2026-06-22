@@ -1695,6 +1695,25 @@ mod tests {
     }
 
     #[test]
+    fn diff_edges_route_to_gl_diff_edge() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+
+        for kind in ["HAS_FILE", "HAS_DIFF", "HAS_LATEST_DIFF"] {
+            let entries = ontology
+                .get_edge(kind)
+                .unwrap_or_else(|| panic!("{kind} should be registered"));
+            assert!(!entries.is_empty(), "{kind} should have variants");
+            for entry in entries {
+                assert_eq!(
+                    entry.destination_table, "gl_diff_edge",
+                    "{kind} variant {:?} -> {:?} should route to gl_diff_edge",
+                    entry.source_kind, entry.target_kind,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn denorm_declared_only_on_fk_holding_side() {
         use crate::entities::DenormDirection;
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");

@@ -1,6 +1,7 @@
 # config/ontology/edges/has_latest_diff.yaml
 
 description: Merge request's most recent diff snapshot (points to the latest MergeRequestDiff)
+table: gl_diff_edge
 
 variants:
   - from_node: { type: MergeRequest, id: id }

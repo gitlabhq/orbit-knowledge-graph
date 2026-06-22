@@ -1,6 +1,7 @@
 # config/ontology/edges/has_file.yaml
 
 description: Files changed in a merge request diff
+table: gl_diff_edge
 
 variants:
   - from_node: { type: MergeRequestDiff, id: id }
