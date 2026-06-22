@@ -6,6 +6,7 @@ pub mod labels {
     pub const CACHE: &str = "cache";
     pub const OUTCOME: &str = "outcome";
     pub const SOURCE_TYPE: &str = "source_type";
+    pub const DENY_REASON: &str = "deny_reason";
 }
 
 pub mod values {
@@ -14,6 +15,13 @@ pub mod values {
     pub const FAIL_OPEN: &str = "fail_open";
     pub const HIT: &str = "hit";
     pub const MISS: &str = "miss";
+
+    // `deny_reason` values. `NONE` is carried by non-deny decisions (allow/fail_open)
+    // so every series in `decisions` supplies the full label set.
+    pub const REASON_NONE: &str = "none";
+    pub const REASON_QUOTA_EXHAUSTED: &str = "quota_exhausted";
+    pub const REASON_NOT_ENTITLED: &str = "not_entitled";
+    pub const REASON_UNPROCESSABLE: &str = "unprocessable";
 }
 
 const DOMAIN: &str = "billing.quota";
@@ -28,11 +36,17 @@ const DOMAIN: &str = "billing.quota";
 pub const QUOTA_DECISIONS: MetricSpec = MetricSpec::counter(
     "gkg.billing.quota.decisions",
     "Quota gate decisions, labelled by outcome (allow/deny/fail_open), cache result \
-     (hit/miss), and source_type (mcp/rest). \
+     (hit/miss), source_type (mcp/rest), and deny_reason \
+     (none/quota_exhausted/not_entitled/unprocessable; non-deny decisions carry none). \
      cache=miss on fail_open does not imply a 1:1 CDot call ratio — see \
      gkg.billing.quota.cdot.duration for actual upstream call counts.",
     None,
-    &[labels::DECISION, labels::CACHE, labels::SOURCE_TYPE],
+    &[
+        labels::DECISION,
+        labels::CACHE,
+        labels::SOURCE_TYPE,
+        labels::DENY_REASON,
+    ],
     DOMAIN,
 );
 
