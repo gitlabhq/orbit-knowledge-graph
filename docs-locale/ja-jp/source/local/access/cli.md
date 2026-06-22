@@ -10,7 +10,7 @@ title: Orbit CLIでOrbit Localを使用する（`orbit`）
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -133,6 +133,16 @@ orbit list -F json
 
 まだ何もインデックス作成されていない場合、`orbit list`は`0`で終了します。テーブルビューには何も表示されず、構造化フォーマットは有効な空の出力（`json`の場合は`[]`、`ndjson`の場合はレコードなし）を返すため、`orbit list -F json | jq`のようなパイプラインも正常に動作します。
 
+## MCPサーバーとして実行する {#run-as-an-mcp-server}
+
+stdioを通じてローカルグラフをMCP対応のAIエージェントに公開します。
+
+```shell
+orbit mcp serve
+```
+
+`~/.orbit/graph.duckdb`に対して`run_sql`、`get_graph_schema`、`index`を提供します。クライアントごとの設定については[MCPで接続する](mcp.md)を参照してください。
+
 ## ストレージ {#storage}
 
 グラフは`~/.orbit/graph.duckdb`に保存されます。複数のリポジトリが同じデータベースを共有します。最初からやり直すにはファイルを削除してください。
@@ -143,7 +153,7 @@ Orbit LocalはGitLabクレジットを消費しません。すべての処理は
 
 ## 次のステップ {#what-to-try-next}
 
-- [MCPで接続する](mcp.md) - Claude Code、Codex、その他のエージェント向けに予定されているMCPサーバーです。
+- [MCPで接続する](mcp.md) - Claude Code、Codex、その他のエージェントをローカルグラフに接続します。
 - [glabでOrbit Localを使用する](glab.md) - `glab orbit local`を通じてCLIを呼び出します。
 - [スキーマリファレンス](../../remote/schema.md) - 利用可能なノードタイプとプロパティ。
 - [Cookbook](../../remote/cookbook.md) - 一般的なユースケース向けのコピー＆ペーストクエリ。

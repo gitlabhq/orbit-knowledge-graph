@@ -5604,7 +5604,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
+               "description": "Billing events confirmed handed over to the Snowplow collector (HTTP 2xx), reported by the emitter's on_success callback. Unlike `emitted` (which counts enqueues), this counts events that actually reached the collector after retries.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
@@ -5623,6 +5623,108 @@
                   "y": 316
                },
                "id": 109,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum(rate(gkg_billing_events_delivered_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_billing_events_delivered_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, auth failure, or an unknown future variant.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 316
+               },
+               "id": 110,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (reason) (rate(gkg_billing_events_delivery_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{reason}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_billing_events_delivery_failed_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 16,
+                  "y": 316
+               },
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5670,10 +5772,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 316
+                  "x": 0,
+                  "y": 324
                },
-               "id": 110,
+               "id": 112,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5721,10 +5823,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 316
+                  "x": 8,
+                  "y": 324
                },
-               "id": 111,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5762,9 +5864,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 324
+            "y": 332
          },
-         "id": 112,
+         "id": 114,
          "panels": [
             {
                "datasource": {
@@ -5787,9 +5889,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 325
+                  "y": 333
                },
-               "id": 113,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5838,9 +5940,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 325
+                  "y": 333
                },
-               "id": 114,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5889,9 +5991,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 325
+                  "y": 333
                },
-               "id": 115,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5958,9 +6060,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 333
+                  "y": 341
                },
-               "id": 116,
+               "id": 118,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6009,9 +6111,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 333
+                  "y": 341
                },
-               "id": 117,
+               "id": 119,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6049,9 +6151,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 341
+            "y": 349
          },
-         "id": 118,
+         "id": 120,
          "panels": [
             {
                "datasource": {
@@ -6074,9 +6176,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 342
+                  "y": 350
                },
-               "id": 119,
+               "id": 121,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6125,9 +6227,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 342
+                  "y": 350
                },
-               "id": 120,
+               "id": 122,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6176,9 +6278,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 342
+                  "y": 350
                },
-               "id": 121,
+               "id": 123,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6216,9 +6318,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 350
+            "y": 358
          },
-         "id": 122,
+         "id": 124,
          "panels": [ ],
          "title": "Rails KG — request (reference)",
          "type": "row"
@@ -6244,9 +6346,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 351
+            "y": 359
          },
-         "id": 123,
+         "id": 125,
          "options": {
             "legend": {
                "calcs": [
@@ -6313,9 +6415,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 351
+            "y": 359
          },
-         "id": 124,
+         "id": 126,
          "options": {
             "legend": {
                "calcs": [
@@ -6364,9 +6466,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 351
+            "y": 359
          },
-         "id": 125,
+         "id": 127,
          "options": {
             "legend": {
                "calcs": [
@@ -6415,9 +6517,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 359
+            "y": 367
          },
-         "id": 126,
+         "id": 128,
          "options": {
             "legend": {
                "calcs": [
@@ -6484,9 +6586,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 359
+            "y": 367
          },
-         "id": 127,
+         "id": 129,
          "options": {
             "legend": {
                "calcs": [
@@ -6535,9 +6637,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 359
+            "y": 367
          },
-         "id": 128,
+         "id": 130,
          "options": {
             "legend": {
                "calcs": [
@@ -6604,9 +6706,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 367
+            "y": 375
          },
-         "id": 129,
+         "id": 131,
          "options": {
             "legend": {
                "calcs": [
@@ -6655,9 +6757,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 367
+            "y": 375
          },
-         "id": 130,
+         "id": 132,
          "options": {
             "legend": {
                "calcs": [
@@ -6724,9 +6826,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 367
+            "y": 375
          },
-         "id": 131,
+         "id": 133,
          "options": {
             "legend": {
                "calcs": [
@@ -6775,9 +6877,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 375
+            "y": 383
          },
-         "id": 132,
+         "id": 134,
          "options": {
             "legend": {
                "calcs": [
@@ -6844,9 +6946,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 375
+            "y": 383
          },
-         "id": 133,
+         "id": 135,
          "options": {
             "legend": {
                "calcs": [
@@ -6895,9 +6997,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 375
+            "y": 383
          },
-         "id": 134,
+         "id": 136,
          "options": {
             "legend": {
                "calcs": [
@@ -6964,9 +7066,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 383
+            "y": 391
          },
-         "id": 135,
+         "id": 137,
          "options": {
             "legend": {
                "calcs": [
@@ -7000,9 +7102,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 391
+            "y": 399
          },
-         "id": 136,
+         "id": 138,
          "panels": [ ],
          "title": "Rails KG — traversal (reference)",
          "type": "row"
@@ -7028,9 +7130,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 392
+            "y": 400
          },
-         "id": 137,
+         "id": 139,
          "options": {
             "legend": {
                "calcs": [
@@ -7097,9 +7199,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 392
+            "y": 400
          },
-         "id": 138,
+         "id": 140,
          "options": {
             "legend": {
                "calcs": [
@@ -7148,9 +7250,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 392
+            "y": 400
          },
-         "id": 139,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [
@@ -7217,9 +7319,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 400
+            "y": 408
          },
-         "id": 140,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -7268,9 +7370,9 @@
             "h": 8,
             "w": 8,
             "x": 8,
-            "y": 400
+            "y": 408
          },
-         "id": 141,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -7319,9 +7421,9 @@
             "h": 8,
             "w": 8,
             "x": 16,
-            "y": 400
+            "y": 408
          },
-         "id": 142,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [

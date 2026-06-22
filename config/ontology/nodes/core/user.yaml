@@ -2,6 +2,7 @@
 
 node_type: User
 domain: core
+global: true
 description: A GitLab user account
 label: username
 destination_table: gl_user
@@ -166,7 +167,6 @@ properties:
 
 etl:
   type: table
-  scope: global
   source: siphon_users
 
 storage:

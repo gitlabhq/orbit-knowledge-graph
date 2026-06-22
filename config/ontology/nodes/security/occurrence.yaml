@@ -168,7 +168,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_vulnerability_occurrences
   edges:
     project_id:

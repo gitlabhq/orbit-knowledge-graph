@@ -97,7 +97,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_packages_packages
   order_by: [traversal_path, package_type, id]
   edges:

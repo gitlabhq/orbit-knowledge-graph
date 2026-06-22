@@ -92,6 +92,54 @@ settings:
         indexes:
           - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
           - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+    gl_sec_edge:
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
+      storage:
+        index_granularity: 1024
+        primary_key: [traversal_path, relationship_kind, source_id]
+        settings:
+          auto_statistics_types: "'minmax, uniq, countmin'"
+        columns:
+          - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+          - {name: source_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+          - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+          - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+        indexes:
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
+    gl_diff_edge:
+      sort_key: [traversal_path, relationship_kind, source_id, target_id, source_kind, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
+      storage:
+        index_granularity: 1024
+        primary_key: [traversal_path, relationship_kind, source_id]
+        settings:
+          auto_statistics_types: "'minmax, uniq, countmin'"
+        columns:
+          - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+          - {name: source_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+          - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: target_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+          - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+        indexes:
+          - {name: idx_source_id, column: source_id, type: "bloom_filter(0.0001)", granularity: 1}
+          - {name: idx_target_id, column: target_id, type: "bloom_filter(0.0001)", granularity: 1}
   denormalization:
     # --- Branch ---
     - {node: Branch, property: is_default}
@@ -217,7 +265,6 @@ settings:
     exclude:
       - {node: Note, columns: [st_diff]}
   internal_column_prefix: "_gkg_"
-  skip_security_filter_for_entities: [User, Runner]
   local_db:
     entities:
       - name: Directory

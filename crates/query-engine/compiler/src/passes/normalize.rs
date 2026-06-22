@@ -209,6 +209,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
         node.has_traversal_path = node_entity.has_traversal_path;
+        node.is_global = node_entity.global;
 
         // Expand column selections to explicit lists. Strip virtual columns
         // into node.virtual_columns for the hydration plan.

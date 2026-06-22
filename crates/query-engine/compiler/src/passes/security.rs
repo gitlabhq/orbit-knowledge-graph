@@ -27,7 +27,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::ast::{Expr, Node, Query, TableRef};
-use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
+use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, global_tables};
 use crate::error::Result;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
@@ -313,10 +313,8 @@ fn should_apply_security_filter(table: &str) -> bool {
         None => return false,
     };
 
-    // The skip list uses unprefixed names from the embedded ontology.
-    !skip_security_filter_tables()
-        .iter()
-        .any(|t| t == unprefixed)
+    // Global hubs (User, Runner) are non-namespaced; names are unprefixed.
+    !global_tables().iter().any(|t| t == unprefixed)
 }
 
 #[cfg(test)]

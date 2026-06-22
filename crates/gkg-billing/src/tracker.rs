@@ -1,12 +1,21 @@
 use std::sync::Arc;
 
+use gkg_observability::billing::events as spec;
 use gkg_server_config::BillingConfig;
-use labkit_events::BillingEvent;
+use labkit_events::{BillingEvent, DeliveryFailure};
+use opentelemetry::KeyValue;
+use uuid::Uuid;
 
 use crate::constants::APP_ID;
+use crate::metrics::{
+    METRICS, REASON_AUTH, REASON_NON_RETRIABLE_STATUS, REASON_RETRIES_EXHAUSTED, REASON_UNKNOWN,
+};
 
 pub trait BillingTracker: Send + Sync {
-    fn track(&self, event: BillingEvent) -> Result<(), labkit_events::Error>;
+    /// Enqueue a billing event for delivery, returning the Snowplow event ID
+    /// assigned to it (so callers can correlate it with delivery-outcome
+    /// callbacks / logs).
+    fn track(&self, event: BillingEvent) -> Result<Uuid, labkit_events::Error>;
 }
 
 pub struct SnowplowBillingTracker {
@@ -25,6 +34,35 @@ impl SnowplowBillingTracker {
             .batch_size(1)
             .collector_path(labkit_events::AUTH_COLLECTOR_PATH)
             .token_source(Arc::new(source))
+            .on_success(Arc::new(|event_ids: &[Uuid]| {
+                METRICS.delivered.add(event_ids.len() as u64, &[]);
+                tracing::info!(
+                    events = event_ids.len(),
+                    event_ids = ?event_ids,
+                    "billing event delivery: success"
+                );
+            }))
+            .on_failure(Arc::new(|event_ids: &[Uuid], reason: DeliveryFailure| {
+                let (reason_label, status) = match reason {
+                    DeliveryFailure::NonRetriableStatus(code) => {
+                        (REASON_NON_RETRIABLE_STATUS, Some(code))
+                    }
+                    DeliveryFailure::RetriesExhausted => (REASON_RETRIES_EXHAUSTED, None),
+                    DeliveryFailure::Auth => (REASON_AUTH, None),
+                    _ => (REASON_UNKNOWN, None),
+                };
+                METRICS.delivery_failed.add(
+                    event_ids.len() as u64,
+                    &[KeyValue::new(spec::labels::REASON, reason_label)],
+                );
+                tracing::warn!(
+                    events = event_ids.len(),
+                    event_ids = ?event_ids,
+                    reason = reason_label,
+                    status = ?status,
+                    "billing event delivery: failed"
+                );
+            }))
             .build()?;
 
         Ok(Self {
@@ -34,7 +72,7 @@ impl SnowplowBillingTracker {
 }
 
 impl BillingTracker for SnowplowBillingTracker {
-    fn track(&self, event: BillingEvent) -> Result<(), labkit_events::Error> {
+    fn track(&self, event: BillingEvent) -> Result<Uuid, labkit_events::Error> {
         self.tracker.track_billing_event(event)
     }
 }
@@ -59,10 +97,10 @@ impl InMemoryBillingTracker {
 
 #[cfg(test)]
 impl BillingTracker for InMemoryBillingTracker {
-    fn track(&self, _event: BillingEvent) -> Result<(), labkit_events::Error> {
+    fn track(&self, _event: BillingEvent) -> Result<Uuid, labkit_events::Error> {
         self.count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(())
+        Ok(Uuid::nil())
     }
 }
 
@@ -86,7 +124,7 @@ impl FailingBillingTracker {
 
 #[cfg(test)]
 impl BillingTracker for FailingBillingTracker {
-    fn track(&self, _event: BillingEvent) -> Result<(), labkit_events::Error> {
+    fn track(&self, _event: BillingEvent) -> Result<Uuid, labkit_events::Error> {
         self.count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Err(labkit_events::Error::Emitter("test failure".into()))

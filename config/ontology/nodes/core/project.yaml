@@ -105,7 +105,6 @@ properties:
 
 etl:
   type: query
-  scope: namespaced
   source: project_namespace_traversal_paths
   select: >-
     project.id AS id, project.name AS name, project.description AS description,

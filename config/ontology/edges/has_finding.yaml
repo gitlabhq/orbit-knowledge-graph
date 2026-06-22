@@ -1,6 +1,7 @@
 # config/ontology/edges/has_finding.yaml
 
 description: Entity has associated finding or vulnerability occurrence
+table: gl_sec_edge
 
 variants:
   - from_node: { type: Vulnerability, id: id }

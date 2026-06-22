@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。ローカルのmcp serveコマンドは計画中です。
+description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。
 title: GitLab CLI（`glab`）でOrbit Localを使用する
 ---
 
@@ -10,7 +10,7 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -27,8 +27,6 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 > [!note]
 > `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
-> MCPサーバーのサブコマンド（`glab orbit local mcp serve`）は計画中ですが、
-> まだ利用できません。該当箇所にはその旨を記載しています。
 
 トップレベルのコマンドは2つあります。
 
@@ -119,16 +117,13 @@ glab orbit local schema gl_definition gl_edge      # scoped to two tables
 
 ## MCPサーバーとして実行する {#run-as-an-mcp-server}
 
-> [!note]
-> `glab orbit local mcp serve`は計画中であり、まだリリースされていません。
-
-リリース後、このコマンドはローカルグラフをMCP対応のAIエージェントに公開します。
+ローカルグラフをMCP対応のAIエージェントに公開します。
 
 ```shell
 glab orbit local mcp serve
 ```
 
-MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`run_sql`と`get_graph_schema`を提供します。エージェント統合の詳細については、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
+MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`run_sql`、`get_graph_schema`、`index`を提供します。エージェント統合の詳細については、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
 ## 終了コード {#exit-codes}
 

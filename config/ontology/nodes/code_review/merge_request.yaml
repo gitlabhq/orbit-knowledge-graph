@@ -319,7 +319,6 @@ etl:
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
   type: query
-  scope: namespaced
   source: merge_requests
   select: >-
     m.id AS id,

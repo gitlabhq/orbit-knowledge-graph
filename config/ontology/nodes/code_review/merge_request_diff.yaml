@@ -131,7 +131,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_merge_request_diffs
   order_by: [traversal_path, merge_request_id, id]
   edges:

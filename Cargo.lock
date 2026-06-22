@@ -5119,6 +5119,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -6699,7 +6700,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "axum",
  "futures-util",
@@ -6730,7 +6731,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6748,7 +6749,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 
 [[package]]
 name = "lance"
@@ -9871,9 +9872,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -12155,13 +12156,10 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 [[package]]
 name = "siphon-proto"
 version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/analytics-section/siphon.git?tag=0.0.103-beta#33d23acc0dbafdd2b33dedcf83adb448ff3827f7"
 dependencies = [
  "prost 0.14.4",
- "prost-build 0.14.3",
  "prost-types 0.14.3",
- "protoc-bin-vendored",
- "tonic-build",
- "tonic-prost-build",
 ]
 
 [[package]]

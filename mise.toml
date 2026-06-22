@@ -11,10 +11,6 @@ postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}"
 
 
-# Path to Siphon repository for proto compilation (siphon-proto crate)
-# Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
-SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}/siphon"
-
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 

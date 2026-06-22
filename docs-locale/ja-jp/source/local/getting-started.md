@@ -10,7 +10,7 @@ title: Orbit Localを使ってみる
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -91,7 +91,7 @@ glab orbit local help
 |---|---|---|
 | [Orbit CLI（`orbit`）](access/cli.md) | CLIの直接使用、スクリプト作成、インデックス作成タスク | ワンラインインストーラーまたは`glab orbit local --install` |
 | [GitLab CLI（`glab`）](access/glab.md) | すでに`glab`を使用している方 | `glab orbit local --install` |
-| [MCP](access/mcp.md) | Claude Code、Codex、その他のAIエージェント | 予定中、[現時点では利用不可](access/mcp.md) |
+| [MCP](access/mcp.md) | Claude Code、Codex、その他のAIエージェント | `claude mcp add orbit-local -- orbit mcp serve` |
 
 3つすべてが同じローカルグラフを参照します。Orbit LocalはDuckDB SQLでクエリを実行します。構造化JSONクエリDSLは[Orbit Remote](../remote/_index.md)専用です。
 
@@ -112,7 +112,7 @@ glab orbit local schema
 次のステップ:
 
 - 実際のクエリを実行する: [glabでOrbit Localを使用する](access/glab.md)。
-- AIエージェントに接続する: `glab orbit setup`を実行してOrbitスキルをインストールします。MCPサーバーは[予定中](access/mcp.md)です。
+- AIエージェントに接続する: `glab orbit setup`を実行してOrbitスキルをインストールするか、手動設定については[MCPで接続する](access/mcp.md)を参照してください。
 - テーブルレイアウトを確認する: [スキーマリファレンス](schema.md)。
 
 ## 課金 {#billing}

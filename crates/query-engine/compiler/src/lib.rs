@@ -1941,6 +1941,46 @@ mod tests {
     }
 
     #[test]
+    fn cross_namespace_fk_chain_elides_to_node_joins() {
+        // FK-backed chain reaching the global User hub: elides to node joins, scoping the in-namespace nodes but not the hub.
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "filters": {"username": "stanhu"}},
+                {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+                {"id": "pipe", "entity": "Pipeline"},
+                {"id": "j", "entity": "Job", "filters": {"status": "failed"}}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pipe"},
+                {"type": "HAS_JOB", "from": "pipe", "to": "j"}
+            ],
+            "limit": 10
+        }"#;
+        let sql = compile_sql(query);
+        assert!(
+            !sql.contains("gl_edge") && !sql.contains("gl_ci_edge"),
+            "FK-backed cross-namespace chain must elide to node joins, not edge scans; got:\n{sql}"
+        );
+        assert!(
+            sql.contains("gl_user")
+                && sql.contains("gl_merge_request")
+                && sql.contains("gl_pipeline")
+                && sql.contains("gl_job"),
+            "must join the node tables; got:\n{sql}"
+        );
+        // authz boundary preserved: every in-namespace node scoped, global hub not.
+        assert!(
+            sql.contains("startsWith(mr.traversal_path")
+                && sql.contains("startsWith(pipe.traversal_path")
+                && sql.contains("startsWith(j.traversal_path")
+                && !sql.contains("startsWith(u.traversal_path"),
+            "all in-namespace nodes (mr, pipe, j) scoped, global User hub unscoped; got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn hydration_uses_limit_by_for_latest_rows() {
         let input = Input {
             query_type: QueryType::Hydration,

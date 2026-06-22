@@ -27,7 +27,6 @@ members = [
   "crates/ontology",
 
   "crates/health-check",
-  "crates/siphon-proto",
   "crates/gitaly-protos",
   "crates/gitlab-client",
   "crates/xtask",
@@ -42,8 +41,8 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f154f948" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "f154f948" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "1e235f49" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -99,6 +98,7 @@ clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.0" }
+siphon-proto = { git = "https://gitlab.com/gitlab-org/analytics-section/siphon.git", tag = "0.0.103-beta" }
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"

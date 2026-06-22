@@ -26,6 +26,8 @@ pub(crate) struct NodeYaml {
     node_type: String,
     domain: String,
     #[serde(default)]
+    global: bool,
+    #[serde(default)]
     description: String,
     #[serde(default)]
     label: String,
@@ -51,7 +53,6 @@ pub(crate) struct NodeYaml {
 pub(crate) enum EtlYaml {
     #[serde(rename = "table")]
     Table {
-        scope: EtlScope,
         source: String,
         #[serde(default)]
         watermark: Option<String>,
@@ -66,7 +67,6 @@ pub(crate) enum EtlYaml {
     },
     #[serde(rename = "query")]
     Query {
-        scope: EtlScope,
         source: String,
         select: String,
         from: String,
@@ -443,14 +443,26 @@ impl NodeYaml {
             _ => {}
         }
 
+        let node_scope = if self.global {
+            EtlScope::Global
+        } else {
+            EtlScope::Namespaced
+        };
         let etl = self
             .etl
-            .map(|e| e.into_config(&name, etl_settings))
+            .map(|e| e.into_config(&name, etl_settings, node_scope))
             .transpose()?;
 
         let has_traversal_path = fields
             .iter()
             .any(|f| f.name == crate::constants::TRAVERSAL_PATH_COLUMN);
+
+        // A global hub must be non-namespaced; a traversal_path would let elision drop a scope filter.
+        if self.global && has_traversal_path {
+            return Err(OntologyError::Validation(format!(
+                "node '{name}' is `global: true` but declares a `traversal_path` column; global hubs must be non-namespaced"
+            )));
+        }
 
         let storage = convert_node_storage(self.storage.unwrap_or_default(), &sort_key);
 
@@ -468,6 +480,7 @@ impl NodeYaml {
             redaction: self.redaction,
             style: self.style,
             has_traversal_path,
+            global: self.global,
             storage,
         })
     }
@@ -601,12 +614,12 @@ impl EtlYaml {
         self,
         entity_name: &str,
         etl_settings: &EtlSettings,
+        scope: EtlScope,
     ) -> Result<EtlConfig, OntologyError> {
         let wm = &etl_settings.watermark;
         let del = &etl_settings.deleted;
         match self {
             EtlYaml::Table {
-                scope,
                 source,
                 watermark,
                 deleted,
@@ -632,7 +645,6 @@ impl EtlYaml {
                 })
             }
             EtlYaml::Query {
-                scope,
                 source,
                 select,
                 from,
@@ -868,6 +880,45 @@ mod tests {
     }
 
     #[test]
+    fn global_node_with_traversal_path_is_rejected() {
+        let result = parse_test_node(
+            r#"
+            node_type: entity
+            domain: test
+            global: true
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+              traversal_path:
+                type: string
+                source: traversal_path
+            "#,
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("global") && err.contains("traversal_path"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn global_defaults_false_and_parses_when_true() {
+        let scoped = parse_test_node(
+            "node_type: entity\ndomain: test\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n",
+        )
+        .unwrap();
+        assert!(!scoped.global);
+
+        let hub = parse_test_node(
+            "node_type: entity\ndomain: test\nglobal: true\ndestination_table: gl_test\nproperties:\n  id: {type: int64, source: id}\n",
+        )
+        .unwrap();
+        assert!(hub.global);
+    }
+
+    #[test]
     fn depends_on_rejects_virtual_dependency() {
         let result = parse_test_node(
             r#"
@@ -914,7 +965,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: siphon_test
               transform: system_notes
             "#,
@@ -972,7 +1022,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: source_table
               edges:
         "#;
@@ -990,7 +1039,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: source_table
               edges:
                 project_id:
@@ -1020,7 +1068,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: source_table
               edges:
                 pipeline_id:
@@ -1052,7 +1099,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: source_table
               edges:
                 pipeline_id:
@@ -1080,7 +1126,6 @@ mod tests {
                 source: id
             etl:
               type: table
-              scope: namespaced
               source: source_table
               edges:
                 pipeline_id:
@@ -1227,7 +1272,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "argMax(col, _siphon_watermark) AS col"
               from: source_table
@@ -1257,7 +1301,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "id"
               from: source_table AS t
@@ -1283,7 +1326,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "id"
               from: "source_table AS t JOIN (SELECT argMax(x, {{watermark_column}}) FROM y GROUP BY id) z ON t.id = z.id"
@@ -1316,7 +1358,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "argMax(col, {{typo_column}}) AS col"
               from: source_table
@@ -1342,7 +1383,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "id"
               from: source_table
@@ -1373,7 +1413,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "id"
               from: source_table AS t
@@ -1407,7 +1446,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "argMax({{deleted_column}}, {{watermark_column}}) AS deleted"
               from: source_table
@@ -1436,7 +1474,6 @@ mod tests {
                 source: id
             etl:
               type: query
-              scope: namespaced
               source: source_table
               select: "id"
               from: source_table

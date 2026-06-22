@@ -78,7 +78,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_labels
   edges:
     project_id:

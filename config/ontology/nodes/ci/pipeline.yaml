@@ -215,7 +215,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_p_ci_pipelines
   order_by: [traversal_path, id, partition_id]
   edges:

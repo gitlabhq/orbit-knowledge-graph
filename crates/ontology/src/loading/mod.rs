@@ -420,18 +420,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         config.storage.denormalized_indexes = auto_indexes.clone();
     }
 
-    // Resolve skip_security_filter_for_entities → physical table names.
-    for entity_name in &schema.settings.skip_security_filter_for_entities {
-        let node = ontology.nodes.get(entity_name).ok_or_else(|| {
-            OntologyError::Validation(format!(
-                "skip_security_filter_for_entities: unknown entity '{entity_name}'"
-            ))
-        })?;
-        ontology
-            .skip_security_filter_for_tables
-            .push(node.destination_table.clone());
-    }
-
     // Validate and store local_db entity settings.
     if let Some(local_db) = schema.settings.local_db {
         for entry in local_db.entities {

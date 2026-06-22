@@ -1,6 +1,7 @@
 # config/ontology/edges/has_identifier.yaml
 
 description: Entity has associated vulnerability identifier (CVE, CWE, etc.)
+table: gl_sec_edge
 
 variants:
   - from_node: { type: Finding, id: id }

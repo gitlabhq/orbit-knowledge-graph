@@ -98,7 +98,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_milestones
   edges:
     project_id:
