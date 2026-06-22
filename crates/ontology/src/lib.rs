@@ -3174,6 +3174,25 @@ properties:
     }
 
     #[test]
+    fn user_lifecycle_edges_to_issuables_are_prune_to_target() {
+        // REOPENED is a global User source into a namespaced issuable target,
+        // identical in shape to CLOSED/MERGED. All must carry prune_to_target so
+        // the query-restrict pass scopes them from the resolved target prefix;
+        // a missing scope falls through restrict's `_ => continue` arm and
+        // scopes the edge differently from its siblings.
+        let o = Ontology::load_embedded().unwrap();
+        for kind in ["REOPENED", "CLOSED", "MERGED"] {
+            let variants = o.edges.get(kind).expect(kind);
+            assert!(
+                variants
+                    .iter()
+                    .all(|v| v.scope == Some(EdgeVariantScope::PruneToTarget)),
+                "all {kind} variants must be prune_to_target"
+            );
+        }
+    }
+
+    #[test]
     fn contains_user_project_and_workitem_workitem_not_scope_preserving() {
         let o = Ontology::load_embedded().unwrap();
         let contains = o.edges.get("CONTAINS").expect("CONTAINS");

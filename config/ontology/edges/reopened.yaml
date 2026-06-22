@@ -5,10 +5,12 @@ description: User who reopened a merge request or work item (ADR 013)
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
+    scope: prune_to_target
     description: "User reopened a merge request."
 
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
+    scope: prune_to_target
     description: "User reopened a work item."
 
 # Reopen is a `resource_state_events` row (state = 5), never a system-note

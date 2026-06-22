@@ -73,7 +73,27 @@ pub(in crate::modules::sdlc) fn lower(
         }
     }
 
+    // A plan name is both the handler name (`entity.{name}`) and the checkpoint
+    // key (`{scope}.{name}`), so a collision silently clobbers a handler and
+    // makes two plans share one cursor. `plan_name` disambiguates standalone
+    // edges that share a source table only when the target kind is a literal;
+    // a `Column` target yields no suffix, so two such ETLs would collide. This
+    // is a build-from-ontology invariant checked once at boot (not on the data
+    // path), so panicking on a duplicate is the right failure mode.
+    assert_unique_plan_names(&global, &namespaced);
+
     Plans { global, namespaced }
+}
+
+fn assert_unique_plan_names(global: &[Plan], namespaced: &[Plan]) {
+    let mut seen = std::collections::HashSet::new();
+    for plan in global.iter().chain(namespaced.iter()) {
+        assert!(
+            seen.insert(plan.name.as_str()),
+            "duplicate plan name '{}': plan names are handler names and checkpoint keys and must be unique",
+            plan.name
+        );
+    }
 }
 
 fn lower_derived_entity_plan(input: DerivedEntityPlan, batch_size: u64) -> Plan {
@@ -557,6 +577,40 @@ mod tests {
 
     fn test_ontology() -> ontology::Ontology {
         ontology::Ontology::load_embedded().expect("should load ontology")
+    }
+
+    fn named_plan(name: &str) -> Plan {
+        Plan {
+            name: name.to_string(),
+            extract_template: String::new(),
+            watermark_column: String::new(),
+            sort_key: vec![],
+            batch_size: 1,
+            transform: TransformSpec::DataFusion(vec![]),
+        }
+    }
+
+    #[test]
+    fn assert_unique_plan_names_accepts_distinct_names_across_scopes() {
+        assert_unique_plan_names(
+            &[named_plan("User")],
+            &[named_plan("REOPENED_t_MergeRequest")],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate plan name")]
+    fn assert_unique_plan_names_rejects_collision() {
+        assert_unique_plan_names(&[named_plan("dup")], &[named_plan("dup")]);
+    }
+
+    #[test]
+    fn embedded_ontology_yields_unique_plan_names() {
+        // build_plans -> lower already runs assert_unique_plan_names; this names
+        // the guarantee so a future same-source/same-kind edge with a Column
+        // target (empty plan-name suffix) trips here instead of silently
+        // clobbering a handler and sharing a checkpoint cursor.
+        let _ = build_plans(&test_ontology(), 1000);
     }
 
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {

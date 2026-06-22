@@ -965,6 +965,12 @@ mod tests {
 
     #[test]
     fn reopened_standalone_plans_carry_state_filter_for_both_issuable_sides() {
+        // `resource_state_events.state == reopened` in Rails. Source of truth:
+        // app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
+        // over app/models/concerns/issuable.rb STATE_ID_MAP
+        // (opened: 1, closed: 2, merged: 3, locked: 4).
+        const REOPENED_STATE: i64 = 5;
+
         let ontology = Ontology::load_embedded().expect("ontology");
         let plans = from_ontology(&ontology);
 
@@ -979,9 +985,13 @@ mod tests {
             "REOPENED has an MR-side and a WorkItem-side ETL"
         );
 
+        let expected_filter = format!("state = {REOPENED_STATE}");
         for plan in &reopened {
             assert_eq!(plan.extract.base_table, "siphon_resource_state_events");
-            assert_eq!(plan.extract.additional_where.as_deref(), Some("state = 5"));
+            assert_eq!(
+                plan.extract.additional_where.as_deref(),
+                Some(expected_filter.as_str())
+            );
         }
 
         let targets: Vec<&EdgeKind> = reopened.iter().map(|p| &p.target_kind).collect();
