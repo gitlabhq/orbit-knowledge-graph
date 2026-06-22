@@ -667,14 +667,17 @@ impl EtlYaml {
                 }
                 let context = format!("entity '{entity_name}': query file '{path}'");
                 reject_hardcoded_columns(&context, raw_sql, &watermark, &deleted)?;
-                let template = QueryTemplate::parse_full(&context, raw_sql)?;
-                let sql =
-                    template.render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
+                // Resolve the config-valued markers (watermark/deleted) here so
+                // the stored template only carries the runtime paging markers,
+                // then re-parse once so consumers never re-lex the SQL string.
+                let resolved = QueryTemplate::parse_full(&context, raw_sql)?
+                    .render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
+                let template = QueryTemplate::parse(&context, &resolved)?;
 
                 Ok(EtlConfig::Verbatim {
                     scope,
                     source,
-                    sql,
+                    template,
                     watermark,
                     deleted,
                     order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
@@ -1262,10 +1265,10 @@ mod tests {
         let node =
             parse_test_node_with_files(VERBATIM_YAML, &[("nodes/test/test.sql", full_query)])
                 .expect("verbatim etl should parse");
-        let EtlConfig::Verbatim { sql, .. } = node.etl.unwrap() else {
+        let EtlConfig::Verbatim { template, .. } = node.etl.unwrap() else {
             panic!("expected Verbatim");
         };
-        assert_eq!(sql, full_query);
+        assert_eq!(template.raw(), full_query);
     }
 
     #[test]
@@ -1297,9 +1300,10 @@ mod tests {
             )],
         )
         .expect("placeholders in sql file should render");
-        let EtlConfig::Verbatim { sql, .. } = node.etl.unwrap() else {
+        let EtlConfig::Verbatim { template, .. } = node.etl.unwrap() else {
             panic!("expected Verbatim");
         };
+        let sql = template.raw();
         assert!(
             sql.contains("t._siphon_watermark AS _version"),
             "got: {sql}"

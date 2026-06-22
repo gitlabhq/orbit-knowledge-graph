@@ -181,7 +181,7 @@ mod tests {
             "derived entities name a custom transform, not data_fusion: {:?}",
             system_note.transform
         );
-        let template = &system_note.extract_template;
+        let template = system_note.extract_template.raw();
 
         // #830: the metadata join is bounded by the page CTE, not inlined
         // above the LIMIT. The _batch CTE holds the base scan with the page

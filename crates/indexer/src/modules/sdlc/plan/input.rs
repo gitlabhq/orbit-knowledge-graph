@@ -159,7 +159,7 @@ impl ExtractColumn {
 
 pub(in crate::modules::sdlc) enum ExtractSource {
     Table(String),
-    Raw(String),
+    Raw(QueryTemplate),
 }
 
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
@@ -605,12 +605,10 @@ fn resolve_standalone_edge(
 fn enrichment_source(etl: &EtlConfig) -> String {
     match etl {
         EtlConfig::Table { source, .. } => source.clone(),
-        EtlConfig::Verbatim { sql, .. } => {
+        EtlConfig::Verbatim { template, .. } => {
             // The enrichment supplies its own FK bound, so the verbatim query's
             // paging markers are elided whole — `{{limit}}` carries its `LIMIT`,
             // so dropping it cannot leave a dangling keyword.
-            let template = QueryTemplate::parse("enrichment source", sql)
-                .expect("verbatim query is validated at ontology load");
             let unpaged = template.render(|marker| match marker {
                 Marker::Filters | Marker::Limit => Resolve::Elide,
                 Marker::WatermarkColumn | Marker::DeletedColumn => Resolve::Keep,
@@ -704,7 +702,7 @@ fn build_extract_plan(
         }
         EtlConfig::Verbatim {
             source,
-            sql,
+            template,
             watermark,
             deleted,
             order_by,
@@ -715,7 +713,7 @@ fn build_extract_plan(
             ExtractPlan {
                 destination_table: destination_table.to_string(),
                 columns: Vec::new(),
-                source: ExtractSource::Raw(sql.clone()),
+                source: ExtractSource::Raw(template.clone()),
                 base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),

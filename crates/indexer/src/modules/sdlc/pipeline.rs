@@ -512,12 +512,15 @@ mod tests {
     fn simple_plan_with_batch_size(name: &str, batch_size: u64) -> Plan {
         Plan {
             name: name.to_string(),
-            extract_template: "SELECT id, name, _siphon_watermark AS _version, \
+            extract_template: ontology::QueryTemplate::parse(
+                "test",
+                "SELECT id, name, _siphon_watermark AS _version, \
                  _siphon_deleted AS _deleted \
                  FROM source_table \
                  WHERE 1=1 {{filters}} \
-                 ORDER BY id {{limit}}"
-                .to_string(),
+                 ORDER BY id {{limit}}",
+            )
+            .unwrap(),
             watermark_column: "_siphon_watermark".to_string(),
             sort_key: vec!["id".to_string()],
             batch_size,

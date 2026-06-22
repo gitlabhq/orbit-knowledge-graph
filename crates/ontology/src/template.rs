@@ -42,7 +42,7 @@ impl Marker {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Segment {
     Text(String),
     Marker(Marker),
@@ -61,10 +61,10 @@ pub enum Resolve {
 /// ETL SQL lexed into text and `{{marker}}` sites. Only marker boundaries are
 /// parsed; the surrounding SQL is opaque, which is what lets a page-bounded
 /// CTE live in a plain `.sql` file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryTemplate {
     segments: Vec<Segment>,
-    len_hint: usize,
+    raw: String,
 }
 
 impl QueryTemplate {
@@ -94,8 +94,13 @@ impl QueryTemplate {
         }
         Ok(Self {
             segments,
-            len_hint: sql.len(),
+            raw: sql.to_string(),
         })
+    }
+
+    /// The original SQL the template was parsed from, markers intact.
+    pub fn raw(&self) -> &str {
+        &self.raw
     }
 
     /// Parses a verbatim extract, which must drive its own paging — so the
@@ -125,7 +130,7 @@ impl QueryTemplate {
     }
 
     pub fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
-        let mut out = String::with_capacity(self.len_hint);
+        let mut out = String::with_capacity(self.raw.len());
         for seg in &self.segments {
             match seg {
                 Segment::Text(text) => out.push_str(text),

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
+use ontology::{EtlScope, Ontology, QueryTemplate, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::input::{
     DenormalizedColumnProjection, DerivedEntityPlan, EdgeFilter, EdgeId, EdgeKind, EnrichmentSql,
@@ -401,21 +401,26 @@ fn lower_edge_select(
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
-    // A verbatim `query:` file carries no synthesized columns; its source is
-    // the complete extract template. Everything else is wrapped into one.
-    if input.columns.is_empty() {
-        return Plan {
-            name: String::new(),
-            extract_template: build_extract_from_sql(&input.source),
-            watermark_column: input.watermark,
-            sort_key: input.order_by,
-            batch_size,
-            transform: TransformSpec::DataFusion(vec![]),
-        };
-    }
+    // A verbatim `query:` file is the complete template, used as parsed — it
+    // has no synthesized columns. Any other source is a FROM expression the
+    // plan selects its own columns from before the paging markers are added.
+    let columns_empty = input.columns.is_empty();
+    let from_sql = match input.source {
+        ExtractSource::Raw(template) if columns_empty => {
+            return Plan {
+                name: String::new(),
+                extract_template: template,
+                watermark_column: input.watermark,
+                sort_key: input.order_by,
+                batch_size,
+                transform: TransformSpec::DataFusion(vec![]),
+            };
+        }
+        ExtractSource::Raw(template) => template.raw().to_string(),
+        ExtractSource::Table(table) => table,
+    };
 
     let select_list = build_extract_select_list(&input.columns, &input.watermark, &input.deleted);
-    let from_sql = build_extract_from_sql(&input.source);
     let traversal_predicate =
         build_traversal_predicate(input.namespaced, &input.traversal_path_filter);
 
@@ -434,7 +439,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
 
     let order_by_sql = input.order_by.join(", ");
 
-    let extract_template = match &input.enrichment {
+    let extract_sql = match &input.enrichment {
         Some(enrichment) => render_cte_template(
             &select_list,
             &from_sql,
@@ -452,7 +457,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
 
     Plan {
         name: String::new(),
-        extract_template,
+        extract_template: parse_synthesized(&extract_sql),
         watermark_column: input.watermark,
         sort_key: input.order_by,
         batch_size,
@@ -471,11 +476,11 @@ fn build_extract_select_list(
     select_list
 }
 
-fn build_extract_from_sql(source: &ExtractSource) -> String {
-    match source {
-        ExtractSource::Table(table) => table.clone(),
-        ExtractSource::Raw(raw) => raw.clone(),
-    }
+/// Parses a template the lowering itself assembles. A failure is a bug in the
+/// synthesized SQL, not bad input, so it surfaces loudly rather than silently.
+fn parse_synthesized(sql: &str) -> QueryTemplate {
+    QueryTemplate::parse("synthesized extract", sql)
+        .expect("lowering builds a valid marker template")
 }
 
 fn build_traversal_predicate(namespaced: bool, custom_filter: &Option<String>) -> Option<String> {
@@ -886,8 +891,8 @@ mod tests {
         assert_eq!(plan.watermark_column, "_siphon_watermark");
         assert_eq!(plan.sort_key, vec!["id"]);
         assert_eq!(plan.batch_size, 1000);
-        assert!(plan.extract_template.contains("{{filters}}"));
-        assert!(plan.extract_template.contains("{{limit}}"));
+        assert!(plan.extract_template.raw().contains("{{filters}}"));
+        assert!(plan.extract_template.raw().contains("{{limit}}"));
     }
 
     #[test]
@@ -954,8 +959,11 @@ mod tests {
                 ),
             ],
             source: ExtractSource::Raw(
-                "siphon_projects project INNER JOIN traversal_paths ON project.id = traversal_paths.id"
-                    .to_string(),
+                QueryTemplate::parse(
+                    "test",
+                    "siphon_projects project INNER JOIN traversal_paths ON project.id = traversal_paths.id",
+                )
+                .unwrap(),
             ),
             base_table: "siphon_projects".to_string(),
             watermark: "project._siphon_watermark".to_string(),

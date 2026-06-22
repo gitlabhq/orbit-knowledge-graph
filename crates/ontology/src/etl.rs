@@ -64,11 +64,12 @@ pub enum EtlConfig {
     },
     /// A complete extract from a sibling `.sql` file, used verbatim. The file
     /// owns its own paging via the `{{filters}}`/`{{limit}}` markers and
-    /// emits the `_version`/`_deleted` output columns itself.
+    /// emits the `_version`/`_deleted` output columns itself. Parsed once at
+    /// load (watermark/deleted already resolved); consumers render it per role.
     Verbatim {
         scope: EtlScope,
         source: String,
-        sql: String,
+        template: crate::QueryTemplate,
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
@@ -140,7 +141,11 @@ mod tests {
         EtlConfig::Verbatim {
             scope: EtlScope::Global,
             source: "source_table".to_string(),
-            sql: "SELECT id FROM source_table WHERE 1=1 {{filters}} {{limit}}".to_string(),
+            template: crate::QueryTemplate::parse(
+                "test",
+                "SELECT id FROM source_table WHERE 1=1 {{filters}} {{limit}}",
+            )
+            .unwrap(),
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],

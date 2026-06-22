@@ -226,11 +226,11 @@ impl Filter for CursorFilter<'_> {
 
 // `extract_template` carries `{{filters}}` (dynamic WHERE conditions) and
 // `{{limit}}` (the paging clause) markers that `PreparedQuery::to_sql`
-// resolves through `QueryTemplate::render`.
+// resolves through `QueryTemplate::render`. Parsed once when the plan is built.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
-    pub extract_template: String,
+    pub extract_template: QueryTemplate,
     pub watermark_column: String,
     pub sort_key: Vec<String>,
     pub batch_size: u64,
@@ -274,13 +274,8 @@ pub(in crate::modules::sdlc) struct PreparedQuery {
 
 impl Plan {
     pub fn prepare(&self) -> PreparedQuery {
-        // Extract templates are validated at ontology load (verbatim `query:`
-        // files via `parse_full`) or synthesized here, so a parse failure is an
-        // internal invariant violation, not bad input.
-        let template = QueryTemplate::parse("extract template", &self.extract_template)
-            .expect("extract template must be a valid marker template");
         PreparedQuery {
-            template,
+            template: self.extract_template.clone(),
             filters: Vec::new(),
             params: serde_json::Map::new(),
             batch_size: self.batch_size,
@@ -375,14 +370,18 @@ mod tests {
         let sort_key_sql = sort_key.join(", ");
         Plan {
             name: "Test".to_string(),
-            extract_template: format!(
-                "SELECT id, name, _siphon_watermark AS _version, \
-                 _siphon_deleted AS _deleted \
-                 FROM source_table \
-                 WHERE 1=1 {{{{filters}}}} \
-                 ORDER BY {sort_key_sql} \
-                 {{{{limit}}}}"
-            ),
+            extract_template: QueryTemplate::parse(
+                "test",
+                &format!(
+                    "SELECT id, name, _siphon_watermark AS _version, \
+                     _siphon_deleted AS _deleted \
+                     FROM source_table \
+                     WHERE 1=1 {{{{filters}}}} \
+                     ORDER BY {sort_key_sql} \
+                     {{{{limit}}}}"
+                ),
+            )
+            .unwrap(),
             watermark_column: "_siphon_watermark".to_string(),
             sort_key,
             batch_size,
