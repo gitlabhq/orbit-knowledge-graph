@@ -136,7 +136,7 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -144,9 +144,9 @@ storage:
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: deduplicated, type: "Bool", default: "false"}
     - {name: overridden_uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: scan_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: scanner_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: scan_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: scanner_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deduplicated, column: deduplicated, type: "minmax", granularity: 1}

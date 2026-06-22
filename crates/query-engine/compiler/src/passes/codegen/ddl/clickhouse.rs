@@ -67,6 +67,8 @@ fn emit_codec(codec: &Codec) -> String {
     match codec {
         Codec::ZSTD(level) => format!("ZSTD({level})"),
         Codec::Delta(width) => format!("Delta({width})"),
+        Codec::DoubleDelta => "DoubleDelta".into(),
+        Codec::T64 => "T64".into(),
         Codec::LZ4 => "LZ4".into(),
     }
 }
