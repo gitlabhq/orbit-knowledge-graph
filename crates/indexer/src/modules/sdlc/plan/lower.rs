@@ -401,9 +401,8 @@ fn lower_edge_select(
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
-    // A verbatim `query:` file is the complete template, used as parsed — it
-    // has no synthesized columns. Any other source is a FROM expression the
-    // plan selects its own columns from before the paging markers are added.
+    // A column-less plan is a verbatim query: its source is the whole template.
+    // Otherwise the source is a FROM expression the projected columns select from.
     let columns_empty = input.columns.is_empty();
     let from_sql = match input.source {
         ExtractSource::Raw(template) if columns_empty => {

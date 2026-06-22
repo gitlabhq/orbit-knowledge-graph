@@ -64,8 +64,7 @@ pub enum EtlConfig {
     },
     /// A complete extract from a sibling `.sql` file, used verbatim. The file
     /// owns its own paging via the `{{filters}}`/`{{limit}}` markers and
-    /// emits the `_version`/`_deleted` output columns itself. Parsed once at
-    /// load (watermark/deleted already resolved); consumers render it per role.
+    /// emits the `_version`/`_deleted` output columns itself.
     Verbatim {
         scope: EtlScope,
         source: String,

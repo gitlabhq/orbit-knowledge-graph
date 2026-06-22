@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use gkg_utils::arrow::ArrowUtils;
 use serde_json::Value;
 
-use ontology::{Marker, QueryTemplate, Resolve};
+use ontology::{QueryTemplate, Resolve, RuntimeMarker};
 
 use super::partitioning::PartitionAssignment;
 use crate::checkpoint::Checkpoint;
@@ -224,9 +224,6 @@ impl Filter for CursorFilter<'_> {
     }
 }
 
-// `extract_template` carries `{{filters}}` (dynamic WHERE conditions) and
-// `{{limit}}` (the paging clause) markers that `PreparedQuery::to_sql`
-// resolves through `QueryTemplate::render`. Parsed once when the plan is built.
 #[derive(Debug, Clone)]
 pub(in crate::modules::sdlc) struct Plan {
     pub name: String,
@@ -309,10 +306,9 @@ impl PreparedQuery {
             format!("AND {joined}")
         };
         let limit_sql = format!("LIMIT {}", self.batch_size);
-        self.template.render(|marker| match marker {
-            Marker::Filters => Resolve::Sub(filters_sql.clone()),
-            Marker::Limit => Resolve::Sub(limit_sql.clone()),
-            Marker::WatermarkColumn | Marker::DeletedColumn => Resolve::Keep,
+        self.template.render_runtime(|marker| match marker {
+            RuntimeMarker::Filters => Resolve::Sub(filters_sql.clone()),
+            RuntimeMarker::Limit => Resolve::Sub(limit_sql.clone()),
         })
     }
 

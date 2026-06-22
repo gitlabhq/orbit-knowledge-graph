@@ -1,13 +1,9 @@
 //! Marker templating for ETL extract SQL.
 //!
-//! This is a grammar, not a resolver: ontology owns which `{{marker}}` sites
-//! are legal in a `config/ontology/**/*.sql` file, but only resolves the
-//! markers whose values are ontology config — `{{watermark_column}}` and
-//! `{{deleted_column}}` (from `etl_settings`). The runtime paging markers
-//! `{{filters}}` and `{{limit}}` are recognized here so an unknown marker is
-//! rejected by name, but their *values* are the indexer extract phase's to
-//! supply per batch — substituted for the page query, elided for an FK-bounded
-//! enrichment — via [`QueryTemplate::render`].
+//! Ontology owns which `{{marker}}` sites are legal and resolves the two whose
+//! values are config — `{{watermark_column}}`/`{{deleted_column}}` — at load.
+//! The runtime markers `{{filters}}`/`{{limit}}` are left for the indexer to
+//! resolve per batch via [`QueryTemplate::render_runtime`].
 
 use crate::OntologyError;
 
@@ -16,8 +12,7 @@ pub enum Marker {
     WatermarkColumn,
     DeletedColumn,
     Filters,
-    /// The whole paging clause (`LIMIT n`), so it can be substituted or elided
-    /// as a unit — there is no adjacent author keyword left to dangle.
+    /// The whole `LIMIT n` clause, so it elides as a unit with no dangling keyword.
     Limit,
 }
 
@@ -40,6 +35,22 @@ impl Marker {
             Self::Limit => "{{limit}}",
         }
     }
+
+    fn as_runtime(self) -> Option<RuntimeMarker> {
+        match self {
+            Self::Filters => Some(RuntimeMarker::Filters),
+            Self::Limit => Some(RuntimeMarker::Limit),
+            Self::WatermarkColumn | Self::DeletedColumn => None,
+        }
+    }
+}
+
+/// The markers resolved per batch by the indexer. The load-time markers are
+/// already substituted by the time a template reaches [`QueryTemplate::render_runtime`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMarker {
+    Filters,
+    Limit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,19 +59,14 @@ enum Segment {
     Marker(Marker),
 }
 
-/// How [`QueryTemplate::render`] resolves one marker site.
 pub enum Resolve {
-    /// Replace the marker with this SQL.
     Sub(String),
-    /// Leave the marker's literal `{{token}}` in place (still unresolved).
     Keep,
-    /// Drop the marker, emitting nothing.
     Elide,
 }
 
-/// ETL SQL lexed into text and `{{marker}}` sites. Only marker boundaries are
-/// parsed; the surrounding SQL is opaque, which is what lets a page-bounded
-/// CTE live in a plain `.sql` file.
+/// ETL SQL lexed into text and `{{marker}}` sites; the surrounding SQL stays
+/// opaque, which is what lets a page-bounded CTE live in a plain `.sql` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryTemplate {
     segments: Vec<Segment>,
@@ -98,14 +104,12 @@ impl QueryTemplate {
         })
     }
 
-    /// The original SQL the template was parsed from, markers intact.
     pub fn raw(&self) -> &str {
         &self.raw
     }
 
-    /// Parses a verbatim extract, which must drive its own paging — so the
-    /// `{{filters}}` and `{{limit}}` markers are a construction invariant, not
-    /// something a caller checks afterwards.
+    /// A verbatim extract must drive its own paging, so both runtime markers
+    /// are a construction invariant rather than a check left to the caller.
     pub fn parse_full(context: &str, sql: &str) -> Result<Self, OntologyError> {
         let template = Self::parse(context, sql)?;
         if !template.is_full_query() {
@@ -129,7 +133,7 @@ impl QueryTemplate {
         filters && limit
     }
 
-    pub fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
+    pub(crate) fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
         let mut out = String::with_capacity(self.raw.len());
         for seg in &self.segments {
             match seg {
@@ -142,6 +146,15 @@ impl QueryTemplate {
             }
         }
         out
+    }
+
+    /// Resolve the runtime paging markers; any load-time marker passes through,
+    /// since those are already resolved before a template reaches the indexer.
+    pub fn render_runtime(&self, mut resolve: impl FnMut(RuntimeMarker) -> Resolve) -> String {
+        self.render(|marker| match marker.as_runtime() {
+            Some(runtime) => resolve(runtime),
+            None => Resolve::Keep,
+        })
     }
 }
 
@@ -172,10 +185,12 @@ mod tests {
     }
 
     #[test]
-    fn elide_drops_the_marker() {
-        let template = QueryTemplate::parse("test", "SELECT 1 {{filters}} {{limit}}").unwrap();
-        let sql = template.render(|_| Resolve::Elide);
-        assert_eq!(sql, "SELECT 1  ");
+    fn render_runtime_resolves_paging_and_passes_load_markers_through() {
+        let template =
+            QueryTemplate::parse("test", "SELECT {{watermark_column}} {{filters}} {{limit}}")
+                .unwrap();
+        let sql = template.render_runtime(|_| Resolve::Elide);
+        assert_eq!(sql, "SELECT {{watermark_column}}  ");
     }
 
     #[test]

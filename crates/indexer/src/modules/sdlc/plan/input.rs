@@ -1,7 +1,7 @@
 use ontology::{
     DataType, DenormDirection, DerivedEntity, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig,
-    EdgeTarget, EnumType, EtlConfig, EtlScope, Marker, NodeEntity, Ontology, QueryTemplate,
-    Resolve, constants::TRAVERSAL_PATH_COLUMN,
+    EdgeTarget, EnumType, EtlConfig, EtlScope, NodeEntity, Ontology, QueryTemplate, Resolve,
+    constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -597,22 +597,14 @@ fn resolve_standalone_edge(
     }
 }
 
-/// The table expression a standalone edge point-looks-up to fetch a node's
-/// enrich columns. A `Table` ETL exposes the columns on its base table
-/// directly; a `Verbatim` `query:` file projects them, so it is reused as a
-/// derived table with its own paging markers neutralized (the enrichment
-/// supplies its own FK bound).
+/// The table expression a standalone edge reads a node's enrich columns from.
+/// A `Verbatim` query is reused as a derived table with its paging elided,
+/// since the edge supplies its own FK bound.
 fn enrichment_source(etl: &EtlConfig) -> String {
     match etl {
         EtlConfig::Table { source, .. } => source.clone(),
         EtlConfig::Verbatim { template, .. } => {
-            // The enrichment supplies its own FK bound, so the verbatim query's
-            // paging markers are elided whole — `{{limit}}` carries its `LIMIT`,
-            // so dropping it cannot leave a dangling keyword.
-            let unpaged = template.render(|marker| match marker {
-                Marker::Filters | Marker::Limit => Resolve::Elide,
-                Marker::WatermarkColumn | Marker::DeletedColumn => Resolve::Keep,
-            });
+            let unpaged = template.render_runtime(|_| Resolve::Elide);
             format!("(\n{unpaged}\n) AS _src")
         }
     }

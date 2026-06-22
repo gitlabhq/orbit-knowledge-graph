@@ -553,9 +553,8 @@ fn resolve_etl_marker(marker: Marker, watermark: &str, deleted: &str) -> Resolve
     }
 }
 
-/// Hardcoding the actual column name instead of the placeholder would silently
-/// survive a watermark/deleted rename, so reject it. Checked on the raw input
-/// because substitution reintroduces the literal in the rendered output.
+/// Checked on the raw input, not the rendered output, since substitution
+/// reintroduces the very literal we reject.
 fn reject_hardcoded_columns(
     context: &str,
     raw: &str,
@@ -577,9 +576,6 @@ fn reject_hardcoded_columns(
     Ok(())
 }
 
-/// Resolves `{{watermark_column}}`/`{{deleted_column}}` in a scalar ETL
-/// expression (a `watermark`/`deleted` override). The paging markers have no
-/// meaning here and pass through untouched.
 pub(crate) fn render_etl_placeholders(
     entity: &str,
     field: &str,
@@ -667,9 +663,8 @@ impl EtlYaml {
                 }
                 let context = format!("entity '{entity_name}': query file '{path}'");
                 reject_hardcoded_columns(&context, raw_sql, &watermark, &deleted)?;
-                // Resolve the config-valued markers (watermark/deleted) here so
-                // the stored template only carries the runtime paging markers,
-                // then re-parse once so consumers never re-lex the SQL string.
+                // Resolve watermark/deleted now, then re-parse so the stored
+                // template carries only the runtime markers and is never re-lexed.
                 let resolved = QueryTemplate::parse_full(&context, raw_sql)?
                     .render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
                 let template = QueryTemplate::parse(&context, &resolved)?;
