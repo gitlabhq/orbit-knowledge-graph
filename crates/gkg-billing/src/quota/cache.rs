@@ -264,6 +264,7 @@ mod tests {
                 "test-token",
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
+                true,
             )
             .unwrap(),
         );
@@ -293,6 +294,7 @@ mod tests {
                 "test-token",
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
+                true,
             )
             .unwrap(),
         );
@@ -318,6 +320,7 @@ mod tests {
                 "test-token",
                 Duration::from_secs(5),
                 Duration::from_secs(3600),
+                true,
             )
             .unwrap(),
         );
