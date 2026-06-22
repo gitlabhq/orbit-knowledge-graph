@@ -152,6 +152,9 @@ graph TD
 | `ASSIGNED`                          | `User`         | `MergeRequest`, `WorkItem` | A user is assigned to a merge request or work item.                                         |
 | `FIXES`                             | `MergeRequest` | `Vulnerability`| A merge request fixes a vulnerability.                                                                  |
 | `RELATED_TO`                        | `WorkItem`     | `WorkItem`     | A work item is related to or blocks another work item (edge property `link_type`: `relates_to`, `blocks`). |
+| `MENTIONS`                          | `MergeRequest`, `WorkItem` | `MergeRequest`, `WorkItem` | One merge request or work item references another, parsed from the cross-reference system note. |
+| `ADDS_COMMIT`                       | `MergeRequest` | `Commit`       | A commit was added to a merge request, parsed from the `commit` system note (one edge per listed SHA). |
+| `MERGED_AT_COMMIT`                  | `MergeRequest` | `Commit`       | The commit a merge request was merged at, parsed from the auto-merge `merge` system note. |
 | `FROM_BRANCH`                       | `MergeRequest` | `Branch`       | A merge request originates from a source branch (distinct from `TARGETS` which is the target branch).  |
 | `SCANS`                             | `VulnerabilityScanner` | `Project` | A vulnerability scanner scans a project.                                                          |
 | `RAN_BY`                            | `SecurityScan` | `Job`          | A security scan was executed by a CI job.                                                               |
@@ -167,6 +170,7 @@ The Code Graph represents the structure and relationships within the source code
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
+| `Commit`              | A Git commit referenced from a system note (`commit` / `merge` action). Synthetic `id` = hash of `project_id` + `sha`; no Siphon source table. | `id`, `sha`, `project_id`                                  |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |

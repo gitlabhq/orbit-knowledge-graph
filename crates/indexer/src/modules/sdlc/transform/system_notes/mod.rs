@@ -43,7 +43,7 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 /// `config/ontology/derived/core/system_note.yaml`.
 pub(in crate::modules::sdlc) const TRANSFORM_NAME: &str = "system_notes";
 
-use emit::{EmittedEdge, NoteRow, NoteableKind, build_edges};
+use emit::{EmittedCommit, EmittedEdge, EmittedRows, NoteRow, NoteableKind, build_edges};
 use parse::{Action, Reference, extract as parse_body};
 use resolve::{
     EntityRow, MERGE_REQUESTS_SQL, PROJECT_PATHS_SQL, ROUTES_SQL, ResolutionPlan, ResolvedIndex,
@@ -68,15 +68,23 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
     resolve_lookup_batch_size: usize,
 }
 
+/// Output index of the `gl_edge` batch in [`SystemNotesTransform::outputs`].
+const EDGE_OUTPUT_INDEX: usize = 0;
+/// Output index of the `gl_commit` node batch. The transform dual-writes the
+/// commit node rows here alongside the edge rows, mirroring the code indexer's
+/// inline Branch-row emission (`arrow_converter.rs`).
+const COMMIT_OUTPUT_INDEX: usize = 1;
+
 impl SystemNotesTransform {
     fn new(
         datalake: Arc<dyn DatalakeQuery>,
         edge_table: String,
+        commit_table: String,
         resolve_lookup_batch_size: usize,
     ) -> Self {
         Self {
             datalake,
-            outputs: vec![edge_table],
+            outputs: vec![edge_table, commit_table],
             resolve_lookup_batch_size,
         }
     }
@@ -106,22 +114,28 @@ impl BlockTransform for SystemNotesTransform {
             return Ok(Vec::new());
         };
 
-        let edges = resolve_and_emit(
+        let EmittedRows { edges, commits } = resolve_and_emit(
             &*self.datalake,
             &notes,
             &root_prefix,
             self.resolve_lookup_batch_size,
         )
         .await?;
-        if edges.is_empty() {
-            return Ok(Vec::new());
-        }
 
-        let batch = edges_to_record_batch(&edges)?;
-        Ok(vec![TableBatch {
-            output_index: 0,
-            batch,
-        }])
+        let mut out = Vec::new();
+        if !edges.is_empty() {
+            out.push(TableBatch {
+                output_index: EDGE_OUTPUT_INDEX,
+                batch: edges_to_record_batch(&edges)?,
+            });
+        }
+        if !commits.is_empty() {
+            out.push(TableBatch {
+                output_index: COMMIT_OUTPUT_INDEX,
+                batch: commits_to_record_batch(&commits)?,
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -130,6 +144,7 @@ pub(in crate::modules::sdlc) fn register(
     registry: &mut TransformRegistry,
     datalake: Arc<dyn DatalakeQuery>,
     edge_table: &str,
+    commit_table: &str,
     resolve_lookup_batch_size: usize,
 ) {
     // Every write path targets the current schema version's table-set, so the
@@ -137,10 +152,12 @@ pub(in crate::modules::sdlc) fn register(
     // lowered DataFusion plans do (`lower.rs`); a bare `gl_edge` writes to the
     // wrong (unprefixed) table.
     let edge_table = prefixed_table_name(edge_table, *SCHEMA_VERSION);
+    let commit_table = prefixed_table_name(commit_table, *SCHEMA_VERSION);
     let factory: TransformFactory = Box::new(move |_plan| {
         Arc::new(SystemNotesTransform::new(
             Arc::clone(&datalake),
             edge_table.clone(),
+            commit_table.clone(),
             resolve_lookup_batch_size,
         ))
     });
@@ -194,24 +211,24 @@ async fn resolve_and_emit(
     notes: &[ExtractedNote],
     root_prefix: &str,
     resolve_lookup_batch_size: usize,
-) -> Result<Vec<EmittedEdge>, HandlerError> {
+) -> Result<EmittedRows, HandlerError> {
     let default_projects =
         resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
     let plan = plan_for_batch(notes, &default_projects);
     let index = resolve_plan(datalake, &plan, root_prefix, resolve_lookup_batch_size).await?;
 
-    let edges = process_batch(notes, &default_projects, |r, default_project| {
+    let rows = process_batch(notes, &default_projects, |r, default_project| {
         index.resolve(r, default_project)
     });
 
-    Ok(edges)
+    Ok(rows)
 }
 
 fn process_batch<R>(
     notes: &[ExtractedNote],
     default_projects: &DefaultProjectLookup,
     mut resolve: R,
-) -> Vec<EmittedEdge>
+) -> EmittedRows
 where
     R: FnMut(&Reference, &str) -> Option<ResolvedTarget>,
 {
@@ -236,6 +253,7 @@ where
         rows.push(NoteRow {
             traversal_path: n.traversal_path.clone(),
             default_project,
+            project_id: n.project_id.unwrap_or(0),
             author_id: n.author_id,
             noteable_id: n.noteable_id,
             noteable_kind,
@@ -494,6 +512,54 @@ fn edges_to_record_batch(edges: &[EmittedEdge]) -> Result<RecordBatch, HandlerEr
     .map_err(|e| HandlerError::Processing(format!("failed to build gl_edge batch: {e}")))
 }
 
+// ---------------------------------------------------------------------------
+// Commit → RecordBatch
+// ---------------------------------------------------------------------------
+
+/// Build the `gl_commit` node batch. Column order matches the ontology storage
+/// declaration in `nodes/source_code/commit.yaml` (and the generated DDL):
+/// `id, traversal_path, project_id, sha, _version, _deleted`.
+fn commits_to_record_batch(commits: &[EmittedCommit]) -> Result<RecordBatch, HandlerError> {
+    let len = commits.len();
+    let mut ids = Vec::with_capacity(len);
+    let mut traversal_paths = Vec::with_capacity(len);
+    let mut project_ids = Vec::with_capacity(len);
+    let mut shas = Vec::with_capacity(len);
+
+    for c in commits {
+        ids.push(c.id);
+        traversal_paths.push(c.traversal_path.as_str());
+        project_ids.push(c.project_id);
+        shas.push(c.sha.as_str());
+    }
+
+    let version_micros = Utc::now().timestamp_micros();
+    let versions = TimestampMicrosecondArray::from(vec![version_micros; len]).with_timezone("UTC");
+    let deleted = vec![false; len];
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("traversal_path", DataType::Utf8, false),
+        Field::new("project_id", DataType::Int64, false),
+        Field::new("sha", DataType::Utf8, false),
+        Field::new("_version", versions.data_type().clone(), false),
+        Field::new("_deleted", DataType::Boolean, false),
+    ]));
+
+    RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(Int64Array::from(ids)),
+            Arc::new(StringArray::from(traversal_paths)),
+            Arc::new(Int64Array::from(project_ids)),
+            Arc::new(StringArray::from(shas)),
+            Arc::new(versions),
+            Arc::new(arrow::array::BooleanArray::from(deleted)),
+        ],
+    )
+    .map_err(|e| HandlerError::Processing(format!("failed to build gl_commit batch: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,7 +733,8 @@ mod tests {
                 id: 456,
                 traversal_path: "1/100/".to_string(),
             })
-        });
+        })
+        .edges;
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "MENTIONS");
     }
@@ -697,7 +764,7 @@ mod tests {
     #[test]
     fn process_batch_emits_user_closed_edge_for_lifecycle_action() {
         let notes = vec![make_note("closed", "closed", "Issue", 999)];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None).edges;
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].relationship_kind, "CLOSED");
         assert_eq!(edges[0].target_kind, "WorkItem");
@@ -707,15 +774,42 @@ mod tests {
     #[test]
     fn process_batch_drops_unknown_action_silently() {
         let notes = vec![make_note("designs_added", "", "MergeRequest", 1)];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None).edges;
         assert!(edges.is_empty());
     }
 
     #[test]
     fn process_batch_drops_unsupported_noteable_type_silently() {
         let notes = vec![make_note("closed", "closed", "Snippet", 1)];
-        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        let edges = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None).edges;
         assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn process_batch_emits_commit_nodes_for_commit_action() {
+        let notes = vec![make_note(
+            "commit",
+            "added 1 commit\n\n* abc1234 - Fix\n",
+            "MergeRequest",
+            100,
+        )];
+        let out = process_batch(&notes, &DefaultProjectLookup::new(), |_, _| None);
+        assert_eq!(out.edges.len(), 1);
+        assert_eq!(out.commits.len(), 1);
+        assert_eq!(out.edges[0].relationship_kind, "ADDS_COMMIT");
+        // make_note seeds project_id = 100.
+        assert_eq!(out.commits[0].project_id, 100);
+        assert_eq!(out.edges[0].target_id, out.commits[0].id);
+
+        let batch = commits_to_record_batch(&out.commits).unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        let sha = batch
+            .column_by_name("sha")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(sha.value(0), "abc1234");
     }
 
     #[test]

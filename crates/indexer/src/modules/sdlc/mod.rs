@@ -62,10 +62,18 @@ pub async fn register_handlers(
 
     let mut transform_registry = transform::TransformRegistry::default();
     if gkg_server_config::features::enabled(gkg_server_config::Feature::SystemNotes) {
+        // The Commit-node table is ontology-derived (not hardcoded) so it
+        // can't silently drift from `commit.yaml`'s `destination_table`.
+        let commit_table = ontology
+            .nodes()
+            .find(|n| n.name == "Commit")
+            .map(|n| n.destination_table.as_str())
+            .unwrap_or("gl_commit");
         transform::system_notes::register(
             &mut transform_registry,
             Arc::clone(&datalake),
             ontology.edge_table(),
+            commit_table,
             entity_handler_config.system_notes_resolve_lookup_batch_size,
         );
     }

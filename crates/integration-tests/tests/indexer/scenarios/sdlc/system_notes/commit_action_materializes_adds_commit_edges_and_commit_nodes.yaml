@@ -1,0 +1,40 @@
+# ADR 013 / KG #815: an `Action::Commit` note ("added N commits") fans out
+# one MergeRequest --ADDS_COMMIT--> Commit edge per listed SHA, and dual-writes
+# a gl_commit node row per SHA. The synthetic Commit id is a hash of
+# (project_id, sha), so the edge target_id and node id are not asserted as
+# literals — count + sha + project_id pin the behavior.
+description: Commit action materializes ADDS_COMMIT edges and gl_commit node rows
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  merge_requests:
+    - { id: 10, iid: 5, title: MR 5, target_project_id: 200, source_project_id: 200, author_id: 1, traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: "added 2 commits\n\n* abc1234 - Fix the bug\n* def5678 - Add a test\n", noteable_type: MergeRequest, noteable_id: 10, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: commit, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    # Both edges share (source_id, source_kind, target_kind) and differ only by
+    # the synthetic Commit target_id (hash of project_id+sha), which isn't a
+    # stable literal — so the count + traversal_path + the distinct gl_commit
+    # node rows below pin the behavior instead of a per-row edge matcher.
+    - kind: ADDS_COMMIT
+      from: MergeRequest
+      to: Commit
+      count: 2
+      traversal_path: "1/100/200/"
+  nodes:
+    gl_commit:
+      count: 2
+      rows:
+        - { sha: abc1234, project_id: 200, traversal_path: "1/100/200/" }
+        - { sha: def5678, project_id: 200, traversal_path: "1/100/200/" }
+  totals:
+    gl_edge: 2
+    gl_commit: 2

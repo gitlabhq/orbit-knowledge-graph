@@ -1,0 +1,29 @@
+# KG #815 / OQ-3: the "created merge request !123" `Action::Merge` body is a
+# cross-reference, so it stays MENTIONS (no Commit node, no MERGED_AT_COMMIT).
+# Source noteable is the work item that spawned the MR.
+description: Merge action MR-ref variant stays MENTIONS and writes no commit node
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  merge_requests:
+    - { id: 30, iid: 123, title: MR 123, target_project_id: 200, source_project_id: 200, author_id: 1, traversal_path: "1/100/200/" }
+  work_items:
+    - { id: 20, iid: 9, title: WI 9, description: "", project_id: 200, namespace_id: 100, work_item_type_id: 1, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: "created merge request !123 to address this issue", noteable_type: Issue, noteable_id: 20, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: merge, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MENTIONS
+      count: 1
+      rows:
+        - { source_id: 20, source_kind: WorkItem, target_id: 30, target_kind: MergeRequest }
+  totals:
+    gl_edge: 1
+    gl_commit: 0

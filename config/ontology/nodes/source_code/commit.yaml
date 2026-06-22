@@ -1,0 +1,60 @@
+# config/ontology/nodes/source_code/commit.yaml
+
+node_type: Commit
+domain: source_code
+description: A Git commit referenced from a system note (merge or commit action)
+label: sha
+destination_table: gl_commit
+default_columns: [id, sha, project_id]
+sort_key: [traversal_path, project_id, id]
+
+style:
+  size: 24
+  color: "#8B5CF6"
+
+redaction:
+  resource_type: project
+  id_column: project_id
+  ability: read_code
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    mutable: false
+    description: "Derived ID (hash of project_id + commit SHA)."
+
+  sha:
+    type: string
+    source: sha
+    nullable: false
+    mutable: false
+    description: "Commit SHA as referenced in the system note (7-40 hex chars, NOT guaranteed canonical/full). Short and full SHAs for the same commit produce distinct nodes; see #909."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    mutable: false
+    description: "Owning project ID."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace path for authz."
+
+storage:
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: sha, type: "String", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_project_id, column: project_id, type: "bloom_filter(0.001)", granularity: 1}
+    - {name: idx_sha, column: sha, type: "bloom_filter(0.001)", granularity: 1}

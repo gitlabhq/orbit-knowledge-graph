@@ -1,0 +1,8 @@
+description: >-
+  Commits added to a merge request, extracted from the system note
+  body when a push event records new commits (ADR 013).
+
+variants:
+  - from_node: { type: MergeRequest, id: id }
+    to_node: { type: Commit, id: id }
+    description: "MergeRequest received a pushed commit."

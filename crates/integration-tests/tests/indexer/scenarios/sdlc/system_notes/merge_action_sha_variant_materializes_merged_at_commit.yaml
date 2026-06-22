@@ -1,0 +1,36 @@
+# KG #815: the SHA-bearing `Action::Merge` body ("enabled an automatic merge
+# ... for <sha> pass") routes to MergeRequest --MERGED_AT_COMMIT--> Commit and
+# dual-writes the gl_commit node, distinct from the MR-ref merge variant which
+# stays MENTIONS.
+description: Merge action SHA variant materializes MERGED_AT_COMMIT edge and commit node
+scope: { namespace: 100 }
+
+seed:
+  siphon_routes:
+    - { id: 1, source_id: 200, source_type: Project, path: my-group/my-proj, namespace_id: 100, traversal_path: "1/100/200/" }
+  merge_requests:
+    - { id: 10, iid: 5, title: MR 5, target_project_id: 200, source_project_id: 200, author_id: 1, traversal_path: "1/100/200/" }
+  siphon_notes:
+    - { id: 1, note: "enabled an automatic merge when all merge checks for 1a2b3c4d5e pass", noteable_type: MergeRequest, noteable_id: 10, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+  siphon_system_note_metadata:
+    - { id: 1, note_id: 1, action: merge, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
+
+run: system_notes
+
+expect:
+  edges:
+    - kind: MERGED_AT_COMMIT
+      from: MergeRequest
+      to: Commit
+      count: 1
+      traversal_path: "1/100/200/"
+      rows:
+        - { source_id: 10, source_kind: MergeRequest, target_kind: Commit }
+  nodes:
+    gl_commit:
+      count: 1
+      rows:
+        - { sha: 1a2b3c4d5e, project_id: 200, traversal_path: "1/100/200/" }
+  totals:
+    gl_edge: 1
+    gl_commit: 1
