@@ -1,8 +1,11 @@
 use std::sync::LazyLock;
 
 use gkg_observability::billing::quota as spec;
-use gkg_observability::billing::quota::labels::{CACHE, DECISION, SOURCE_TYPE};
-use gkg_observability::billing::quota::values::{ALLOW, DENY, FAIL_OPEN, HIT, MISS};
+use gkg_observability::billing::quota::labels::{CACHE, DECISION, DENY_REASON, SOURCE_TYPE};
+use gkg_observability::billing::quota::values::{
+    ALLOW, DENY, FAIL_OPEN, HIT, MISS, REASON_NONE, REASON_NOT_ENTITLED, REASON_QUOTA_EXHAUSTED,
+    REASON_UNPROCESSABLE,
+};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 
@@ -38,22 +41,37 @@ impl QuotaMetrics {
 pub fn register() {
     let metered_types = ["mcp", "rest"];
     let bypass_types = ["frontend", "core", "dws"];
+    let deny_reasons = [
+        REASON_QUOTA_EXHAUSTED,
+        REASON_NOT_ENTITLED,
+        REASON_UNPROCESSABLE,
+    ];
 
     for cache in [HIT, MISS] {
-        for decision in [ALLOW, DENY] {
-            for source_type in metered_types {
+        for source_type in metered_types {
+            QUOTA_METRICS.decisions.add(
+                0,
+                &[
+                    KeyValue::new(DECISION, ALLOW),
+                    KeyValue::new(CACHE, cache),
+                    KeyValue::new(SOURCE_TYPE, source_type),
+                    KeyValue::new(DENY_REASON, REASON_NONE),
+                ],
+            );
+            for reason in deny_reasons {
                 QUOTA_METRICS.decisions.add(
                     0,
                     &[
-                        KeyValue::new(DECISION, decision),
+                        KeyValue::new(DECISION, DENY),
                         KeyValue::new(CACHE, cache),
                         KeyValue::new(SOURCE_TYPE, source_type),
+                        KeyValue::new(DENY_REASON, reason),
                     ],
                 );
             }
         }
     }
-    // fail_open is only ever observed on cache=miss (never cached).
+    // fail_open is only ever observed on cache=miss (never cached); deny_reason=none.
     for source_type in metered_types {
         QUOTA_METRICS.decisions.add(
             0,
@@ -61,6 +79,7 @@ pub fn register() {
                 KeyValue::new(DECISION, FAIL_OPEN),
                 KeyValue::new(CACHE, MISS),
                 KeyValue::new(SOURCE_TYPE, source_type),
+                KeyValue::new(DENY_REASON, REASON_NONE),
             ],
         );
     }
