@@ -250,6 +250,14 @@ where
                 for r in &row.references {
                     match r.kind {
                         RefKind::Commit => {
+                            // `merged_at_commit.yaml` only declares
+                            // MergeRequest → Commit, so drop a SHA-bearing
+                            // merge note on a non-MR noteable rather than emit
+                            // an undeclared variant. Mirrors the Action::Commit
+                            // guard above.
+                            if row.noteable_kind != NoteableKind::MergeRequest {
+                                continue;
+                            }
                             if let Some(commit) = build_commit_node(row, r) {
                                 edges.push(commit_edge(
                                     row,
@@ -537,6 +545,23 @@ mod tests {
         assert_eq!(e.target_id, out.commits[0].id);
         assert_eq!(out.commits[0].sha, "1a2b3c4d5e");
         assert_eq!(out.commits[0].id, compute_commit_id(2, "1a2b3c4d5e"));
+    }
+
+    #[test]
+    fn merge_action_sha_variant_on_non_mr_noteable_is_dropped() {
+        // merged_at_commit.yaml only declares MergeRequest → Commit. A merge
+        // note carrying a SHA on a non-MR noteable must drop rather than emit
+        // an undeclared <NonMR> → Commit variant (mirrors the Action::Commit
+        // WorkItem-drop guard).
+        let row = row_for(
+            Action::Merge,
+            "enabled an automatic merge when all merge checks for 1a2b3c4d5e pass",
+            NoteableKind::WorkItem,
+            7,
+        );
+        let out = build_edges(&[row], |_r: &Reference, _d: &str| None);
+        assert!(out.edges.is_empty());
+        assert!(out.commits.is_empty());
     }
 
     #[test]
