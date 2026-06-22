@@ -495,21 +495,14 @@ fn resolve_standalone_edge(
             continue;
         };
         let Some(etl) = &node.etl else { continue };
-        let node_table = match etl {
-            EtlConfig::Table { source, .. } => source.as_str(),
-            EtlConfig::Query { from, .. } => from.as_str(),
-        };
+        let node_table = enrichment_source(etl);
         let watermark_col = etl.watermark();
         let deleted_col = etl.deleted();
         let fk_col = &endpoint.id_column;
 
-        // For Query-type ETLs the `from` is a JOIN expression and bare `id`
-        // is ambiguous. Use the explicit table_alias to qualify `id`.
-        let qualified_id = if let Some(alias) = etl.table_alias() {
-            format!("{alias}.id")
-        } else {
-            "id".to_string()
-        };
+        // The enrichment source exposes `id` as a bare name (a `query:` file is
+        // reused as a derived table), so it needs no alias qualification.
+        let qualified_id = "id".to_string();
 
         let alias = format!("_e{enrich_idx}");
         enrich_idx += 1;
@@ -604,6 +597,23 @@ fn resolve_standalone_edge(
     }
 }
 
+/// The table expression a standalone edge point-looks-up to fetch a node's
+/// enrich columns. A `Table` ETL exposes the columns on its base table
+/// directly; a `Verbatim` `query:` file projects them, so it is reused as a
+/// derived table with its own paging markers neutralized (the enrichment
+/// supplies its own FK bound).
+fn enrichment_source(etl: &EtlConfig) -> String {
+    match etl {
+        EtlConfig::Table { source, .. } => source.clone(),
+        EtlConfig::Verbatim { sql, .. } => {
+            let unpaged = sql
+                .replace("{{filters}}", "")
+                .replace("LIMIT {{batch_size}}", "");
+            format!("(\n{unpaged}\n) AS _src")
+        }
+    }
+}
+
 fn resolve_endpoint(
     endpoint: &ontology::EdgeEndpoint,
     resolve_allowed_types: impl FnOnce() -> Vec<String>,
@@ -686,81 +696,28 @@ fn build_extract_plan(
                 enrichment: None,
             }
         }
-        EtlConfig::Query {
+        EtlConfig::Verbatim {
             source,
-            select,
-            from,
-            where_clause,
+            sql,
             watermark,
             deleted,
             order_by,
-            traversal_path_filter,
-            page_join,
             ..
         } => {
-            let mut columns: Vec<ExtractColumn> = select
-                .split(", ")
-                .map(|s| ExtractColumn::Bare(s.trim().to_string()))
-                .collect();
-            append_missing(&mut columns, order_by);
-
-            // Only one page_join is supported; the CTE alias is fixed at _e0.
-            let enrichment = page_join.as_ref().map(|pj| {
-                let alias = &pj.alias;
-                let fk = &pj.fk_column;
-                let wm = &pj.watermark;
-                let agg_cols: Vec<String> = pj
-                    .select
-                    .iter()
-                    .map(|c| format!("argMax({alias}.{c}, {alias}.{wm}) AS {c}"))
-                    .collect();
-                let sub_cols = std::iter::once(format!("{alias}.{fk} AS id"))
-                    .chain(agg_cols)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let mut where_frag = pj
-                    .where_clause
-                    .as_ref()
-                    .map(|w| format!(" AND {w}"))
-                    .unwrap_or_default();
-                // Reuses the base scan's `{traversal_path:String}` param to prune
-                // the enrichment by the joined table's leading PK column.
-                if let Some(tp_col) = pj.traversal_path_column.as_ref().filter(|_| namespaced) {
-                    where_frag.push_str(&format!(
-                        " AND startsWith({alias}.{tp_col}, {{traversal_path:String}})"
-                    ));
-                }
-                let cte_def = format!(
-                    "_e0 AS (SELECT {sub_cols} FROM {table} AS {alias} \
-                     WHERE {alias}.{fk} IN (SELECT DISTINCT id FROM _batch){where_frag} \
-                     GROUP BY {alias}.{fk})",
-                    table = pj.table,
-                );
-                let join_clause = "LEFT JOIN _e0 ON _batch.id = _e0.id".to_string();
-                let select_exprs: Vec<String> = pj
-                    .select
-                    .iter()
-                    .map(|c| format!("_e0.{c} AS {c}"))
-                    .collect();
-                EnrichmentSql {
-                    cte_defs: vec![cte_def],
-                    join_clauses: vec![join_clause],
-                    select_exprs,
-                }
-            });
-
+            // The `.sql` file is the complete extract, used verbatim; it owns
+            // its own paging via the `{{filters}}`/`{{batch_size}}` markers.
             ExtractPlan {
                 destination_table: destination_table.to_string(),
-                columns,
-                source: ExtractSource::Raw(from.clone()),
+                columns: Vec::new(),
+                source: ExtractSource::Raw(sql.clone()),
                 base_table: source.clone(),
                 watermark: watermark.clone(),
                 deleted: deleted.clone(),
                 order_by: order_by.clone(),
                 namespaced,
-                traversal_path_filter: traversal_path_filter.clone(),
-                additional_where: where_clause.clone(),
-                enrichment,
+                traversal_path_filter: None,
+                additional_where: None,
+                enrichment: None,
             }
         }
     }

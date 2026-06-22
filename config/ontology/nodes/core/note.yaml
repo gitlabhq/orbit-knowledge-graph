@@ -135,12 +135,9 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: query
+  type: verbatim
   source: siphon_notes
-  select: "id, note, noteable_type, noteable_id, line_code, created_at, updated_at, discussion_id, resolved_at, internal, confidential, commit_id, st_diff, author_id, project_id, traversal_path"
-  from: siphon_notes
-  where: "system = false"
-  traversal_path_filter: "startsWith(traversal_path, {traversal_path:String})"
+  query: note.sql
   order_by: [traversal_path, noteable_type, noteable_id, id]
   edges:
     author_id:

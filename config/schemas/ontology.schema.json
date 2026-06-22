@@ -312,24 +312,17 @@
           "additionalProperties": false
         },
         {
-          "description": "Query ETL: structured extraction with JOINs and custom conditions.",
+          "description": "Verbatim ETL: a complete extract from a sibling .sql file, run verbatim. The file owns its own paging via the {{filters}}/{{batch_size}} markers and emits the _version/_deleted output columns itself.",
           "properties": {
-            "type": { "type": "string", "const": "query" },
+            "type": { "type": "string", "const": "verbatim" },
             "source": {
               "type": "string",
-              "description": "Underlying primary table."
+              "description": "Underlying primary table the extract reads from."
             },
-            "select": {
+            "query": {
               "type": "string",
-              "description": "Column expressions for the SELECT clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "from": {
-              "type": "string",
-              "description": "Table or JOIN expression for the FROM clause. Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
-            },
-            "where": {
-              "type": "string",
-              "description": "Extra WHERE conditions beyond watermark and traversal_path filtering (e.g. business logic filters). Use {{watermark_column}} placeholder instead of hardcoding the watermark column name."
+              "pattern": "^[a-z0-9_]+\\.sql$",
+              "description": "Sibling .sql file holding the COMPLETE extract, used verbatim. It must drive its own paging with the {{filters}} and {{batch_size}} markers. Use {{watermark_column}}/{{deleted_column}} placeholders rather than hardcoding column names."
             },
             "watermark": {
               "type": "string",
@@ -344,52 +337,6 @@
               "description": "Columns for ORDER BY in extract queries. Defaults to the node's sort_key if not specified.",
               "items": { "type": "string" },
               "minItems": 1
-            },
-            "traversal_path_filter": {
-              "type": "string",
-              "description": "Custom traversal_path filter expression for namespace scoping. When set, replaces the default startsWith(traversal_path, ...) filter. Must contain {traversal_path:String} placeholder."
-            },
-            "table_alias": {
-              "type": "string",
-              "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
-            },
-            "page_join": {
-              "type": "object",
-              "description": "Secondary table joined after the page LIMIT to avoid materializing the full secondary table in ClickHouse's hash-join build phase. The lowering wraps the base query in a _batch CTE and enriches via fk_column IN (SELECT id FROM _batch).",
-              "properties": {
-                "table": {
-                  "type": "string",
-                  "description": "Datalake table to join (e.g. siphon_system_note_metadata)."
-                },
-                "alias": {
-                  "type": "string",
-                  "description": "Table alias used in the enrichment CTE (e.g. snm)."
-                },
-                "fk_column": {
-                  "type": "string",
-                  "description": "FK column on the joined table that references the base table's id (e.g. note_id)."
-                },
-                "select": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "minItems": 1,
-                  "description": "Columns to select from the joined table (e.g. [action])."
-                },
-                "where": {
-                  "type": "string",
-                  "description": "Extra WHERE predicate on the joined table (e.g. {{deleted_column}} = false). Use {{watermark_column}} and {{deleted_column}} placeholders instead of hardcoding column names."
-                },
-                "watermark": {
-                  "type": "string",
-                  "description": "Watermark column for argMax deduplication. Defaults to schema.yaml's default_watermark. Use {{watermark_column}} placeholder instead of hardcoding the column name."
-                },
-                "traversal_path_column": {
-                  "type": "string",
-                  "description": "traversal_path column on the joined table. When set and the entity is namespaced, the enrichment CTE adds startsWith(<col>, {traversal_path}) so the join prunes by the joined table's leading PK column instead of scanning its whole FK index. The IN (SELECT id FROM _batch) bound already guarantees correctness; this is a pruning hint that must be a superset of the matched rows."
-                }
-              },
-              "required": ["table", "alias", "fk_column", "select"],
-              "additionalProperties": false
             },
             "transform": {
               "type": "string",
@@ -411,7 +358,7 @@
               }
             }
           },
-          "required": ["type", "source", "select", "from"],
+          "required": ["type", "source", "query"],
           "additionalProperties": false
         }
       ]

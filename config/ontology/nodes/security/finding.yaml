@@ -105,17 +105,9 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: query
+  type: verbatim
   source: siphon_security_findings
-  select: >-
-    traversal_path, id, toString(uuid) AS uuid,
-    nullIf(JSONExtractString(finding_data, 'name'), '') AS name,
-    nullIf(JSONExtractString(finding_data, 'description'), '') AS description,
-    nullIf(JSONExtractString(finding_data, 'solution'), '') AS solution,
-    severity, deduplicated, toString(overridden_uuid) AS overridden_uuid,
-    project_id, scanner_id, scan_id, partition_number
-  from: siphon_security_findings
-  traversal_path_filter: "startsWith(traversal_path, {traversal_path:String})"
+  query: finding.sql
   order_by: [traversal_path, id, partition_number]
   edges:
     project_id:

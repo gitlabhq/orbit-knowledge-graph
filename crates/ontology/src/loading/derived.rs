@@ -3,8 +3,8 @@ use serde::Deserialize;
 use crate::OntologyError;
 use crate::entities::DerivedEntity;
 use crate::etl::{DEFAULT_TRANSFORM, EtlScope};
-use crate::loading::EtlSettings;
 use crate::loading::node::EtlYaml;
+use crate::loading::{EtlSettings, ReadOntologyFile};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct DerivedYaml {
@@ -22,6 +22,8 @@ impl DerivedYaml {
         self,
         name: String,
         etl_settings: &EtlSettings,
+        reader: &impl ReadOntologyFile,
+        yaml_dir: &str,
     ) -> Result<DerivedEntity, OntologyError> {
         if self
             .name
@@ -47,7 +49,9 @@ impl DerivedYaml {
         } else {
             EtlScope::Namespaced
         };
-        let etl = self.etl.into_config(&name, etl_settings, scope)?;
+        let etl = self
+            .etl
+            .into_config(&name, etl_settings, scope, reader, yaml_dir)?;
         Ok(DerivedEntity {
             name,
             emits: self.emits,

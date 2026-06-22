@@ -19,6 +19,12 @@ use schema::SchemaYaml;
 #[folder = "$ONTOLOGY_DIR"]
 struct EmbeddedOntology;
 
+/// The directory part of an ontology-relative path, so a sibling `query:` file
+/// can be resolved next to the node/derived YAML that names it.
+fn parent_dir(path: &str) -> &str {
+    path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EtlSettings {
     pub watermark: String,
@@ -210,6 +216,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 &ontology.default_entity_sort_key,
                 &etl_settings,
                 &ontology.internal_column_prefix,
+                reader,
+                parent_dir(node_path),
             )?;
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
@@ -233,7 +241,12 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
             let content = reader.read(derived_path)?;
             let derived_def: DerivedYaml = parse_yaml(&content, derived_path)?;
-            let derived = derived_def.into_derived(derived_name.clone(), &etl_settings)?;
+            let derived = derived_def.into_derived(
+                derived_name.clone(),
+                &etl_settings,
+                reader,
+                parent_dir(derived_path),
+            )?;
             ontology
                 .derived_entities
                 .insert(derived_name.clone(), derived);

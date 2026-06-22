@@ -9,38 +9,19 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
+/// A `query:` file is the complete extract, run verbatim — it drives its own
+/// paging via these runtime markers (substituted per batch by the indexer)
+/// rather than being wrapped. The loader requires both; the indexer keys the
+/// verbatim-vs-table decision off the `EtlConfig` variant.
+pub fn is_full_query(sql: &str) -> bool {
+    sql.contains("{{filters}}") && sql.contains("{{batch_size}}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EtlScope {
     Global,
     Namespaced,
-}
-
-/// A secondary table joined to the page after `LIMIT`, so ClickHouse never
-/// builds a hash table over the entire secondary table. The lowering wraps
-/// the base query in a `_batch` CTE and enriches via
-/// `fk_column IN (SELECT id FROM _batch)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PageJoin {
-    /// Datalake table to join (e.g. `siphon_system_note_metadata`).
-    pub table: String,
-    /// Table alias (e.g. `snm`).
-    pub alias: String,
-    /// FK column on the joined table that references the base table's `id`
-    /// (e.g. `note_id`).
-    pub fk_column: String,
-    /// Columns to select from the joined table (e.g. `["action"]`).
-    pub select: Vec<String>,
-    /// Extra WHERE predicate on the joined table (e.g. `{{deleted_column}} = false`).
-    pub where_clause: Option<String>,
-    /// Watermark column for `argMax` deduplication. Always filled by the
-    /// ontology loader; defaults to the ontology's `default_watermark`.
-    pub watermark: String,
-    /// `traversal_path` column on the joined table. When set on a namespaced
-    /// entity, the enrichment CTE adds `startsWith(<col>, {traversal_path})` to
-    /// prune by the joined table's leading PK column. A superset of the matched
-    /// rows; correctness still comes from the `IN (_batch)` bound.
-    pub traversal_path_column: Option<String>,
 }
 
 /// Direction of an edge relative to the node defining the FK column.
@@ -89,25 +70,16 @@ pub enum EtlConfig {
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
-    Query {
+    /// A complete extract from a sibling `.sql` file, used verbatim. The file
+    /// owns its own paging via the `{{filters}}`/`{{batch_size}}` markers and
+    /// emits the `_version`/`_deleted` output columns itself.
+    Verbatim {
         scope: EtlScope,
         source: String,
-        select: String,
-        from: String,
-        where_clause: Option<String>,
+        sql: String,
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        traversal_path_filter: Option<String>,
-        /// Alias of the main table in the `from` JOIN expression.
-        /// Used to qualify bare column references (e.g. `id`) that would
-        /// otherwise be ambiguous across JOINed tables.
-        table_alias: Option<String>,
-        /// Join pushed below the page `LIMIT` to avoid materializing the
-        /// full joined table in ClickHouse's hash-join build phase.
-        /// When set, the lowering wraps the base query in a `_batch` CTE
-        /// and enriches via `fk IN (SELECT id FROM _batch)`.
-        page_join: Option<Box<PageJoin>>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -118,58 +90,42 @@ impl EtlConfig {
     pub fn scope(&self) -> EtlScope {
         match self {
             EtlConfig::Table { scope, .. } => *scope,
-            EtlConfig::Query { scope, .. } => *scope,
+            EtlConfig::Verbatim { scope, .. } => *scope,
         }
     }
 
     pub fn source(&self) -> &str {
         match self {
             EtlConfig::Table { source, .. } => source,
-            EtlConfig::Query { source, .. } => source,
+            EtlConfig::Verbatim { source, .. } => source,
         }
     }
 
     pub fn deleted(&self) -> &str {
         match self {
             EtlConfig::Table { deleted, .. } => deleted.as_str(),
-            EtlConfig::Query { deleted, .. } => deleted.as_str(),
+            EtlConfig::Verbatim { deleted, .. } => deleted.as_str(),
         }
     }
 
     pub fn watermark(&self) -> &str {
         match self {
             EtlConfig::Table { watermark, .. } => watermark.as_str(),
-            EtlConfig::Query { watermark, .. } => watermark.as_str(),
-        }
-    }
-
-    /// Returns the main table alias for Query-type ETLs, if set.
-    /// Table-type ETLs always return `None` (single table, no ambiguity).
-    pub fn table_alias(&self) -> Option<&str> {
-        match self {
-            EtlConfig::Table { .. } => None,
-            EtlConfig::Query { table_alias, .. } => table_alias.as_deref(),
-        }
-    }
-
-    pub fn page_join(&self) -> Option<&PageJoin> {
-        match self {
-            EtlConfig::Table { .. } => None,
-            EtlConfig::Query { page_join, .. } => page_join.as_deref(),
+            EtlConfig::Verbatim { watermark, .. } => watermark.as_str(),
         }
     }
 
     pub fn order_by(&self) -> &[String] {
         match self {
             EtlConfig::Table { order_by, .. } => order_by,
-            EtlConfig::Query { order_by, .. } => order_by,
+            EtlConfig::Verbatim { order_by, .. } => order_by,
         }
     }
 
     pub fn edges(&self) -> &BTreeMap<String, Vec<EdgeMapping>> {
         match self {
             EtlConfig::Table { edges, .. } => edges,
-            EtlConfig::Query { edges, .. } => edges,
+            EtlConfig::Verbatim { edges, .. } => edges,
         }
     }
 
@@ -182,103 +138,23 @@ impl EtlConfig {
     pub fn has_edges(&self) -> bool {
         self.edges().values().any(|v| !v.is_empty())
     }
-
-    pub fn validate_query_parameters(&self) -> Vec<&'static str> {
-        let EtlConfig::Query {
-            scope,
-            traversal_path_filter,
-            ..
-        } = self
-        else {
-            return Vec::new();
-        };
-
-        if *scope == EtlScope::Namespaced
-            && let Some(filter) = traversal_path_filter
-            && !filter.contains("{traversal_path:String}")
-        {
-            return vec!["{traversal_path:String}"];
-        }
-
-        Vec::new()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn query_config(
-        scope: EtlScope,
-        where_clause: Option<&str>,
-        traversal_path_filter: Option<&str>,
-    ) -> EtlConfig {
-        EtlConfig::Query {
-            scope,
+    fn verbatim_config() -> EtlConfig {
+        EtlConfig::Verbatim {
+            scope: EtlScope::Global,
             source: "source_table".to_string(),
-            select: "id, name".to_string(),
-            from: "source_table".to_string(),
-            where_clause: where_clause.map(String::from),
+            sql: "SELECT id FROM source_table WHERE 1=1 {{filters}} LIMIT {{batch_size}}"
+                .to_string(),
             watermark: crate::constants::siphon_watermark_column().to_string(),
             deleted: crate::constants::siphon_deleted_column().to_string(),
             order_by: vec!["id".to_string()],
-            traversal_path_filter: traversal_path_filter.map(String::from),
-            table_alias: None,
-            page_join: None,
             edges: BTreeMap::new(),
         }
-    }
-
-    #[test]
-    fn validate_query_parameters_passes_for_global_query() {
-        let config = query_config(EtlScope::Global, None, None);
-        assert!(config.validate_query_parameters().is_empty());
-    }
-
-    #[test]
-    fn validate_passes_for_custom_traversal_path_filter_with_placeholder() {
-        let config = query_config(
-            EtlScope::Namespaced,
-            None,
-            Some("startsWith(traversal_path, {traversal_path:String})"),
-        );
-        assert!(config.validate_query_parameters().is_empty());
-    }
-
-    #[test]
-    fn validate_fails_for_custom_traversal_path_filter_without_placeholder() {
-        let config = query_config(
-            EtlScope::Namespaced,
-            None,
-            Some("startsWith(traversal_path, 'hardcoded')"),
-        );
-        let missing = config.validate_query_parameters();
-        assert_eq!(missing, vec!["{traversal_path:String}"]);
-    }
-
-    #[test]
-    fn validate_passes_for_default_traversal_path_filter() {
-        let config = query_config(EtlScope::Namespaced, Some("status = 'active'"), None);
-        assert!(config.validate_query_parameters().is_empty());
-    }
-
-    #[test]
-    fn validate_passes_for_no_where_and_default_filter() {
-        let config = query_config(EtlScope::Namespaced, None, None);
-        assert!(config.validate_query_parameters().is_empty());
-    }
-
-    #[test]
-    fn validate_query_parameters_skips_table_etl() {
-        let config = EtlConfig::Table {
-            scope: EtlScope::Namespaced,
-            source: "t".to_string(),
-            watermark: "w".to_string(),
-            deleted: "d".to_string(),
-            order_by: vec!["id".to_string()],
-            edges: BTreeMap::new(),
-        };
-        assert!(config.validate_query_parameters().is_empty());
     }
 
     #[test]
@@ -292,9 +168,10 @@ mod tests {
             edges: BTreeMap::new(),
         };
         assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
-
-        let query = query_config(EtlScope::Global, None, None);
-        assert_eq!(query.deleted(), crate::constants::siphon_deleted_column());
+        assert_eq!(
+            verbatim_config().deleted(),
+            crate::constants::siphon_deleted_column()
+        );
     }
 
     #[test]
@@ -311,10 +188,8 @@ mod tests {
             table.watermark(),
             crate::constants::siphon_watermark_column()
         );
-
-        let query = query_config(EtlScope::Global, None, None);
         assert_eq!(
-            query.watermark(),
+            verbatim_config().watermark(),
             crate::constants::siphon_watermark_column()
         );
     }

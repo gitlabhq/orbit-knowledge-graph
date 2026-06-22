@@ -1589,6 +1589,16 @@ mod tests {
         Path::new(env!("ONTOLOGY_DIR")).to_path_buf()
     }
 
+    struct EmptyReader;
+    impl ReadOntologyFile for EmptyReader {
+        fn read(&self, path: &str) -> Result<String, OntologyError> {
+            Err(OntologyError::Io {
+                path: path.to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "no test file"),
+            })
+        }
+    }
+
     #[test]
     fn test_load_ontology() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
@@ -2323,6 +2333,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
@@ -2361,6 +2373,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
@@ -2585,6 +2599,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .unwrap_err();
         assert!(
@@ -2630,6 +2646,8 @@ properties:
                 &default_sort_key,
                 &etl_settings,
                 "_gkg_",
+                &EmptyReader,
+                "nodes/test",
             )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
@@ -3008,8 +3026,8 @@ properties:
         assert_eq!(derived.transform, "system_notes");
         assert_eq!(derived.etl.scope(), crate::EtlScope::Namespaced);
         assert!(
-            matches!(derived.etl, crate::EtlConfig::Query { .. }),
-            "SystemNote extract is a JOIN (query ETL)"
+            matches!(derived.etl, crate::EtlConfig::Verbatim { .. }),
+            "SystemNote extract is a verbatim query file"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
     }
