@@ -1,15 +1,6 @@
-# config/ontology/edges/created_for_mr.yaml
-
 description: Environment was first created by a merge request pipeline
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: Environment, id: id }
-    to_node: { type: MergeRequest, id: id }
-    fk_column: merge_request_id
-    description: "Environment was first created by a merge request pipeline."
-
-sources:
-  - node: Environment
-    from: {type: Environment, id: id}
-    to: {type: MergeRequest, id: merge_request_id}
+edges:
+  - from: {node: Environment, key: merge_request_id}
+    to:   {node: MergeRequest, key: id}

@@ -267,11 +267,41 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let mut transform_emits: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
 
+    // Graph-column -> datalake-column per node. A unified `edges:` entry names
+    // the graph column; its extract column is the node property's `source`, so
+    // the siphon name lives only on the node, never in the edge file.
+    let node_columns: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, String>,
+    > = ontology
+        .nodes
+        .iter()
+        .map(|(name, node)| {
+            let cols = node
+                .fields
+                .iter()
+                .filter_map(|f| f.column_name().map(|c| (f.name.clone(), c.to_string())))
+                .collect();
+            (name.clone(), cols)
+        })
+        .collect();
+    let resolve_siphon = |node: &str, key: &str| -> Result<String, OntologyError> {
+        node_columns
+            .get(node)
+            .and_then(|m| m.get(key))
+            .cloned()
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "edge node '{node}' has no property '{key}' to resolve its datalake column"
+                ))
+            })
+    };
+
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
         let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-        let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
+        let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table())?;
 
         for entity in &entities {
             if !ontology.nodes.contains_key(&entity.source_kind) {
@@ -310,7 +340,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let sources = edge_def.into_sources(edge_name, &etl_settings)?;
+        let sources = edge_def.into_sources(edge_name, &etl_settings, &resolve_siphon)?;
         if !sources.table_etls.is_empty() {
             ontology
                 .edge_etl_configs

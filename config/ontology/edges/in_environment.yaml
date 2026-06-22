@@ -1,16 +1,7 @@
-# config/ontology/edges/in_environment.yaml
-
 description: Deployment targets an environment
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: Deployment, id: id }
-    to_node: { type: Environment, id: id }
-    fk_column: environment_id
-    scope: same_namespace
-    description: "Deployment targets environment."
-
-sources:
-  - node: Deployment
-    from: {type: Deployment, id: id}
-    to: {type: Environment, id: environment_id}
+scope: same_namespace
+edges:
+  - from: {node: Deployment, key: environment_id}
+    to:   {node: Environment, key: id}

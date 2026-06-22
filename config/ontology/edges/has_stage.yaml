@@ -1,16 +1,7 @@
-# config/ontology/edges/has_stage.yaml
-
 description: Pipeline contains stage relationship
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: Pipeline, id: id }
-    to_node: { type: Stage, id: id }
-    fk_column: pipeline_id
-    scope: same_namespace
-    description: "Pipeline contains stage."
-
-sources:
-  - node: Stage
-    from: {type: Pipeline, id: pipeline_id}
-    to: {type: Stage, id: id}
+scope: same_namespace
+edges:
+  - from: {node: Pipeline, key: id}
+    to:   {node: Stage, key: pipeline_id}

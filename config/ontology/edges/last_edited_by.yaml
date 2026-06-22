@@ -1,16 +1,7 @@
-# config/ontology/edges/last_edited_by.yaml
-
 description: User who most recently edited an entity's content (title/description)
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: MergeRequest, id: id }
-    fk_column: last_edited_by_id
-    scope: prune_to_target
-    description: "User last edited merge request content."
-
-sources:
-  - node: MergeRequest
-    from: {type: User, id: last_edited_by_id}
-    to: {type: MergeRequest, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: MergeRequest, key: last_edited_by_id}
     mutable: true

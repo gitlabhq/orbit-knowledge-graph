@@ -1,16 +1,7 @@
-# config/ontology/edges/deployed_by.yaml
-
 description: User who triggered a deployment
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Deployment, id: id }
-    fk_column: user_id
-    scope: prune_to_target
-    description: "User triggered deployment."
-
-sources:
-  - node: Deployment
-    from: {type: User, id: user_id}
-    to: {type: Deployment, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: Deployment, key: user_id}

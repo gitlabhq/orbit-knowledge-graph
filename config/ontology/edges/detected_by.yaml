@@ -1,22 +1,7 @@
-# config/ontology/edges/detected_by.yaml
-
 description: Finding was detected by a vulnerability scanner
 
-variants:
-  - from_node: { type: Finding, id: id }
-    to_node: { type: VulnerabilityScanner, id: id }
-    fk_column: scanner_id
-    description: "Finding detected by vulnerability scanner."
-
-  - from_node: { type: VulnerabilityOccurrence, id: id }
-    to_node: { type: VulnerabilityScanner, id: id }
-    fk_column: scanner_id
-    description: "Vulnerability occurrence detected by vulnerability scanner."
-
-sources:
-  - node: Finding
-    from: {type: Finding, id: id}
-    to: {type: VulnerabilityScanner, id: scanner_id}
-  - node: VulnerabilityOccurrence
-    from: {type: VulnerabilityOccurrence, id: id}
-    to: {type: VulnerabilityScanner, id: scanner_id}
+edges:
+  - from: {node: Finding, key: scanner_id}
+    to:   {node: VulnerabilityScanner, key: id}
+  - from: {node: VulnerabilityOccurrence, key: scanner_id}
+    to:   {node: VulnerabilityScanner, key: id}

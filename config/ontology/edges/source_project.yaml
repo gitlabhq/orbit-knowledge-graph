@@ -1,14 +1,5 @@
-# config/ontology/edges/source_project.yaml
-
 description: Merge request's source project (differs from target project for fork-based MRs)
 
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Project, id: id }
-    fk_column: source_project_id
-    description: "Merge request originates from source project."
-
-sources:
-  - node: MergeRequest
-    from: {type: MergeRequest, id: id}
-    to: {type: Project, id: source_project_id}
+edges:
+  - from: {node: MergeRequest, key: source_project_id}
+    to:   {node: Project, key: id}

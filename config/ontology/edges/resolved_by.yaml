@@ -1,15 +1,6 @@
-# config/ontology/edges/resolved_by.yaml
-
 description: User who resolved a vulnerability
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Vulnerability, id: id }
-    fk_column: resolved_by_id
-    scope: prune_to_target
-    description: "User resolved vulnerability."
-
-sources:
-  - node: Vulnerability
-    from: {type: User, id: resolved_by_id}
-    to: {type: Vulnerability, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: Vulnerability, key: resolved_by_id}

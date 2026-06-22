@@ -1,15 +1,6 @@
-# config/ontology/edges/confirmed_by.yaml
-
 description: User who confirmed a vulnerability
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Vulnerability, id: id }
-    fk_column: confirmed_by_id
-    scope: prune_to_target
-    description: "User confirmed vulnerability."
-
-sources:
-  - node: Vulnerability
-    from: {type: User, id: confirmed_by_id}
-    to: {type: Vulnerability, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: Vulnerability, key: confirmed_by_id}

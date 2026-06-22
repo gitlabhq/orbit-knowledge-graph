@@ -1,16 +1,7 @@
-# config/ontology/edges/updated_by.yaml
-
 description: User who most recently updated an entity (non-content changes)
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: MergeRequest, id: id }
-    fk_column: updated_by_id
-    scope: prune_to_target
-    description: "User last updated merge request."
-
-sources:
-  - node: MergeRequest
-    from: {type: User, id: updated_by_id}
-    to: {type: MergeRequest, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: MergeRequest, key: updated_by_id}
     mutable: true

@@ -1,13 +1,6 @@
 description: User who merged a merge request
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: MergeRequest, id: id }
-    fk_column: merge_user_id
-    scope: prune_to_target
-    description: "User merged a merge request."
-
-sources:
-  - node: MergeRequest
-    from: {type: User, id: merge_user_id}
-    to: {type: MergeRequest, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: MergeRequest, key: merge_user_id}

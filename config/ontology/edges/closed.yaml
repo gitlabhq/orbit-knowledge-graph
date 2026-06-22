@@ -1,22 +1,8 @@
-description: User who closed a work item
+description: User who closed a work item or merge request
 
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: WorkItem, id: id }
-    fk_column: closed_by_id
-    scope: prune_to_target
-    description: "User closed a work item."
-
-  - from_node: { type: User, id: id }
-    to_node: { type: MergeRequest, id: id }
-    fk_column: closed_by_id
-    scope: prune_to_target
-    description: "User closed a merge request."
-
-sources:
-  - node: MergeRequest
-    from: {type: User, id: metric_latest_closed_by_id}
-    to: {type: MergeRequest, id: id}
-  - node: WorkItem
-    from: {type: User, id: closed_by_id}
-    to: {type: WorkItem, id: id}
+scope: prune_to_target
+edges:
+  - from: {node: User, key: id}
+    to:   {node: WorkItem, key: closed_by_id}
+  - from: {node: User, key: id}
+    to:   {node: MergeRequest, key: closed_by_id}

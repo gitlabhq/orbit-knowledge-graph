@@ -1,25 +1,9 @@
-# config/ontology/edges/has_job.yaml
-
 description: Pipeline or stage contains job relationship
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: Stage, id: id }
-    to_node: { type: Job, id: id }
-    fk_column: stage_id
-    scope: same_namespace
-    description: "Stage contains job."
-
-  - from_node: { type: Pipeline, id: id }
-    to_node: { type: Job, id: id }
-    fk_column: pipeline_id
-    scope: same_namespace
-    description: "Pipeline contains job (skips the Stage hop, matches the natural CI mental model)."
-
-sources:
-  - node: Job
-    from: {type: Pipeline, id: commit_id}
-    to: {type: Job, id: id}
-  - node: Job
-    from: {type: Stage, id: stage_id}
-    to: {type: Job, id: id}
+scope: same_namespace
+edges:
+  - from: {node: Stage, key: id}
+    to:   {node: Job, key: stage_id}
+  - from: {node: Pipeline, key: id}
+    to:   {node: Job, key: pipeline_id}

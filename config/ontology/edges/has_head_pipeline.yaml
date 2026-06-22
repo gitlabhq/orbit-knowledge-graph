@@ -1,17 +1,8 @@
-# config/ontology/edges/has_head_pipeline.yaml
-
 description: Merge request's head pipeline (pipeline running against the tip of the source branch)
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Pipeline, id: id }
-    fk_column: head_pipeline_id
-    scope: same_namespace
-    description: "Merge request has head pipeline."
-
-sources:
-  - node: MergeRequest
-    from: {type: MergeRequest, id: id}
-    to: {type: Pipeline, id: head_pipeline_id}
+scope: same_namespace
+edges:
+  - from: {node: MergeRequest, key: head_pipeline_id}
+    to:   {node: Pipeline, key: id}
     mutable: true

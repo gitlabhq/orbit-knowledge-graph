@@ -1,16 +1,7 @@
-# config/ontology/edges/has_latest_diff.yaml
-
 description: Merge request's most recent diff snapshot (points to the latest MergeRequestDiff)
 
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: MergeRequestDiff, id: id }
-    fk_column: latest_merge_request_diff_id
-    scope: same_namespace
-    description: "Merge request has latest diff."
-
-sources:
-  - node: MergeRequest
-    from: {type: MergeRequest, id: id}
-    to: {type: MergeRequestDiff, id: latest_merge_request_diff_id}
+scope: same_namespace
+edges:
+  - from: {node: MergeRequest, key: latest_merge_request_diff_id}
+    to:   {node: MergeRequestDiff, key: id}
     mutable: true

@@ -1224,6 +1224,18 @@
             "$ref": "#/definitions/propertyDefinition"
           }
         },
+        "scope": {
+          "$ref": "#/definitions/edgeVariantScope",
+          "description": "Default traversal scope for every `edges:` entry that does not set its own."
+        },
+        "edges": {
+          "type": "array",
+          "description": "Unified graph-native form: each entry declares one relationship once, in graph terms. The query entity and the ETL node binding both derive from it; the datalake extract column is resolved through the owning node's property map.",
+          "items": {
+            "$ref": "#/definitions/edgeUnifiedEntry"
+          },
+          "minItems": 1
+        },
         "variants": {
           "type": "array",
           "description": "List of valid source-target node type pairs.",
@@ -1252,8 +1264,51 @@
         }
       },
       "required": [
-        "description",
-        "variants"
+        "description"
+      ],
+      "additionalProperties": false
+    },
+    "edgeUnifiedEntry": {
+      "type": "object",
+      "description": "One relationship in the unified `edges:` form. Exactly one endpoint is the foreign-key owner (its `key` is a graph column other than `id`); the other anchors on `id`.",
+      "properties": {
+        "from": {
+          "$ref": "#/definitions/edgeUnifiedEndpoint"
+        },
+        "to": {
+          "$ref": "#/definitions/edgeUnifiedEndpoint"
+        },
+        "scope": {
+          "$ref": "#/definitions/edgeVariantScope",
+          "description": "Overrides the file-level `scope:` for this entry."
+        },
+        "mutable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opts the edge into the stale-edge reconciliation sweep."
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "additionalProperties": false
+    },
+    "edgeUnifiedEndpoint": {
+      "type": "object",
+      "properties": {
+        "node": {
+          "type": "string",
+          "description": "Node type at this endpoint."
+        },
+        "key": {
+          "type": "string",
+          "description": "Graph column carrying this endpoint's id: `id` for the anchor, or the foreign-key graph column for the owner."
+        }
+      },
+      "required": [
+        "node",
+        "key"
       ],
       "additionalProperties": false
     },

@@ -1,34 +1,13 @@
-# config/ontology/edges/triggered.yaml
-
 description: Trigger relationship between entities
+
 table: gl_ci_edge
-
-variants:
-  - from_node: { type: User, id: id }
-    to_node: { type: Pipeline, id: id }
-    fk_column: user_id
+edges:
+  - from: {node: User, key: id}
+    to:   {node: Pipeline, key: user_id}
     scope: prune_to_target
-    description: "User triggered pipeline."
-
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: Pipeline, id: id }
-    fk_column: merge_request_id
+  - from: {node: MergeRequest, key: id}
+    to:   {node: Pipeline, key: merge_request_id}
     scope: same_namespace
-    description: "Merge request triggered pipeline."
-
-  - from_node: { type: User, id: id }
-    to_node: { type: Job, id: id }
-    fk_column: user_id
+  - from: {node: User, key: id}
+    to:   {node: Job, key: user_id}
     scope: prune_to_target
-    description: "User triggered job."
-
-sources:
-  - node: Job
-    from: {type: User, id: user_id}
-    to: {type: Job, id: id}
-  - node: Pipeline
-    from: {type: MergeRequest, id: merge_request_id}
-    to: {type: Pipeline, id: id}
-  - node: Pipeline
-    from: {type: User, id: user_id}
-    to: {type: Pipeline, id: id}
