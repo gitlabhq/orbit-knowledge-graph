@@ -20,6 +20,10 @@ fn default_fallback_ttl_secs() -> u64 {
     3600
 }
 
+fn default_entitlement_fail_closed() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QuotaConfig {
@@ -35,6 +39,12 @@ pub struct QuotaConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "default_fallback_ttl_secs")]
     pub fallback_cache_ttl_secs: u64,
+    /// When true, a CustomersDot 403 (not entitled) or 422 (invalid claim) on a SaaS
+    /// request denies (`RESOURCE_EXHAUSTED`) instead of failing open. Kill-switch: set
+    /// false to revert to fail-open. Self-managed realms are unaffected — CustomersDot
+    /// owns their fail-close policy (`:fail_close_policy`, Dedicated-excluded).
+    #[serde(default = "default_entitlement_fail_closed")]
+    pub entitlement_fail_closed: bool,
 }
 
 impl Default for QuotaConfig {
@@ -46,6 +56,7 @@ impl Default for QuotaConfig {
             api_token: None,
             request_timeout_ms: default_quota_timeout_ms(),
             fallback_cache_ttl_secs: default_fallback_ttl_secs(),
+            entitlement_fail_closed: default_entitlement_fail_closed(),
         }
     }
 }
