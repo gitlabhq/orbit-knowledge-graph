@@ -175,6 +175,7 @@ billing:
     customers_dot_url: "http://localhost:5000"
     request_timeout_ms: 1000
     fallback_cache_ttl_secs: 3600
+    entitlement_fail_closed: true
     # api_user: ""
     # api_token: ""
 
