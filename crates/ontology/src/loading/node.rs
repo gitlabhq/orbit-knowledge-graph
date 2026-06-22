@@ -9,9 +9,7 @@ use crate::entities::{
     RedactionConfig, StorageIndex, StorageProjection, TraversalPathKind, TraversalPathLookupSpec,
     VirtualSource,
 };
-use crate::etl::{
-    DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, is_full_query,
-};
+use crate::etl::{DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 use crate::template::{Marker, QueryTemplate, Resolve};
 
 use super::{EtlSettings, ReadOntologyFile};
@@ -547,12 +545,41 @@ fn convert_edge_mappings(
         .collect()
 }
 
-/// Replaces `{{watermark_column}}` and `{{deleted_column}}` placeholders with
-/// the configured column names, rejecting ETL SQL that hardcodes either literal.
-///
-/// Both literals are checked on the raw input *before* any substitution so that
-/// the check doesn't false-positive on the rendered output (substitution
-/// reintroduces the literal).
+fn resolve_etl_marker(marker: Marker, watermark: &str, deleted: &str) -> Resolve {
+    match marker {
+        Marker::WatermarkColumn => Resolve::Sub(watermark.to_string()),
+        Marker::DeletedColumn => Resolve::Sub(deleted.to_string()),
+        Marker::Filters | Marker::BatchSize => Resolve::Keep,
+    }
+}
+
+/// Hardcoding the actual column name instead of the placeholder would silently
+/// survive a watermark/deleted rename, so reject it. Checked on the raw input
+/// because substitution reintroduces the literal in the rendered output.
+fn reject_hardcoded_columns(
+    context: &str,
+    raw: &str,
+    watermark: &str,
+    deleted: &str,
+) -> Result<(), OntologyError> {
+    if raw.contains(watermark) {
+        return Err(OntologyError::Validation(format!(
+            "{context} hardcodes watermark column '{watermark}'; \
+             use {{{{watermark_column}}}} placeholder instead"
+        )));
+    }
+    if raw.contains(deleted) {
+        return Err(OntologyError::Validation(format!(
+            "{context} hardcodes deleted column '{deleted}'; \
+             use {{{{deleted_column}}}} placeholder instead"
+        )));
+    }
+    Ok(())
+}
+
+/// Resolves `{{watermark_column}}`/`{{deleted_column}}` in a scalar ETL
+/// expression (a `watermark`/`deleted` override). The paging markers have no
+/// meaning here and pass through untouched.
 pub(crate) fn render_etl_placeholders(
     entity: &str,
     field: &str,
@@ -560,24 +587,10 @@ pub(crate) fn render_etl_placeholders(
     watermark: &str,
     deleted: &str,
 ) -> Result<String, OntologyError> {
-    if raw.contains(watermark) {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' hardcodes watermark column \
-             '{watermark}'; use {{{{watermark_column}}}} placeholder instead"
-        )));
-    }
-    if raw.contains(deleted) {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' hardcodes deleted column \
-             '{deleted}'; use {{{{deleted_column}}}} placeholder instead"
-        )));
-    }
-    let template = QueryTemplate::parse(&format!("entity '{entity}' field '{field}'"), raw)?;
-    Ok(template.render(|marker| match marker {
-        Marker::WatermarkColumn => Resolve::Sub(watermark.to_string()),
-        Marker::DeletedColumn => Resolve::Sub(deleted.to_string()),
-        Marker::Filters | Marker::BatchSize => Resolve::Keep,
-    }))
+    let context = format!("entity '{entity}' field '{field}'");
+    reject_hardcoded_columns(&context, raw, watermark, deleted)?;
+    let template = QueryTemplate::parse(&context, raw)?;
+    Ok(template.render(|marker| resolve_etl_marker(marker, watermark, deleted)))
 }
 
 impl EtlYaml {
@@ -652,15 +665,11 @@ impl EtlYaml {
                         "entity '{entity_name}': query file '{path}' is empty"
                     )));
                 }
+                let context = format!("entity '{entity_name}': query file '{path}'");
+                reject_hardcoded_columns(&context, raw_sql, &watermark, &deleted)?;
+                let template = QueryTemplate::parse_full(&context, raw_sql)?;
                 let sql =
-                    render_etl_placeholders(entity_name, &path, raw_sql, &watermark, &deleted)?;
-                if !is_full_query(&sql) {
-                    return Err(OntologyError::Validation(format!(
-                        "entity '{entity_name}': query file '{path}' must be a complete \
-                         extract that drives its own paging with the {{{{filters}}}} and \
-                         {{{{batch_size}}}} markers"
-                    )));
-                }
+                    template.render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
 
                 Ok(EtlConfig::Verbatim {
                     scope,

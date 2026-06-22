@@ -91,7 +91,21 @@ impl QueryTemplate {
         })
     }
 
-    pub(crate) fn is_full_query(&self) -> bool {
+    /// Parses a verbatim extract, which must drive its own paging — so the
+    /// `{{filters}}` and `{{batch_size}}` markers are a construction invariant,
+    /// not something a caller checks afterwards.
+    pub(crate) fn parse_full(context: &str, sql: &str) -> Result<Self, OntologyError> {
+        let template = Self::parse(context, sql)?;
+        if !template.is_full_query() {
+            return Err(OntologyError::Validation(format!(
+                "{context}: must be a complete extract that drives its own paging \
+                 with the {{{{filters}}}} and {{{{batch_size}}}} markers"
+            )));
+        }
+        Ok(template)
+    }
+
+    fn is_full_query(&self) -> bool {
         let mut filters = false;
         let mut batch_size = false;
         for seg in &self.segments {
@@ -145,16 +159,12 @@ mod tests {
     }
 
     #[test]
-    fn full_query_requires_both_paging_markers() {
+    fn parse_full_requires_both_paging_markers() {
+        assert!(QueryTemplate::parse_full("test", "x {{filters}} y {{batch_size}}").is_ok());
+        let err = QueryTemplate::parse_full("test", "x {{filters}} y").unwrap_err();
         assert!(
-            QueryTemplate::parse("test", "x {{filters}} y {{batch_size}}")
-                .unwrap()
-                .is_full_query()
-        );
-        assert!(
-            !QueryTemplate::parse("test", "x {{filters}} y")
-                .unwrap()
-                .is_full_query()
+            err.to_string().contains("drives its own paging"),
+            "got: {err}"
         );
     }
 

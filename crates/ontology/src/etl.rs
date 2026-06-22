@@ -9,16 +9,6 @@ use std::collections::BTreeMap;
 /// use it implicitly; derived entities must name a different one.
 pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 
-/// A `query:` file is the complete extract, run verbatim — it drives its own
-/// paging via these runtime markers (substituted per batch by the indexer)
-/// rather than being wrapped. The loader requires both; the indexer keys the
-/// verbatim-vs-table decision off the `EtlConfig` variant.
-pub fn is_full_query(sql: &str) -> bool {
-    crate::template::QueryTemplate::parse("", sql)
-        .map(|template| template.is_full_query())
-        .unwrap_or(false)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EtlScope {
