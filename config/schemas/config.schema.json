@@ -24,6 +24,7 @@
           "api_user": null,
           "customers_dot_url": "",
           "enabled": false,
+          "entitlement_fail_closed": true,
           "fallback_cache_ttl_secs": 3600,
           "request_timeout_ms": 1000
         }
@@ -322,6 +323,7 @@
             "api_user": null,
             "customers_dot_url": "",
             "enabled": false,
+            "entitlement_fail_closed": true,
             "fallback_cache_ttl_secs": 3600,
             "request_timeout_ms": 1000
           }
@@ -1394,6 +1396,11 @@
         "enabled": {
           "type": "boolean",
           "default": false
+        },
+        "entitlement_fail_closed": {
+          "description": "When true, a CustomersDot 403 (not entitled) or 422 (invalid claim) on a SaaS\nrequest denies (`RESOURCE_EXHAUSTED`) instead of failing open. Kill-switch: set\nfalse to revert to fail-open. Self-managed realms are unaffected — CustomersDot\nowns their fail-close policy (`:fail_close_policy`, Dedicated-excluded).",
+          "type": "boolean",
+          "default": true
         },
         "fallback_cache_ttl_secs": {
           "type": "integer",
