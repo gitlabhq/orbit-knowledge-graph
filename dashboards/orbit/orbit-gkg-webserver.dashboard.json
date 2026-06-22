@@ -5655,7 +5655,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, or auth failure.",
+               "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, auth failure, or an unknown future variant.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {

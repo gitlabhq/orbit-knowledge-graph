@@ -13,7 +13,7 @@
     {
       "otel_name": "gkg.billing.events.delivery_failed",
       "prom_name": "gkg_billing_events_delivery_failed_total",
-      "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, or auth failure.",
+      "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, auth failure, or an unknown future variant.",
       "kind": "counter",
       "labels": [
         "reason"

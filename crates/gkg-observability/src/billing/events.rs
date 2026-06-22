@@ -48,7 +48,7 @@ pub const EVENTS_DELIVERY_FAILED: MetricSpec = MetricSpec::counter(
     "gkg.billing.events.delivery_failed",
     "Billing events permanently dropped by the emitter without reaching the \
      collector, reported by the on_failure callback: a non-retriable status, \
-     exhausted retries, or auth failure.",
+     exhausted retries, auth failure, or an unknown future variant.",
     None,
     &[labels::REASON],
     DOMAIN,
