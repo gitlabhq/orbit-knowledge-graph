@@ -7,6 +7,13 @@
 //! so `'`/`\` cost 6 bytes each and a raw-byte proxy undercounts the wire size.
 //! Driven by `ArrowClickHouseClient`, which feeds its own `base_url`,
 //! `database`, and scaffold pairs.
+//!
+//! The dispatch guard (`UriGuard::check()`) is automatic for every query, so an
+//! over-cap dispatch always fails with `UriTooLong` rather than freezing. The
+//! chunker (`chunk_to_fit`) is opt-in per caller: only a caller that splits a
+//! large item list (e.g. `query_routes`) needs it, and it must pass the same
+//! `dispatch_settings` the dispatch path appends so its budget matches the
+//! guard's measurement.
 
 use serde_json::Value;
 use url::Url;
@@ -80,8 +87,8 @@ pub(crate) fn overflow(
 ///
 /// `build_params` renders a sub-slice into the full `Value` the query sends
 /// (including fixed params like `root_prefix`). Returns at least one chunk even
-/// when the first item alone overflows; the downstream `build_query` guard
-/// catches that single-item overflow.
+/// when the first item alone overflows; the dispatch-time `UriGuard::check()`
+/// backstop then rejects that single-item overflow with `UriTooLong`.
 pub(crate) fn chunk_to_fit<'a, T>(
     base_url: &str,
     database: &str,

@@ -75,6 +75,10 @@ pub(in crate::modules::sdlc) struct SystemNotesTransform {
     client: Arc<ArrowClickHouseClient>,
     outputs: Vec<String>,
     resolve_lookup_batch_size: usize,
+    /// The `max_block_size` the routes dispatch path appends after the URI
+    /// guard's construction; the chunker reserves it so a validated chunk still
+    /// fits once dispatch adds `&max_block_size=<n>` (KG#881).
+    stream_block_size: u64,
 }
 
 impl SystemNotesTransform {
@@ -83,12 +87,14 @@ impl SystemNotesTransform {
         client: Arc<ArrowClickHouseClient>,
         edge_table: String,
         resolve_lookup_batch_size: usize,
+        stream_block_size: u64,
     ) -> Self {
         Self {
             datalake,
             client,
             outputs: vec![edge_table],
             resolve_lookup_batch_size,
+            stream_block_size,
         }
     }
 }
@@ -123,6 +129,7 @@ impl BlockTransform for SystemNotesTransform {
             &notes,
             &root_prefix,
             self.resolve_lookup_batch_size,
+            self.stream_block_size,
         )
         .await?;
         if edges.is_empty() {
@@ -146,6 +153,7 @@ pub(in crate::modules::sdlc) fn register(
     client: Arc<ArrowClickHouseClient>,
     edge_table: &str,
     resolve_lookup_batch_size: usize,
+    stream_block_size: u64,
 ) {
     // Every write path targets the current schema version's table-set, so the
     // hand-written transform must prefix its destination exactly like the
@@ -158,6 +166,7 @@ pub(in crate::modules::sdlc) fn register(
             Arc::clone(&client),
             edge_table.clone(),
             resolve_lookup_batch_size,
+            stream_block_size,
         ))
     });
     registry.register(TRANSFORM_NAME, factory);
@@ -219,6 +228,7 @@ async fn resolve_and_emit(
     notes: &[ExtractedNote],
     root_prefix: &str,
     resolve_lookup_batch_size: usize,
+    stream_block_size: u64,
 ) -> Result<Vec<EmittedEdge>, HandlerError> {
     let default_projects =
         resolve_default_projects(datalake, notes, root_prefix, resolve_lookup_batch_size).await?;
@@ -229,6 +239,7 @@ async fn resolve_and_emit(
         &plan,
         root_prefix,
         resolve_lookup_batch_size,
+        stream_block_size,
     )
     .await?;
 
@@ -348,13 +359,14 @@ async fn resolve_plan(
     plan: &ResolutionPlan,
     root_prefix: &str,
     resolve_lookup_batch_size: usize,
+    stream_block_size: u64,
 ) -> Result<ResolvedIndex, HandlerError> {
     if plan.paths.is_empty() {
         return Ok(ResolvedIndex::default());
     }
 
     let paths: Vec<&str> = plan.paths.iter().map(String::as_str).collect();
-    let routes = query_routes(datalake, client, &paths, root_prefix).await?;
+    let routes = query_routes(datalake, client, &paths, root_prefix, stream_block_size).await?;
 
     let mr_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.mr_pairs, &routes);
     let wi_pairs: Vec<(i64, i64)> = pairs_with_project_id(&plan.issue_pairs, &routes);
@@ -402,13 +414,20 @@ async fn query_routes(
     client: &ArrowClickHouseClient,
     paths: &[&str],
     root_prefix: &str,
+    stream_block_size: u64,
 ) -> Result<Vec<RouteRow>, HandlerError> {
     let mut rows = Vec::new();
     let root_prefix_owned = root_prefix.to_string();
+    // `query_batches(.., None)` dispatches via `fetch_arrow_streamed`, which
+    // appends `&max_block_size=<stream_block_size>` after the URI guard's
+    // construction. Reserve it in the chunk budget so a validated chunk still
+    // fits the cap once dispatch adds it (KG#881).
+    let block_size = stream_block_size.to_string();
     let chunks = client.chunk_params_to_fit_uri(
         paths,
         |chunk| routes_params(&root_prefix_owned, chunk),
         MAX_REQUEST_URI_LEN,
+        &[("max_block_size", block_size.as_str())],
     );
 
     for paths in chunks {
@@ -560,6 +579,7 @@ mod tests {
 
     const TEST_RESOLVE_LOOKUP_BATCH_SIZE: usize = 1_000;
     const TEST_ENTITY_ID_PROJECT_FACTOR: i64 = 1_000_000;
+    const TEST_STREAM_BLOCK_SIZE: u64 = 65536;
 
     fn test_client() -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
@@ -845,9 +865,15 @@ mod tests {
         let paths: Vec<_> = (0..3_000).map(|i| format!("group/project-{i}")).collect();
         let path_refs: Vec<_> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &test_client(), &path_refs, "1/")
-            .await
-            .unwrap();
+        let routes = query_routes(
+            &datalake,
+            &test_client(),
+            &path_refs,
+            "1/",
+            TEST_STREAM_BLOCK_SIZE,
+        )
+        .await
+        .unwrap();
 
         assert!(
             datalake.queries().len() > 1,
@@ -877,7 +903,7 @@ mod tests {
             .collect();
         let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
 
-        let routes = query_routes(&datalake, &client, &path_refs, "1/")
+        let routes = query_routes(&datalake, &client, &path_refs, "1/", TEST_STREAM_BLOCK_SIZE)
             .await
             .unwrap();
 
@@ -890,11 +916,18 @@ mod tests {
         for params in &datalake.queries() {
             let chunk_paths = params["paths"].as_array().unwrap();
             let chunk_refs: Vec<&str> = chunk_paths.iter().map(|v| v.as_str().unwrap()).collect();
-            let uri_len =
-                client.request_uri_len(&json!({ "root_prefix": "1/", "paths": chunk_refs }));
+            // The dispatch path appends `&max_block_size=<n>` after the guard's
+            // construction, so the budget the chunker honors is the cap minus
+            // that setting's framing; measure the dispatched URI, not the bare one.
+            let dispatched_len = client
+                .query(&ROUTES_SQL)
+                .param("root_prefix", "1/")
+                .param("paths", chunk_refs)
+                .with_setting("max_block_size", TEST_STREAM_BLOCK_SIZE.to_string())
+                .dispatched_uri_len();
             assert!(
-                uri_len <= MAX_REQUEST_URI_LEN,
-                "chunk URI is {uri_len} bytes, over the cap"
+                dispatched_len <= MAX_REQUEST_URI_LEN,
+                "dispatched chunk URI is {dispatched_len} bytes, over the cap"
             );
         }
     }
@@ -951,6 +984,7 @@ mod tests {
             &plan,
             "1/",
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            TEST_STREAM_BLOCK_SIZE,
         )
         .await
         .unwrap();
@@ -984,6 +1018,7 @@ mod tests {
             &ResolutionPlan::default(),
             "1/",
             TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+            TEST_STREAM_BLOCK_SIZE,
         )
         .await
         .unwrap();
@@ -1017,6 +1052,7 @@ mod tests {
                 &plan,
                 "1/",
                 TEST_RESOLVE_LOOKUP_BATCH_SIZE,
+                TEST_STREAM_BLOCK_SIZE,
             )
             .await
             .unwrap();

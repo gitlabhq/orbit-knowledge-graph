@@ -67,6 +67,7 @@ pub async fn register_handlers(
             Arc::clone(&datalake_client),
             ontology.edge_table(),
             entity_handler_config.system_notes_resolve_lookup_batch_size,
+            entity_handler_config.stream_block_size,
         );
     }
     let transform_registry = Arc::new(transform_registry);

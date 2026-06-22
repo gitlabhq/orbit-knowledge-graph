@@ -103,7 +103,8 @@ impl ArrowClickHouseClient {
 
     /// `Some(len)` when the URI for `sql_params` would exceed
     /// [`MAX_REQUEST_URI_LEN`](crate::MAX_REQUEST_URI_LEN), `None` when it fits.
-    pub fn request_uri_overflow(&self, sql_params: &Value) -> Option<usize> {
+    #[cfg(test)]
+    pub(crate) fn request_uri_overflow(&self, sql_params: &Value) -> Option<usize> {
         crate::uri_len::overflow(
             &self.base_url,
             &self.database,
@@ -115,16 +116,30 @@ impl ArrowClickHouseClient {
     /// Split `items` into the fewest chunks whose serialized request URIs stay
     /// at or under `max_uri_len`. `build_params` renders a sub-slice into the
     /// full `Value` the query sends.
+    ///
+    /// `dispatch_settings` are the query settings the dispatch path appends
+    /// *after* the URI guard's construction — for the streamed read path that is
+    /// `max_block_size` (and any retry settings). They are measured here so a
+    /// chunk validated as in-budget still fits once dispatch adds them;
+    /// otherwise the guard would reject a chunk the chunker thought was safe
+    /// (KG#881). Pass `&[]` when the dispatch path adds no extra settings.
     pub fn chunk_params_to_fit_uri<'a, T>(
         &self,
         items: &'a [T],
         build_params: impl Fn(&[T]) -> Value,
         max_uri_len: usize,
+        dispatch_settings: &[(&str, &str)],
     ) -> Vec<&'a [T]> {
+        let mut scaffold = self.scaffold_pairs();
+        scaffold.extend(
+            dispatch_settings
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+        );
         crate::uri_len::chunk_to_fit(
             &self.base_url,
             &self.database,
-            &self.scaffold_pairs(),
+            &scaffold,
             items,
             build_params,
             max_uri_len,
@@ -450,8 +465,40 @@ impl ArrowQuery {
     }
 
     pub fn with_setting(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        let name = name.into();
+        let value = value.into();
+        // `do_execute` appends every query setting as a `&name=value` URL pair,
+        // so the guard must see it too; otherwise a setting added after
+        // construction (`max_block_size`, `preferred_block_size_bytes`,
+        // `log_comment`, `http_settings`) dispatches on the wire but stays
+        // invisible to `check()`, letting a chunk validated as in-budget
+        // overflow the cap at dispatch (KG#881).
+        self.uri_guard
+            .scaffold_pairs
+            .push((name.clone(), value.clone()));
         self.inner = self.inner.with_setting(name, value);
         self
+    }
+
+    /// Byte length of the request URI the dispatch path would send for this
+    /// query as currently configured: base params plus every setting applied
+    /// via [`with_setting`](Self::with_setting). This is what the guard checks,
+    /// and (post-KG#881) is byte-equivalent to the URI `do_execute` dispatches.
+    /// Lets a caller (or its tests) assert the chunk budget matches dispatch.
+    pub fn dispatched_uri_len(&self) -> usize {
+        crate::uri_len::measure_uri(
+            &self.uri_guard.base_url,
+            &self.uri_guard.database,
+            &self.uri_guard.scaffold_pairs,
+            &Value::Object(self.uri_guard.params.clone()),
+        )
+    }
+
+    /// Whether the dispatch guard would let this query through as currently
+    /// configured — the same `check()` every fetch method runs.
+    #[cfg(test)]
+    pub(crate) fn dispatch_within_cap(&self) -> bool {
+        self.uri_guard.check().is_ok()
     }
 
     pub async fn execute(self) -> Result<(), ClickHouseError> {
@@ -531,15 +578,13 @@ impl ArrowQuery {
     }
 
     pub async fn fetch_arrow_streamed(
-        mut self,
+        self,
         max_block_size: u64,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
-        self.uri_guard.check()?;
-        self.inner = self
-            .inner
-            .with_setting("max_block_size", max_block_size.to_string());
+        let this = self.with_setting("max_block_size", max_block_size.to_string());
+        this.uri_guard.check()?;
 
-        let cursor = self
+        let cursor = this
             .inner
             .fetch_bytes("ArrowStream")
             .map_err(ClickHouseError::Query)?;
@@ -572,7 +617,7 @@ impl ArrowQuery {
     /// Like [`fetch_arrow_streamed`](Self::fetch_arrow_streamed), but also yields the
     /// `X-ClickHouse-Summary` over a `oneshot` once drained (it arrives after the body).
     pub async fn fetch_arrow_streamed_with_summary(
-        mut self,
+        self,
         max_block_size: u64,
     ) -> Result<
         (
@@ -581,12 +626,10 @@ impl ArrowQuery {
         ),
         ClickHouseError,
     > {
-        self.uri_guard.check()?;
-        self.inner = self
-            .inner
-            .with_setting("max_block_size", max_block_size.to_string());
+        let this = self.with_setting("max_block_size", max_block_size.to_string());
+        this.uri_guard.check()?;
 
-        let mut cursor = self
+        let mut cursor = this
             .inner
             .fetch_bytes("ArrowStream")
             .map_err(ClickHouseError::Query)?;
@@ -762,6 +805,7 @@ mod tests {
             &paths,
             |chunk| serde_json::json!({ "paths": chunk }),
             crate::MAX_REQUEST_URI_LEN,
+            &[],
         );
         assert!(chunks.len() > 1);
         let total: usize = chunks.iter().map(|c| c.len()).sum();
@@ -803,4 +847,80 @@ mod tests {
             .await;
         assert!(matches!(result, Err(ClickHouseError::UriTooLong { .. })));
     }
+
+    // KG#881 regression: the routes path chunks against the URI guard's
+    // construction-time scaffold, but `fetch_arrow_streamed` appends
+    // `&max_block_size=<n>` (~21 B) *after* the guard is built. With the
+    // production zero-headroom budget a chunk packed to exactly the cap
+    // dispatches over it. This reproduces the production chokepoint end to end:
+    // the chunker is told the dispatch setting, dispatch applies the same
+    // setting via `with_setting`, and the guard's measurement (`dispatched_uri_len`)
+    // — now fed by `with_setting` — must equal the chunker's budget and stay
+    // within the cap. The path width is tuned so the largest chunk lands in the
+    // borderline window the post-guard delta opens. Before the fix this fails
+    // two ways: the chunker over-packs (ignores `max_block_size`) and the guard
+    // under-measures (ignores `with_setting`); both must hold for it to pass.
+    #[test]
+    fn chunked_routes_dispatch_uri_stays_within_cap_with_block_size_setting() {
+        let client = client_with_settings(HashMap::new());
+        let root_prefix = "1/";
+        let dispatch_settings = [("max_block_size", STREAM_BLOCK_SIZE)];
+        // Small paths give the chunker fine granularity, so the largest chunk
+        // packs to within one item-cost (< the ~21 B `max_block_size` delta) of
+        // the cap — the borderline window the post-guard bug needs.
+        let path = "a".repeat(12);
+        let paths: Vec<&str> = std::iter::repeat_n(path.as_str(), 6_000).collect();
+        let build =
+            |chunk: &[&str]| serde_json::json!({ "root_prefix": root_prefix, "paths": chunk });
+        let dispatched_len = |chunk: &[&str]| {
+            client
+                .query(ROUTES_SQL_STUB)
+                .param("root_prefix", root_prefix)
+                .param("paths", chunk)
+                .with_setting("max_block_size", STREAM_BLOCK_SIZE)
+                .dispatched_uri_len()
+        };
+
+        // Bug reproduction: chunking blind to the dispatch setting (the pre-fix
+        // behavior) packs a chunk whose URI clears the cap once `max_block_size`
+        // is appended at dispatch — the exact #881 over-cap dispatch.
+        let blind = client.chunk_params_to_fit_uri(&paths, build, crate::MAX_REQUEST_URI_LEN, &[]);
+        assert!(
+            blind
+                .iter()
+                .any(|c| dispatched_len(c) > crate::MAX_REQUEST_URI_LEN),
+            "fixture must reproduce the bug: a setting-blind chunk must overflow at dispatch"
+        );
+
+        // Fix: reserving the dispatch setting in the chunk budget keeps every
+        // dispatched URI within the cap, and the guard agrees.
+        let chunks = client.chunk_params_to_fit_uri(
+            &paths,
+            build,
+            crate::MAX_REQUEST_URI_LEN,
+            &dispatch_settings,
+        );
+        assert!(chunks.len() > 1, "batch must split into multiple chunks");
+        for chunk in &chunks {
+            let len = dispatched_len(chunk);
+            assert!(
+                len <= crate::MAX_REQUEST_URI_LEN,
+                "dispatched URI {len} over the {}-byte cap (chunk of {} paths)",
+                crate::MAX_REQUEST_URI_LEN,
+                chunk.len(),
+            );
+            let guarded = client
+                .query(ROUTES_SQL_STUB)
+                .param("root_prefix", root_prefix)
+                .param("paths", *chunk)
+                .with_setting("max_block_size", STREAM_BLOCK_SIZE);
+            assert!(
+                guarded.dispatch_within_cap(),
+                "the guard the dispatch path runs must agree the chunk fits"
+            );
+        }
+    }
+
+    const ROUTES_SQL_STUB: &str = "SELECT source_id, path, traversal_path FROM routes";
+    const STREAM_BLOCK_SIZE: &str = "65536";
 }
