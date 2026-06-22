@@ -23,6 +23,7 @@ pub mod introspection;
 mod json_schema;
 mod loading;
 pub mod query_dsl;
+mod template;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,

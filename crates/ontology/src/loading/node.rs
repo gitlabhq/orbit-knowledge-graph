@@ -12,6 +12,7 @@ use crate::entities::{
 use crate::etl::{
     DEFAULT_TRANSFORM, EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope, is_full_query,
 };
+use crate::template::{Marker, QueryTemplate, Resolve};
 
 use super::{EtlSettings, ReadOntologyFile};
 
@@ -571,20 +572,12 @@ pub(crate) fn render_etl_placeholders(
              '{deleted}'; use {{{{deleted_column}}}} placeholder instead"
         )));
     }
-    let rendered = raw
-        .replace("{{watermark_column}}", watermark)
-        .replace("{{deleted_column}}", deleted);
-    // {{filters}}/{{batch_size}} are runtime markers a full query owns; the
-    // indexer substitutes them per batch, so they pass through the loader.
-    let leftover = rendered
-        .replace("{{filters}}", "")
-        .replace("{{batch_size}}", "");
-    if leftover.contains("{{") {
-        return Err(OntologyError::Validation(format!(
-            "entity '{entity}' field '{field}' contains unresolved placeholder '{{{{..}}}}'",
-        )));
-    }
-    Ok(rendered)
+    let template = QueryTemplate::parse(&format!("entity '{entity}' field '{field}'"), raw)?;
+    Ok(template.render(|marker| match marker {
+        Marker::WatermarkColumn => Resolve::Sub(watermark.to_string()),
+        Marker::DeletedColumn => Resolve::Sub(deleted.to_string()),
+        Marker::Filters | Marker::BatchSize => Resolve::Keep,
+    }))
 }
 
 impl EtlYaml {
@@ -1337,9 +1330,6 @@ mod tests {
             )],
         )
         .expect_err("unknown placeholder should fail");
-        assert!(
-            err.to_string().contains("unresolved placeholder"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("typo_column"), "got: {err}");
     }
 }

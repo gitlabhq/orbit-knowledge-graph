@@ -14,7 +14,9 @@ pub const DEFAULT_TRANSFORM: &str = "data_fusion";
 /// rather than being wrapped. The loader requires both; the indexer keys the
 /// verbatim-vs-table decision off the `EtlConfig` variant.
 pub fn is_full_query(sql: &str) -> bool {
-    sql.contains("{{filters}}") && sql.contains("{{batch_size}}")
+    crate::template::QueryTemplate::parse("", sql)
+        .map(|template| template.is_full_query())
+        .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
