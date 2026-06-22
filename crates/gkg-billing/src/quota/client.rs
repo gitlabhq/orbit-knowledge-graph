@@ -5,7 +5,7 @@ use reqwest::header::{CACHE_CONTROL, HeaderMap, HeaderName, HeaderValue};
 use tracing::warn;
 
 use super::key::CdotRequest;
-use crate::constants::CDOT_QUOTA_PATH;
+use crate::constants::{CDOT_QUOTA_PATH, REALM_SAAS, normalize_realm};
 
 const X_ADMIN_EMAIL: HeaderName = HeaderName::from_static("x-admin-email");
 const X_ADMIN_TOKEN: HeaderName = HeaderName::from_static("x-admin-token");
@@ -18,13 +18,30 @@ pub(crate) enum QuotaDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DenyReason {
+    /// CDot 402 — consumer is out of credits.
     QuotaExhausted,
+    /// CDot 403 — `Consumer::ResolutionError`: namespace not entitled / no billable source.
+    NotEntitled,
+    /// CDot 422 — invalid claim. GKG pre-validates these fields, so this signals a
+    /// GKG↔CDot param-contract bug rather than a user condition.
+    Unprocessable,
 }
 
 impl DenyReason {
     pub(crate) fn message(self) -> &'static str {
         match self {
             DenyReason::QuotaExhausted => "GitLab credits exhausted",
+            DenyReason::NotEntitled => "Not entitled to this feature for the namespace",
+            DenyReason::Unprocessable => "Usage quota check could not be processed",
+        }
+    }
+
+    pub(crate) fn metric_value(self) -> &'static str {
+        use gkg_observability::billing::quota::values;
+        match self {
+            DenyReason::QuotaExhausted => values::REASON_QUOTA_EXHAUSTED,
+            DenyReason::NotEntitled => values::REASON_NOT_ENTITLED,
+            DenyReason::Unprocessable => values::REASON_UNPROCESSABLE,
         }
     }
 }
@@ -42,6 +59,7 @@ pub(crate) struct QuotaClient {
     http: reqwest::Client,
     base_url: String,
     default_ttl: Duration,
+    entitlement_fail_closed: bool,
 }
 
 impl QuotaClient {
@@ -51,6 +69,7 @@ impl QuotaClient {
         api_token: &str,
         request_timeout: Duration,
         default_ttl: Duration,
+        entitlement_fail_closed: bool,
     ) -> Result<Self, reqwest::Error> {
         let mut headers = HeaderMap::new();
         if let Ok(v) = HeaderValue::from_str(api_user) {
@@ -69,6 +88,7 @@ impl QuotaClient {
             http,
             base_url,
             default_ttl,
+            entitlement_fail_closed,
         })
     }
 
@@ -106,6 +126,35 @@ impl QuotaClient {
                 decision: QuotaDecision::Deny(DenyReason::QuotaExhausted),
                 ttl,
             },
+            // CDot returns raw 403/422 for SaaS (it defers SaaS fail-close to the
+            // client; see resolve_controller#apply_fail_close_policy?). Self-managed
+            // fail-close is owned by CDot's :fail_close_policy (Dedicated-excluded),
+            // so we only fail closed for SaaS and leave SM/others to fail open.
+            StatusCode::FORBIDDEN | StatusCode::UNPROCESSABLE_ENTITY
+                if self.entitlement_fail_closed
+                    && normalize_realm(&request.key.realm) == Some(REALM_SAAS) =>
+            {
+                let reason = if status == StatusCode::FORBIDDEN {
+                    DenyReason::NotEntitled
+                } else {
+                    DenyReason::Unprocessable
+                };
+                warn!(
+                    status = %status,
+                    user_id = %request.key.user_id,
+                    realm = %request.key.realm,
+                    root_namespace_id = %request.key.root_namespace_id,
+                    global_user_id = %request.global_user_id,
+                    instance_id = %request.key.instance_id,
+                    unique_instance_id = %request.key.unique_instance_id,
+                    feature_qualified_name = %request.key.feature_qualified_name,
+                    "quota check entitlement failure; failing closed"
+                );
+                QuotaOutcome::Decided {
+                    decision: QuotaDecision::Deny(reason),
+                    ttl,
+                }
+            }
             other => {
                 warn!(
                     status = %other,
@@ -167,8 +216,35 @@ mod tests {
         }
     }
 
+    fn self_managed_request() -> CdotRequest {
+        CdotRequest {
+            key: super::super::key::CacheKey {
+                realm: "SM".into(),
+                user_id: "1".into(),
+                root_namespace_id: String::new(),
+                instance_id: "i".into(),
+                unique_instance_id: "u".into(),
+                event_type: "orbit_workflow_completion".into(),
+                feature_qualified_name: "orbit_mcp".into(),
+            },
+            global_user_id: "g".into(),
+        }
+    }
+
     fn install_crypto() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
+    fn client_for(url: String, entitlement_fail_closed: bool) -> QuotaClient {
+        QuotaClient::new(
+            url,
+            "test@example.com",
+            "test-token",
+            Duration::from_secs(5),
+            Duration::from_secs(3600),
+            entitlement_fail_closed,
+        )
+        .unwrap()
     }
 
     async fn stub_server(status: AxumStatus, cache_control: Option<&'static str>) -> String {
@@ -216,14 +292,7 @@ mod tests {
     #[tokio::test]
     async fn status_200_maps_to_allow() {
         let url = stub_server(AxumStatus::OK, Some("max-age=60")).await;
-        let client = QuotaClient::new(
-            url,
-            "test@example.com",
-            "test-token",
-            Duration::from_secs(5),
-            Duration::from_secs(3600),
-        )
-        .unwrap();
+        let client = client_for(url, true);
         let outcome = client.check(&sample_request()).await;
         match outcome {
             QuotaOutcome::Decided { decision, ttl } => {
@@ -243,6 +312,7 @@ mod tests {
             "test-token",
             Duration::from_secs(5),
             Duration::from_secs(42),
+            true,
         )
         .unwrap();
         let outcome = client.check(&sample_request()).await;
@@ -256,16 +326,58 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_403_fails_open() {
+    async fn saas_403_fails_closed_when_enabled() {
+        let url = stub_server(AxumStatus::FORBIDDEN, Some("max-age=60")).await;
+        let client = client_for(url, true);
+        let outcome = client.check(&sample_request()).await;
+        match outcome {
+            QuotaOutcome::Decided { decision, ttl } => {
+                assert_eq!(decision, QuotaDecision::Deny(DenyReason::NotEntitled));
+                assert_eq!(ttl, Duration::from_secs(60));
+            }
+            other => panic!("expected Decided, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn saas_422_fails_closed_when_enabled() {
+        let url = stub_server(AxumStatus::UNPROCESSABLE_ENTITY, None).await;
+        let client = client_for(url, true);
+        assert_eq!(
+            client.check(&sample_request()).await,
+            QuotaOutcome::Decided {
+                decision: QuotaDecision::Deny(DenyReason::Unprocessable),
+                ttl: Duration::from_secs(3600),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn saas_403_fails_open_when_disabled() {
         let url = stub_server(AxumStatus::FORBIDDEN, None).await;
-        let client = QuotaClient::new(
-            url,
-            "test@example.com",
-            "test-token",
-            Duration::from_secs(5),
-            Duration::from_secs(3600),
-        )
-        .unwrap();
+        let client = client_for(url, false);
+        assert_eq!(
+            client.check(&sample_request()).await,
+            QuotaOutcome::FailOpen
+        );
+    }
+
+    // SM fail-close is owned by CDot's :fail_close_policy (Dedicated-excluded), so GKG
+    // defers: a raw 403/422 to an SM request fails open even with the flag enabled.
+    #[tokio::test]
+    async fn self_managed_403_fails_open_even_when_enabled() {
+        let url = stub_server(AxumStatus::FORBIDDEN, None).await;
+        let client = client_for(url, true);
+        assert_eq!(
+            client.check(&self_managed_request()).await,
+            QuotaOutcome::FailOpen
+        );
+    }
+
+    #[tokio::test]
+    async fn saas_5xx_fails_open_even_when_enabled() {
+        let url = stub_server(AxumStatus::INTERNAL_SERVER_ERROR, None).await;
+        let client = client_for(url, true);
         assert_eq!(
             client.check(&sample_request()).await,
             QuotaOutcome::FailOpen
@@ -282,6 +394,7 @@ mod tests {
             "test-token",
             Duration::from_millis(500),
             Duration::from_secs(3600),
+            true,
         )
         .unwrap();
         assert_eq!(
