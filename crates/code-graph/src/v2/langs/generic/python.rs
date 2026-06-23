@@ -369,10 +369,6 @@ impl HasRules for PythonRules {
     }
 }
 
-/// Derive module scope from file path.
-/// `services/user_service.py` → `services.user_service`
-/// `models/__init__.py` → `models`
-/// `main.py` → `main`
 /// Resolve Python relative import paths against the current module scope.
 /// `from .models import User` in module `pkg.sub.mod` → `pkg.sub.models`
 /// `from ..services import Auth` in `pkg.sub.mod` → `pkg.services`
@@ -407,6 +403,12 @@ fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str)
     }
 }
 
+/// Derive module scope from a file path.
+///
+/// `services/user_service.py` → `services.user_service`
+/// `models/__init__.py`       → `models`
+/// `main.py`                  → `main`
+/// `__init__.py`              → `None` (no enclosing package — skip scope)
 fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let path = std::path::Path::new(file_path);
     let stem = path.with_extension("");
@@ -415,7 +417,11 @@ fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
     let module = module
         .strip_suffix(&format!("{sep}__init__"))
         .unwrap_or(&module);
-    if module.is_empty() {
+    // A bare `__init__.py` at the repository root has no enclosing package
+    // name. The strip_suffix above only removes a dot-prefixed `.__init__`
+    // segment, so the bare form arrives here unchanged and must be caught
+    // explicitly before it escapes as the nonsensical module name `"__init__"`.
+    if module.is_empty() || module == "__init__" {
         return None;
     }
     Some(module.to_string())

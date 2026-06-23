@@ -169,6 +169,11 @@ yaml_test!(
     "python/decorator_references.yaml"
 );
 yaml_test!(python_relative_imports, "python/relative_imports.yaml");
+yaml_test!(python_init_module_scope, "python/init_module_scope.yaml");
+yaml_test!(
+    python_relative_import_depth,
+    "python/relative_import_depth.yaml"
+);
 yaml_test!(
     python_dataclass_references,
     "python/dataclass_references.yaml"
