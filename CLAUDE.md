@@ -9,7 +9,7 @@ Fix linting issues: `mise lint:code:fix`. Validate docs: `mise lint:docs`. Valid
 Integration tests need Docker: `mise test:integration`. Correctness subset: `mise test:integration:server`.
 CLI integration tests (concurrency, worktrees): `mise test:cli`.
 
-**Worktrees:** after creating a git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
+**Worktrees:** after creating a Git worktree, run `mise trust` and `git config core.hooksPath "$(git rev-parse --git-common-dir)/hooks"` so that lefthook and mise work correctly.
 
 ## Ignored directories
 
@@ -85,7 +85,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Local development (`mise run dev`) | `scripts/gkg-native-dev.sh`, `docs/dev/local-development.md` |
 | Operational runbooks | `docs/dev/runbooks/` |
 | Architecture Decision Records | `docs/design-documents/decisions/` |
-| **All project links** (repos, epics, infra, people, helm charts) | `README.md` (single source of truth) |
+| **All project links** (repos, epics, infra, people, Helm charts) | `README.md` (single source of truth) |
 | Code history / dead code investigation | `/code-history` skill |
 | AST-based code search / rewrite | `ast-grep` skill, `.claude/skills/ast-grep/` |
 | Related repos and local paths | `/related-repositories` skill |
@@ -144,8 +144,9 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
   - If a comment would survive deleting it without losing *why* information, delete it. `/remove-llm-comments` is a fallback, not a license to narrate first.
 - **Reuse existing infrastructure before writing new code.** Before scaffolding a new handler, pipeline, or module, do an explicit "what does the codebase already give me?" pass (cursor/checkpoint, Arrow helpers, ontology-derived specs, SQL filtering, concurrency). Reinventing infra the codebase already provides is the most common class of preventable review feedback. For the indexer, see the checklist in **`crates/indexer/AGENTS.md`**. For code-graph, prefer reusing existing types and constructors in the language module (e.g. `CanonicalDefinition` in `src/v2/types/`, the DSL engine helpers in `src/v2/dsl/`) rather than duplicating construction logic per language.
 - **No `#[allow(dead_code)]` in shipped code.** Production (non-test) modules must not ship dead-code allows to silence scaffold warnings. If a symbol is test-only, gate it with `#[cfg(test)]`; if it is genuinely unused, delete it. Reserve exceptions for an explicit, justified case: use `#[allow(dead_code, reason = "…")]` (ideally linking an issue) or, preferably, `#[expect(dead_code, reason = "…")]`, which fails once the code is used and self-cleans. The `indexer` crate enforces this mechanically via `clippy::allow_attributes_without_reason = "deny"`.
-- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/gkg-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need git-diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
+- **Prefer build-time validation over CI-only checks** for correctness that can be checked without network or repo context. A `build.rs` that `panic!`s on drift fails locally and in CI even when CI egress is down, and can't be skipped by editing a script. Prior art: `crates/gkg-analytics/build.rs` validates committed Iglu schemas under `config/schemas/iglu/` at build time (asserts each schema's `self` block matches its path/version and runs codegen). Consider this pattern for any vendored-constant or generated-file drift check (e.g. the DDL-freshness check in `scripts/check-ddl-freshness.sh` is a future candidate). Checks that need Git diff context or live network (`scripts/iglu/check.sh`'s upstream-CDN half) stay in CI.
 - Prefer `ast-grep` over text-based Grep/Edit for structural code transformations (batch renames, pattern-based rewrites).
+- Fence executable Orbit query JSON in docs and skills as `json orbit-query`; keep shell commands in separate shell fences so docs smoke tests run the query.
 - Check crates.io for latest version before adding dependencies.
 - Non-trivial MRs (features, refactors, architectural changes) should reference an issue in the MR description, for example `Closes #123` or `Relates to #123`.
 - Trivial MRs (typos, minor dependency bumps, formatting-only changes) do not need an issue.

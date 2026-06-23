@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
+use comrak::nodes::{NodeCodeBlock, NodeValue};
+use comrak::{Arena, Options, parse_document};
 use gkg_server::auth::Claims;
 use gkg_server::pipeline::{
     ClickHouseExecutor, HydrationStage, PathResolutionStage, RedactionStage, SecurityStage,
@@ -249,90 +251,36 @@ fn collect_doc_queries(
     cases: &mut Vec<SmokeCase>,
     failures: &mut Vec<String>,
 ) {
-    let mut fence: Option<OpenFence> = None;
+    let arena = Arena::new();
+    let root = parse_document(&arena, text, &Options::default());
     let path_label = relative_path(path);
 
-    for (idx, line) in text.lines().enumerate() {
-        let line_number = idx + 1;
-        if let Some(open) = fence.as_mut() {
-            if let Some((ch, len, _)) = fence_info(line)
-                && ch == open.ch
-                && len >= open.len
-            {
-                let closed = fence.take().expect("open fence");
-                if closed.track {
-                    handle_doc_fence(&path_label, closed, cases, failures);
-                }
-                continue;
-            }
-            open.body.push_str(line);
-            open.body.push('\n');
-        } else if let Some((ch, len, info)) = fence_info(line) {
-            fence = Some(OpenFence {
-                ch,
-                len,
-                info: info.to_string(),
-                start_line: line_number,
-                track: should_track_fence(info),
-                body: String::new(),
-            });
+    for node in root.descendants() {
+        let ast = node.data();
+        if let NodeValue::CodeBlock(block) = &ast.value {
+            handle_doc_code_block(
+                &path_label,
+                ast.sourcepos.start.line,
+                block,
+                cases,
+                failures,
+            );
         }
     }
-
-    if let Some(open) = fence.filter(|open| open.track) {
-        failures.push(format!(
-            "{}:{}: unclosed Markdown code fence",
-            path_label, open.start_line
-        ));
-    }
 }
 
-struct OpenFence {
-    ch: char,
-    len: usize,
-    info: String,
-    start_line: usize,
-    track: bool,
-    body: String,
-}
-
-fn fence_info(line: &str) -> Option<(char, usize, &str)> {
-    let trimmed = line.trim_start();
-    let ch = trimmed.chars().next()?;
-    if ch != '`' && ch != '~' {
-        return None;
-    }
-
-    let len = trimmed.chars().take_while(|c| *c == ch).count();
-    if len < 3 {
-        return None;
-    }
-
-    Some((ch, len, trimmed[len..].trim()))
-}
-
-fn should_track_fence(info: &str) -> bool {
-    let tokens: Vec<_> = info
-        .split_whitespace()
-        .map(|token| token.to_ascii_lowercase())
-        .collect();
-    if tokens.iter().any(|token| token == DOC_QUERY_MARKER) {
-        return true;
-    }
-
-    matches!(
-        tokens.first().map(String::as_str),
-        Some("json" | "rust" | "bash" | "sh" | "shell")
-    )
-}
-
-fn handle_doc_fence(
+fn handle_doc_code_block(
     path_label: &str,
-    fence: OpenFence,
+    line: usize,
+    block: &NodeCodeBlock,
     cases: &mut Vec<SmokeCase>,
     failures: &mut Vec<String>,
 ) {
-    let tokens: Vec<_> = fence
+    if !block.fenced {
+        return;
+    }
+
+    let tokens: Vec<_> = block
         .info
         .split_whitespace()
         .map(|token| token.to_ascii_lowercase())
@@ -340,37 +288,42 @@ fn handle_doc_fence(
     let first_token = tokens.first().map(String::as_str);
     let marked = tokens.iter().any(|token| token == DOC_QUERY_MARKER);
 
+    if !block.closed
+        && (marked || matches!(first_token, Some("json" | "rust" | "bash" | "sh" | "shell")))
+    {
+        failures.push(format!("{path_label}:{line}: unclosed Markdown code fence"));
+        return;
+    }
+
     if marked {
-        match normalize_marked_doc_queries(&fence) {
+        match normalize_marked_doc_queries(first_token, &block.literal) {
             Ok(queries) => {
                 for (idx, query) in queries.into_iter().enumerate() {
                     cases.push(SmokeCase {
-                        key: doc_case_key(path_label, fence.start_line, idx),
+                        key: doc_case_key(path_label, line, idx),
                         query,
                         expects_error: false,
                     });
                 }
             }
-            Err(e) => failures.push(format!("{}:{}: {e}", path_label, fence.start_line)),
+            Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
         }
         return;
     }
 
     match first_token {
         Some("json") => {
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&fence.body)
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&block.literal)
                 && orbit_query_value(&value).is_some()
             {
                 failures.push(format!(
-                    "{}:{}: Orbit query JSON fence must use `json {DOC_QUERY_MARKER}`",
-                    path_label, fence.start_line
+                    "{path_label}:{line}: Orbit query JSON fence must use `json {DOC_QUERY_MARKER}`"
                 ));
             }
         }
-        Some("bash" | "sh" | "shell") if fence.body.contains("\"query_type\"") => {
+        Some("bash" | "sh" | "shell") if block.literal.contains("\"query_type\"") => {
             failures.push(format!(
-                "{}:{}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence",
-                path_label, fence.start_line
+                "{path_label}:{line}: shell fence contains Orbit query JSON; move the query body to a `json {DOC_QUERY_MARKER}` fence"
             ));
         }
         _ => {}
@@ -385,11 +338,13 @@ fn doc_case_key(path_label: &str, line: usize, idx: usize) -> String {
     }
 }
 
-fn normalize_marked_doc_queries(fence: &OpenFence) -> Result<Vec<String>, String> {
-    let first_token = fence.info.split_whitespace().next();
+fn normalize_marked_doc_queries(
+    first_token: Option<&str>,
+    body: &str,
+) -> Result<Vec<String>, String> {
     match first_token {
-        Some("json") => normalize_doc_query(&fence.body).map(|query| vec![query]),
-        Some("rust") => normalize_rust_doc_queries(&fence.body),
+        Some("json") => normalize_doc_query(body).map(|query| vec![query]),
+        Some("rust") => normalize_rust_doc_queries(body),
         _ => Err(format!(
             "`{DOC_QUERY_MARKER}` fences must use `json` or `rust` as the first info token"
         )),

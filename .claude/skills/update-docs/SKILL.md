@@ -55,6 +55,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 4. Run `mise run lint:docs` to validate
 5. If you touched CLAUDE.md, mirror the change to AGENTS.md
 6. If your change alters orbit API behavior (new endpoint, new query type, new response field, new user-visible feature), update `skills/orbit/SKILL.md` and `skills/orbit/references/` (especially `recipes.md` and `troubleshooting.md`) to reflect it. CI only catches byte-equal drift of `query_language.md`; everything else in the skill is manual.
+7. Fence executable Orbit query JSON as `json orbit-query`; keep shell commands in separate shell fences.
 
 ## Self-improvement
 
