@@ -70,7 +70,6 @@ pub enum Resolve {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryTemplate {
     segments: Vec<Segment>,
-    raw: String,
 }
 
 impl QueryTemplate {
@@ -98,14 +97,12 @@ impl QueryTemplate {
         if !rest.is_empty() {
             segments.push(Segment::Text(rest.to_string()));
         }
-        Ok(Self {
-            segments,
-            raw: sql.to_string(),
-        })
+        Ok(Self { segments })
     }
 
-    pub fn raw(&self) -> &str {
-        &self.raw
+    /// Materialize the SQL, leaving any unresolved marker as its `{{token}}`.
+    pub fn to_sql(&self) -> String {
+        self.render(|_| Resolve::Keep)
     }
 
     /// A raw-SQL extract must drive its own paging, so both runtime markers
@@ -134,12 +131,12 @@ impl QueryTemplate {
     }
 
     pub(crate) fn render(&self, resolve: impl FnMut(Marker) -> Resolve) -> String {
-        render_segments(&self.segments, self.raw.len(), resolve)
+        render_segments(&self.segments, resolve)
     }
 
-    /// Substitute the resolved markers into the segments and return a template
-    /// carrying only the markers left as `Keep`. Peeling the load-time markers
-    /// this way keeps the SQL lexed once — no render-to-string-then-reparse.
+    /// Bind each marker to its resolved value in place: a substituted marker
+    /// becomes text and drops out of the marker set, a kept one stays. Pure
+    /// segment transform — nothing is rendered, so the SQL is lexed only once.
     pub(crate) fn resolve(self, mut resolve: impl FnMut(Marker) -> Resolve) -> Self {
         let mut segments = Vec::with_capacity(self.segments.len());
         for seg in self.segments {
@@ -152,8 +149,7 @@ impl QueryTemplate {
                 },
             }
         }
-        let raw = render_segments(&segments, 0, |_| Resolve::Keep);
-        Self { segments, raw }
+        Self { segments }
     }
 
     /// Resolve the runtime paging markers; any load-time marker passes through,
@@ -166,11 +162,14 @@ impl QueryTemplate {
     }
 }
 
-fn render_segments(
-    segments: &[Segment],
-    capacity: usize,
-    mut resolve: impl FnMut(Marker) -> Resolve,
-) -> String {
+fn render_segments(segments: &[Segment], mut resolve: impl FnMut(Marker) -> Resolve) -> String {
+    let capacity = segments
+        .iter()
+        .map(|seg| match seg {
+            Segment::Text(text) => text.len(),
+            Segment::Marker(marker) => marker.token().len(),
+        })
+        .sum();
     let mut out = String::with_capacity(capacity);
     for seg in segments {
         match seg {
@@ -220,7 +219,7 @@ mod tests {
         .unwrap()
         .resolve(keep_paging);
         assert_eq!(
-            template.raw(),
+            template.to_sql(),
             "SELECT _siphon_watermark AS _version FROM t WHERE 1=1 {{filters}} {{limit}}"
         );
         let sql = template.render_runtime(|_| Resolve::Elide);

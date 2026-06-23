@@ -415,7 +415,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
                 transform: TransformSpec::DataFusion(vec![]),
             };
         }
-        ExtractSource::Raw(template) => template.raw().to_string(),
+        ExtractSource::Raw(template) => template.to_sql(),
         ExtractSource::Table(table) => table,
     };
 
@@ -890,8 +890,8 @@ mod tests {
         assert_eq!(plan.watermark_column, "_siphon_watermark");
         assert_eq!(plan.sort_key, vec!["id"]);
         assert_eq!(plan.batch_size, 1000);
-        assert!(plan.extract_template.raw().contains("{{filters}}"));
-        assert!(plan.extract_template.raw().contains("{{limit}}"));
+        assert!(plan.extract_template.to_sql().contains("{{filters}}"));
+        assert!(plan.extract_template.to_sql().contains("{{limit}}"));
     }
 
     #[test]

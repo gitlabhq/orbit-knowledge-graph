@@ -1259,7 +1259,7 @@ mod tests {
         let EtlConfig::Sql { template, .. } = node.etl.unwrap() else {
             panic!("expected Sql");
         };
-        assert_eq!(template.raw(), full_query);
+        assert_eq!(template.to_sql(), full_query);
     }
 
     #[test]
@@ -1294,7 +1294,7 @@ mod tests {
         let EtlConfig::Sql { template, .. } = node.etl.unwrap() else {
             panic!("expected Sql");
         };
-        let sql = template.raw();
+        let sql = template.to_sql();
         assert!(
             sql.contains("t._siphon_watermark AS _version"),
             "got: {sql}"
