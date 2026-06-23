@@ -663,11 +663,8 @@ impl EtlYaml {
                 }
                 let context = format!("entity '{entity_name}': query file '{path}'");
                 reject_hardcoded_columns(&context, raw_sql, &watermark, &deleted)?;
-                // Resolve watermark/deleted now, then re-parse so the stored
-                // template carries only the runtime markers and is never re-lexed.
-                let resolved = QueryTemplate::parse_full(&context, raw_sql)?
-                    .render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
-                let template = QueryTemplate::parse(&context, &resolved)?;
+                let template = QueryTemplate::parse_full(&context, raw_sql)?
+                    .resolve(|marker| resolve_etl_marker(marker, &watermark, &deleted));
 
                 Ok(EtlConfig::Sql {
                     scope,

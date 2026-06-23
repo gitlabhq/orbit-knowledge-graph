@@ -133,19 +133,27 @@ impl QueryTemplate {
         filters && limit
     }
 
-    pub(crate) fn render(&self, mut resolve: impl FnMut(Marker) -> Resolve) -> String {
-        let mut out = String::with_capacity(self.raw.len());
-        for seg in &self.segments {
+    pub(crate) fn render(&self, resolve: impl FnMut(Marker) -> Resolve) -> String {
+        render_segments(&self.segments, self.raw.len(), resolve)
+    }
+
+    /// Substitute the resolved markers into the segments and return a template
+    /// carrying only the markers left as `Keep`. Peeling the load-time markers
+    /// this way keeps the SQL lexed once — no render-to-string-then-reparse.
+    pub(crate) fn resolve(self, mut resolve: impl FnMut(Marker) -> Resolve) -> Self {
+        let mut segments = Vec::with_capacity(self.segments.len());
+        for seg in self.segments {
             match seg {
-                Segment::Text(text) => out.push_str(text),
-                Segment::Marker(marker) => match resolve(*marker) {
-                    Resolve::Sub(sql) => out.push_str(&sql),
-                    Resolve::Keep => out.push_str(marker.token()),
+                Segment::Text(text) => segments.push(Segment::Text(text)),
+                Segment::Marker(marker) => match resolve(marker) {
+                    Resolve::Sub(sql) => segments.push(Segment::Text(sql)),
+                    Resolve::Keep => segments.push(Segment::Marker(marker)),
                     Resolve::Elide => {}
                 },
             }
         }
-        out
+        let raw = render_segments(&segments, 0, |_| Resolve::Keep);
+        Self { segments, raw }
     }
 
     /// Resolve the runtime paging markers; any load-time marker passes through,
@@ -156,6 +164,25 @@ impl QueryTemplate {
             None => Resolve::Keep,
         })
     }
+}
+
+fn render_segments(
+    segments: &[Segment],
+    capacity: usize,
+    mut resolve: impl FnMut(Marker) -> Resolve,
+) -> String {
+    let mut out = String::with_capacity(capacity);
+    for seg in segments {
+        match seg {
+            Segment::Text(text) => out.push_str(text),
+            Segment::Marker(marker) => match resolve(*marker) {
+                Resolve::Sub(sql) => out.push_str(&sql),
+                Resolve::Keep => out.push_str(marker.token()),
+                Resolve::Elide => {}
+            },
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -181,6 +208,25 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT _siphon_watermark AS _version FROM t WHERE 1=1 {{filters}} {{limit}}"
+        );
+    }
+
+    #[test]
+    fn resolve_substitutes_load_markers_in_place_and_keeps_paging() {
+        let template = QueryTemplate::parse(
+            "test",
+            "SELECT {{watermark_column}} AS _version FROM t WHERE 1=1 {{filters}} {{limit}}",
+        )
+        .unwrap()
+        .resolve(keep_paging);
+        assert_eq!(
+            template.raw(),
+            "SELECT _siphon_watermark AS _version FROM t WHERE 1=1 {{filters}} {{limit}}"
+        );
+        let sql = template.render_runtime(|_| Resolve::Elide);
+        assert_eq!(
+            sql,
+            "SELECT _siphon_watermark AS _version FROM t WHERE 1=1  "
         );
     }
 
