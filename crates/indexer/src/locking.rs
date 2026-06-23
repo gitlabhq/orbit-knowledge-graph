@@ -85,6 +85,11 @@ impl NatsLockService {
             revisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    #[cfg(test)]
+    fn holds(&self, key: &str) -> bool {
+        self.revisions.lock().contains_key(key)
+    }
 }
 
 fn encode_expiration(at: DateTime<Utc>) -> Bytes {
@@ -398,6 +403,47 @@ mod tests {
                     .await
                     .unwrap(),
                 "renewing a lock we never held must report loss, not steal it",
+            );
+        }
+
+        // The threat model: our lease expired and another worker reclaimed the
+        // lock, bumping the KV revision out from under us. `renew` must CAS on the
+        // revision we held, detect the mismatch, and report the loss rather than
+        // overwrite (steal back) the other holder's lease.
+        #[tokio::test]
+        async fn renew_after_steal_reports_loss_and_forgets_lock() {
+            let (nats, svc) = new_service();
+            assert!(svc.try_acquire("p7", Duration::from_secs(1)).await.unwrap());
+            assert!(svc.holds("p7"));
+
+            nats.set_kv(
+                INDEXING_LOCKS_BUCKET,
+                "p7",
+                encode_expiration(Utc::now() + chrono::Duration::seconds(60)),
+            );
+
+            assert!(
+                !svc.renew("p7", Duration::from_secs(30)).await.unwrap(),
+                "a stolen lock must report loss, not be stolen back",
+            );
+            assert!(
+                !svc.holds("p7"),
+                "a lost lease must be forgotten so we stop renewing it",
+            );
+        }
+
+        #[tokio::test]
+        async fn renew_after_release_reports_no_lease() {
+            let (_, svc) = new_service();
+            assert!(
+                svc.try_acquire("p8", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            svc.release("p8").await.expect("release");
+            assert!(
+                !svc.renew("p8", Duration::from_secs(30)).await.unwrap(),
+                "a released lock must not be resurrectable by a late heartbeat renew",
             );
         }
     }
