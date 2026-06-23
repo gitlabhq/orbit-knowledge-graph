@@ -21,7 +21,7 @@ indexer = { path = "../indexer", features = ["testkit"] }
 nats-client = { workspace = true, features = ["testkit"] }
 integration-testkit = { path = "../integration-testkit" }
 ontology = { path = "../ontology" }
-query-engine = { path = "../query-engine" }
+query-engine = { path = "../query-engine", features = ["testutils"] }
 arrow = { workspace = true }
 async-nats = { workspace = true }
 async-trait = { workspace = true }

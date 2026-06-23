@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::common::{DummyClaims, GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
+use compiler::parse_input;
 use comrak::nodes::{NodeCodeBlock, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use gkg_server::auth::Claims;
@@ -30,6 +31,7 @@ use gkg_server::pipeline::{
 use gkg_server::redaction::ResourceAuthorization;
 use integration_testkit::load_seed;
 use ontology::Ontology;
+use query_engine::formatters::GraphResponse;
 use query_engine::pipeline::{
     NoOpObserver, PipelineError, PipelineObserver, PipelineRunner, PipelineStage,
     QueryPipelineContext, TypeMap,
@@ -288,23 +290,19 @@ fn handle_doc_code_block(
     let first_token = tokens.first().map(String::as_str);
     let marked = tokens.iter().any(|token| token == DOC_QUERY_MARKER);
 
-    if !block.closed
-        && (marked || matches!(first_token, Some("json" | "rust" | "bash" | "sh" | "shell")))
-    {
+    if !block.closed && (marked || matches!(first_token, Some("json" | "bash" | "sh" | "shell"))) {
         failures.push(format!("{path_label}:{line}: unclosed Markdown code fence"));
         return;
     }
 
     if marked {
-        match normalize_marked_doc_queries(first_token, &block.literal) {
-            Ok(queries) => {
-                for (idx, query) in queries.into_iter().enumerate() {
-                    cases.push(SmokeCase {
-                        key: doc_case_key(path_label, line, idx),
-                        query,
-                        expects_error: false,
-                    });
-                }
+        match normalize_marked_doc_query(first_token, &block.literal) {
+            Ok(query) => {
+                cases.push(SmokeCase {
+                    key: format!("{path_label}:{line}"),
+                    query,
+                    expects_error: false,
+                });
             }
             Err(e) => failures.push(format!("{path_label}:{line}: {e}")),
         }
@@ -330,23 +328,11 @@ fn handle_doc_code_block(
     }
 }
 
-fn doc_case_key(path_label: &str, line: usize, idx: usize) -> String {
-    if idx == 0 {
-        format!("{path_label}:{line}")
-    } else {
-        format!("{path_label}:{line}#{idx}")
-    }
-}
-
-fn normalize_marked_doc_queries(
-    first_token: Option<&str>,
-    body: &str,
-) -> Result<Vec<String>, String> {
+fn normalize_marked_doc_query(first_token: Option<&str>, body: &str) -> Result<String, String> {
     match first_token {
-        Some("json") => normalize_doc_query(body).map(|query| vec![query]),
-        Some("rust") => normalize_rust_doc_queries(body),
+        Some("json") => normalize_doc_query(body),
         _ => Err(format!(
-            "`{DOC_QUERY_MARKER}` fences must use `json` or `rust` as the first info token"
+            "`{DOC_QUERY_MARKER}` fences must use `json` as the first info token"
         )),
     }
 }
@@ -359,97 +345,15 @@ fn normalize_doc_query(body: &str) -> Result<String, String> {
     serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))
 }
 
-fn normalize_rust_doc_queries(body: &str) -> Result<Vec<String>, String> {
-    let mut queries = Vec::new();
-    for literal in rust_raw_strings(body) {
-        if literal.contains("\"query_type\"") {
-            queries.push(normalize_doc_query(literal)?);
-        }
-    }
-    if queries.is_empty() {
-        return Err("marked Rust fence does not contain an Orbit query raw string".to_string());
-    }
-    Ok(queries)
-}
-
-fn rust_raw_strings(body: &str) -> Vec<&str> {
-    let bytes = body.as_bytes();
-    let mut literals = Vec::new();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] != b'r' {
-            i += 1;
-            continue;
-        }
-
-        let mut quote = i + 1;
-        while quote < bytes.len() && bytes[quote] == b'#' {
-            quote += 1;
-        }
-        if quote >= bytes.len() || bytes[quote] != b'"' {
-            i += 1;
-            continue;
-        }
-
-        let hashes = quote - i - 1;
-        let content_start = quote + 1;
-        let mut end = content_start;
-        while end < bytes.len() {
-            if bytes[end] == b'"'
-                && end + 1 + hashes <= bytes.len()
-                && bytes[end + 1..end + 1 + hashes]
-                    .iter()
-                    .all(|byte| *byte == b'#')
-            {
-                literals.push(&body[content_start..end]);
-                i = end + 1 + hashes;
-                break;
-            }
-            end += 1;
-        }
-
-        if end >= bytes.len() {
-            break;
-        }
-    }
-
-    literals
-}
-
 fn orbit_query_value(value: &serde_json::Value) -> Option<&serde_json::Value> {
-    if is_query_shape(value) {
-        return Some(value);
+    let query = value.get("query").unwrap_or(value);
+    if serde_json::from_value::<GraphResponse>(query.clone()).is_ok() {
+        return None;
     }
 
-    let query = value.get("query")?;
-    is_query_shape(query).then_some(query)
-}
+    let json = serde_json::to_string(query).ok()?;
 
-fn is_query_shape(value: &serde_json::Value) -> bool {
-    let Some(obj) = value.as_object() else {
-        return false;
-    };
-    if [
-        "format_version",
-        "edges",
-        "rows",
-        "columns",
-        "group_columns",
-    ]
-    .iter()
-    .any(|key| obj.contains_key(*key))
-    {
-        return false;
-    }
-
-    match obj.get("query_type").and_then(serde_json::Value::as_str) {
-        Some("traversal") => obj.contains_key("node") || obj.contains_key("nodes"),
-        Some("aggregation") => obj.contains_key("aggregations"),
-        Some("path_finding") => obj.contains_key("path"),
-        Some("neighbors") => obj.contains_key("neighbors"),
-        _ => false,
-    }
+    parse_input(&json).is_ok().then_some(query)
 }
 
 fn relative_path(path: &Path) -> String {

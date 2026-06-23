@@ -203,7 +203,7 @@ resp.skip_requirement(Requirement::OrderBy);
 
 ### Example: single-entity traversal with filter and ordering
 
-```rust orbit-query
+```rust
 async fn search_filter_eq(ctx: &TestContext) {
     let resp = run_query(ctx, r#"{
         "query_type": "traversal",
@@ -225,7 +225,7 @@ async fn search_filter_eq(ctx: &TestContext) {
 
 ### Example: traversal with edges
 
-```rust orbit-query
+```rust
 async fn traversal_edges(ctx: &TestContext) {
     let resp = run_query(ctx, r#"{
         "query_type": "traversal",
