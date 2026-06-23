@@ -37,6 +37,7 @@ pub struct CodeIndexingTaskHandler {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
+    lock_renew_interval: Duration,
     subscription: Subscription,
     analytics: IndexingAnalytics,
 }
@@ -52,6 +53,7 @@ impl CodeIndexingTaskHandler {
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
+        lock_renew_interval: Duration,
         subscription: Subscription,
         analytics: IndexingAnalytics,
     ) -> Self {
@@ -61,6 +63,7 @@ impl CodeIndexingTaskHandler {
             checkpoint_store,
             metrics,
             lock_ttl,
+            lock_renew_interval,
             subscription,
             analytics,
         }
@@ -256,9 +259,14 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
+        let _guard = match LockGuard::acquire(
+            context.lock_service.clone(),
+            &key,
+            self.lock_ttl,
+            self.lock_renew_interval,
+        )
+        .await
+        .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
             Some(guard) => guard,
             None => {
@@ -401,6 +409,7 @@ mod tests {
                 Arc::clone(&checkpoint_store),
                 metrics,
                 Duration::from_secs(60),
+                Duration::from_secs(30),
                 CodeIndexingTaskRequest::subscription(),
                 IndexingAnalytics::disabled(),
             );

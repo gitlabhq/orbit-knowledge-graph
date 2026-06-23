@@ -103,6 +103,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(30),
             CodeIndexingTaskRequest::subscription(),
             indexer::analytics::IndexingAnalytics::disabled(),
         )

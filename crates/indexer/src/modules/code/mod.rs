@@ -116,6 +116,7 @@ pub async fn register_handlers(
         Arc::clone(&checkpoint_store),
         metrics,
         config.nats.ack_wait(),
+        config.nats.lock_lease_renew_interval(),
         subscription,
         analytics,
     )));

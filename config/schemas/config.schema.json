@@ -197,6 +197,7 @@
         "consumer_inactive_threshold_secs": 3600,
         "consumer_name": null,
         "fetch_expires_secs": 5,
+        "lock_lease_renew_interval_secs": 150,
         "max_deliver": 5,
         "password": null,
         "request_timeout_secs": 5,
@@ -1059,6 +1060,13 @@
           "type": "integer",
           "format": "uint64",
           "default": 5,
+          "minimum": 0
+        },
+        "lock_lease_renew_interval_secs": {
+          "description": "How often (seconds) a held indexing lock's lease is renewed, on its own\nclock independent of `ack_wait`. Must be less than `ack_wait_secs` so the\nlease never lapses mid-job. Defaults to 150 (half the default ack_wait).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 150,
           "minimum": 0
         },
         "max_deliver": {

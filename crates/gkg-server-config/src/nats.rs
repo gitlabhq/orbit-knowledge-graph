@@ -51,6 +51,12 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
     pub ack_wait_secs: u64,
 
+    /// How often (seconds) a held indexing lock's lease is renewed, on its own
+    /// clock independent of `ack_wait`. Must be less than `ack_wait_secs` so the
+    /// lease never lapses mid-job. Defaults to 150 (half the default ack_wait).
+    #[serde(default = "NatsConfiguration::default_lock_lease_renew_interval_secs")]
+    pub lock_lease_renew_interval_secs: u64,
+
     /// Maximum redelivery attempts. None means unlimited. Defaults to 5.
     #[serde(default = "NatsConfiguration::default_max_deliver")]
     pub max_deliver: Option<u32>,
@@ -134,6 +140,10 @@ impl NatsConfiguration {
 
     fn default_ack_wait_secs() -> u64 {
         300
+    }
+
+    fn default_lock_lease_renew_interval_secs() -> u64 {
+        150
     }
 
     fn default_max_deliver() -> Option<u32> {
@@ -245,6 +255,10 @@ impl NatsConfiguration {
         Duration::from_secs(self.ack_wait_secs)
     }
 
+    pub fn lock_lease_renew_interval(&self) -> Duration {
+        Duration::from_secs(self.lock_lease_renew_interval_secs)
+    }
+
     /// Returns buffer size, clamped to at least 1.
     pub fn subscription_buffer_size(&self) -> usize {
         self.subscription_buffer_size.max(1)
@@ -276,6 +290,7 @@ impl Default for NatsConfiguration {
             connection_timeout_secs: Self::default_connection_timeout_secs(),
             request_timeout_secs: Self::default_request_timeout_secs(),
             ack_wait_secs: Self::default_ack_wait_secs(),
+            lock_lease_renew_interval_secs: Self::default_lock_lease_renew_interval_secs(),
             max_deliver: Self::default_max_deliver(),
             subscription_buffer_size: Self::default_subscription_buffer_size(),
             consumer_name: None,

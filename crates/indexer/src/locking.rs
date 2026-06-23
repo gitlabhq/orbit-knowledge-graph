@@ -39,9 +39,15 @@ impl LockGuard {
         service: Arc<dyn LockService>,
         key: &str,
         ttl: Duration,
+        renew_interval: Duration,
     ) -> Result<Option<Self>, LockError> {
         if service.try_acquire(key, ttl).await? {
-            let renewer = Some(Self::spawn_renewer(service.clone(), key.to_string(), ttl));
+            let renewer = Some(Self::spawn_renewer(
+                service.clone(),
+                key.to_string(),
+                ttl,
+                renew_interval,
+            ));
             Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
@@ -52,11 +58,15 @@ impl LockGuard {
         }
     }
 
-    /// Renew the lease on its own cadence (`ttl/2`), decoupled from NATS ack
-    /// timing — so a job that outruns `ack_wait` can't have its lock stolen by a
+    /// Renew the lease on `interval` (configured, independent of NATS ack timing)
+    /// — so a job that outruns `ack_wait` can't have its lock stolen by a
     /// redelivered copy. Stops if the lease is lost.
-    fn spawn_renewer(service: Arc<dyn LockService>, key: String, ttl: Duration) -> JoinHandle<()> {
-        let interval = ttl / 2;
+    fn spawn_renewer(
+        service: Arc<dyn LockService>,
+        key: String,
+        ttl: Duration,
+        interval: Duration,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
@@ -241,6 +251,9 @@ mod tests {
     use super::*;
     use crate::testkit::mocks::MockLockService;
 
+    // Long enough that the renewer never fires during these sub-second tests.
+    const RENEW: Duration = Duration::from_secs(60);
+
     async fn settle() {
         for _ in 0..10 {
             tokio::task::yield_now().await;
@@ -250,7 +263,7 @@ mod tests {
     #[tokio::test]
     async fn lock_guard_release_consumes_and_releases() {
         let svc = Arc::new(MockLockService::new());
-        let guard = LockGuard::acquire(svc.clone(), "k1", Duration::from_secs(1))
+        let guard = LockGuard::acquire(svc.clone(), "k1", Duration::from_secs(1), RENEW)
             .await
             .expect("acquire ok")
             .expect("acquired");
@@ -263,7 +276,7 @@ mod tests {
     async fn lock_guard_drop_spawns_release() {
         let svc = Arc::new(MockLockService::new());
         {
-            let _guard = LockGuard::acquire(svc.clone(), "k2", Duration::from_secs(1))
+            let _guard = LockGuard::acquire(svc.clone(), "k2", Duration::from_secs(1), RENEW)
                 .await
                 .expect("acquire ok")
                 .expect("acquired");
@@ -281,7 +294,7 @@ mod tests {
         let work = tokio::spawn({
             let svc = svc.clone();
             async move {
-                let _guard = LockGuard::acquire(svc, "k3", Duration::from_secs(1))
+                let _guard = LockGuard::acquire(svc, "k3", Duration::from_secs(1), RENEW)
                     .await
                     .expect("acquire ok")
                     .expect("acquired");
@@ -307,7 +320,7 @@ mod tests {
     async fn lock_guard_acquire_returns_none_when_held() {
         let svc = Arc::new(MockLockService::new());
         svc.set_lock("k5");
-        let result = LockGuard::acquire(svc.clone(), "k5", Duration::from_secs(1))
+        let result = LockGuard::acquire(svc.clone(), "k5", Duration::from_secs(1), RENEW)
             .await
             .expect("acquire ok");
         assert!(result.is_none(), "contended acquire must return None");
