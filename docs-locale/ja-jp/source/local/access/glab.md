@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。ローカルのmcp serveコマンドは計画中です。
+description: GitLab CLIのglab orbit localとglab orbit setupを使用して、Orbit Localのインストール、インデックス作成、クエリを実行します。
 title: GitLab CLI（`glab`）でOrbit Localを使用する
 ---
 
@@ -10,7 +10,7 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 - プラン: Free、Premium、Ultimate
 - 提供形態: GitLab.com、GitLab Self-Managed、GitLab Dedicated
-- ステータス: ベータ
+- ステータス: ベータ版
 
 {{< /details >}}
 
@@ -27,8 +27,6 @@ title: GitLab CLI（`glab`）でOrbit Localを使用する
 
 > [!note]
 > `glab orbit local`と`glab orbit setup`は、`glab` 1.94以降で現在利用可能です。
-> MCPサーバーのサブコマンド（`glab orbit local mcp serve`）は計画中ですが、
-> まだ利用できません。該当箇所にはその旨を記載しています。
 
 トップレベルのコマンドは2つあります。
 
@@ -99,30 +97,33 @@ echo 'SELECT name FROM gl_definition LIMIT 3' | glab orbit local sql -
 
 ## スキーマを確認する {#inspect-the-schema}
 
-`glab orbit local schema`には`--ontology`または`--query`のいずれかが必要です。
+`glab orbit local schema`は、ローカルDuckDBグラフ内のすべてのテーブルとカラムを一覧表示します。
 
 ```shell
-glab orbit local schema --ontology
-glab orbit local schema --query
+glab orbit local schema
 ```
 
-- `--ontology`: グラフオントロジー（エンティティ、エッジ、プロパティ）を表示します。
-- `--query`: クエリDSLスキーマ（構造化クエリの記述方法）を表示します。
+テーブル名を位置引数として渡すと、出力を絞り込めます。
 
-どちらのフラグにも`--raw`を追加すると、デフォルトのLLM向け出力ではなくJSON形式で出力されます。
+```shell
+glab orbit local schema gl_definition              # scoped to one table
+glab orbit local schema gl_definition gl_edge      # scoped to two tables
+```
+
+| フラグ | 説明 |
+|------|---------|
+| `--raw` | デフォルトのテーブル表示ではなくJSON形式で出力します。 |
+| `--db` | DuckDBのパスを上書きします。デフォルトは`~/.orbit/graph.duckdb`です。 |
 
 ## MCPサーバーとして実行する {#run-as-an-mcp-server}
 
-> [!note]
-> `glab orbit local mcp serve`は計画中であり、まだリリースされていません。
-
-リリース後、このコマンドはローカルグラフをMCP対応のAIエージェントに公開します。
+ローカルグラフをMCP対応のAIエージェントに公開します。
 
 ```shell
 glab orbit local mcp serve
 ```
 
-MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`query_graph`と`get_graph_schema`を提供します。エージェント統合の詳細については、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
+MCPプロトコルを通じて`~/.orbit/graph.duckdb`に対して`run_sql`、`get_graph_schema`、`index`を提供します。エージェント統合の詳細については、[MCPを使用してOrbitにアクセスする](mcp.md)を参照してください。
 
 ## 終了コード {#exit-codes}
 

@@ -1,4 +1,8 @@
-use crate::v2::config::{Language, parsable_language};
+use crate::v2::config::{FilterSkip, Language};
+use crate::v2::error::FileReason;
+use crate::v2::inventory::{
+    FamilyFileInput, FileInput, build_file_inventory_graph, group_parseable_inventory,
+};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
@@ -8,7 +12,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
-use std::path::{Component, Path};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -179,17 +183,6 @@ fn record_offset_overflow_skips(ctx: &PipelineContext, files: &[FamilyFileInput]
             detail.clone(),
         );
     }
-}
-
-/// Input to a language pipeline: file path (source read on demand).
-pub type FileInput = String;
-
-/// A file paired with the specific [`Language`] that should parse it.
-/// Used when a language family groups multiple languages into one
-/// pipeline invocation (e.g. C and C++ in `CFamily`).
-pub struct FamilyFileInput {
-    pub language: Language,
-    pub path: FileInput,
 }
 
 /// Immutable context shared across the entire pipeline run.
@@ -509,7 +502,6 @@ pub trait LanguagePipeline {
 
 #[derive(Clone)]
 pub struct PipelineConfig {
-    pub max_file_size: u64,
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
@@ -549,7 +541,6 @@ pub type PhaseCpuObserver = Arc<dyn Fn(Language, crate::v2::dsl::engine::PhaseCp
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            max_file_size: 1_000_000,
             max_files: 0,
             cancel: CancellationToken::new(),
             worker_threads: 0,
@@ -566,11 +557,7 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileInventoryEntry {
-    pub path: String,
-    pub size: u64,
-}
+pub use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
 
 /// Per-file timing captured during pipeline execution.
 ///
@@ -698,6 +685,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<[FileInventoryEntry]>,
         config: PipelineConfig,
+        stream_reasons: &FxHashMap<String, FilterSkip>,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
@@ -705,6 +693,7 @@ impl Pipeline {
             root,
             file_inventory,
             config,
+            stream_reasons,
             Tracer::new(false),
             converter,
             sink,
@@ -721,6 +710,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<[FileInventoryEntry]>,
         mut config: PipelineConfig,
+        stream_reasons: &FxHashMap<String, FilterSkip>,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
@@ -729,15 +719,14 @@ impl Pipeline {
         config.emit_file_inventory_graph = true;
         let t_pipeline = std::time::Instant::now();
 
-        // 1. Normalize the repository inventory, then group parseable files
-        //    by language family. Files keep their specific Language for
+        // 1. Group parseable files by language family (the stream already
+        //    canonicalized the inventory). Files keep their specific Language for
         //    parser selection; the family determines which files share a
         //    CodeGraph for cross-language resolution.
         let t_discovery = std::time::Instant::now();
         let pb_discover = spinner("Preparing file inventory...");
-        let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
         let (files_by_family, parsed_file_languages) =
-            group_parseable_inventory(root, &file_inventory, &config);
+            group_parseable_inventory(&file_inventory, config.max_files);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
@@ -995,29 +984,23 @@ impl Pipeline {
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
 
-        // The structural graph (gl_file/gl_directory) is written after parsing so
-        // each File node carries its final skip/fault reason in a single write
-        // (no second row to dedup, which the local DuckDB graph can't do). Synthetic
-        // skip paths (e.g. "js:cross-file-resolve") never match an inventory entry,
-        // so they produce no File node.
+        // Build the structural file/directory graph after parsing so each File
+        // node carries its final reason in a single write: pre-parse stream skips,
+        // then parse-phase skips and faults.
         let t_structural = std::time::Instant::now();
         if !file_inventory.is_empty() {
-            use crate::v2::error::FileReason;
-            let reasons: FxHashMap<&str, FileReason> = skipped
-                .iter()
-                .map(|s| (s.path.as_str(), FileReason::Skip(s.kind)))
-                .chain(
-                    faults
-                        .iter()
-                        .map(|f| (f.path.as_str(), FileReason::Fault(f.kind))),
-                )
-                .collect();
-            let structural_graph = Self::build_file_inventory_graph(
-                root,
-                &file_inventory,
-                &parsed_file_languages,
-                &reasons,
-            );
+            let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
+            for (path, skip) in stream_reasons {
+                reasons.insert(path.as_str(), FileReason::Filter(*skip));
+            }
+            for s in &skipped {
+                reasons.insert(s.path.as_str(), FileReason::Skip(s.kind));
+            }
+            for f in &faults {
+                reasons.insert(f.path.as_str(), FileReason::Fault(f.kind));
+            }
+            let structural_graph =
+                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages, &reasons);
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -1072,123 +1055,6 @@ impl Pipeline {
             faults,
             ctx,
         }
-    }
-
-    #[cfg(test)]
-    fn group_inventory(
-        root: &Path,
-        inventory: &[FileInventoryEntry],
-        config: &PipelineConfig,
-    ) -> FxHashMap<Language, Vec<FileInput>> {
-        let (by_family, _) = group_parseable_inventory(root, inventory, config);
-        let mut by_lang: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
-        for (_fam, files) in by_family {
-            for f in files {
-                by_lang.entry(f.language).or_default().push(f.path);
-            }
-        }
-        by_lang
-    }
-
-    fn build_file_inventory_graph(
-        root: &Path,
-        inventory: &[FileInventoryEntry],
-        parsed_file_languages: &FxHashMap<String, Language>,
-        reasons: &FxHashMap<&str, crate::v2::error::FileReason>,
-    ) -> CodeGraph {
-        let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
-        for entry in inventory {
-            let language = parsed_file_languages.get(&entry.path).copied();
-            let reason = reasons
-                .get(entry.path.as_str())
-                .copied()
-                .unwrap_or_default();
-            graph.add_unparsed_file(&entry.path, language, entry.size, reason);
-        }
-
-        graph.drop_construction_indexes();
-        graph
-    }
-}
-
-fn group_parseable_inventory(
-    root: &Path,
-    inventory: &[FileInventoryEntry],
-    config: &PipelineConfig,
-) -> (
-    FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>>,
-    FxHashMap<String, Language>,
-) {
-    let mut groups: FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>> =
-        FxHashMap::default();
-    let mut parsed_file_languages = FxHashMap::default();
-    let mut accepted_files = 0usize;
-
-    for entry in inventory {
-        if entry.size > config.max_file_size {
-            continue;
-        }
-
-        let rel_path = Path::new(&entry.path);
-        let Some(lang) = parsable_language(rel_path) else {
-            continue;
-        };
-
-        if config.max_files > 0 && accepted_files >= config.max_files {
-            continue;
-        }
-
-        if !root.join(rel_path).is_file() {
-            continue;
-        }
-
-        accepted_files += 1;
-        parsed_file_languages.insert(entry.path.clone(), lang);
-        groups
-            .entry(lang.family())
-            .or_default()
-            .push(FamilyFileInput {
-                language: lang,
-                path: entry.path.clone(),
-            });
-    }
-
-    (groups, parsed_file_languages)
-}
-
-fn canonical_file_inventory(
-    entries: impl IntoIterator<Item = FileInventoryEntry>,
-) -> Vec<FileInventoryEntry> {
-    let mut by_path = FxHashMap::default();
-    for entry in entries {
-        let Some(path) = normalize_inventory_path(&entry.path) else {
-            continue;
-        };
-        by_path.entry(path).or_insert(entry.size);
-    }
-
-    let mut entries: Vec<_> = by_path
-        .into_iter()
-        .map(|(path, size)| FileInventoryEntry { path, size })
-        .collect();
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    entries
-}
-
-fn normalize_inventory_path(path: &str) -> Option<String> {
-    let mut parts = Vec::new();
-    for component in Path::new(path).components() {
-        match component {
-            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("/"))
     }
 }
 
@@ -1888,40 +1754,6 @@ mod tests {
     }
 
     #[test]
-    fn inventory_grouping_respects_max_files() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::write(dir.path().join("a.java"), "class A {}").expect("write a");
-        std::fs::write(dir.path().join("b.java"), "class B {}").expect("write b");
-        std::fs::write(dir.path().join("c.java"), "class C {}").expect("write c");
-
-        let inventory = [
-            FileInventoryEntry {
-                path: "a.java".into(),
-                size: 10,
-            },
-            FileInventoryEntry {
-                path: "b.java".into(),
-                size: 10,
-            },
-            FileInventoryEntry {
-                path: "c.java".into(),
-                size: 10,
-            },
-        ];
-        let groups = Pipeline::group_inventory(
-            dir.path(),
-            &inventory,
-            &PipelineConfig {
-                max_files: 2,
-                ..PipelineConfig::default()
-            },
-        );
-        let accepted = groups.values().map(Vec::len).sum::<usize>();
-
-        assert_eq!(accepted, 2);
-    }
-
-    #[test]
     fn arrow_string_offsets_reproduce_i32_offset_overflow() {
         // Memory-safe as of Arrow 58.3.0: `new_repeated` calls
         // `OffsetBuffer::from_repeated_length` first, which panics on the
@@ -1948,11 +1780,10 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "proto.gen.go".into(),
                 size: GO_PARSER_MAX_FILE_SIZE + 1,
+                decision: Decision::Parse,
             }]),
-            PipelineConfig {
-                max_file_size: u64::MAX,
-                ..PipelineConfig::default()
-            },
+            PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -1968,50 +1799,6 @@ mod tests {
     }
 
     #[test]
-    fn skipped_file_reason_is_emitted_to_gl_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        let path = root.join("proto.gen.go");
-        let file = std::fs::File::create(&path).unwrap();
-        file.set_len(GO_PARSER_MAX_FILE_SIZE + 1).unwrap();
-
-        let capture = Arc::new(TestCapture::new());
-        let result = Pipeline::run_with_tracer(
-            root,
-            Arc::from(vec![FileInventoryEntry {
-                path: "proto.gen.go".into(),
-                size: GO_PARSER_MAX_FILE_SIZE + 1,
-            }]),
-            PipelineConfig {
-                max_file_size: u64::MAX,
-                ..PipelineConfig::default()
-            },
-            crate::v2::trace::Tracer::new(false),
-            capture.clone(),
-            Arc::new(NullSink),
-        );
-
-        assert_eq!(
-            result.skipped[0].kind,
-            crate::v2::error::FileSkip::ParserOversize
-        );
-        // The File node for the skipped path carries its reason as a typed enum,
-        // which the converter writes to gl_file.reason.
-        let reason = capture
-            .take()
-            .iter()
-            .flat_map(|g| g.files())
-            .find(|(_, f)| f.path == "proto.gen.go")
-            .map(|(_, f)| f.reason);
-        assert_eq!(
-            reason,
-            Some(crate::v2::error::FileReason::Skip(
-                crate::v2::error::FileSkip::ParserOversize
-            ))
-        );
-    }
-
-    #[test]
     fn pipeline_records_timeout_skip_when_cpu_budget_is_exhausted() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2023,6 +1810,7 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.py".into(),
                 size: source.len() as u64,
+                decision: Decision::Parse,
             }]),
             PipelineConfig {
                 per_file_parse_timeout: Some(std::time::Duration::ZERO),
@@ -2030,6 +1818,7 @@ mod tests {
                 per_file_ssa_timeout: Some(std::time::Duration::ZERO),
                 ..PipelineConfig::default()
             },
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -2063,10 +1852,12 @@ mod tests {
                 FileInventoryEntry {
                     path: "a.py".into(),
                     size: 22,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "b.py".into(),
                     size: 22,
+                    decision: Decision::Parse,
                 },
             ]),
             PipelineConfig {
@@ -2075,6 +1866,7 @@ mod tests {
                 })),
                 ..PipelineConfig::default()
             },
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -2099,8 +1891,10 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
             Arc::new(NullSink),
@@ -2134,8 +1928,10 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "main.go".into(),
                 size: 27,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
             Arc::new(NullSink),
@@ -2163,26 +1959,27 @@ mod tests {
             FileInventoryEntry {
                 path: "src/main.py".into(),
                 size: 17,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "README.md".into(),
                 size: 12,
-            },
-            FileInventoryEntry {
-                path: "./README.md".into(),
-                size: 12,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "config/app.yml".into(),
                 size: 9,
+                decision: Decision::Parse,
             },
             FileInventoryEntry {
                 path: "assets/logo.png".into(),
                 size: 128,
+                decision: Decision::ListOnly,
             },
             FileInventoryEntry {
                 path: "vendor/jquery.min.js".into(),
                 size: 256,
+                decision: Decision::ListOnly,
             },
         ];
 
@@ -2191,6 +1988,7 @@ mod tests {
             root,
             Arc::from(inventory),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(NullSink),
@@ -2237,8 +2035,10 @@ mod tests {
             Arc::from(vec![FileInventoryEntry {
                 path: "listed.py".into(),
                 size: 19,
+                decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(NullSink),
@@ -2419,21 +2219,26 @@ namespace MyApp {
                 FileInventoryEntry {
                     path: "app.py".into(),
                     size: 0,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "Service.java".into(),
                     size: 0,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "App.kt".into(),
                     size: 0,
+                    decision: Decision::Parse,
                 },
                 FileInventoryEntry {
                     path: "Controller.cs".into(),
                     size: 0,
+                    decision: Decision::Parse,
                 },
             ]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             sink,

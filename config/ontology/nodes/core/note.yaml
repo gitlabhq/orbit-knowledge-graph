@@ -136,7 +136,6 @@ properties:
 
 etl:
   type: query
-  scope: namespaced
   source: siphon_notes
   select: "id, note, noteable_type, noteable_id, line_code, created_at, updated_at, discussion_id, resolved_at, internal, confidential, commit_id, st_diff, author_id, project_id, traversal_path"
   from: siphon_notes
@@ -172,7 +171,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: noteable_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}

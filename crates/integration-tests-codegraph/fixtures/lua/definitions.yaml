@@ -1,0 +1,76 @@
+name: "Lua: function definitions"
+fixtures:
+  - path: defs.lua
+    content: |
+      function greet(name)
+        print("Hello, " .. name)
+      end
+
+      local function add(a, b)
+        return a + b
+      end
+
+      local M = {}
+      function M.helper()
+        return 42
+      end
+
+      function M:speak()
+        print(self.name)
+      end
+
+      function outer()
+        local function inner()
+          return 1
+        end
+        return inner()
+      end
+
+tests:
+  - name: "greet is a Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'greet' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "greet" } }
+
+  - name: "local add is a Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'add' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "add" } }
+
+  - name: "M.helper is a Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "helper" } }
+
+  - name: "M:speak is a Method"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'speak' AND d.definition_type = 'Method'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "speak" } }
+
+  - name: "outer is a Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'outer' AND d.definition_type = 'Function'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "outer" } }
+
+  - name: "Total definitions from defs.lua"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path ENDS WITH 'defs.lua'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 6 }

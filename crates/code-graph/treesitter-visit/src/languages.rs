@@ -25,6 +25,8 @@ pub enum SupportLang {
     Rust,
     Php,
     Hcl,
+    Swift,
+    Lua,
 }
 
 impl fmt::Display for SupportLang {
@@ -123,6 +125,16 @@ impl LanguageExt for SupportLang {
             Self::Hcl => tree_sitter_hcl::LANGUAGE.into(),
             #[cfg(not(feature = "tree-sitter-hcl"))]
             Self::Hcl => panic!("tree-sitter-hcl feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-swift")]
+            Self::Swift => tree_sitter_swift::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-swift"))]
+            Self::Swift => panic!("tree-sitter-swift feature not enabled"),
+
+            #[cfg(feature = "tree-sitter-lua")]
+            Self::Lua => tree_sitter_lua::LANGUAGE.into(),
+            #[cfg(not(feature = "tree-sitter-lua"))]
+            Self::Lua => panic!("tree-sitter-lua feature not enabled"),
         }
     }
 

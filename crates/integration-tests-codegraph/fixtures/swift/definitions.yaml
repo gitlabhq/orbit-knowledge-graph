@@ -1,0 +1,161 @@
+name: Swift definitions
+
+fixtures:
+  - path: Animals.swift
+    content: |
+      class Animal {
+          func speak() {}
+          func eat() {}
+          init(name: String) {}
+      }
+
+      class Dog: Animal {
+          func fetch() {}
+      }
+
+      struct Point {
+          var x: Double
+          var y: Double
+      }
+
+      struct Rectangle: Equatable {
+          var origin: Point
+          var size: Point
+      }
+
+      enum Direction {
+          case north
+          case south
+          case east
+          case west
+      }
+
+      enum Result {
+          case success
+          case failure
+      }
+
+      protocol Drawable {
+          func draw()
+          func resize(factor: Double)
+      }
+
+      protocol Identifiable: Drawable {
+          func identify()
+      }
+
+tests:
+  - name: Animal class is indexed with correct type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Animal'
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Animal", fqn: "Animal", type: "Class" } }
+
+  - name: Dog subclass is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Dog'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class" } }
+
+  - name: Point struct is indexed with Struct type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Point'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Struct" } }
+
+  - name: Rectangle struct is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Rectangle'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Struct" } }
+
+  - name: Direction enum is indexed with Enum type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Direction'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Enum" } }
+
+  - name: Drawable protocol is indexed with Interface type
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Drawable'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Interface" } }
+
+  - name: Identifiable protocol is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Identifiable'
+      RETURN d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Interface" } }
+
+  - name: Animal.speak is scoped under Animal FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Animal.speak'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "speak" } }
+
+  - name: Dog.fetch is scoped under Dog FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Dog.fetch'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: Direction enum entries are indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumEntry'
+      RETURN d.name AS name, d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { unique: fqn }
+
+  - name: Direction.north entry is scoped under Direction
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Direction.north'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "north" } }
+
+  - name: Classes and structs contain expected method definitions
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE e.edge_kind = 'Defines' AND parent.name = 'Animal'
+      RETURN child.name AS name
+    assert:
+      - { no_nulls: name }
+
+  - name: All top-level types are in the same file
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Class', 'Struct', 'Enum', 'Interface']
+      RETURN d.name AS name, d.file_path AS file
+    assert:
+      - { no_nulls: file }
+      - { match: { field: file, pattern: "Animals.swift" } }

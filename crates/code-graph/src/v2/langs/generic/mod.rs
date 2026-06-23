@@ -7,6 +7,8 @@ pub mod go;
 pub mod hcl;
 pub mod java;
 pub mod kotlin;
+pub mod lua;
 pub mod php;
 pub mod python;
 pub mod ruby;
+pub mod swift;

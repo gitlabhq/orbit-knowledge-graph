@@ -2,6 +2,7 @@
 
 node_type: Runner
 domain: ci
+global: true
 description: A CI/CD runner that executes jobs
 label: name
 destination_table: gl_runner
@@ -102,7 +103,6 @@ properties:
 
 etl:
   type: table
-  scope: global
   source: siphon_ci_runners
   order_by: [id, runner_type]
 
@@ -112,7 +112,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(1)"]}

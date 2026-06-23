@@ -1,6 +1,7 @@
 # config/ontology/edges/detected_in.yaml
 
 description: Pipeline where finding was detected
+table: gl_sec_edge
 
 properties:
   detection_type:

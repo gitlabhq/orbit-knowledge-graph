@@ -83,7 +83,6 @@ properties:
 
 etl:
   type: query
-  scope: namespaced
   source: namespace_traversal_paths
   select: >-
     namespace.id AS id, namespace.name AS name,
@@ -135,7 +134,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

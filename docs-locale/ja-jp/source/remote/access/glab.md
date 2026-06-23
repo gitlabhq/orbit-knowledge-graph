@@ -129,4 +129,4 @@ glab orbit remote graph-status --project-id 2
 
 ## 課金 {#billing}
 
-`glab orbit remote query`はMCPクエリと同様にGitLabクレジットを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは無料です。
+`glab orbit remote query`はMCPクエリと同様にGitLabクレジットを消費します。`status`、`schema`、`tools`、`graph-status`の呼び出しは消費対象外です。

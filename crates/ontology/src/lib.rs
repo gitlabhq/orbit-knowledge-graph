@@ -132,7 +132,6 @@ pub struct Ontology {
     pub(crate) edge_etl_configs: BTreeMap<String, Vec<EdgeSourceEtlConfig>>,
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
-    pub(crate) skip_security_filter_for_tables: Vec<String>,
     /// Local entity configs keyed by entity name. Each entry lists
     /// properties to exclude from the local DuckDB table.
     pub(crate) local_entities: BTreeMap<String, Vec<String>>,
@@ -200,7 +199,6 @@ impl Ontology {
                 ],
             },
             internal_column_prefix: "_gkg_".to_string(),
-            skip_security_filter_for_tables: Vec::new(),
             local_entities: BTreeMap::new(),
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
@@ -563,9 +561,8 @@ impl Ontology {
     /// schema version.
     ///
     /// This prepends `prefix` to every `destination_table` on nodes and edges,
-    /// the default edge table, edge table config keys, auxiliary table names,
-    /// and `skip_security_filter_for_tables`. Local (DuckDB) table names are
-    /// not affected.
+    /// the default edge table, edge table config keys, and auxiliary table
+    /// names. Local (DuckDB) table names are not affected.
     ///
     /// An empty prefix returns a clone with table names unchanged (v0 backward
     /// compatibility).
@@ -592,12 +589,6 @@ impl Ontology {
                 edge.destination_table = format!("{prefix}{}", edge.destination_table);
             }
         }
-
-        self.skip_security_filter_for_tables = self
-            .skip_security_filter_for_tables
-            .into_iter()
-            .map(|t| format!("{prefix}{t}"))
-            .collect();
 
         for aux in &mut self.auxiliary_tables {
             aux.name = format!("{prefix}{}", aux.name);
@@ -1104,10 +1095,16 @@ impl Ontology {
         &self.etl_settings.deleted
     }
 
-    /// Tables excluded from traversal-path security filters.
+    /// Physical tables of `global` nodes — non-namespaced hubs (User, Runner).
+    /// These are excluded from traversal-path security filters because they
+    /// carry no `traversal_path` to scope on.
     #[must_use]
-    pub fn skip_security_filter_tables(&self) -> &[String] {
-        &self.skip_security_filter_for_tables
+    pub fn global_tables(&self) -> Vec<&str> {
+        self.nodes
+            .values()
+            .filter(|n| n.global)
+            .map(|n| n.destination_table.as_str())
+            .collect()
     }
 
     /// Entity names that participate in the local DuckDB graph.
@@ -1665,6 +1662,51 @@ mod tests {
                 assert_eq!(
                     entry.destination_table, "gl_code_edge",
                     "{kind} variant {:?} -> {:?} should route to gl_code_edge",
+                    entry.source_kind, entry.target_kind,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn security_edges_route_to_gl_sec_edge() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+
+        for kind in [
+            "HAS_FINDING",
+            "DETECTED_BY",
+            "HAS_IDENTIFIER",
+            "OCCURRENCE_OF",
+            "DETECTED_IN",
+            "SCANS",
+        ] {
+            let entries = ontology
+                .get_edge(kind)
+                .unwrap_or_else(|| panic!("{kind} should be registered"));
+            assert!(!entries.is_empty(), "{kind} should have variants");
+            for entry in entries {
+                assert_eq!(
+                    entry.destination_table, "gl_sec_edge",
+                    "{kind} variant {:?} -> {:?} should route to gl_sec_edge",
+                    entry.source_kind, entry.target_kind,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diff_edges_route_to_gl_diff_edge() {
+        let ontology = Ontology::load_embedded().expect("embedded ontology should load");
+
+        for kind in ["HAS_FILE", "HAS_DIFF", "HAS_LATEST_DIFF"] {
+            let entries = ontology
+                .get_edge(kind)
+                .unwrap_or_else(|| panic!("{kind} should be registered"));
+            assert!(!entries.is_empty(), "{kind} should have variants");
+            for entry in entries {
+                assert_eq!(
+                    entry.destination_table, "gl_diff_edge",
+                    "{kind} variant {:?} -> {:?} should route to gl_diff_edge",
                     entry.source_kind, entry.target_kind,
                 );
             }
@@ -3015,6 +3057,24 @@ properties:
             "SystemNote extract is a JOIN (query ETL)"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
+    }
+
+    #[test]
+    fn derived_emits_are_registered_and_visible_in_schema() {
+        let o = Ontology::load_embedded().expect("should load");
+        let edge_names: Vec<&str> = o.edge_names().collect();
+
+        for derived in o.derived_entities() {
+            for emit in &derived.emits {
+                assert!(
+                    edge_names.contains(&emit.as_str()),
+                    "derived '{}' emits '{emit}' but it is missing from the schema edge list",
+                    derived.name
+                );
+            }
+        }
+
+        assert!(edge_names.contains(&"MENTIONS"));
     }
 
     // --- Scope annotation tests ---

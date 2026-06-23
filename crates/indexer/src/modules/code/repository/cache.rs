@@ -2,15 +2,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::{
-    FileInventoryEntry,
-    config::{is_excluded_from_indexing, looks_binary},
-};
+use code_graph::v2::FileInventoryEntry;
+use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use futures::StreamExt;
+use gkg_utils::archive::extract_tar_gz;
+use gkg_utils::fs_stream::StreamError;
+use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
-use super::archive::{ArchiveError, extract_tar_gz_from_reader};
 use super::service::ByteStream;
 use crate::modules::code::metrics::CodeMetrics;
 
@@ -27,12 +27,20 @@ pub enum RepositoryCacheError {
     /// a retryable processing failure.
     #[error("archive contained no entries (empty or truncated stream)")]
     EmptyArchive,
+
+    /// The repository exceeded the total-bytes cap. Like `EmptyArchive`, the
+    /// resolver treats it as an empty repo (checkpoint), not a retryable failure.
+    #[error("repository exceeded the total-bytes cap")]
+    RepositoryTooLarge,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CachedRepository {
     pub path: PathBuf,
     pub file_inventory: Arc<[FileInventoryEntry]>,
+    /// Per-path reason for files the stream settled as bare nodes, carried to the
+    /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
+    pub stream_reasons: FxHashMap<String, FilterSkip>,
 }
 
 impl std::ops::Deref for CachedRepository {
@@ -61,14 +69,21 @@ const REPOSITORY_DIR: &str = "repository";
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
     max_file_size: u64,
+    max_total_bytes: u64,
     metrics: CodeMetrics,
 }
 
 impl LocalRepositoryCache {
-    pub fn new(base_dir: PathBuf, max_file_size: u64, metrics: CodeMetrics) -> Self {
+    pub fn new(
+        base_dir: PathBuf,
+        max_file_size: u64,
+        max_total_bytes: u64,
+        metrics: CodeMetrics,
+    ) -> Self {
         Self {
             base_dir,
             max_file_size,
+            max_total_bytes,
             metrics,
         }
     }
@@ -123,43 +138,32 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
-        let max_file_size = self.max_file_size;
-        let metrics = self.metrics.clone();
-        let file_inventory = tokio::task::spawn_blocking(move || {
+        let mut filter = CodeFilter::new(
+            self.max_file_size,
+            self.max_total_bytes,
+            detect_language_from_path,
+        );
+        let (file_inventory, filter) = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(
-                bridge,
-                &repo_dir_owned,
-                |rel_path, size| {
-                    if size > max_file_size {
-                        metrics.record_archive_entry_skipped("oversize", size);
-                        return false;
-                    }
-                    if is_excluded_from_indexing(rel_path) {
-                        metrics.record_archive_entry_skipped("excluded_extension", size);
-                        return false;
-                    }
-                    true
-                },
-                |_rel_path, size, prefix| {
-                    if looks_binary(prefix) {
-                        metrics.record_archive_entry_skipped("binary", size);
-                        return false;
-                    }
-                    true
-                },
-            )
+            extract_tar_gz(bridge, &repo_dir_owned, &mut filter).map(|inv| (inv, filter))
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
         .map_err(|e| match e {
-            ArchiveError::EmptyArchive => RepositoryCacheError::EmptyArchive,
-            other => RepositoryCacheError::Archive(other.to_string()),
+            StreamError::Empty => RepositoryCacheError::EmptyArchive,
+            StreamError::Cap(_) => RepositoryCacheError::RepositoryTooLarge,
+            StreamError::Io(io) => RepositoryCacheError::Archive(io.to_string()),
         })?;
+
+        for (reason, tally) in filter.skips() {
+            self.metrics
+                .record_archive_entry_skipped(reason.into(), tally.count, tally.bytes);
+        }
 
         Ok(CachedRepository {
             path: repo_dir,
             file_inventory: Arc::from(file_inventory),
+            stream_reasons: filter.file_reasons().clone(),
         })
     }
 
@@ -192,6 +196,7 @@ mod tests {
         let cache = LocalRepositoryCache::new(
             temp_dir.path().to_path_buf(),
             max_file_size,
+            0,
             CodeMetrics::default(),
         );
         (temp_dir, cache)
@@ -299,7 +304,7 @@ mod tests {
     async fn purge_all_recreates_missing_base_dir() {
         let temp_dir = TempDir::new().unwrap();
         let base = temp_dir.path().join("not-yet-created");
-        let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, CodeMetrics::default());
+        let cache = LocalRepositoryCache::new(base.clone(), u64::MAX, 0, CodeMetrics::default());
 
         cache.purge_all().await.unwrap();
 

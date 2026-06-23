@@ -94,7 +94,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_p_ci_stages
   order_by: [traversal_path, id, partition_id]
   edges:
@@ -114,13 +113,13 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: position, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

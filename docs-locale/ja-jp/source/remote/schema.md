@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: 6つのドメインにわたる24のOrbitノードタイプの完全なリファレンス（プロパティとその型を含む）。
+description: 6つのドメインにわたる27のOrbitノードタイプの完全なリファレンス（プロパティとその型を含む）。
 title: スキーマリファレンス
 ---
 
@@ -26,7 +26,7 @@ title: スキーマリファレンス
 > 詳細については、履歴を参照してください。
 > この機能はテスト目的で利用可能ですが、本番環境での使用には対応していません。
 
-Orbitは6つのドメインにわたる24のノードタイプのインデックスを作成します。クエリのエンティティ名としてこれらを使用してください。
+Orbitは6つのドメインにわたる27のノードタイプのインデックスを作成します。クエリのエンティティ名としてこれらを使用してください。
 
 ライブスキーマをいつでもフェッチするには:
 
@@ -68,6 +68,9 @@ glab orbit remote schema
 | `Pipeline` | CI/CDパイプラインの実行 | `id`, `sha`, `ref`, `status`, `source`, `duration`, `failure_reason` |
 | `Stage` | パイプラインステージ | `id`, `name`, `status`, `position` |
 | `Job` | CI/CDジョブ | `id`, `name`, `status`, `ref`, `allow_failure`, `environment`, `failure_reason` |
+| `Deployment` | コミットのCI/CDデプロイ | `id`, `iid`, `status`, `ref`, `sha`, `environment_id` |
+| `Environment` | CI/CDデプロイターゲット | `id`, `name`, `state`, `tier`, `external_url` |
+| `Runner` | CI/CD Runner | `id`, `runner_type`, `name`, `active`, `locked` |
 
 ## プランニング {#planning}
 

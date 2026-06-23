@@ -821,7 +821,7 @@ code-indexing-benchmark-v2-analyze:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - git fetch --tags
-    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1s/^v//p')
     - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
     - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 

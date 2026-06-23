@@ -39,6 +39,12 @@ pub struct ComponentHealth {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QueueDepth {
+    pub code_pending: u64,
+    pub code_in_flight: u64,
+}
+
 impl HealthStatus {
     pub fn aggregate_status(
         services: Vec<ServiceHealth>,
@@ -156,5 +162,19 @@ mod tests {
         let ch = healthy_ch("clickhouse");
         let json = serde_json::to_string(&ch).unwrap();
         assert!(!json.contains("error"));
+    }
+
+    #[test]
+    fn queue_depth_json_field_names_are_the_keda_contract() {
+        let depth = QueueDepth {
+            code_pending: 142,
+            code_in_flight: 96,
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&depth).unwrap())
+                .expect("QueueDepth serializes to valid JSON");
+
+        assert_eq!(value["code_pending"], 142);
+        assert_eq!(value["code_in_flight"], 96);
     }
 }

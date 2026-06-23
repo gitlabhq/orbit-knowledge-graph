@@ -131,7 +131,6 @@ properties:
 
 etl:
   type: table
-  scope: namespaced
   source: siphon_merge_request_diffs
   order_by: [traversal_path, merge_request_id, id]
   edges:
@@ -150,15 +149,15 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: merge_request_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: merge_request_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: state, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: base_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: head_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: start_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: commits_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: files_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: diff_type, type: "LowCardinality(String)", default: "'regular'", codec: ["LZ4"]}
     - {name: real_size, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: stored_externally, type: "Bool", default: "false"}

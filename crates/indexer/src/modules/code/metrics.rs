@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
@@ -128,10 +130,11 @@ impl CodeMetrics {
     pub(in crate::modules::code) fn record_archive_entry_skipped(
         &self,
         reason: &'static str,
+        entries: u64,
         bytes: u64,
     ) {
         let labels = [KeyValue::new(code::labels::REASON, reason)];
-        self.archive_entries_skipped.add(1, &labels);
+        self.archive_entries_skipped.add(entries, &labels);
         self.archive_bytes_skipped.add(bytes, &labels);
     }
 
@@ -195,6 +198,20 @@ impl CodeMetrics {
             );
         }
     }
+
+    pub(in crate::modules::code) fn record_fetch_duration(&self, elapsed: Duration) {
+        self.repository_fetch_duration
+            .record(elapsed.as_secs_f64(), &[]);
+    }
+
+    pub(in crate::modules::code) fn record_indexing_duration(&self, elapsed: Duration) {
+        self.indexing_duration.record(elapsed.as_secs_f64(), &[]);
+    }
+
+    pub(in crate::modules::code) fn record_stage_error(&self, stage: &'static str) {
+        self.errors
+            .add(1, &[KeyValue::new(code::labels::STAGE, stage)]);
+    }
 }
 
 impl Default for CodeMetrics {
@@ -218,9 +235,7 @@ impl<T> RecordStageError<T> for Result<T, HandlerError> {
         stage: &'static str,
     ) -> Result<T, HandlerError> {
         if self.is_err() {
-            metrics
-                .errors
-                .add(1, &[KeyValue::new(code::labels::STAGE, stage)]);
+            metrics.record_stage_error(stage);
         }
         self
     }

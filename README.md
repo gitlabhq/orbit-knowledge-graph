@@ -21,6 +21,17 @@ Index your GitLab SDLC and source code as one property graph, then query it from
 
 > Beta. The Query DSL and ontology may change. Orbit Remote is gated by the `knowledge_graph` feature flag and must be enabled on a top-level group.
 
+## For contributors
+
+New here? Start with:
+
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — build setup, test commands, MR conventions
+- **[Orbit Local quickstart](#quickstart-orbit-local)** — index a repo and run queries in minutes, no server needed
+- **[User docs](https://docs.gitlab.com/orbit/)** — understand what Orbit does before changing it
+- **[`orbit::hackathon` issues](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/issues/?label_name%5B%5D=orbit%3A%3Ahackathon)** — curated issues for new contributors
+
+Most contributions don't require Rust experience: ontology YAML, docs, cookbook recipes, and language parser stubs are all approachable without deep Rust knowledge.
+
 ## Two ways to run Orbit
 
 ### Orbit Local

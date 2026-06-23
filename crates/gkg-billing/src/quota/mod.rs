@@ -104,7 +104,21 @@ impl QuotaService {
         record_decision(&gate_decision, cache_outcome, &inputs.source_type);
 
         match gate_decision {
-            QuotaGateDecision::Allow => Ok(()),
+            QuotaGateDecision::Allow => {
+                info!(
+                    user_id = inputs.user_id,
+                    realm = inputs.realm.as_deref().unwrap_or(""),
+                    root_namespace_id = inputs.root_namespace_id.unwrap_or_default(),
+                    global_user_id = inputs.global_user_id.as_deref().unwrap_or(""),
+                    instance_id = inputs.instance_id.as_deref().unwrap_or(""),
+                    unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
+                    source_type = %inputs.source_type,
+                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
+                    correlation_id = %correlation_id,
+                    "quota gate decision: allow"
+                );
+                Ok(())
+            }
             QuotaGateDecision::FailOpen => {
                 warn!(
                     user_id = inputs.user_id,
@@ -114,6 +128,7 @@ impl QuotaService {
                     instance_id = inputs.instance_id.as_deref().unwrap_or(""),
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
+                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: fail_open"
                 );
@@ -129,6 +144,7 @@ impl QuotaService {
                     unique_instance_id = inputs.unique_instance_id.as_deref().unwrap_or(""),
                     source_type = %inputs.source_type,
                     reason = ?reason,
+                    cache_hit = matches!(cache_outcome, CacheOutcome::Hit),
                     correlation_id = %correlation_id,
                     "quota gate decision: denied"
                 );

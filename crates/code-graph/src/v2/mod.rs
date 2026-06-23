@@ -1,6 +1,7 @@
 pub mod config;
 pub mod dsl;
 pub mod error;
+pub mod inventory;
 pub mod langs;
 pub mod linker;
 pub mod pipeline;
@@ -16,7 +17,7 @@ pub use error::{
     SkippedFile,
 };
 pub use pipeline::{
-    BatchTx, CancellationToken, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
+    BatchTx, CancellationToken, Decision, FamilyPipeline, FileInventoryEntry, FileTimingEntry,
     GenericPipeline, GraphStatsCounters, LanguageContext, LanguagePipeline, LanguageTimings,
     PhaseCpuObserver, PhaseTimings, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
 };

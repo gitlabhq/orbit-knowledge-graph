@@ -2,7 +2,12 @@
 experimental = true
 
 [hooks]
-postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
+postinstall = "if [ -z \"$CI\" ]; then mise run hooks:install; fi"
+# Auto-install lefthook git hooks when entering the project.
+# Closes the gap where a developer clones and forgets `mise run hooks:install` — hooks
+# become self-healing. Guarded: skips if lefthook isn't on PATH yet (fresh clone
+# before `mise install`) and skips if hooks are already installed.
+enter = 'test -n "$CI" || { common_dir=$(git rev-parse --git-common-dir 2>/dev/null) && test -f "$common_dir/hooks/pre-commit" && test -f "$common_dir/hooks/post-checkout"; } || { command -v lefthook >/dev/null 2>&1 && mise run hooks:install; true; }'
 
 [env]
 # GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
@@ -10,10 +15,6 @@ postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 # Do not use ~ (tilde is not expanded in variable values).
 GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}"
 
-
-# Path to Siphon repository for proto compilation (siphon-proto crate)
-# Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
-SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}/siphon"
 
 # Auto-download prebuilt DuckDB shared library on first build (cached in target/).
 DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
@@ -49,7 +50,7 @@ hyperfine = "1.20.0"
 "github:google/go-jsonnet" = "0.22.0"
 
 [tasks."hooks:install"]
-run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
+run = ["lefthook install --force", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
 
 [tasks."fuzz:compile"]

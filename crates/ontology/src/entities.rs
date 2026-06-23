@@ -329,6 +329,8 @@ pub struct NodeEntity {
     /// Whether this entity's table has a `traversal_path` column.
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
+    /// Non-namespaced global hub (e.g. User, Runner), declared `global: true`.
+    pub global: bool,
     /// ClickHouse-specific storage metadata for DDL generation.
     pub storage: NodeStorage,
 }
@@ -349,6 +351,7 @@ impl Default for NodeEntity {
             redaction: None,
             style: NodeStyle::default(),
             has_traversal_path: false,
+            global: false,
             storage: NodeStorage::default(),
         }
     }

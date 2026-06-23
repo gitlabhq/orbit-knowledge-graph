@@ -1,0 +1,68 @@
+name: Swift import extraction
+
+fixtures:
+  - path: Networking.swift
+    content: |
+      import Foundation
+      import UIKit
+      import UIKit.UIViewController
+      import struct Foundation.URL
+      import Combine
+
+      class NetworkClient {
+          func fetch() {}
+      }
+
+tests:
+  - name: Foundation is extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'Foundation'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Foundation" } }
+
+  - name: UIKit is extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'UIKit'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "UIKit" } }
+
+  - name: Dotted import UIKit.UIViewController extracts last segment as name
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'UIKit.UIViewController'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "UIViewController" } }
+
+  - name: Qualified import strips kind — Foundation.URL has URL as name
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'Foundation.URL'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "URL" } }
+
+  - name: Combine is extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'Combine'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "Combine" } }
+
+  - name: All five imports are extracted
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.path AS path
+    assert:
+      - { row_count: 5 }
+      - { no_nulls: path }

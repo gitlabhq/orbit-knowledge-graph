@@ -16,14 +16,16 @@ use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::hcl::{HclDsl, HclRules};
 use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
 use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
+use crate::v2::langs::generic::lua::{LuaDsl, LuaRules};
 use crate::v2::langs::generic::php::{PhpDsl, PhpRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
+use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
 use std::sync::Arc;
 
+use crate::v2::inventory::{FamilyFileInput, FileInput};
 use crate::v2::pipeline::{
-    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
-    PipelineContext, PipelineError,
+    BatchTx, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext, PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -109,7 +111,9 @@ register_v2_pipelines! {
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Elixir  => [GenericPipeline<ElixirDsl, ElixirRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
+    Lua     => [GenericPipeline<LuaDsl, LuaRules>],
     Php     => [GenericPipeline<PhpDsl, PhpRules>],
+    Swift   => [GenericPipeline<SwiftDsl, SwiftRules>],
     Rust    => [RustPipeline],
     Hcl     => [GenericPipeline<HclDsl, HclRules>],
     Tag("js") => [JsPipeline],

@@ -1,24 +1,28 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod descriptions;
 mod list;
+mod mcp;
 mod sql;
 mod sql_format;
 mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gitalisk_core::repository::gitalisk_repository::IterFileOptions;
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+/// Per-file byte cap for local indexing; files above it are recorded as nodes
+/// but not loaded or parsed.
+const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -141,7 +145,7 @@ struct Cli {
 enum Commands {
     /// Print the version string and exit.
     Version,
-    /// Index a code repository and output graph statistics as JSON
+    #[command(about = descriptions::INDEX_SHORT)]
     Index {
         /// Path to the repository to index
         #[arg(value_name = "PATH")]
@@ -159,7 +163,7 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
     },
-    /// Run a raw read-only SQL query against the local DuckDB graph.
+    #[command(about = descriptions::RUN_SQL_SHORT)]
     Sql {
         /// SQL query, or `-` to read from stdin.
         #[arg(value_name = "QUERY", conflicts_with = "file")]
@@ -177,7 +181,7 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
-    /// Describe the schema of the local DuckDB graph.
+    #[command(about = descriptions::GET_SCHEMA_SHORT)]
     Schema {
         /// Override the DuckDB path (default: ~/.orbit/graph.duckdb).
         #[arg(long, value_name = "PATH")]
@@ -203,6 +207,20 @@ enum Commands {
         #[arg(long, value_name = "PATH")]
         db: Option<PathBuf>,
     },
+    #[command(about = descriptions::MCP_SERVE_SHORT)]
+    #[command(long_about = "Serve the local graph to MCP-compatible AI agents.\n\n\
+                      Plug into editors that support MCP (Claude Code, Cursor, OpenCode, Codex) \
+                      so the agent can call `run_sql`, `get_graph_schema`, and `index`.")]
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpCommands {
+    /// Start a stateless MCP server over stdio.
+    Serve,
 }
 
 #[tokio::main]
@@ -247,35 +265,32 @@ async fn main() -> Result<()> {
         } => sql::run(query, file, format, db),
         Commands::Schema { db, raw, tables } => run_schema(db, raw, tables),
         Commands::List { format, db } => list::run(format, db),
+        Commands::Mcp {
+            command: McpCommands::Serve,
+        } => {
+            // Logs must go to stderr only — stdout is the MCP transport.
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(Level::INFO)
+                .with_target(false)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(std::io::stderr)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("setting default subscriber failed");
+            mcp::serve().await
+        }
     }
 }
 
-/// Describe the local DuckDB schema by reading `information_schema` from the
-/// graph database. Skips DuckDB's own `*_schema` namespaces.
-/// When `tables` is non-empty, only columns for those tables are returned.
 fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()> {
-    let db_path = workspace::resolve_db_path(db)?;
-    if !db_path.exists() {
-        anyhow::bail!(
-            "no local graph found at {}. Run `orbit index` first.",
-            db_path.display()
-        );
-    }
-
-    let client = duckdb_client::DuckDbClient::open_read_only(&db_path)
-        .with_context(|| format!("failed to open {}", db_path.display()))?;
+    let client = sql::open_graph(db)?;
 
     let batches = if tables.is_empty() {
-        let sql = "SELECT table_name, column_name, data_type \
-                   FROM information_schema.columns \
-                   WHERE table_schema = 'main' \
-                   ORDER BY table_name, ordinal_position";
-        client
-            .query_arrow(sql)
-            .context("failed to read information_schema.columns")?
+        sql::query(&client, sql::SCHEMA_INTROSPECTION_SQL)?
     } else {
         let placeholders = vec!["?"; tables.len()].join(", ");
-        let sql = format!(
+        let query = format!(
             "SELECT table_name, column_name, data_type \
              FROM information_schema.columns \
              WHERE table_schema = 'main' \
@@ -284,53 +299,34 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
         );
         let params: Vec<serde_json::Value> = tables.iter().map(|t| serde_json::json!(t)).collect();
         let batches = client
-            .query_arrow_json(&sql, &params)
+            .query_arrow_json(&query, &params)
             .context("failed to read information_schema.columns")?;
 
-        // Validate that all requested tables were found
-        if !batches.is_empty() {
-            let found_tables: std::collections::HashSet<String> = batches
-                .iter()
-                .flat_map(|batch| {
-                    if let Some(col) = batch.column_by_name("table_name")
-                        && let Some(string_array) =
-                            col.as_any().downcast_ref::<arrow::array::StringArray>()
-                    {
-                        return string_array
-                            .iter()
+        let found: std::collections::HashSet<String> = batches
+            .iter()
+            .flat_map(|batch| {
+                batch
+                    .column_by_name("table_name")
+                    .and_then(|col| col.as_any().downcast_ref::<arrow::array::StringArray>())
+                    .map(|arr| {
+                        arr.iter()
                             .filter_map(|s| s.map(String::from))
-                            .collect();
-                    }
-                    Vec::new()
-                })
-                .collect();
-
-            let missing: Vec<_> = tables
-                .iter()
-                .filter(|t| !found_tables.contains(*t))
-                .collect();
-            if !missing.is_empty() {
-                anyhow::bail!(
-                    "no table named {} in the local graph. Run `orbit schema` to list tables.",
-                    missing
-                        .iter()
-                        .map(|t| format!("'{}'", t))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-        } else if !tables.is_empty() {
-            // No results at all — all requested tables are missing
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+        let missing: Vec<_> = tables.iter().filter(|t| !found.contains(*t)).collect();
+        if !missing.is_empty() {
             anyhow::bail!(
                 "no table named {} in the local graph. Run `orbit schema` to list tables.",
-                tables
+                missing
                     .iter()
-                    .map(|t| format!("'{}'", t))
+                    .map(|t| format!("'{t}'"))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
         }
-
         batches
     };
 
@@ -343,12 +339,25 @@ fn run_schema(db: Option<PathBuf>, raw: bool, tables: Vec<String>) -> Result<()>
 }
 
 async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
+    for output in index_collect(path, threads, show_stats)? {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+    Ok(())
+}
+
+/// Synchronous (the pipeline and DuckDB driver both block), so async callers
+/// must wrap it in `spawn_blocking`.
+pub(crate) fn index_collect(
+    path: PathBuf,
+    threads: usize,
+    show_stats: bool,
+) -> Result<Vec<IndexOutput>> {
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
     if repos.is_empty() {
         info!("No git repositories found in {}", path.display());
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let ontology = Ontology::load_embedded().context("failed to load embedded ontology")?;
@@ -365,7 +374,6 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     }
 
     let pipeline_config = code_graph::v2::PipelineConfig {
-        max_file_size: 5_000_000,
         worker_threads: threads,
         per_file_timeout: Some(std::time::Duration::from_secs(2)),
         per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
@@ -376,6 +384,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     };
 
     let mut failed = 0usize;
+    let mut outputs = Vec::with_capacity(repos.len());
 
     for repo_path in &repos {
         let git = match workspace::git_info(repo_path) {
@@ -410,7 +419,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
             )?;
         }
 
-        let result = index_repo(&git, &store, &ontology, pipeline_config.clone()).await;
+        let result = index_repo(&git, &store, &ontology, pipeline_config.clone());
         match result {
             Ok(result) => {
                 let repo_name = git
@@ -420,7 +429,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
                     .unwrap_or_else(|| "repository".to_string());
                 let mut output = build_index_output(&repo_name, &key, &result, show_stats);
                 output.database_path = Some(db_path.display().to_string());
-                println!("{}", serde_json::to_string_pretty(&output)?);
+                outputs.push(output);
             }
             Err(e) => {
                 tracing::error!("failed to index {key}: {e:#}");
@@ -444,10 +453,10 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
     if failed > 0 {
         anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
     }
-    Ok(())
+    Ok(outputs)
 }
 
-async fn index_repo(
+fn index_repo(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
@@ -458,7 +467,15 @@ async fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let file_inventory = gitalisk_file_inventory(git)?;
+    let mut filter = code_graph::v2::config::CodeFilter::new(
+        MAX_INDEXED_FILE_BYTES,
+        0,
+        code_graph::v2::config::detect_language_from_path,
+    );
+    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
+        gkg_utils::walk::walk_dir(&git.repo_path, &mut filter)
+            .context("failed to walk repository files")?,
+    );
 
     let db_path = store.db_path();
     let client =
@@ -497,6 +514,7 @@ async fn index_repo(
         std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config.clone(),
+        filter.file_reasons(),
         tracer,
         converter,
         sink,
@@ -541,44 +559,6 @@ async fn index_repo(
         language_timings: v2_result.stats.language_timings,
         phase_timings: v2_result.stats.phase_timings,
     })
-}
-
-fn gitalisk_file_inventory(
-    git: &workspace::GitInfo,
-) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
-    let files = git
-        .repository()
-        .get_repo_files(IterFileOptions {
-            include_ignored: false,
-            include_hidden: true,
-            exclude_patterns: Vec::new(),
-        })
-        .with_context(|| {
-            format!(
-                "failed to list repository files with Gitalisk in {}",
-                git.repo_path.display()
-            )
-        })?;
-
-    let entries: Vec<_> = files
-        .into_iter()
-        .map(|file| {
-            let path = file.path();
-            let relative_path = path
-                .strip_prefix(&git.repo_path)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-            let size = std::fs::symlink_metadata(path)
-                .with_context(|| format!("failed to read metadata for {}", path.display()))?
-                .len();
-            Ok(code_graph::v2::FileInventoryEntry {
-                path: relative_path,
-                size,
-            })
-        })
-        .collect::<Result<_>>()?;
-    Ok(Arc::from(entries))
 }
 
 fn build_index_output(

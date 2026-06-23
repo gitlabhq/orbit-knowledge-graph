@@ -1,0 +1,73 @@
+name: Swift cross-file call resolution
+
+fixtures:
+  - path: Logger.swift
+    content: |
+      class Logger {
+          func log(message: String) {}
+          func warn(message: String) {}
+      }
+
+  - path: Service.swift
+    content: |
+      class Service {
+          func run() {
+              let logger = Logger()
+              logger.log(message: "started")
+              logger.warn(message: "retrying")
+          }
+      }
+
+tests:
+  - name: Logger class is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Logger'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class" } }
+
+  - name: Service class is indexed
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'Service'
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { type: "Class" } }
+
+  - name: Logger.log is indexed with correct FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Logger.log'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "log" } }
+
+  - name: Logger.warn is indexed with correct FQN
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Logger.warn'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 1 }
+
+  - name: Service.run calls Logger.log
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Service.run' AND callee.fqn = 'Logger.log'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: Service.run calls Logger.warn
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Service.run' AND callee.fqn = 'Logger.warn'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

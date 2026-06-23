@@ -178,6 +178,8 @@ The billing observer instruments the path from a successful query to a Snowplow 
 | `gkg.billing.events.emitted` | Counter | count | | Billing events handed to the Snowplow tracker after a successful query |
 | `gkg.billing.events.dropped` | Counter | count | `reason` (realm_missing / realm_unrecognized / event_build_failed) | Billing events not emitted because event construction failed |
 | `gkg.billing.events.rejected` | Counter | count | | Billing events refused by the labkit tracker at enqueue (queue full or shutdown). HTTP delivery failures occur in labkit's background loop and are not surfaced through this counter. |
+| `gkg.billing.events.delivered` | Counter | count | | Billing events confirmed delivered to the Snowplow collector (HTTP 2xx), via labkit's `on_success` callback. Unlike `emitted` (which counts enqueues), this counts events that actually reached the collector after retries. |
+| `gkg.billing.events.delivery_failed` | Counter | count | `reason` (non_retriable_status / retries_exhausted / auth / unknown) | Billing events permanently dropped by labkit's background loop without reaching the collector, via the `on_failure` callback. |
 
 *Quota gate metrics:*
 
@@ -271,6 +273,8 @@ Services are instrumented with OpenTelemetry for distributed tracing. A single r
 ### Health Checks
 
 The Indexer and Dispatcher expose `/live` and `/ready` endpoints on dedicated health ports (default 4202 and 4203 respectively). The `/ready` probe checks downstream dependencies (NATS, ClickHouse graph, ClickHouse datalake) and returns HTTP 503 when any are unreachable. Traffic is only routed to healthy instances.
+
+The HealthCheck service additionally exposes a read-only `/queue-depth` endpoint that connects to NATS and reports the code work-queue's pending and in-flight counts (`{ "code_pending": <n>, "code_in_flight": <n> }`) from JetStream consumer state. The stream and durable consumer names are resolved inside the application using the same versioned naming the indexer uses, so deployment charts stay naming-agnostic. This is the scaling signal consumed by KEDA for the code indexer.
 
 ## Self-Managed Instances
 

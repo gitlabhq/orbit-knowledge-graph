@@ -98,7 +98,7 @@ pub(super) fn emit_node_join_with_narrowing(
     )
 }
 
-/// JOIN a node's latest-row LIMIT BY scan into the FROM tree.
+/// JOIN a node's latest-row scan into the FROM tree (FINAL when broad, LIMIT BY when narrowed).
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -122,29 +122,42 @@ fn emit_node_join_inner(
 
     let selects = node_select_columns(alias, np);
     let mut wheres = latest_node_predicates(alias, np);
+    let narrowed = in_predicate.is_some();
     if let Some(in_predicate) = in_predicate {
         wheres.push(in_predicate);
     }
 
-    let mut order_by: Vec<OrderExpr> = sort_key
-        .iter()
-        .map(|col| OrderExpr::asc(Expr::col(alias, col)))
-        .collect();
-    order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
-
-    let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
-
-    let node_scan = TableRef::subquery(
-        Query {
-            select: vec![SelectExpr::star()],
-            from: TableRef::scan(table, alias),
-            where_clause: Expr::conjoin(wheres),
-            order_by,
-            limit_by: Some((1, limit_by_cols)),
-            ..Default::default()
-        },
-        alias,
-    );
+    // Broad target: FINAL streams deduped rows in PK order so the top-level LIMIT
+    // short-circuits the join. Narrowed target: candidate set is tiny, LIMIT 1 BY is cheaper.
+    let node_scan = if narrowed {
+        let mut order_by: Vec<OrderExpr> = sort_key
+            .iter()
+            .map(|col| OrderExpr::asc(Expr::col(alias, col)))
+            .collect();
+        order_by.push(OrderExpr::desc(Expr::col(alias, VERSION_COLUMN)));
+        let limit_by_cols: Vec<Expr> = sort_key.iter().map(|col| Expr::col(alias, col)).collect();
+        TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan(table, alias),
+                where_clause: Expr::conjoin(wheres),
+                order_by,
+                limit_by: Some((1, limit_by_cols)),
+                ..Default::default()
+            },
+            alias,
+        )
+    } else {
+        TableRef::subquery(
+            Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan_final(table, alias),
+                where_clause: Expr::conjoin(wheres),
+                ..Default::default()
+            },
+            alias,
+        )
+    };
 
     let joined = TableRef::join(
         JoinType::Inner,

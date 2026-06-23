@@ -3,12 +3,11 @@ description: >-
   Rails-authored system notes, parsed for cross-entity edges. A Rust transform
   parses each note body and resolves GFM references into edges.
 
-emits: [MENTIONS, REOPENED]
+emits: [MENTIONS]
 
 etl:
   type: query
   transform: system_notes
-  scope: namespaced
   source: siphon_notes
   from: siphon_notes AS sn
   select: >-

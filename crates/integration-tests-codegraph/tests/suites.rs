@@ -169,6 +169,11 @@ yaml_test!(
     "python/decorator_references.yaml"
 );
 yaml_test!(python_relative_imports, "python/relative_imports.yaml");
+yaml_test!(python_init_module_scope, "python/init_module_scope.yaml");
+yaml_test!(
+    python_relative_import_depth,
+    "python/relative_import_depth.yaml"
+);
 yaml_test!(
     python_dataclass_references,
     "python/dataclass_references.yaml"
@@ -285,6 +290,16 @@ yaml_test!(cpp_cross_language, "cpp/cross_language.yaml");
 yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
 yaml_test!(cpp_concepts, "cpp/concepts.yaml");
 yaml_test!(cpp_templates, "cpp/templates.yaml");
+
+// Swift
+yaml_test!(swift_definitions, "swift/definitions.yaml");
+yaml_test!(swift_imports, "swift/imports.yaml");
+yaml_test!(swift_cross_file_calls, "swift/cross_file_calls.yaml");
+
+// Lua
+yaml_test!(lua_definitions, "lua/definitions.yaml");
+yaml_test!(lua_requires, "lua/requires.yaml");
+yaml_test!(lua_cross_file_calls, "lua/cross_file_calls.yaml");
 
 // PHP
 yaml_test!(php_resolution, "php/resolution.yaml");

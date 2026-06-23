@@ -5119,6 +5119,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -5216,10 +5217,14 @@ dependencies = [
  "arrow 58.3.0",
  "chrono",
  "enum-as-inner",
+ "flate2",
+ "ignore",
  "rustc-hash 2.1.2",
  "serde_json",
  "strum 0.28.0",
+ "tar",
  "tempfile",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -5397,11 +5402,13 @@ dependencies = [
 name = "health-check"
 version = "0.1.0"
 dependencies = [
+ "async-nats",
  "axum",
  "clickhouse-client",
  "gkg-server-config",
  "k8s-openapi",
  "kube",
+ "nats-client",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -6009,7 +6016,6 @@ dependencies = [
  "query-engine",
  "rand 0.10.1",
  "regex",
- "reqwest 0.13.4",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
@@ -6150,6 +6156,7 @@ dependencies = [
  "cargo_metadata",
  "chrono",
  "clickhouse-client",
+ "code-graph",
  "compiler",
  "flate2",
  "futures",
@@ -6174,6 +6181,7 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.13.4",
+ "rustc-hash 2.1.2",
  "rustls",
  "serde",
  "serde_json",
@@ -6693,7 +6701,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "axum",
  "futures-util",
@@ -6724,7 +6732,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6742,7 +6750,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=f154f948#f154f948f0546471d724d9d11716098097d83a1e"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=1e235f49#1e235f49edd4c813edb88e711f1cc125d990909f"
 
 [[package]]
 name = "lance"
@@ -8344,6 +8352,8 @@ dependencies = [
  "mimalloc",
  "ontology",
  "query-engine",
+ "rmcp",
+ "schemars 1.2.1",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -9019,6 +9029,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "path_abs"
@@ -9857,9 +9873,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -11185,6 +11201,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rmcp"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0810a9f717d9828f475fe1f629f4c305c8464b7f496c3a854b58d29e65f4058e"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures",
+ "pastey",
+ "pin-project-lite",
+ "rmcp-macros",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "rmcp-macros"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aefac48c364756e97f04c0401ba3231e8607882c7c1d92da0437dc16307904d"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "roaring"
 version = "0.10.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11615,6 +11666,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
+ "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive 1.2.1",
@@ -12105,13 +12157,10 @@ checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 [[package]]
 name = "siphon-proto"
 version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/analytics-section/siphon.git?tag=0.0.103-beta#33d23acc0dbafdd2b33dedcf83adb448ff3827f7"
 dependencies = [
  "prost 0.14.4",
- "prost-build 0.14.3",
  "prost-types 0.14.3",
- "protoc-bin-vendored",
- "tonic-build",
- "tonic-prost-build",
 ]
 
 [[package]]
@@ -13472,6 +13521,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
+name = "tree-sitter-lua"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-php"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13512,6 +13571,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-swift"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe36052155b9dd69ca82b3b8f1b4ccfb2d867125ac1a4db1dd7331829242668c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-typescript"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13540,10 +13609,12 @@ dependencies = [
  "tree-sitter-hcl",
  "tree-sitter-java",
  "tree-sitter-kotlin-sg",
+ "tree-sitter-lua",
  "tree-sitter-php",
  "tree-sitter-python",
  "tree-sitter-ruby",
  "tree-sitter-rust",
+ "tree-sitter-swift",
  "tree-sitter-typescript",
 ]
 

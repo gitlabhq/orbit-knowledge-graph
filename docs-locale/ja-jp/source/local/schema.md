@@ -52,7 +52,7 @@ orbit schema
 
 ## Orbit Remoteとの違い {#differences-from-orbit-remote}
 
-[Orbit Remote](../remote/schema.md)は6つのドメインにわたる24のノードタイプをインデックス作成します。Orbit Localはソースコードドメインのみを対象としており、GitLabのデータ（マージリクエスト、パイプライン、ユーザー、脆弱性、作業アイテム）を必要とする機能は利用できません。
+[Orbit Remote](../remote/schema.md)は6つのドメインにわたる28のノードタイプをインデックス作成します。Orbit Localはソースコードドメインのみを対象としており、GitLabのデータ（マージリクエスト、パイプライン、ユーザー、脆弱性、作業アイテム）を必要とする機能は利用できません。
 
 ## 注意事項 {#notes}
 

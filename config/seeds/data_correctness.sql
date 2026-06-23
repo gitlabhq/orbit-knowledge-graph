@@ -244,9 +244,6 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note', ['state:opened'], []),
     ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note', ['state:opened'], []),
     ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff', ['state:opened'], []),
-    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff', ['state:opened'], []),
     ('1/100/', 1, 'User', 'AUTHORED', 4000, 'WorkItem', [], ['state:opened', 'wi_type:issue']),
     ('1/100/', 2, 'User', 'AUTHORED', 4001, 'WorkItem', [], ['state:closed', 'wi_type:incident']),
     ('1/101/', 1, 'User', 'AUTHORED', 4002, 'WorkItem', [], ['state:opened', 'wi_type:task']),
@@ -263,6 +260,11 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label', ['state:opened', 'wi_type:issue'], []),
     ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label', ['state:opened', 'wi_type:issue'], []),
     ('1/100/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label', ['state:closed', 'wi_type:incident'], []);
+
+INSERT INTO gl_diff_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff', ['state:opened'], []),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff', ['state:opened'], []),
+    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff', ['state:opened'], []);
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
     ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project', ['state:opened', 'wi_type:issue'], []),

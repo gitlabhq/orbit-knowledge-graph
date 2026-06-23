@@ -41,7 +41,7 @@ regex = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-siphon-proto = { path = "../siphon-proto" }
+siphon-proto = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
@@ -58,7 +58,6 @@ zstd = "0.13.3"
 gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 nats-client = { workspace = true, features = ["testkit"] }
-reqwest = { workspace = true, features = ["stream", "rustls"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
 tokio-stream = { workspace = true }
 

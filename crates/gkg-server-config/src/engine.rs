@@ -221,6 +221,10 @@ fn default_code_indexing_max_files() -> usize {
     1_000_000
 }
 
+fn default_code_indexing_max_total_bytes() -> u64 {
+    10_000_000_000
+}
+
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
     2000
 }
@@ -248,6 +252,11 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
+    /// Total discovered bytes above which a repository is skipped entirely
+    /// (indexed empty, then checkpointed). Bounds pathologically large repos.
+    /// 0 = no limit. Defaults to 10 GB.
+    #[serde(default = "default_code_indexing_max_total_bytes")]
+    pub max_total_bytes: u64,
     #[serde(default)]
     pub worker_threads: usize,
     #[serde(default)]
@@ -279,6 +288,7 @@ impl Default for CodeIndexingPipelineConfig {
         Self {
             max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
             max_files: default_code_indexing_max_files(),
+            max_total_bytes: default_code_indexing_max_total_bytes(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),

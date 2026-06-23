@@ -31,6 +31,8 @@ pub enum EmptyRepositoryReason {
     /// HTTP 200 OK with an empty or truncated archive body. Distinct from
     /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
+    /// Repository exceeded the total-bytes cap; indexed empty and checkpointed.
+    RepositoryTooLarge,
 }
 
 impl EmptyRepositoryReason {
@@ -39,6 +41,7 @@ impl EmptyRepositoryReason {
             EmptyRepositoryReason::NotFound => "not_found",
             EmptyRepositoryReason::ServerError => "server_error",
             EmptyRepositoryReason::EmptyArchive => "empty_archive",
+            EmptyRepositoryReason::RepositoryTooLarge => "repository_too_large",
         }
     }
 }
@@ -141,6 +144,12 @@ impl RepositoryResolver {
                 reason: EmptyRepositoryReason::EmptyArchive,
                 detail: format!(
                     "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                ),
+            }),
+            Err(RepositoryCacheError::RepositoryTooLarge) => Err(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::RepositoryTooLarge,
+                detail: format!(
+                    "repository for project {project_id} ref {ref_name} exceeded the total-bytes cap"
                 ),
             }),
             Err(e) => {
@@ -270,6 +279,7 @@ mod tests {
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             temp_dir.path().to_path_buf(),
             u64::MAX,
+            0,
             metrics,
         ));
         let resolver = RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache);

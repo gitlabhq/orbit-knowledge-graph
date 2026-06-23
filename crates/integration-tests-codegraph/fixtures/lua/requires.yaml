@@ -1,0 +1,49 @@
+name: "Lua: require imports"
+fixtures:
+  - path: app.lua
+    content: |
+      local utils = require("utils")
+      local json = require("vendor.json")
+      local socket = require "socket"
+      local mod = require("some.nested.module")
+
+tests:
+  - name: "Simple require extracts path and name"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'utils'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row: { path: "utils", name: "utils" } }
+
+  - name: "Dotted require: path = full, name = last segment"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'vendor.json'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row: { path: "vendor.json", name: "json" } }
+
+  - name: "require without parens is also extracted"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'socket'
+      RETURN i.path AS path
+    assert:
+      - { row: { path: "socket" } }
+
+  - name: "Deeply nested require: name is last segment"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'some.nested.module'
+      RETURN i.name AS name
+    assert:
+      - { row: { name: "module" } }
+
+  - name: "Total imports from app.lua"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path ENDS WITH 'app.lua'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 4 }

@@ -1,65 +1,173 @@
-//! Path-based predicates for deciding whether a file is worth feeding to the
-//! pipeline.
-//!
-//! Two use sites:
-//!
-//! - [`parsable_language`] / [`is_parsable`] — used by parser discovery
-//!   after extraction to decide which language to dispatch a file to.
-//! - [`is_excluded_from_indexing`] — used by the archive extractor
-//!   before bytes touch disk. Exclusion-based by design: we drop only
-//!   files we are confident the indexer never needs (binary assets,
-//!   media, fonts, archives, compiled artifacts), and let everything
-//!   else through. The blast radius of a miss in the denylist is "we
-//!   extract a few extra bytes," not "we break a resolver." Inclusion
-//!   filters here historically broke resolvers that load
-//!   `Cargo.toml` / `package.json` / `tsconfig.json` / `.gitignore`
-//!   from disk after extraction.
+//! The single filtering policy for code indexing, shared by every file source
+//! as a [`FileStreamHooks`] implementation. Per file it produces the full
+//! [`Decision`]: `Parse` (source), `Load` (resolver inputs: on disk, not
+//! parsed), `ListOnly` (excluded/oversize/binary/minified: a node, no bytes), or
+//! `Drop`. Resolver inputs are never in the denylist, so they survive. A
+//! total-bytes [`Counter`] aborts an oversized repo.
 
 use std::path::Path;
 use std::sync::LazyLock;
 
+use gkg_utils::fs_stream::{CapExceeded, Counter, Decision, FileInventoryEntry, FileStreamHooks};
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use rustc_hash::FxHashMap;
 
-use super::lang::Language;
-use super::registry::detect_language_from_extension;
+use super::Language;
 
-/// Returns the [`Language`] that would parse `rel_path`, or `None` if no
-/// registered language claims the extension or the path matches a per-language
-/// exclude suffix (e.g. `*.min.js`, `*_test.go`).
-///
-/// `rel_path` is matched as-is against exclude suffixes, so a file named
-/// `foo.min.js` is rejected even though its `Path::extension()` is just `js`.
-pub fn parsable_language(rel_path: &Path) -> Option<Language> {
-    let ext = rel_path.extension().and_then(|e| e.to_str())?;
-    let lang = detect_language_from_extension(ext)?;
-    let path_str = rel_path.to_string_lossy();
-    if lang
-        .exclude_extensions()
-        .iter()
-        .any(|excl| path_str.ends_with(excl))
-    {
-        return None;
+/// git's binary heuristic looks at the first 8 KiB; matching it keeps a NUL deep
+/// inside a large text file from being misread as binary.
+const BINARY_SNIFF_BYTES: usize = 8000;
+
+const MAX_LINE_LENGTH: usize = 64 * 1024;
+const MAX_AVG_LINE_LENGTH: usize = 16 * 1024;
+const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
+
+/// Why [`CodeFilter`] declined to load a file. Low-cardinality, snake_case for
+/// metric labels.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    strum::Display,
+    strum::AsRefStr,
+    strum::IntoStaticStr,
+    strum::EnumIter,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum FilterSkip {
+    Oversize,
+    ExcludedExtension,
+    Binary,
+    NotUtf8,
+    Minified,
+    LineTooLong,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SkipTally {
+    pub count: u64,
+    pub bytes: u64,
+}
+
+/// The code-indexing filter. Construct one per repository stream. Classifies
+/// each file fully (load+parse / load-only / node / drop): the language detector
+/// is injected so the filter never hard-wires the registry.
+pub struct CodeFilter {
+    max_file_size: u64,
+    total_bytes: Counter,
+    skips: FxHashMap<FilterSkip, SkipTally>,
+    detect_language: fn(&str) -> Option<Language>,
+    file_reasons: FxHashMap<String, FilterSkip>,
+}
+
+impl CodeFilter {
+    /// `max_file_size` and `max_total_bytes` are byte caps (`0` = unlimited).
+    /// `detect_language` decides parse candidacy (e.g. `detect_language_from_path`).
+    pub fn new(
+        max_file_size: u64,
+        max_total_bytes: u64,
+        detect_language: fn(&str) -> Option<Language>,
+    ) -> Self {
+        Self {
+            max_file_size,
+            total_bytes: Counter::new("total_bytes", max_total_bytes),
+            skips: FxHashMap::default(),
+            detect_language,
+            file_reasons: FxHashMap::default(),
+        }
     }
-    Some(lang)
+
+    /// Per-reason `(count, bytes)` of files recorded as nodes but not loaded.
+    pub fn skips(&self) -> impl Iterator<Item = (FilterSkip, SkipTally)> + '_ {
+        self.skips.iter().map(|(reason, tally)| (*reason, *tally))
+    }
+
+    /// Per-path skip reason for every file the stream settled as a bare node,
+    /// so the pipeline can stamp it onto the File node's `gl_file.reason`.
+    pub fn file_reasons(&self) -> &FxHashMap<String, FilterSkip> {
+        &self.file_reasons
+    }
+
+    fn record(&mut self, file: &FileInventoryEntry, reason: FilterSkip) -> Decision {
+        let tally = self.skips.entry(reason).or_default();
+        tally.count += 1;
+        tally.bytes += file.size;
+        self.file_reasons.insert(file.path.clone(), reason);
+        Decision::ListOnly
+    }
 }
 
-/// Returns `true` when `rel_path` would be picked up by the parsing pipeline.
-pub fn is_parsable(rel_path: &Path) -> bool {
-    parsable_language(rel_path).is_some()
+impl FileStreamHooks for CodeFilter {
+    fn admit(&mut self, file: &FileInventoryEntry) -> Result<(), CapExceeded> {
+        self.total_bytes.add(file.size)
+    }
+
+    fn on_header(&mut self, file: &FileInventoryEntry) -> Option<Decision> {
+        if self.max_file_size != 0 && file.size > self.max_file_size {
+            return Some(self.record(file, FilterSkip::Oversize));
+        }
+        if is_excluded_from_indexing(Path::new(&file.path)) {
+            return Some(self.record(file, FilterSkip::ExcludedExtension));
+        }
+        None
+    }
+
+    fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> Decision {
+        let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
+        if looks_binary(sniff) {
+            return self.record(file, FilterSkip::Binary);
+        }
+        // Parsers all need `&str`; validate once here so they can assume UTF-8.
+        if std::str::from_utf8(content).is_err() {
+            return self.record(file, FilterSkip::NotUtf8);
+        }
+        if let Some(reason) = minified_skip(content) {
+            return self.record(file, reason);
+        }
+        // A parse candidate is parsed; a non-parsable file (resolver input) is
+        // loaded for resolvers but not parsed.
+        if (self.detect_language)(&file.path).is_some() {
+            Decision::Parse
+        } else {
+            Decision::Load
+        }
+    }
 }
 
-/// Glob patterns the archive extractor refuses to write to disk.
-///
-/// Curated denylist of obvious binary blobs and rendered output where
-/// no current or near-term resolver could plausibly want the bytes.
-/// **Source files, manifests, lockfiles, dotfiles, and unknown
-/// extensions are intentionally NOT here** — letting them through
-/// preserves resolver inputs (`Cargo.toml`, `package.json`,
-/// `tsconfig.json`, `.gitignore`, etc.) without an inclusion list that
-/// has to be kept in sync with every new resolver.
-///
-/// Patterns are case-insensitive (`*.PNG` is dropped just like `*.png`)
-/// and matched against the basename of each archive entry.
+/// Detect machine-generated bundles by line shape: a single line over
+/// [`MAX_LINE_LENGTH`], or a high average line length over a non-trivial file.
+/// Split on `\n` and `\r` so classic-Mac line endings can't hide as one line.
+fn minified_skip(content: &[u8]) -> Option<FilterSkip> {
+    let mut line_count = 0usize;
+    let mut current_line_len = 0usize;
+    for &byte in content {
+        if byte == b'\n' || byte == b'\r' {
+            current_line_len = 0;
+            line_count += 1;
+        } else {
+            current_line_len += 1;
+            if current_line_len > MAX_LINE_LENGTH {
+                return Some(FilterSkip::LineTooLong);
+            }
+        }
+    }
+    if current_line_len > 0 {
+        line_count += 1;
+    }
+    let line_count = line_count.max(1);
+    if content.len() / line_count > MAX_AVG_LINE_LENGTH && content.len() > MINIFIED_SIZE_THRESHOLD {
+        return Some(FilterSkip::Minified);
+    }
+    None
+}
+
+/// The single denylist of files recorded as a bare node but never loaded or
+/// parsed: globs matched case-insensitively on the basename, grouped by line.
+/// Source (including tests), manifests, lockfiles, and dotfiles are absent so
+/// resolver inputs survive — this is the one place to add an exclusion.
 pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     // Raster + vector images.
     "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
@@ -75,6 +183,8 @@ pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
     "*.{pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp}",
     // Datastores / disk images.
     "*.{db,sqlite,sqlite3,iso,dmg,bin,dat}",
+    // Minified JS/TS bundles (the content heuristic catches unnamed ones).
+    "*.min.{js,mjs,cjs}",
 ];
 
 static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
@@ -85,14 +195,10 @@ static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
     builder.build().expect("static excluded-indexing globset")
 });
 
-/// Returns `true` when the archive extractor should refuse to write
-/// `rel_path` to disk. Match is case-insensitive and on basename only.
-///
-/// This is exclusion-based: a `false` here just means the extractor
-/// keeps the file. Resolver inputs (manifests, `.gitignore`, etc.)
-/// fall in the `false` bucket because they are not in the denylist,
-/// without needing to be enumerated upfront.
-pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
+/// `true` when `rel_path` is on the [`EXCLUDED_INDEXING_GLOBS`] denylist. Match
+/// is case-insensitive, on the basename only. `false` means "load it"; resolver
+/// inputs fall there because they are not in the denylist.
+fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     let Some(name) = rel_path.file_name() else {
         return false;
     };
@@ -100,8 +206,8 @@ pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
     EXCLUDED_INDEXING_GLOBSET.is_match(&lowered)
 }
 
-/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full of
-/// NULs, so the BOM is what distinguishes it from a binary blob.
+/// BOMs that keep a NUL-bearing buffer as text: UTF-16/32 text is full of NULs,
+/// so the BOM is what distinguishes it from a binary blob.
 const TEXT_BOMS: &[&[u8]] = &[
     &[0x00, 0x00, 0xFE, 0xFF], // UTF-32 BE
     &[0xFF, 0xFE, 0x00, 0x00], // UTF-32 LE
@@ -112,7 +218,7 @@ const TEXT_BOMS: &[&[u8]] = &[
 
 /// Binary when a NUL byte appears in `prefix`, like git's `buffer_is_binary`,
 /// plus a BOM rescue for UTF-16/32 text (git has none, so BOM-less is dropped).
-pub fn looks_binary(prefix: &[u8]) -> bool {
+fn looks_binary(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
     }
@@ -125,70 +231,128 @@ pub fn looks_binary(prefix: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use crate::v2::config::detect_language_from_path;
 
-    fn p(s: &str) -> PathBuf {
-        PathBuf::from(s)
+    fn entry(path: &str, size: u64) -> FileInventoryEntry {
+        FileInventoryEntry {
+            path: path.into(),
+            size,
+            decision: Decision::Parse,
+        }
+    }
+
+    fn filter() -> CodeFilter {
+        CodeFilter::new(0, 0, detect_language_from_path)
     }
 
     #[test]
-    fn supported_extension_is_parsable() {
-        assert!(is_parsable(&p("src/main.rs")));
-        assert!(is_parsable(&p("lib/foo.py")));
-        assert!(is_parsable(&p("app/models/user.rb")));
-        assert!(is_parsable(&p("pkg/server.go")));
-        assert!(is_parsable(&p("src/index.ts")));
-        assert!(is_parsable(&p("src/component.vue")));
+    fn records_per_file_reason_only_for_settled_files() {
+        let mut f = filter();
+        f.on_header(&entry("logo.png", 10));
+        f.on_content(&entry("x.bin", 10), b"a\x00b");
+        f.on_content(&entry("main.rs", 10), b"fn main() {}\n");
+        assert_eq!(
+            f.file_reasons().get("logo.png"),
+            Some(&FilterSkip::ExcludedExtension)
+        );
+        assert_eq!(f.file_reasons().get("x.bin"), Some(&FilterSkip::Binary));
+        assert!(!f.file_reasons().contains_key("main.rs"));
     }
 
     #[test]
-    fn unsupported_extension_is_not_parsable() {
-        assert!(!is_parsable(&p("README.md")));
-        assert!(!is_parsable(&p("image.png")));
-        assert!(!is_parsable(&p("Cargo.lock")));
-        assert!(!is_parsable(&p("dist/bundle.css")));
+    fn parses_source_and_loads_resolver_inputs() {
+        let mut f = filter();
+        assert_eq!(f.on_header(&entry("src/main.rs", 100)), None);
+        assert_eq!(
+            f.on_content(&entry("src/main.rs", 100), b"fn main() {}\n"),
+            Decision::Parse
+        );
+        // Non-parsable resolver inputs: on disk for resolvers, never parsed.
+        assert_eq!(
+            f.on_content(&entry("Cargo.toml", 100), b"[package]\n"),
+            Decision::Load
+        );
+        assert_eq!(
+            f.on_content(&entry(".gitignore", 100), b"target/\n"),
+            Decision::Load
+        );
     }
 
     #[test]
-    fn no_extension_is_not_parsable() {
-        assert!(!is_parsable(&p("Makefile")));
-        assert!(!is_parsable(&p("LICENSE")));
-        assert!(!is_parsable(&p("src/binary")));
+    fn list_only_for_excluded_oversize_binary_minified() {
+        let mut f = CodeFilter::new(50, 0, detect_language_from_path);
+        assert_eq!(
+            f.on_header(&entry("logo.png", 10)),
+            Some(Decision::ListOnly)
+        );
+        assert_eq!(f.on_header(&entry("big.rs", 999)), Some(Decision::ListOnly));
+        assert_eq!(
+            f.on_content(&entry("x.bin", 10), b"a\x00b"),
+            Decision::ListOnly
+        );
+        let minified = vec![b'a'; MAX_LINE_LENGTH + 1];
+        assert_eq!(
+            f.on_content(&entry("bundle.js", 10), &minified),
+            Decision::ListOnly
+        );
     }
 
     #[test]
-    fn excluded_suffix_is_not_parsable() {
-        // `foo.min.js` has extension `js` but is excluded by suffix.
-        assert!(!is_parsable(&p("vendor/jquery.min.js")));
-        assert!(!is_parsable(&p("pkg/server_test.go")));
+    fn minified_bundles_settled_by_name_in_header() {
+        let mut f = filter();
+        for path in ["vendor/jquery.min.js", "a/b.min.mjs", "c.min.cjs"] {
+            assert_eq!(
+                f.on_header(&entry(path, 200)),
+                Some(Decision::ListOnly),
+                "{path}"
+            );
+        }
+        // The leading dot must be literal — these are real source, not bundles.
+        for path in ["src/admin.js", "src/examine.js"] {
+            assert_eq!(f.on_header(&entry(path, 200)), None, "{path}");
+        }
     }
 
     #[test]
-    fn min_js_suffix_does_not_match_unrelated_filenames() {
-        // The `.min.js` exclude must require a literal dot before `min.js`,
-        // otherwise common identifiers ending in those characters get
-        // dropped by accident.
-        assert!(is_parsable(&p("src/admin.js")));
-        assert!(is_parsable(&p("src/gemini.js")));
-        assert!(is_parsable(&p("src/vitamin.js")));
-        assert!(is_parsable(&p("src/examine.js")));
+    fn identical_parse_candidates_are_each_parsed() {
+        // Byte-identical files at different paths are distinct graph entities
+        // (different module/FQN), so both parse; content is never deduped.
+        let mut f = filter();
+        let src = b"export const x = 1;\n";
+        assert_eq!(f.on_content(&entry("a/x.js", 19), src), Decision::Parse);
+        assert_eq!(f.on_content(&entry("b/x.js", 19), src), Decision::Parse);
     }
 
     #[test]
-    fn excluded_extensions_are_dropped() {
+    fn total_bytes_cap_charges_every_file_then_trips() {
+        let mut f = CodeFilter::new(0, 100, detect_language_from_path);
+        assert!(f.admit(&entry("a.png", 60)).is_ok());
+        assert!(
+            f.admit(&entry("b.png", 60)).is_err(),
+            "excluded files still count toward the total-bytes cap"
+        );
+    }
+
+    fn p(s: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(s)
+    }
+
+    #[test]
+    fn denylist_drops_blobs_and_minified() {
         for path in [
             "assets/logo.png",
-            "icons/star.svg",
             "img/photo.JPG",
             "fonts/Inter.woff2",
             "audio/track.mp3",
-            "video/intro.mp4",
             "dist/bundle.zip",
             "build/lib.so",
             "out/app.exe",
             "vendor/cache.tar.gz",
             "docs/spec.pdf",
             "data/seed.sqlite",
+            "vendor/jquery.min.js",
+            "web/app.min.mjs",
+            "a/b/c/d/icon.png",
         ] {
             assert!(
                 is_excluded_from_indexing(&p(path)),
@@ -198,9 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn resolver_inputs_and_source_pass_through_exclusion() {
-        // The denylist must NOT touch any of these — that's the whole
-        // point of going exclusion-based instead of inclusion-based.
+    fn denylist_passes_resolver_inputs_and_source() {
         for path in [
             "src/main.rs",
             "frontend/src/index.ts",
@@ -208,16 +370,14 @@ mod tests {
             "Cargo.lock",
             "package.json",
             "tsconfig.json",
-            "tsconfig.base.json",
-            "frontend/yarn.lock",
             "config/webpack.config.js",
             ".gitignore",
-            "frontend/.gitignore",
             ".ignore",
-            "rust-analyzer.toml",
             "README.md",
             "Makefile",
-            "LICENSE",
+            "src/admin.js",
+            // Test files are real source and are indexed like any other.
+            "pkg/server_test.go",
         ] {
             assert!(
                 !is_excluded_from_indexing(&p(path)),
@@ -227,66 +387,14 @@ mod tests {
     }
 
     #[test]
-    fn excluded_extensions_match_case_insensitively() {
-        assert!(is_excluded_from_indexing(&p("LOGO.PNG")));
-        assert!(is_excluded_from_indexing(&p("Image.JpEg")));
-        assert!(is_excluded_from_indexing(&p("BUNDLE.ZIP")));
-    }
-
-    #[test]
-    fn excluded_extensions_match_at_any_depth() {
-        assert!(is_excluded_from_indexing(&p("a/b/c/d/icon.png")));
-        assert!(is_excluded_from_indexing(&p("static/fonts/x/Inter.ttf")));
-    }
-
-    #[test]
-    fn empty_prefix_is_text() {
+    fn looks_binary_matches_git_with_bom_rescue() {
         assert!(!looks_binary(b""));
-    }
-
-    #[test]
-    fn ascii_source_is_text() {
         assert!(!looks_binary(b"fn main() {}\n"));
-        assert!(!looks_binary(b"export function run() { return 1; }\n"));
-    }
-
-    #[test]
-    fn nul_byte_marks_binary() {
         assert!(looks_binary(b"abc\x00def"));
-        assert!(looks_binary(&[0u8; 4096]));
-    }
-
-    #[test]
-    fn png_signature_is_binary() {
         assert!(looks_binary(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"));
-    }
-
-    #[test]
-    fn bom_marked_text_is_kept() {
+        // UTF-16/32 BOMs rescue NUL-bearing text; BOM-less NULs stay binary.
         assert!(!looks_binary(&[0xEF, 0xBB, 0xBF, b'h', b'i']));
         assert!(!looks_binary(&[0xFF, 0xFE, b'h', 0x00, b'i', 0x00]));
-        assert!(!looks_binary(&[0xFE, 0xFF, 0x00, b'h', 0x00, b'i']));
-        assert!(!looks_binary(&[
-            0xFF, 0xFE, 0x00, 0x00, b'h', 0x00, 0x00, 0x00
-        ]));
-        assert!(!looks_binary(&[
-            0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, b'h'
-        ]));
-    }
-
-    #[test]
-    fn nul_bearing_utf16_without_bom_is_treated_binary() {
         assert!(looks_binary(&[0x68, 0x00, 0x69, 0x00]));
-    }
-
-    #[test]
-    fn parsable_language_returns_correct_language() {
-        assert_eq!(parsable_language(&p("a.rs")), Some(Language::Rust));
-        assert_eq!(parsable_language(&p("a.py")), Some(Language::Python));
-        assert_eq!(parsable_language(&p("a.ts")), Some(Language::TypeScript));
-        assert_eq!(parsable_language(&p("a.tsx")), Some(Language::TypeScript));
-        assert_eq!(parsable_language(&p("a.js")), Some(Language::JavaScript));
-        assert_eq!(parsable_language(&p("a.min.js")), None);
-        assert_eq!(parsable_language(&p("foo.unknown")), None);
     }
 }

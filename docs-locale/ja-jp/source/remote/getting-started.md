@@ -108,6 +108,6 @@ curl --request POST \
 ## 次に試すこと {#what-to-try-next}
 
 - [Orbitのインデックス対象](indexing.md) - クエリを作成する前にカバレッジを理解する
-- [スキーマリファレンス](schema.md) - 24種類のノードタイプとそのプロパティを確認する
+- [スキーマリファレンス](schema.md) - 28種類のノードタイプとそのプロパティを確認する
 - [Cookbook](cookbook.md) - 一般的なユースケース向けのコピー&ペーストクエリ
 - [Orbit Localを使ってみる](../local/getting-started.md) - ローカルリポジトリをオフラインでクエリする

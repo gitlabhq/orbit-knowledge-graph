@@ -2,6 +2,26 @@
   "$generated_by": "cargo xtask metrics-catalog - do not edit",
   "metrics": [
     {
+      "otel_name": "gkg.billing.events.delivered",
+      "prom_name": "gkg_billing_events_delivered_total",
+      "description": "Billing events confirmed handed over to the Snowplow collector (HTTP 2xx), reported by the emitter's on_success callback. Unlike `emitted` (which counts enqueues), this counts events that actually reached the collector after retries.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.delivery_failed",
+      "prom_name": "gkg_billing_events_delivery_failed_total",
+      "description": "Billing events permanently dropped by the emitter without reaching the collector, reported by the on_failure callback: a non-retriable status, exhausted retries, auth failure, or an unknown future variant.",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
       "otel_name": "gkg.billing.events.dropped",
       "prom_name": "gkg_billing_events_dropped_total",
       "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
@@ -417,7 +437,7 @@
     {
       "otel_name": "gkg.indexer.code.archive.entries.skipped",
       "prom_name": "gkg_indexer_code_archive_entries_skipped_total",
-      "description": "Tar archive entries dropped before extraction so they never touch disk. Reasons: `excluded_extension` (basename matches the binary-asset / media / archive denylist in `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue).",
+      "description": "Files the stream recorded as a graph node but did not load or parse (and, for the tar source, did not write to disk). Reasons: `excluded_extension` (basename matches the `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS` denylist — binary assets, media, archives, minified bundles), `oversize` (declared size exceeds the configured per-file ceiling), `binary` (a NUL byte in the first 8000 bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid UTF-8), `minified` / `line_too_long` (high average line length or a >64 KiB line).",
       "kind": "counter",
       "labels": [
         "reason"
@@ -495,7 +515,7 @@
     {
       "otel_name": "gkg.indexer.code.files.skipped",
       "prom_name": "gkg_indexer_code_files_skipped_total",
-      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `parser_oversize`, `arrow_offset_overflow`, `unsafe_path`, and per-phase CPU-budget timeouts `timeout_parse`, `timeout_walk`, `timeout_ssa`, `timeout_sentinel`.",
       "kind": "counter",
       "labels": [
         "reason"

@@ -2,6 +2,7 @@
 
 node_type: User
 domain: core
+global: true
 description: A GitLab user account
 label: username
 destination_table: gl_user
@@ -166,7 +167,6 @@ properties:
 
 etl:
   type: table
-  scope: global
   source: siphon_users
 
 storage:
@@ -175,7 +175,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: username, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: email, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}

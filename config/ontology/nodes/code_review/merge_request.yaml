@@ -319,7 +319,6 @@ etl:
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
   type: query
-  scope: namespaced
   source: merge_requests
   select: >-
     m.id AS id,
@@ -535,7 +534,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -550,7 +549,7 @@ storage:
     - {name: merge_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

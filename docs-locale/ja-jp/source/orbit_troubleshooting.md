@@ -1,11 +1,11 @@
 ---
-redirect_to: 'remote/_index.md'
+redirect_to: 'troubleshooting.md'
 remove_date: '2026-08-07'
 ---
 
 <!-- markdownlint-disable -->
 
-このドキュメントは[別の場所](remote/_index.md)に移動しました。
+このドキュメントは[別の場所](troubleshooting.md)に移動しました。
 
 <!-- This redirect file can be deleted after <2026-08-07>. -->
 
