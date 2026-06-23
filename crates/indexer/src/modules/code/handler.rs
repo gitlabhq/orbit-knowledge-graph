@@ -37,7 +37,7 @@ pub struct CodeIndexingTaskHandler {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
     lock_ttl: Duration,
-    lock_renew_interval: Duration,
+    progress_heartbeat_interval: Duration,
     subscription: Subscription,
     analytics: IndexingAnalytics,
 }
@@ -53,7 +53,7 @@ impl CodeIndexingTaskHandler {
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
         lock_ttl: Duration,
-        lock_renew_interval: Duration,
+        progress_heartbeat_interval: Duration,
         subscription: Subscription,
         analytics: IndexingAnalytics,
     ) -> Self {
@@ -63,7 +63,7 @@ impl CodeIndexingTaskHandler {
             checkpoint_store,
             metrics,
             lock_ttl,
-            lock_renew_interval,
+            progress_heartbeat_interval,
             subscription,
             analytics,
         }
@@ -259,14 +259,9 @@ impl CodeIndexingTaskHandler {
         let project_id = request.project_id;
         let key = project_lock_key(project_id, branch);
 
-        let _guard = match LockGuard::acquire(
-            context.lock_service.clone(),
-            &key,
-            self.lock_ttl,
-            self.lock_renew_interval,
-        )
-        .await
-        .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
+        let _guard = match LockGuard::acquire(context.lock_service.clone(), &key, self.lock_ttl)
+            .await
+            .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))?
         {
             Some(guard) => guard,
             None => {
@@ -286,6 +281,24 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
+        // One heartbeat keeps the job alive while it runs: each tick resets the
+        // NATS ack_wait timer and renews the lock lease, so a long fetch/index is
+        // neither redelivered nor has its lock stolen by a second worker.
+        let heartbeat = {
+            let progress = context.progress.clone().with_lock_renewal(
+                context.lock_service.clone(),
+                key.clone(),
+                self.lock_ttl,
+            );
+            let interval = self.progress_heartbeat_interval;
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(interval).await;
+                    progress.notify_in_progress().await;
+                }
+            })
+        };
+
         let result = self
             .pipeline
             .index_project(
@@ -301,6 +314,8 @@ impl CodeIndexingTaskHandler {
                 observer,
             )
             .await;
+
+        heartbeat.abort();
 
         context
             .indexing_status

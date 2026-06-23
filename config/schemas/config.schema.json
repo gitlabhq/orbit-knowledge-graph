@@ -197,9 +197,9 @@
         "consumer_inactive_threshold_secs": 3600,
         "consumer_name": null,
         "fetch_expires_secs": 5,
-        "lock_lease_renew_interval_secs": 150,
         "max_deliver": 5,
         "password": null,
+        "progress_heartbeat_interval_secs": 150,
         "request_timeout_secs": 5,
         "stream_max_age_secs": 14400,
         "stream_max_bytes": null,
@@ -1062,13 +1062,6 @@
           "default": 5,
           "minimum": 0
         },
-        "lock_lease_renew_interval_secs": {
-          "description": "How often (seconds) a held indexing lock's lease is renewed, on its own\nclock independent of `ack_wait`. Must be less than `ack_wait_secs` so the\nlease never lapses mid-job. Defaults to 150 (half the default ack_wait).",
-          "type": "integer",
-          "format": "uint64",
-          "default": 150,
-          "minimum": 0
-        },
         "max_deliver": {
           "description": "Maximum redelivery attempts. None means unlimited. Defaults to 5.",
           "type": [
@@ -1086,6 +1079,13 @@
             "null"
           ],
           "default": null
+        },
+        "progress_heartbeat_interval_secs": {
+          "description": "How often (seconds) a running indexing job emits an in-progress heartbeat,\nwhich resets the `ack_wait` timer and renews its lock lease in one beat.\nMust be less than `ack_wait_secs`. Defaults to 150 (half the default).",
+          "type": "integer",
+          "format": "uint64",
+          "default": 150,
+          "minimum": 0
         },
         "request_timeout_secs": {
           "description": "Request timeout in seconds. Defaults to 5.",

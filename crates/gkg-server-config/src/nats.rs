@@ -51,11 +51,11 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
     pub ack_wait_secs: u64,
 
-    /// How often (seconds) a held indexing lock's lease is renewed, on its own
-    /// clock independent of `ack_wait`. Must be less than `ack_wait_secs` so the
-    /// lease never lapses mid-job. Defaults to 150 (half the default ack_wait).
-    #[serde(default = "NatsConfiguration::default_lock_lease_renew_interval_secs")]
-    pub lock_lease_renew_interval_secs: u64,
+    /// How often (seconds) a running indexing job emits an in-progress heartbeat,
+    /// which resets the `ack_wait` timer and renews its lock lease in one beat.
+    /// Must be less than `ack_wait_secs`. Defaults to 150 (half the default).
+    #[serde(default = "NatsConfiguration::default_progress_heartbeat_interval_secs")]
+    pub progress_heartbeat_interval_secs: u64,
 
     /// Maximum redelivery attempts. None means unlimited. Defaults to 5.
     #[serde(default = "NatsConfiguration::default_max_deliver")]
@@ -142,7 +142,7 @@ impl NatsConfiguration {
         300
     }
 
-    fn default_lock_lease_renew_interval_secs() -> u64 {
+    fn default_progress_heartbeat_interval_secs() -> u64 {
         150
     }
 
@@ -255,8 +255,8 @@ impl NatsConfiguration {
         Duration::from_secs(self.ack_wait_secs)
     }
 
-    pub fn lock_lease_renew_interval(&self) -> Duration {
-        Duration::from_secs(self.lock_lease_renew_interval_secs)
+    pub fn progress_heartbeat_interval(&self) -> Duration {
+        Duration::from_secs(self.progress_heartbeat_interval_secs)
     }
 
     /// Returns buffer size, clamped to at least 1.
@@ -290,7 +290,7 @@ impl Default for NatsConfiguration {
             connection_timeout_secs: Self::default_connection_timeout_secs(),
             request_timeout_secs: Self::default_request_timeout_secs(),
             ack_wait_secs: Self::default_ack_wait_secs(),
-            lock_lease_renew_interval_secs: Self::default_lock_lease_renew_interval_secs(),
+            progress_heartbeat_interval_secs: Self::default_progress_heartbeat_interval_secs(),
             max_deliver: Self::default_max_deliver(),
             subscription_buffer_size: Self::default_subscription_buffer_size(),
             consumer_name: None,

@@ -91,6 +91,7 @@ impl NatsMessage {
     pub fn progress_notifier(&self) -> ProgressNotifier {
         ProgressNotifier {
             acker: Some(self.acker.clone()),
+            lock_renewal: None,
         }
     }
 
@@ -155,25 +156,57 @@ pub enum DlqResult {
     Nacked,
 }
 
-/// Tells NATS "I'm still working on this" so it doesn't redeliver the message.
-///
-/// Each call resets the `ack_wait` timer back to its full duration.
+/// A held lock the notifier should keep alive alongside the NATS ack.
+#[derive(Clone)]
+struct LockRenewal {
+    service: Arc<dyn crate::locking::LockService>,
+    key: String,
+    ttl: Duration,
+}
+
+/// Tells NATS "I'm still working on this" so it doesn't redeliver the message,
+/// and (when a lock is attached) renews that lock's lease in the same beat — so
+/// one "still alive" signal keeps both the `ack_wait` timer and the lock alive.
 #[derive(Clone)]
 pub struct ProgressNotifier {
     acker: Option<Arc<dyn MessageAcker>>,
+    lock_renewal: Option<LockRenewal>,
 }
 
 impl ProgressNotifier {
     pub fn noop() -> Self {
-        Self { acker: None }
+        Self {
+            acker: None,
+            lock_renewal: None,
+        }
     }
 
-    /// Resets the ack wait timer, preventing redelivery while processing continues.
+    /// Attach a held lock so every in-progress notification also renews its
+    /// lease, on the same cadence as the ack and decoupled from `ack_wait`.
+    pub fn with_lock_renewal(
+        mut self,
+        service: Arc<dyn crate::locking::LockService>,
+        key: String,
+        ttl: Duration,
+    ) -> Self {
+        self.lock_renewal = Some(LockRenewal { service, key, ttl });
+        self
+    }
+
+    /// Resets the ack wait timer (preventing redelivery while processing
+    /// continues) and renews the attached lock lease, if any.
     pub async fn notify_in_progress(&self) {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await
         {
             warn!(%error, "failed to send in-progress ack");
+        }
+        if let Some(renewal) = &self.lock_renewal {
+            match renewal.service.renew(&renewal.key, renewal.ttl).await {
+                Ok(true) => {}
+                Ok(false) => warn!(key = %renewal.key, "lock lease lost during in-progress notify"),
+                Err(error) => warn!(key = %renewal.key, %error, "lock lease renewal failed"),
+            }
         }
     }
 }

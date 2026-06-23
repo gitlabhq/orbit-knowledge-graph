@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
-use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::nats::{KvPutOptions, KvPutResult};
@@ -31,7 +30,6 @@ pub trait LockService: Send + Sync {
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
-    renewer: Option<JoinHandle<()>>,
 }
 
 impl LockGuard {
@@ -39,53 +37,18 @@ impl LockGuard {
         service: Arc<dyn LockService>,
         key: &str,
         ttl: Duration,
-        renew_interval: Duration,
     ) -> Result<Option<Self>, LockError> {
         if service.try_acquire(key, ttl).await? {
-            let renewer = Some(Self::spawn_renewer(
-                service.clone(),
-                key.to_string(),
-                ttl,
-                renew_interval,
-            ));
             Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
-                renewer,
             }))
         } else {
             Ok(None)
         }
     }
 
-    /// Renew the lease on `interval` (configured, independent of NATS ack timing)
-    /// — so a job that outruns `ack_wait` can't have its lock stolen by a
-    /// redelivered copy. Stops if the lease is lost.
-    fn spawn_renewer(
-        service: Arc<dyn LockService>,
-        key: String,
-        ttl: Duration,
-        interval: Duration,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(interval).await;
-                match service.renew(&key, ttl).await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        warn!(key = %key, "lock lease lost; stopping renewal");
-                        break;
-                    }
-                    Err(e) => warn!(key = %key, error = %e, "lock lease renewal failed"),
-                }
-            }
-        })
-    }
-
     pub async fn release(mut self) -> Result<(), LockError> {
-        if let Some(renewer) = self.renewer.take() {
-            renewer.abort();
-        }
         if let Some(service) = self.service.take() {
             service.release(&self.key).await
         } else {
@@ -96,9 +59,6 @@ impl LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        if let Some(renewer) = self.renewer.take() {
-            renewer.abort();
-        }
         if let Some(service) = self.service.take() {
             let key = std::mem::take(&mut self.key);
             tokio::spawn(async move {
@@ -251,9 +211,6 @@ mod tests {
     use super::*;
     use crate::testkit::mocks::MockLockService;
 
-    // Long enough that the renewer never fires during these sub-second tests.
-    const RENEW: Duration = Duration::from_secs(60);
-
     async fn settle() {
         for _ in 0..10 {
             tokio::task::yield_now().await;
@@ -263,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn lock_guard_release_consumes_and_releases() {
         let svc = Arc::new(MockLockService::new());
-        let guard = LockGuard::acquire(svc.clone(), "k1", Duration::from_secs(1), RENEW)
+        let guard = LockGuard::acquire(svc.clone(), "k1", Duration::from_secs(1))
             .await
             .expect("acquire ok")
             .expect("acquired");
@@ -276,7 +233,7 @@ mod tests {
     async fn lock_guard_drop_spawns_release() {
         let svc = Arc::new(MockLockService::new());
         {
-            let _guard = LockGuard::acquire(svc.clone(), "k2", Duration::from_secs(1), RENEW)
+            let _guard = LockGuard::acquire(svc.clone(), "k2", Duration::from_secs(1))
                 .await
                 .expect("acquire ok")
                 .expect("acquired");
@@ -294,7 +251,7 @@ mod tests {
         let work = tokio::spawn({
             let svc = svc.clone();
             async move {
-                let _guard = LockGuard::acquire(svc, "k3", Duration::from_secs(1), RENEW)
+                let _guard = LockGuard::acquire(svc, "k3", Duration::from_secs(1))
                     .await
                     .expect("acquire ok")
                     .expect("acquired");
@@ -320,7 +277,7 @@ mod tests {
     async fn lock_guard_acquire_returns_none_when_held() {
         let svc = Arc::new(MockLockService::new());
         svc.set_lock("k5");
-        let result = LockGuard::acquire(svc.clone(), "k5", Duration::from_secs(1), RENEW)
+        let result = LockGuard::acquire(svc.clone(), "k5", Duration::from_secs(1))
             .await
             .expect("acquire ok");
         assert!(result.is_none(), "contended acquire must return None");

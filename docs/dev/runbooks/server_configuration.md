@@ -52,7 +52,7 @@ All modes share the same configuration structure.
 |-------------|---------|---------|-------------|
 | `nats.consumer_name` | `GKG_NATS__CONSUMER_NAME` | None | Durable consumer name. `None` = ephemeral (lost on disconnect). Set in production for persistence across restarts. |
 | `nats.ack_wait_secs` | | `300` | Seconds before unacked message is redelivered |
-| `nats.lock_lease_renew_interval_secs` | | `150` | How often a held indexing lock's lease is renewed. Must be less than `ack_wait_secs`. |
+| `nats.progress_heartbeat_interval_secs` | | `150` | How often a running indexing job heartbeats: resets `ack_wait` and renews its lock lease. Must be less than `ack_wait_secs`. |
 | `nats.max_deliver` | | `5` | Max redelivery attempts. `None` = unlimited. |
 | `nats.batch_size` | | `10` | Messages fetched per batch |
 | `nats.subscription_buffer_size` | | `100` | Internal channel buffer between fetch loop and handler |
@@ -527,7 +527,7 @@ nats:
   url: nats://gkg-nats:4222
   consumer_name: gkg-indexer
   ack_wait_secs: 300
-  lock_lease_renew_interval_secs: 150
+  progress_heartbeat_interval_secs: 150
   auto_create_streams: true
   stream_replicas: 3
 
