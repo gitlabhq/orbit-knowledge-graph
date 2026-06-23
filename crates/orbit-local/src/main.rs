@@ -535,7 +535,7 @@ fn index_repo(
     }
     // Re-open for workspace status (client was moved into sink)
     let client =
-        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for status")?;
+        duckdb_client::DuckDbClient::open(db_path).context("failed to open DuckDB for status")?;
     workspace::set_status(
         &client,
         &key,
