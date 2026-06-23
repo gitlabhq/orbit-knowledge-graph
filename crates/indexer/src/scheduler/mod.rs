@@ -279,6 +279,9 @@ mod tests {
         async fn try_acquire(&self, _key: &str, _ttl: Duration) -> Result<bool, LockError> {
             Ok(true)
         }
+        async fn renew(&self, _key: &str, _ttl: Duration) -> Result<bool, LockError> {
+            Ok(true)
+        }
         async fn release(&self, _key: &str) -> Result<(), LockError> {
             Ok(())
         }

@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
+use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::nats::{KvPutOptions, KvPutResult};
@@ -19,12 +22,16 @@ pub enum LockError {
 #[async_trait]
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
+    /// Extend the lease on a lock we hold. `Ok(false)` means the lease was lost
+    /// (someone else now holds it), so the caller should stop renewing.
+    async fn renew(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
     async fn release(&self, key: &str) -> Result<(), LockError>;
 }
 
 pub struct LockGuard {
     service: Option<Arc<dyn LockService>>,
     key: String,
+    renewer: Option<JoinHandle<()>>,
 }
 
 impl LockGuard {
@@ -34,16 +41,41 @@ impl LockGuard {
         ttl: Duration,
     ) -> Result<Option<Self>, LockError> {
         if service.try_acquire(key, ttl).await? {
+            let renewer = Some(Self::spawn_renewer(service.clone(), key.to_string(), ttl));
             Ok(Some(Self {
                 service: Some(service),
                 key: key.to_string(),
+                renewer,
             }))
         } else {
             Ok(None)
         }
     }
 
+    /// Renew the lease on its own cadence (`ttl/2`), decoupled from NATS ack
+    /// timing — so a job that outruns `ack_wait` can't have its lock stolen by a
+    /// redelivered copy. Stops if the lease is lost.
+    fn spawn_renewer(service: Arc<dyn LockService>, key: String, ttl: Duration) -> JoinHandle<()> {
+        let interval = ttl / 2;
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                match service.renew(&key, ttl).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        warn!(key = %key, "lock lease lost; stopping renewal");
+                        break;
+                    }
+                    Err(e) => warn!(key = %key, error = %e, "lock lease renewal failed"),
+                }
+            }
+        })
+    }
+
     pub async fn release(mut self) -> Result<(), LockError> {
+        if let Some(renewer) = self.renewer.take() {
+            renewer.abort();
+        }
         if let Some(service) = self.service.take() {
             service.release(&self.key).await
         } else {
@@ -54,6 +86,9 @@ impl LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
+        if let Some(renewer) = self.renewer.take() {
+            renewer.abort();
+        }
         if let Some(service) = self.service.take() {
             let key = std::mem::take(&mut self.key);
             tokio::spawn(async move {
@@ -67,11 +102,18 @@ impl Drop for LockGuard {
 
 pub struct NatsLockService {
     nats: std::sync::Arc<dyn crate::nats::NatsServices>,
+    /// Revision of each lock we currently hold, so `renew` can CAS on the exact
+    /// revision we own — a renewal that lost the race (lock stolen after expiry)
+    /// hits a revision mismatch and reports the loss instead of stealing back.
+    revisions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl NatsLockService {
     pub fn new(nats: std::sync::Arc<dyn crate::nats::NatsServices>) -> Self {
-        Self { nats }
+        Self {
+            nats,
+            revisions: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -108,7 +150,8 @@ impl LockService for NatsLockService {
             .await
             .map_err(|e| LockError::Backend(e.to_string()))?
         {
-            KvPutResult::Success(_) => {
+            KvPutResult::Success(revision) => {
+                self.revisions.lock().insert(key.to_string(), revision);
                 debug!(key, "lock acquired");
                 return Ok(true);
             }
@@ -140,7 +183,8 @@ impl LockService for NatsLockService {
                     .await
                     .map_err(|e| LockError::Backend(e.to_string()))?
                 {
-                    KvPutResult::Success(_) => {
+                    KvPutResult::Success(revision) => {
+                        self.revisions.lock().insert(key.to_string(), revision);
                         debug!(key, "lock acquired after expiry");
                         Ok(true)
                     }
@@ -150,7 +194,38 @@ impl LockService for NatsLockService {
         }
     }
 
+    async fn renew(&self, key: &str, ttl: Duration) -> Result<bool, LockError> {
+        let Some(revision) = self.revisions.lock().get(key).copied() else {
+            return Ok(false);
+        };
+        let chrono_ttl =
+            chrono::Duration::from_std(ttl).map_err(|e| LockError::Backend(e.to_string()))?;
+        let value = encode_expiration(Utc::now() + chrono_ttl);
+
+        match self
+            .nats
+            .kv_put(
+                INDEXING_LOCKS_BUCKET,
+                key,
+                value,
+                KvPutOptions::update_revision(revision),
+            )
+            .await
+            .map_err(|e| LockError::Backend(e.to_string()))?
+        {
+            KvPutResult::Success(revision) => {
+                self.revisions.lock().insert(key.to_string(), revision);
+                Ok(true)
+            }
+            KvPutResult::AlreadyExists | KvPutResult::RevisionMismatch => {
+                self.revisions.lock().remove(key);
+                Ok(false)
+            }
+        }
+    }
+
     async fn release(&self, key: &str) -> Result<(), LockError> {
+        self.revisions.lock().remove(key);
         let result = self
             .nats
             .kv_delete(INDEXING_LOCKS_BUCKET, key)
@@ -326,6 +401,33 @@ mod tests {
                     .await
                     .unwrap(),
                 "unparseable lock value must not pin the lock forever",
+            );
+        }
+
+        #[tokio::test]
+        async fn renew_extends_a_held_lease() {
+            let (nats, svc) = new_service();
+            assert!(
+                svc.try_acquire("p6", Duration::from_secs(30))
+                    .await
+                    .unwrap()
+            );
+            let before =
+                decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap()).unwrap();
+            assert!(svc.renew("p6", Duration::from_secs(120)).await.unwrap());
+            let after =
+                decode_expiration(&nats.get_kv(INDEXING_LOCKS_BUCKET, "p6").unwrap()).unwrap();
+            assert!(after > before, "renew must push the expiry forward");
+        }
+
+        #[tokio::test]
+        async fn renew_unheld_lock_reports_no_lease() {
+            let (_, svc) = new_service();
+            assert!(
+                !svc.renew("never-acquired", Duration::from_secs(30))
+                    .await
+                    .unwrap(),
+                "renewing a lock we never held must report loss, not steal it",
             );
         }
     }

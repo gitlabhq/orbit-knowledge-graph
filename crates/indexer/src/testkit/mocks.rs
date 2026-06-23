@@ -309,6 +309,10 @@ impl LockService for MockLockService {
         }
     }
 
+    async fn renew(&self, key: &str, _ttl: Duration) -> Result<bool, LockError> {
+        Ok(self.held.lock().contains(key))
+    }
+
     async fn release(&self, key: &str) -> Result<(), LockError> {
         self.held.lock().remove(key);
         Ok(())
