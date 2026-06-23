@@ -294,10 +294,18 @@ impl CodeIndexingTaskHandler {
         let result = match self.pipeline.job_timeout() {
             Some(timeout) => match tokio::time::timeout(timeout, work).await {
                 Ok(result) => result,
-                Err(_) => Err(HandlerError::Processing(format!(
-                    "code indexing job exceeded the {}s timeout",
-                    timeout.as_secs()
-                ))),
+                Err(_) => {
+                    warn!(
+                        project_id,
+                        branch = %branch,
+                        timeout_secs = timeout.as_secs(),
+                        "code indexing job exceeded wall-clock timeout"
+                    );
+                    Err(HandlerError::Processing(format!(
+                        "code indexing job exceeded the {}s timeout",
+                        timeout.as_secs()
+                    )))
+                }
             },
             None => work.await,
         };
