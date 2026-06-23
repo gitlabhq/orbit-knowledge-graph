@@ -1,3 +1,35 @@
+## [0.79.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.78.0...v0.79.0) (2026-06-22)
+
+### Features
+
+* **billing:** emit delivery-outcome metrics from Snowplow callback ([78df329](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/78df3295049f1589a65d3a2b16b52e4ed6871678)) by Sharmad Nachnolkar
+* **health:** add nats queue depth endpoint ([b0574aa](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b0574aa3c10c70e93c6e188fc07a26d2ab960c31)) by Aaron Algutifan
+* **ontology:** add explicit global node flag for fk-chain elision ([337e31f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/337e31f27d26ad8946c06d97b2f34f60d505121f)) by Michael Usachenko
+* **ontology:** route merge-request diff edges to a dedicated gl_diff_edge table ([76c5b03](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/76c5b035bcaf1107ec9a7f7a86bcddea5fe501de)) by Michael Usachenko
+* **ontology:** route security edges to a dedicated gl_sec_edge table ([c3daf98](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c3daf98bdb7956d3ba62b08dc588a47884fceeb3)) by Michael Usachenko
+
+### Fixes
+
+* **deps:** bump quinn-proto to 0.11.15 for RUSTSEC-2026-0185 ([381533b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/381533bd7f05bd0912ef52751a7e4e62dc632e42)) by michaelangeloio
+* **ontology:** register MENTIONS edge in the schema ([3fb0269](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3fb02692f1e2fb2430edb34b40e8019f53848066)) by Michael Angelo Rivera (OOO - June 19th)
+
+### Performance
+
+* **compiler:** elide cross-namespace FK traversals via global-hub gate ([c4061b6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c4061b6569ee40b9e9c362d9a5b5fe1dea1b1c4a)) by Michael Usachenko
+* **compiler:** use FINAL for broad FK-join targets, keep LIMIT 1 BY when narrowed ([0d82ced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0d82cedfb54ffdc98e5eb3557604bf26f095461c)) by Michael Usachenko
+* **schema:** tune column codecs for ~18% storage reduction ([34be6b3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/34be6b3c43ebce18ced13bdc406d3b99887eec51)) by Michael Usachenko
+
+### Other
+
+* **agents:** add review-mined guidance for hardcoded constants, MR focus, and code-graph boundaries ([61782f7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/61782f77c2df536e79719e8c3fba0e2bdf8a1e82)) by Dmitry Gruzd
+* **i18n:** [Translation] Update ja-jp for commit b36fcb51 ([32dbe96](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/32dbe96e6a6820c543a1d545297c8b7e76a96d66)) by Lauren Barker
+* **indexer:** decompose code-indexing pipeline ([23ca919](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23ca919dbfc22c0df3e8ecbe9bdf14eb03066b6a)) by Michael Angelo Rivera (OOO - June 19th)
+* **mr-template:** enforce a terse headline section ([900cc29](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/900cc2973520c826483aa6d1652f1f4f4e1e244b)) by Dmitry Gruzd
+* **ontology:** collapse global-hub signals into the global node flag ([e1e5294](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1e5294b1800df1ed130c78fb75d2bc0ff418eb7)) by Jean-Gabriel Doyon
+* **orbit-skill:** update /status shape for {user,system} wrapper ([58f19fc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58f19fc7e6a41d526c7982c0cf3c4451065547c7)) by Dmitry Gruzd
+* **readme:** add 'For contributors' section with onboarding links ([ee4203d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ee4203db0f886350192ef92ae25e6a9883e52709)) by Eszter Kovacs
+* **siphon-proto:** use the proto crate shipped with siphon ([93fe10f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/93fe10ffac0f6b09c2a9e6e76e2cb150d60ef95d)) by Jean-Gabriel Doyon
+
 ## [0.78.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.77.0...v0.78.0) (2026-06-18)
 
 ### Features

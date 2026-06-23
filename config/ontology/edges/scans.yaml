@@ -1,6 +1,7 @@
 # config/ontology/edges/scans.yaml
 
 description: VulnerabilityScanner scans a project for security vulnerabilities
+table: gl_sec_edge
 
 variants:
   - from_node: { type: VulnerabilityScanner, id: id }

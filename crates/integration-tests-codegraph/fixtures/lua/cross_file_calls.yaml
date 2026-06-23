@@ -1,0 +1,74 @@
+name: "Lua: cross-file function calls"
+fixtures:
+  - path: logger.lua
+    content: |
+      function log(msg)
+        print("[LOG] " .. msg)
+      end
+
+      function warn(msg)
+        print("[WARN] " .. msg)
+      end
+
+  - path: service.lua
+    content: |
+      local logger = require("logger")
+
+      function run()
+        log("service started")
+        warn("low memory")
+      end
+
+tests:
+  - name: "log is defined in logger.lua"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'log' AND d.definition_type = 'Function'
+        AND d.file_path ENDS WITH 'logger.lua'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "log" } }
+
+  - name: "warn is defined in logger.lua"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'warn' AND d.definition_type = 'Function'
+        AND d.file_path ENDS WITH 'logger.lua'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "warn" } }
+
+  - name: "run is defined in service.lua"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'run' AND d.definition_type = 'Function'
+        AND d.file_path ENDS WITH 'service.lua'
+      RETURN d.name AS name
+    assert:
+      - { row: { name: "run" } }
+
+  - name: "service.lua imports logger"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path ENDS WITH 'service.lua' AND i.path = 'logger'
+      RETURN i.path AS path
+    assert:
+      - { row: { path: "logger" } }
+
+  - name: "log is called from run"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'log'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row: { caller: "run", callee: "log" } }
+
+  - name: "warn is called from run"
+    severity: warning
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'warn'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row: { caller: "run", callee: "warn" } }

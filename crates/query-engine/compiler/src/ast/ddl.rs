@@ -81,6 +81,10 @@ pub enum ColumnType {
 pub enum Codec {
     ZSTD(u8),
     Delta(u8),
+    /// Second-order delta; best for monotonic-with-constant-increment sequences.
+    DoubleDelta,
+    /// Bit-packs integers to their actual value range; best for bounded ids/offsets.
+    T64,
     LZ4,
 }
 

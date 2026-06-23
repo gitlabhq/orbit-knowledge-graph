@@ -1157,8 +1157,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|LZ4)$",
-            "description": "Codec. Must be ZSTD(N), Delta(N), or LZ4."
+            "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|DoubleDelta|T64|LZ4)$",
+            "description": "Codec. Must be ZSTD(N), Delta(N), DoubleDelta, T64, or LZ4."
           }
         }
       },

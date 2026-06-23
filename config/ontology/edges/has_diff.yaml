@@ -1,6 +1,7 @@
 # config/ontology/edges/has_diff.yaml
 
 description: Diff snapshots of a merge request
+table: gl_diff_edge
 
 variants:
   - from_node: { type: MergeRequest, id: id }

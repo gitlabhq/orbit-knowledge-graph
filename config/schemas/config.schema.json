@@ -71,6 +71,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "max_total_bytes": 10000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,
@@ -416,6 +417,13 @@
           "default": 1000000,
           "minimum": 0
         },
+        "max_total_bytes": {
+          "description": "Total discovered bytes above which a repository is skipped entirely\n(indexed empty, then checkpointed). Bounds pathologically large repos.\n0 = no limit. Defaults to 10 GB.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 10000000000,
+          "minimum": 0
+        },
         "per_file_parse_timeout_ms": {
           "type": "integer",
           "format": "uint64",
@@ -461,6 +469,7 @@
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
+            "max_total_bytes": 10000000000,
             "per_file_parse_timeout_ms": 100,
             "per_file_ssa_timeout_ms": 100,
             "per_file_timeout_ms": 2000,
@@ -555,6 +564,7 @@
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
+                "max_total_bytes": 10000000000,
                 "per_file_parse_timeout_ms": 100,
                 "per_file_ssa_timeout_ms": 100,
                 "per_file_timeout_ms": 2000,
@@ -799,6 +809,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "max_total_bytes": 10000000000,
               "per_file_parse_timeout_ms": 100,
               "per_file_ssa_timeout_ms": 100,
               "per_file_timeout_ms": 2000,

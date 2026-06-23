@@ -182,7 +182,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -198,7 +198,7 @@ storage:
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: namespace_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: namespace_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: closed_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

@@ -5217,10 +5217,14 @@ dependencies = [
  "arrow 58.3.0",
  "chrono",
  "enum-as-inner",
+ "flate2",
+ "ignore",
  "rustc-hash 2.1.2",
  "serde_json",
  "strum 0.28.0",
+ "tar",
  "tempfile",
+ "thiserror 2.0.18",
  "tracing",
 ]
 
@@ -6012,7 +6016,6 @@ dependencies = [
  "query-engine",
  "rand 0.10.1",
  "regex",
- "reqwest 0.13.4",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
@@ -6153,6 +6156,7 @@ dependencies = [
  "cargo_metadata",
  "chrono",
  "clickhouse-client",
+ "code-graph",
  "compiler",
  "flate2",
  "futures",
@@ -9868,9 +9872,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
 dependencies = [
  "aws-lc-rs",
  "bytes",
@@ -13516,6 +13520,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
 
 [[package]]
+name = "tree-sitter-lua"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8daaf5f4235188a58603c39760d5fa5d4b920d36a299c934adddae757f32a10c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-php"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13584,6 +13598,7 @@ dependencies = [
  "tree-sitter-hcl",
  "tree-sitter-java",
  "tree-sitter-kotlin-sg",
+ "tree-sitter-lua",
  "tree-sitter-php",
  "tree-sitter-python",
  "tree-sitter-ruby",

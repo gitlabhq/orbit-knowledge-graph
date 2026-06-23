@@ -151,10 +151,10 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: merge_request_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: merge_request_diff_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: merge_request_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: merge_request_diff_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["T64", "ZSTD(1)"]}
     - {name: too_large, type: "Bool", default: "false"}
     - {name: new_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: old_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
