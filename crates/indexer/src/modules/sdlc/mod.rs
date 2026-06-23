@@ -1,5 +1,4 @@
 mod datalake;
-pub mod dispatch;
 mod handler;
 mod metrics;
 pub(crate) mod observer;

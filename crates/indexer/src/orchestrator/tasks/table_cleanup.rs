@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 

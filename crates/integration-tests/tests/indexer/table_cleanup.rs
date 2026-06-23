@@ -1,7 +1,7 @@
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use gkg_server_config::TableCleanupConfig;
-use indexer::scheduler::table_cleanup::TableCleanup;
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::tasks::table_cleanup::TableCleanup;
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 
 // Verifies that OPTIMIZE TABLE ... FINAL CLEANUP is valid for every ontology table.

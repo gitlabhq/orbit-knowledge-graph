@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::campaign::CampaignState;
 use crate::nats::NatsServices;
-use crate::scheduler::ScheduledTaskMetrics;
-use crate::scheduler::{ScheduledTask, TaskError};
+use crate::orchestrator::scheduler::ScheduledTaskMetrics;
+use crate::orchestrator::scheduler::{ScheduledTask, TaskError};
 use crate::topic::GlobalIndexingRequest;
 use crate::types::{Envelope, Event};
 use gkg_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};

@@ -38,7 +38,7 @@ pub mod locking;
 pub mod modules;
 pub mod nats;
 pub mod observer;
-pub mod scheduler;
+pub mod orchestrator;
 pub mod schema;
 pub mod topic;
 
@@ -67,13 +67,14 @@ use gkg_server_config::IndexerModule;
 use health::{HealthState, run_health_server};
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
-use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
-use modules::namespace_deletion::{
-    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
-};
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
-use scheduler::{ScheduledTask, ScheduledTaskMetrics, StaleEdgeReconciliation, TableCleanup};
+use orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use orchestrator::tasks::{
+    GlobalDispatcher, MigrationCompletionChecker, NamespaceCodeBackfillDispatcher,
+    NamespaceDeletionScheduler, NamespaceDispatcher, SiphonCodeIndexingTaskDispatcher,
+    StaleEdgeReconciliation, TableCleanup,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -240,7 +241,7 @@ pub async fn run_dispatcher(
     ontology: &ontology::Ontology,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let services = scheduler::connect(&config.nats).await?;
+    let services = orchestrator::scheduler::connect(&config.nats).await?;
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
@@ -346,7 +347,7 @@ pub async fn run_dispatcher(
             metrics.clone(),
             config.schedule.tasks.stale_edge_reconciliation.clone(),
         )),
-        Box::new(schema::completion::MigrationCompletionChecker::new(
+        Box::new(MigrationCompletionChecker::new(
             config.graph.build_client(),
             config.datalake.build_client(),
             lock_service.clone(),
@@ -361,7 +362,7 @@ pub async fn run_dispatcher(
 
     let health_abort = health_task.abort_handle();
     tokio::select! {
-        result = scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
+        result = orchestrator::scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
             health_abort.abort();
             result.map_err(DispatcherError::from)
         }

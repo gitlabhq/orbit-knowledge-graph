@@ -8,11 +8,11 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::campaign::CampaignState;
-use crate::modules::code::config::subjects;
-use crate::modules::code::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::nats::NatsServices;
-use crate::scheduler::ScheduledTaskMetrics;
-use crate::scheduler::{ScheduledTask, TaskError};
+use crate::orchestrator::scheduler::ScheduledTaskMetrics;
+use crate::orchestrator::scheduler::{ScheduledTask, TaskError};
+use crate::orchestrator::siphon::decoder::{ColumnExtractor, decode_logical_replication_events};
+use crate::orchestrator::siphon::subjects;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use gkg_server_config::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
@@ -241,7 +241,7 @@ mod tests {
     use crate::modules::code::test_helpers::{
         build_replication_events, code_indexing_task_columns,
     };
-    use crate::scheduler::ScheduledTaskMetrics;
+    use crate::orchestrator::scheduler::ScheduledTaskMetrics;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
     use crate::topic::CodeIndexingTaskRequest;
     use siphon_proto::replication_event::Operation;
