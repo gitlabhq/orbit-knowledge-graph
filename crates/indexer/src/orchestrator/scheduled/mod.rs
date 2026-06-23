@@ -1,20 +1,18 @@
 mod metrics;
 
-pub mod code_indexing_task;
+pub mod backfill_sweep;
 pub mod global;
 pub mod migration_completion;
 pub mod namespace;
-pub mod namespace_backfill;
 pub mod namespace_deletion;
 pub mod stale_edge_reconciliation;
 pub mod table_cleanup;
 
-pub use code_indexing_task::SiphonCodeIndexingTaskDispatcher;
+pub use backfill_sweep::CodeBackfillSweep;
 pub use global::GlobalDispatcher;
 pub use metrics::ScheduledTaskMetrics;
 pub use migration_completion::MigrationCompletionChecker;
 pub use namespace::NamespaceDispatcher;
-pub use namespace_backfill::NamespaceCodeBackfillDispatcher;
 pub use namespace_deletion::NamespaceDeletionScheduler;
 pub use stale_edge_reconciliation::StaleEdgeReconciliation;
 pub use table_cleanup::TableCleanup;
@@ -31,6 +29,7 @@ use tracing::{info, warn};
 
 use crate::locking::{INDEXING_LOCKS_BUCKET, LockService, NatsLockService};
 use crate::nats::{KvBucketConfig, NatsBroker, NatsServices, NatsServicesImpl};
+use crate::orchestrator::{Trigger, TriggerError};
 use gkg_server_config::NatsConfiguration;
 use gkg_server_config::ScheduleConfiguration;
 
@@ -219,6 +218,34 @@ pub async fn run_once(
     }
 
     Ok(())
+}
+
+/// Trigger A: the cron-driven scheduler. Wraps [`run_loop`] over a fixed set of
+/// [`ScheduledTask`]s so it can be launched alongside the other triggers.
+pub struct Scheduled {
+    tasks: Vec<Box<dyn ScheduledTask>>,
+    lock_service: Arc<dyn LockService>,
+}
+
+impl Scheduled {
+    pub fn new(tasks: Vec<Box<dyn ScheduledTask>>, lock_service: Arc<dyn LockService>) -> Self {
+        Self {
+            tasks,
+            lock_service,
+        }
+    }
+}
+
+#[async_trait]
+impl Trigger for Scheduled {
+    fn name(&self) -> &str {
+        "scheduled"
+    }
+
+    async fn run(self: Box<Self>, cancel: CancellationToken) -> Result<(), TriggerError> {
+        run_loop(self.tasks, self.lock_service, cancel).await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

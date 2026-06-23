@@ -343,11 +343,10 @@ fn default_dispatcher_batch_size() -> usize {
     100
 }
 
+/// Drives the continuous Siphon CDC trigger: which JetStream the orchestrator
+/// drains and how many messages per `consume_pending` call.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SiphonCodeIndexingTaskDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-
+pub struct SiphonRouterConfig {
     #[serde(default = "default_events_stream_name")]
     pub events_stream_name: String,
 
@@ -355,36 +354,20 @@ pub struct SiphonCodeIndexingTaskDispatcherConfig {
     pub batch_size: usize,
 }
 
-impl Default for SiphonCodeIndexingTaskDispatcherConfig {
+impl Default for SiphonRouterConfig {
     fn default() -> Self {
         Self {
-            schedule: ScheduleConfiguration::default(),
             events_stream_name: default_events_stream_name(),
             batch_size: default_dispatcher_batch_size(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct NamespaceCodeBackfillDispatcherConfig {
+/// Cadence for the coverage-driven code-backfill sweep.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+pub struct CodeBackfillSweepConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-
-    #[serde(default = "default_events_stream_name")]
-    pub events_stream_name: String,
-
-    #[serde(default = "default_dispatcher_batch_size")]
-    pub batch_size: usize,
-}
-
-impl Default for NamespaceCodeBackfillDispatcherConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration::default(),
-            events_stream_name: default_events_stream_name(),
-            batch_size: default_dispatcher_batch_size(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -466,9 +449,9 @@ pub struct ScheduledTasksConfiguration {
     #[serde(default)]
     pub namespace: NamespaceDispatcherConfig,
     #[serde(default)]
-    pub code_indexing_task: SiphonCodeIndexingTaskDispatcherConfig,
+    pub siphon: SiphonRouterConfig,
     #[serde(default)]
-    pub namespace_code_backfill: NamespaceCodeBackfillDispatcherConfig,
+    pub code_backfill: CodeBackfillSweepConfig,
     #[serde(default)]
     pub table_cleanup: TableCleanupConfig,
     #[serde(default)]

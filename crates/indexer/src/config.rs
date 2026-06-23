@@ -108,6 +108,9 @@ pub enum DispatcherError {
     #[error("scheduler error: {0}")]
     Scheduler(#[from] crate::orchestrator::scheduled::SchedulerError),
 
+    #[error("trigger error: {0}")]
+    Trigger(#[from] crate::orchestrator::TriggerError),
+
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::MigrationError),
 

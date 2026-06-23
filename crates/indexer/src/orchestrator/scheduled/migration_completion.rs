@@ -303,8 +303,8 @@ impl MigrationCompletionChecker {
     ///
     /// Migration completion is **SDLC-only**. Code-indexing coverage is
     /// observed and reported but does not gate promotion: code data fills
-    /// `v{N}_code_indexing_checkpoint` continuously via
-    /// `NamespaceCodeBackfillDispatcher` regardless of migration state, so
+    /// `v{N}_code_indexing_checkpoint` continuously via the `Migration`
+    /// trigger's active backfill sweep regardless of migration state, so
     /// gating promotion on it would couple a slow process (per-repo archive
     /// download + indexing) to a fast one (per-namespace SDLC pull) and risk
     /// stalling rollouts indefinitely when individual projects can't be

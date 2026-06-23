@@ -235,10 +235,8 @@
       "$ref": "#/$defs/ScheduleConfig",
       "default": {
         "tasks": {
-          "code-indexing-task": {
-            "batch_size": 100,
-            "cron": null,
-            "events_stream_name": "siphon_stream_main_db"
+          "code-backfill": {
+            "cron": null
           },
           "global": {
             "cron": null
@@ -249,13 +247,12 @@
           "namespace": {
             "cron": null
           },
-          "namespace-code-backfill": {
-            "batch_size": 100,
-            "cron": null,
-            "events_stream_name": "siphon_stream_main_db"
-          },
           "namespace-deletion": {
             "cron": "0 0 3 * * *"
+          },
+          "siphon": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db"
           },
           "stale-edge-reconciliation": {
             "cron": "0 */30 * * * *"
@@ -381,6 +378,20 @@
         "url",
         "username"
       ]
+    },
+    "CodeBackfillSweepConfig": {
+      "description": "Cadence for the coverage-driven code-backfill sweep.",
+      "type": "object",
+      "properties": {
+        "cron": {
+          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
     },
     "CodeIndexingPipelineConfig": {
       "type": "object",
@@ -930,30 +941,6 @@
         }
       }
     },
-    "NamespaceCodeBackfillDispatcherConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
-      "type": "object",
-      "properties": {
-        "batch_size": {
-          "type": "integer",
-          "format": "uint",
-          "default": 100,
-          "minimum": 0
-        },
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "events_stream_name": {
-          "type": "string",
-          "default": "siphon_stream_main_db"
-        }
-      }
-    },
     "NamespaceDeletionSchedulerConfig": {
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
@@ -1428,10 +1415,8 @@
         "tasks": {
           "$ref": "#/$defs/ScheduledTasksConfiguration",
           "default": {
-            "code-indexing-task": {
-              "batch_size": 100,
-              "cron": null,
-              "events_stream_name": "siphon_stream_main_db"
+            "code-backfill": {
+              "cron": null
             },
             "global": {
               "cron": null
@@ -1442,13 +1427,12 @@
             "namespace": {
               "cron": null
             },
-            "namespace-code-backfill": {
-              "batch_size": 100,
-              "cron": null,
-              "events_stream_name": "siphon_stream_main_db"
-            },
             "namespace-deletion": {
               "cron": "0 0 3 * * *"
+            },
+            "siphon": {
+              "batch_size": 100,
+              "events_stream_name": "siphon_stream_main_db"
             },
             "stale-edge-reconciliation": {
               "cron": "0 */30 * * * *"
@@ -1465,12 +1449,10 @@
       "description": "Typed per-task configuration for all registered scheduled tasks.",
       "type": "object",
       "properties": {
-        "code-indexing-task": {
-          "$ref": "#/$defs/SiphonCodeIndexingTaskDispatcherConfig",
+        "code-backfill": {
+          "$ref": "#/$defs/CodeBackfillSweepConfig",
           "default": {
-            "batch_size": 100,
-            "cron": null,
-            "events_stream_name": "siphon_stream_main_db"
+            "cron": null
           }
         },
         "global": {
@@ -1491,18 +1473,17 @@
             "cron": null
           }
         },
-        "namespace-code-backfill": {
-          "$ref": "#/$defs/NamespaceCodeBackfillDispatcherConfig",
-          "default": {
-            "batch_size": 100,
-            "cron": null,
-            "events_stream_name": "siphon_stream_main_db"
-          }
-        },
         "namespace-deletion": {
           "$ref": "#/$defs/NamespaceDeletionSchedulerConfig",
           "default": {
             "cron": "0 0 3 * * *"
+          }
+        },
+        "siphon": {
+          "$ref": "#/$defs/SiphonRouterConfig",
+          "default": {
+            "batch_size": 100,
+            "events_stream_name": "siphon_stream_main_db"
           }
         },
         "stale-edge-reconciliation": {
@@ -1548,8 +1529,8 @@
       },
       "additionalProperties": false
     },
-    "SiphonCodeIndexingTaskDispatcherConfig": {
-      "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
+    "SiphonRouterConfig": {
+      "description": "Drives the continuous Siphon CDC trigger: which JetStream the orchestrator\ndrains and how many messages per `consume_pending` call.",
       "type": "object",
       "properties": {
         "batch_size": {
@@ -1557,14 +1538,6 @@
           "format": "uint",
           "default": 100,
           "minimum": 0
-        },
-        "cron": {
-          "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
         },
         "events_stream_name": {
           "type": "string",

@@ -69,12 +69,14 @@ use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
+use orchestrator::Trigger;
+use orchestrator::dispatch::CodeBackfill;
 use orchestrator::scheduled::{
-    GlobalDispatcher, MigrationCompletionChecker, NamespaceCodeBackfillDispatcher,
-    NamespaceDeletionScheduler, NamespaceDispatcher, SiphonCodeIndexingTaskDispatcher,
-    StaleEdgeReconciliation, TableCleanup,
+    CodeBackfillSweep, GlobalDispatcher, MigrationCompletionChecker, NamespaceDeletionScheduler,
+    NamespaceDispatcher, Scheduled, StaleEdgeReconciliation, TableCleanup,
 };
 use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
+use orchestrator::siphon::{CodeIndexingTaskRoute, EnabledNamespacesRoute, Route, Siphon};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -297,6 +299,14 @@ pub async fn run_dispatcher(
         ));
     let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
 
+    let backfill = Arc::new(CodeBackfill::new(
+        services.nats.clone(),
+        config.graph.build_client(),
+        config.datalake.build_client(),
+        metrics.clone(),
+        campaign.clone(),
+    ));
+
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
             services.nats.clone(),
@@ -311,19 +321,9 @@ pub async fn run_dispatcher(
             config.schedule.tasks.namespace.clone(),
             campaign.clone(),
         )),
-        Box::new(SiphonCodeIndexingTaskDispatcher::new(
-            services.nats.clone(),
-            metrics.clone(),
-            config.schedule.tasks.code_indexing_task.clone(),
-            campaign.clone(),
-        )),
-        Box::new(NamespaceCodeBackfillDispatcher::new(
-            services.nats.clone(),
-            config.graph.build_client(),
-            config.datalake.build_client(),
-            metrics.clone(),
-            config.schedule.tasks.namespace_code_backfill.clone(),
-            campaign.clone(),
+        Box::new(CodeBackfillSweep::new(
+            backfill.clone(),
+            config.schedule.tasks.code_backfill.clone(),
         )),
         Box::new(TableCleanup::new(
             graph,
@@ -354,15 +354,33 @@ pub async fn run_dispatcher(
             Arc::new(ontology.clone()),
             config.schema.clone(),
             config.schedule.tasks.migration_completion.clone(),
-            metrics,
+            metrics.clone(),
             campaign.clone(),
             services.nats_client.clone(),
         )),
     ];
 
+    let routes: Vec<Arc<dyn Route>> = vec![
+        Arc::new(CodeIndexingTaskRoute::new(
+            services.nats.clone(),
+            metrics.clone(),
+        )),
+        Arc::new(EnabledNamespacesRoute::new(backfill.clone())),
+    ];
+
+    let scheduled = Scheduled::new(tasks, lock_service);
+    let siphon = Siphon::new(
+        services.nats.clone(),
+        metrics,
+        config.schedule.tasks.siphon.clone(),
+        campaign.clone(),
+        routes,
+    );
+    let triggers: Vec<Box<dyn Trigger>> = vec![Box::new(scheduled), Box::new(siphon)];
+
     let health_abort = health_task.abort_handle();
     tokio::select! {
-        result = orchestrator::scheduled::run_loop(tasks, lock_service, shutdown.clone()) => {
+        result = orchestrator::launch(triggers, shutdown.clone()) => {
             health_abort.abort();
             result.map_err(DispatcherError::from)
         }
