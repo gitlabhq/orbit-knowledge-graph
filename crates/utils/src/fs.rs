@@ -38,6 +38,28 @@ pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
     canonical.starts_with(root).then_some(canonical)
 }
 
+/// `true` when `path` has only normal components — safe to join under a root,
+/// with no `..`/`.`/root/prefix that could climb out.
+pub fn is_safe_relative_path(path: &Path) -> bool {
+    path.components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Resolve `dest` to its canonical form within `root`, creating parents if
+/// needed. `PermissionDenied` if the real target escapes `root`.
+pub fn resolve_dest_within(root: &Path, dest: &Path) -> io::Result<PathBuf> {
+    if dest.exists() {
+        contained_canonical_path(root, dest).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("path traversal detected: {}", dest.display()),
+            )
+        })
+    } else {
+        safe_create_dir_all(dest, root)
+    }
+}
+
 /// Create parent directories for `path`, validating that no existing
 /// path component resolves outside `root` via symlinks.
 ///
@@ -201,6 +223,39 @@ mod tests {
             let escape = root.join("escape");
             std::os::unix::fs::symlink(outside.path(), &escape).unwrap();
             assert!(contained_canonical_path(&root, &escape).is_none());
+        }
+    }
+
+    #[test]
+    fn is_safe_relative_path_accepts_normal_rejects_traversal() {
+        assert!(is_safe_relative_path(Path::new("src/main.rs")));
+        assert!(is_safe_relative_path(Path::new("a/b/c.txt")));
+        assert!(!is_safe_relative_path(Path::new("../escape")));
+        assert!(!is_safe_relative_path(Path::new("a/../../b")));
+        assert!(!is_safe_relative_path(Path::new("/abs/path")));
+        assert!(!is_safe_relative_path(Path::new("./rel")));
+    }
+
+    #[test]
+    fn resolve_dest_within_creates_and_contains() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let dest = resolve_dest_within(&root, &root.join("a/b/file.txt")).unwrap();
+        assert!(dest.starts_with(&root));
+        assert!(root.join("a/b").is_dir());
+    }
+
+    #[test]
+    fn resolve_dest_within_rejects_existing_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        #[cfg(unix)]
+        {
+            let escape = root.join("escape");
+            std::os::unix::fs::symlink(outside.path(), &escape).unwrap();
+            let err = resolve_dest_within(&root, &escape).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
         }
     }
 

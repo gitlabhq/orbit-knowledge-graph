@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use rust_embed::RustEmbed;
@@ -101,17 +101,10 @@ fn write_assets(root: &Path) -> Result<()> {
 }
 
 fn asset_output_path(root: &Path, asset_path: &str) -> Result<PathBuf> {
-    let mut output_path = root.to_path_buf();
-    for component in Path::new(asset_path).components() {
-        match component {
-            Component::Normal(segment) => output_path.push(segment),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                bail!("embedded Rust sysroot asset path `{asset_path}` is invalid");
-            }
-        }
+    if !gkg_utils::fs::is_safe_relative_path(Path::new(asset_path)) {
+        bail!("embedded Rust sysroot asset path `{asset_path}` is invalid");
     }
-    Ok(output_path)
+    Ok(root.join(asset_path))
 }
 
 fn load_project_json(root: &AbsPathBuf) -> Result<ProjectJson> {

@@ -21,9 +21,9 @@ use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
+use crate::v2::inventory::{FamilyFileInput, FileInput};
 use crate::v2::pipeline::{
-    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
-    PipelineContext, PipelineError,
+    BatchTx, GenericPipeline, LanguageContext, LanguagePipeline, PipelineContext, PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────

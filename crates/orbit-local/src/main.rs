@@ -10,17 +10,19 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gitalisk_core::repository::gitalisk_repository::IterFileOptions;
 use ontology::Ontology;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
 const LOCAL_DDL: &str = include_str!(concat!(env!("CONFIG_DIR"), "/graph_local.sql"));
+
+/// Per-file byte cap for local indexing; files above it are recorded as nodes
+/// but not loaded or parsed.
+const MAX_INDEXED_FILE_BYTES: u64 = 5_000_000;
 
 #[derive(Serialize)]
 struct IndexOutput {
@@ -372,7 +374,6 @@ pub(crate) fn index_collect(
     }
 
     let pipeline_config = code_graph::v2::PipelineConfig {
-        max_file_size: 5_000_000,
         worker_threads: threads,
         per_file_timeout: Some(std::time::Duration::from_secs(2)),
         per_file_parse_timeout: Some(std::time::Duration::from_millis(100)),
@@ -466,7 +467,15 @@ fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let file_inventory = gitalisk_file_inventory(git)?;
+    let mut filter = code_graph::v2::config::CodeFilter::new(
+        MAX_INDEXED_FILE_BYTES,
+        0,
+        code_graph::v2::config::detect_language_from_path,
+    );
+    let file_inventory: std::sync::Arc<[code_graph::v2::FileInventoryEntry]> = std::sync::Arc::from(
+        gkg_utils::walk::walk_dir(&git.repo_path, &mut filter)
+            .context("failed to walk repository files")?,
+    );
 
     let db_path = store.db_path();
     let client =
@@ -549,44 +558,6 @@ fn index_repo(
         language_timings: v2_result.stats.language_timings,
         phase_timings: v2_result.stats.phase_timings,
     })
-}
-
-fn gitalisk_file_inventory(
-    git: &workspace::GitInfo,
-) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
-    let files = git
-        .repository()
-        .get_repo_files(IterFileOptions {
-            include_ignored: false,
-            include_hidden: true,
-            exclude_patterns: Vec::new(),
-        })
-        .with_context(|| {
-            format!(
-                "failed to list repository files with Gitalisk in {}",
-                git.repo_path.display()
-            )
-        })?;
-
-    let entries: Vec<_> = files
-        .into_iter()
-        .map(|file| {
-            let path = file.path();
-            let relative_path = path
-                .strip_prefix(&git.repo_path)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .to_string();
-            let size = std::fs::symlink_metadata(path)
-                .with_context(|| format!("failed to read metadata for {}", path.display()))?
-                .len();
-            Ok(code_graph::v2::FileInventoryEntry {
-                path: relative_path,
-                size,
-            })
-        })
-        .collect::<Result<_>>()?;
-    Ok(Arc::from(entries))
 }
 
 fn build_index_output(
