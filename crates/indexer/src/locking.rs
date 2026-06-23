@@ -85,11 +85,6 @@ impl NatsLockService {
             revisions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-
-    #[cfg(test)]
-    fn holds(&self, key: &str) -> bool {
-        self.revisions.lock().contains_key(key)
-    }
 }
 
 fn encode_expiration(at: DateTime<Utc>) -> Bytes {
@@ -298,6 +293,10 @@ mod tests {
             (nats, svc)
         }
 
+        fn holds(svc: &NatsLockService, key: &str) -> bool {
+            svc.revisions.lock().contains_key(key)
+        }
+
         #[tokio::test]
         async fn first_acquire_succeeds_and_stores_future_expiration() {
             let (nats, svc) = new_service();
@@ -414,7 +413,7 @@ mod tests {
         async fn renew_after_steal_reports_loss_and_forgets_lock() {
             let (nats, svc) = new_service();
             assert!(svc.try_acquire("p7", Duration::from_secs(1)).await.unwrap());
-            assert!(svc.holds("p7"));
+            assert!(holds(&svc, "p7"));
 
             nats.set_kv(
                 INDEXING_LOCKS_BUCKET,
@@ -427,7 +426,7 @@ mod tests {
                 "a stolen lock must report loss, not be stolen back",
             );
             assert!(
-                !svc.holds("p7"),
+                !holds(&svc, "p7"),
                 "a lost lease must be forgotten so we stop renewing it",
             );
         }
