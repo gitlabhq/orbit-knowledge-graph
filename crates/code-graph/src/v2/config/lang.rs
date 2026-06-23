@@ -233,6 +233,13 @@ define_languages! {
         separator: ".",
         names: ["hcl", "terraform"],
     },
+    Swift => {
+        support_lang: Swift,
+        extensions: ["swift"],
+        exclude: [],
+        separator: ".",
+        names: ["swift"],
+    },
 }
 
 #[cfg(test)]
