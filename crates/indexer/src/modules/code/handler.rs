@@ -281,39 +281,32 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
-        // Heartbeat resets ack_wait and renews the lock lease each tick; a lost lease is logged, not propagated (the ack reset blocks redelivery).
-        let heartbeat = {
-            let progress = context.progress.clone().with_lock_renewal(
-                context.lock_service.clone(),
-                key.clone(),
-                self.lock_ttl,
-            );
-            let interval = self.progress_heartbeat_interval;
-            tokio::spawn(async move {
+        let progress = context.progress.clone().with_lock_renewal(
+            context.lock_service.clone(),
+            key.clone(),
+            self.lock_ttl,
+        );
+        let interval = self.progress_heartbeat_interval;
+        let indexing_request = IndexingRequest {
+            project_id,
+            branch: branch.to_string(),
+            traversal_path: request.traversal_path.clone(),
+            task_id: request.task_id,
+            commit_sha: request.commit_sha.clone(),
+            had_prior_checkpoint,
+        };
+
+        // Heartbeat as a select branch, not a spawned task, so it's cancelled with the job and can't outlive it; each tick resets ack_wait and renews the lock lease.
+        let result = tokio::select! {
+            biased;
+            result = self.pipeline.index_project(context, &indexing_request, observer) => result,
+            _ = async {
                 loop {
                     tokio::time::sleep(interval).await;
                     progress.notify_in_progress().await;
                 }
-            })
+            } => unreachable!("heartbeat loop never returns"),
         };
-
-        let result = self
-            .pipeline
-            .index_project(
-                context,
-                &IndexingRequest {
-                    project_id,
-                    branch: branch.to_string(),
-                    traversal_path: request.traversal_path.clone(),
-                    task_id: request.task_id,
-                    commit_sha: request.commit_sha.clone(),
-                    had_prior_checkpoint,
-                },
-                observer,
-            )
-            .await;
-
-        heartbeat.abort();
 
         context
             .indexing_status
