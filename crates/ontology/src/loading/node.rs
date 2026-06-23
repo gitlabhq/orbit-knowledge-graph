@@ -590,11 +590,8 @@ pub(crate) fn render_etl_placeholders(
 }
 
 impl EtlYaml {
-    /// Lowers the surface onto [`EtlConfig`]: `type: table` → declarative
-    /// `Table`; `type: sql` → `Sql` holding the sibling `query:`
-    /// file's complete extract (it owns its own paging via the
-    /// `{{filters}}`/`{{limit}}` markers). No SQL is assembled from YAML —
-    /// the only SQL lives in the sibling `.sql` file.
+    /// Lowers the YAML surface onto [`EtlConfig`]. No SQL is assembled here —
+    /// a `sql` entity's extract lives entirely in its sibling `.sql` file.
     pub(crate) fn into_config(
         self,
         entity_name: &str,

@@ -699,23 +699,19 @@ fn build_extract_plan(
             deleted,
             order_by,
             ..
-        } => {
-            // The `.sql` file is the complete extract, run as-is; it owns
-            // its own paging via the `{{filters}}`/`{{limit}}` markers.
-            ExtractPlan {
-                destination_table: destination_table.to_string(),
-                columns: Vec::new(),
-                source: ExtractSource::Raw(template.clone()),
-                base_table: source.clone(),
-                watermark: watermark.clone(),
-                deleted: deleted.clone(),
-                order_by: order_by.clone(),
-                namespaced,
-                traversal_path_filter: None,
-                additional_where: None,
-                enrichment: None,
-            }
-        }
+        } => ExtractPlan {
+            destination_table: destination_table.to_string(),
+            columns: Vec::new(),
+            source: ExtractSource::Raw(template.clone()),
+            base_table: source.clone(),
+            watermark: watermark.clone(),
+            deleted: deleted.clone(),
+            order_by: order_by.clone(),
+            namespaced,
+            traversal_path_filter: None,
+            additional_where: None,
+            enrichment: None,
+        },
     }
 }
 

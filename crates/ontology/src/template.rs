@@ -134,9 +134,8 @@ impl QueryTemplate {
         render_segments(&self.segments, resolve)
     }
 
-    /// Bind each marker to its resolved value in place: a substituted marker
-    /// becomes text and drops out of the marker set, a kept one stays. Pure
-    /// segment transform — nothing is rendered, so the SQL is lexed only once.
+    /// Bind markers to their values without rendering, so the SQL is lexed
+    /// once and never re-parsed.
     pub(crate) fn resolve(self, mut resolve: impl FnMut(Marker) -> Resolve) -> Self {
         let mut segments = Vec::with_capacity(self.segments.len());
         for seg in self.segments {
