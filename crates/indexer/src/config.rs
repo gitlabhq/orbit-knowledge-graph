@@ -106,7 +106,7 @@ pub struct DispatcherConfig {
 #[derive(Debug, Error)]
 pub enum DispatcherError {
     #[error("scheduler error: {0}")]
-    Scheduler(#[from] crate::orchestrator::scheduler::SchedulerError),
+    Scheduler(#[from] crate::orchestrator::scheduled::SchedulerError),
 
     #[error("schema migration error: {0}")]
     Migration(#[from] crate::schema::migration::MigrationError),

@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::campaign::CampaignState;
 use crate::nats::NatsServices;
-use crate::orchestrator::scheduler::ScheduledTaskMetrics;
-use crate::orchestrator::scheduler::{ScheduledTask, TaskError};
+use crate::orchestrator::scheduled::ScheduledTaskMetrics;
+use crate::orchestrator::scheduled::{ScheduledTask, TaskError};
 use crate::orchestrator::siphon::decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::orchestrator::siphon::subjects;
 use crate::topic::CodeIndexingTaskRequest;
@@ -241,7 +241,7 @@ mod tests {
     use crate::modules::code::test_helpers::{
         build_replication_events, code_indexing_task_columns,
     };
-    use crate::orchestrator::scheduler::ScheduledTaskMetrics;
+    use crate::orchestrator::scheduled::ScheduledTaskMetrics;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
     use crate::topic::CodeIndexingTaskRequest;
     use siphon_proto::replication_event::Operation;

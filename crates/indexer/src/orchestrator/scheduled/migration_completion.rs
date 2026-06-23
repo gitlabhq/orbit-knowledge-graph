@@ -31,7 +31,7 @@ use std::sync::LazyLock;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
-use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
     SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,

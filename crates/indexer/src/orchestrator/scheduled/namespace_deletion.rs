@@ -11,7 +11,7 @@ use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::durability::WriteDurability;
 use crate::modules::namespace_deletion::NamespaceDeletionStore;
 use crate::nats::NatsServices;
-use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
 use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};

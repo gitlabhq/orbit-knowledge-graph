@@ -69,12 +69,12 @@ use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::namespace_deletion::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 use nats::{KvBucketConfig, NatsBroker};
-use orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
-use orchestrator::tasks::{
+use orchestrator::scheduled::{
     GlobalDispatcher, MigrationCompletionChecker, NamespaceCodeBackfillDispatcher,
     NamespaceDeletionScheduler, NamespaceDispatcher, SiphonCodeIndexingTaskDispatcher,
     StaleEdgeReconciliation, TableCleanup,
 };
+use orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -241,7 +241,7 @@ pub async fn run_dispatcher(
     ontology: &ontology::Ontology,
     shutdown: CancellationToken,
 ) -> Result<(), DispatcherError> {
-    let services = orchestrator::scheduler::connect(&config.nats).await?;
+    let services = orchestrator::scheduled::connect(&config.nats).await?;
     let graph = config.graph.build_client();
     let datalake = config.datalake.build_client();
     let metrics = ScheduledTaskMetrics::new();
@@ -362,7 +362,7 @@ pub async fn run_dispatcher(
 
     let health_abort = health_task.abort_handle();
     tokio::select! {
-        result = orchestrator::scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
+        result = orchestrator::scheduled::run_loop(tasks, lock_service, shutdown.clone()) => {
             health_abort.abort();
             result.map_err(DispatcherError::from)
         }

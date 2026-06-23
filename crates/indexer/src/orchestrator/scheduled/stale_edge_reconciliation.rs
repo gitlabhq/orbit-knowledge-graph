@@ -9,7 +9,7 @@ use tracing::{info, warn};
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 use crate::durability::WriteDurability;
-use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduled::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, StaleEdgeReconciliationConfig};
 
