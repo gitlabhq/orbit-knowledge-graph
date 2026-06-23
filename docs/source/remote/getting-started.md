@@ -86,25 +86,31 @@ for project-scoped install, update instructions, and what the skill contains.
 
 Replace `your-group` with the top-level group path you enabled Orbit on. The `full_path` filter scopes the query so it passes Orbit's selectivity validation.
 
+Put the request body in `request.json`:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "columns": ["name", "full_path"],
+      "filters": {
+        "full_path": {"op": "starts_with", "value": "your-group/"}
+      }
+    },
+    "limit": 10
+  },
+  "format": "raw"
+}
+```
+
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '{
-    "query": {
-      "query_type": "traversal",
-      "node": {
-        "id": "p",
-        "entity": "Project",
-        "columns": ["name", "full_path"],
-        "filters": {
-          "full_path": {"op": "starts_with", "value": "your-group/"}
-        }
-      },
-      "limit": 10
-    },
-    "format": "raw"
-  }' \
+  --data @request.json \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 

@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via `glab orbit remote` CLI subcommands or run a local copy with `glab orbit local`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries that require relationship traversal or aggregation, repository map / repo-map generation, and any question spanning relationships, cross-entity joins, or multi-entity aggregation across GitLab entities (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities). Do not use for single-entity GitLab lookups or write operations that `glab` handles directly (e.g. `glab mr view`, `glab mr create`); prefer Orbit when the question spans relationships, cross-entity joins, or multi-entity aggregation.
-version: 0.14.2
+version: 0.14.3
 license: MIT
 metadata:
   audience: developers
@@ -48,8 +48,9 @@ Write the request body to a file and pass it to `glab orbit remote query`.
 Default output is `llm` (compact, agent-friendly); pass `--format raw` to pipe
 into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
 
-```bash
-cat > /tmp/q.json <<'JSON'
+Put the request body in `/tmp/q.json`:
+
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -66,7 +67,9 @@ cat > /tmp/q.json <<'JSON'
     "limit": 5
   }
 }
-JSON
+```
+
+```shell
 glab orbit remote query /tmp/q.json
 ```
 
@@ -86,7 +89,6 @@ shorthand equality (`{"state": "opened"}`) or the operator form
   When endpoints use filters, include `path.rel_types` to bound fan-out;
   path_finding follows edges only in their schema direction (see
   [recipe pitfall](references/recipes.md#path_finding--shortest-path-between-nodes)).
-
 
 ## Common pitfalls
 

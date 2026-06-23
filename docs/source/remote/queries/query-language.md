@@ -35,7 +35,7 @@ the relationships to follow, and the properties to return.
 When submitting a query via the REST API or `glab orbit remote query`, wrap the
 query object in a top-level `query` field:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -63,7 +63,7 @@ the envelope.
 
 Every query has a `query_type` and either `node` or `nodes`.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -254,7 +254,7 @@ The `content` column is for source code. For merge request diff text, use
 
 Fetch one merge request with its full diff:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -269,7 +269,7 @@ Fetch one merge request with its full diff:
 
 Fetch per-file diff content from diff snapshots:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -316,7 +316,7 @@ history. See the ontology field descriptions on
 
 Fetch source file content:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -333,7 +333,7 @@ Fetch source file content:
 
 Find merged merge requests in a project:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -361,7 +361,7 @@ Find every pipeline that ran for one merge request. Always filter
 `Pipeline.source = "merge_request_event"` to match what the merge request's
 **Pipelines** tab shows:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -441,7 +441,7 @@ rejected during validation.
 
 Count merged merge requests per project:
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -470,7 +470,7 @@ Count merged merge requests per project:
 
 Count detected vulnerabilities by severity:
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -514,7 +514,7 @@ Both endpoints must be bounded by `node_ids`, filters, or an `id_range` with a
 span of 500 or less. If either endpoint uses filters or `id_range`, provide
 `rel_types`.
 
-```json
+```json orbit-query
 {
   "query_type": "path_finding",
   "nodes": [
@@ -537,7 +537,7 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 Neighbor queries use one `node` selector and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 
-```json
+```json orbit-query
 {
   "query_type": "neighbors",
   "node": {

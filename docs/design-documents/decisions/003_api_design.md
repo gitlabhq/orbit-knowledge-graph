@@ -162,7 +162,7 @@ Execute a Knowledge Graph query.
 
 **Request body (pseudo code):**
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -366,10 +366,20 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
 
 ## `glab` CLI Design
 
+Query body:
+
+```json orbit-query
+{
+  "query_type": "traversal",
+  "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+  "limit": 5
+}
+```
+
 ```shell
 # Query execution
-glab orbit query '{"query_type":"traversal","node":{"id":"mr","entity":"MergeRequest"},"limit":5}' --format=human
-glab orbit query '{"query_type":"traversal","node":{"id":"mr","entity":"MergeRequest"},"limit":5}' --format=llm
+glab orbit query query.json --format=human
+glab orbit query query.json --format=llm
 
 # Schema
 glab orbit schema                                   # full schema (compact)

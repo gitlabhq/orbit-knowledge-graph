@@ -88,8 +88,9 @@ glab orbit remote tools
 Replace `your-group` with your own group path. This query returns the first
 five projects in that group:
 
-```shell
-glab orbit remote query - <<'EOF'
+Put the request body in `query.json`:
+
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -103,7 +104,10 @@ glab orbit remote query - <<'EOF'
     "limit": 5
   }
 }
-EOF
+```
+
+```shell
+glab orbit remote query query.json
 ```
 
 The `--format` flag maps to the body's `response_format`:

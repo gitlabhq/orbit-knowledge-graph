@@ -10,7 +10,7 @@ Every recipe assumes `glab auth login` has succeeded and the
 
 The shell pattern is always:
 
-```bash
+```shell
 glab orbit remote query /tmp/q.json
 # or:
 cat /tmp/q.json | glab orbit remote query -
@@ -25,7 +25,7 @@ For the full field reference see [`query_language.md`](query_language.md).
 Many filters (e.g. `project_id` on MergeRequest) need the numeric project ID.
 Query the `Project` entity by `full_path` and read back its `id`:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -45,7 +45,7 @@ Query the `Project` entity by `full_path` and read back its `id`:
 The most common entry point: "tell me about MR !1216 in project X".
 Requires both `iid` and `project_id` filters (IID is only unique within a project):
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -67,7 +67,7 @@ Requires both `iid` and `project_id` filters (IID is only unique within a projec
 
 Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -103,7 +103,7 @@ project-scoped `iid`); look it up first with the
 [MR-by-IID recipe](#look-up-a-merge-request-by-iid) and reuse the returned
 `id`.
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -124,7 +124,7 @@ project-scoped `iid`); look it up first with the
 Apply the same filter when narrowing by status — for example, "failed
 pipelines for this MR":
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -147,7 +147,7 @@ Count by status with a single-node `aggregation` (keep the node count at
 one — adding `MergeRequest` or `Project` as extra nodes can change the
 underlying join shape and inflate the count):
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "aggregation",
@@ -170,7 +170,7 @@ If you only have the MR's `iid` and not its internal `id`, the equivalent
 two-node form via `TRIGGERED` works — still with the `source` filter on the
 Pipeline node:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -208,7 +208,7 @@ and grouping by `old_path` keeps the same row identity across an MR's
 history — see the canonical field descriptions on
 [`merge_request_diff_file.yaml`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/ontology/nodes/code_review/merge_request_diff_file.yaml):
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -245,7 +245,7 @@ extension, interface implementation, Go struct embedding) into it.
 `Boards::BaseService`); use it instead of bare `name` when the parent
 class is namespaced:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -269,7 +269,7 @@ class is namespaced:
 List opened merge requests and their authors. Requires at least two nodes and
 one relationship:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -290,7 +290,7 @@ one relationship:
 Add `order_by` to any traversal. Fields are `node` (the node `id`), `property`,
 and `direction` (`ASC` or `DESC`):
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
@@ -311,7 +311,7 @@ and `direction` (`ASC` or `DESC`):
 
 Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "neighbors",
@@ -330,7 +330,7 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
 
 Count open merge requests per project, highest first:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "aggregation",
@@ -353,7 +353,7 @@ Count open merge requests per project, highest first:
 
 Count detected vulnerabilities by severity:
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "aggregation",
@@ -384,7 +384,7 @@ causes a server-side validation error.
 > (e.g. `Group --CONTAINS--> Project`, not `Project → … → Project` via a
 > reverse hop the engine will not take).
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "path_finding",
@@ -417,11 +417,15 @@ structured `PropertyFilter`:
 
 Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 100.
 
-```json
+```json orbit-query
 {
   "query": {
     "query_type": "traversal",
-    "node": {"id": "p", "entity": "Project"},
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {"full_path": {"op": "starts_with", "value": "gitlab-org/"}}
+    },
     "limit": 200,
     "cursor": {"offset": 0, "page_size": 50}
   }

@@ -51,7 +51,7 @@ Single-node `traversal` is the search shape. Orbit does not have a separate
 Use the `diff` column on `MergeRequest` to fetch the full unified diff for a
 merge request. Request virtual columns explicitly by name.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -82,7 +82,7 @@ The `content` column is for source code nodes. For merge request diff text, use
 Use `HAS_DIFF` to move from a merge request to its diff snapshots, then
 `HAS_FILE` to fetch the files in those snapshots.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -118,7 +118,7 @@ Use `HAS_DIFF` to move from a merge request to its diff snapshots, then
 Use `content` on source code entities. This example searches indexed files by
 path and returns the raw file text.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {

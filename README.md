@@ -40,7 +40,6 @@ Orbit Local runs on your machine. The `orbit` CLI parses a local repository, ext
 
 What it indexes: directories, files, function and class definitions, and cross-file import references. It indexes the same 11+ languages as Orbit Remote. Multiple repositories share one database at `~/.orbit/graph.duckdb`, each scoped by repository and branch.
 
-
 | Access method | Use for |
 |---|---|
 | [`orbit` CLI](docs/source/local/access/cli.md) | Index, query, and inspect the local graph today |
@@ -100,9 +99,28 @@ orbit sql 'SELECT count(*) FROM gl_definition'
 # Requires glab 1.94+, authenticated (glab auth login), with Orbit enabled on your group.
 # See docs/source/remote/getting-started.md. Replace your-group/ with your top-level group path.
 glab orbit remote schema
+```
 
-echo '{"query":{"query_type":"traversal","node":{"id":"p","entity":"Project","filters":{"full_path":{"op":"starts_with","value":"your-group/"}}},"limit":5}}' \
-  | glab orbit remote query -
+Put the request body in `/tmp/orbit-query.json`:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": {"op": "starts_with", "value": "your-group/"}
+      }
+    },
+    "limit": 5
+  }
+}
+```
+
+```shell
+glab orbit remote query /tmp/orbit-query.json
 ```
 
 The [cookbook](docs/source/remote/cookbook.md) has blast-radius, dependency, pipeline-health, and vulnerability recipes.

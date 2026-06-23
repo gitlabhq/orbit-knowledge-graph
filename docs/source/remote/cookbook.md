@@ -37,7 +37,7 @@ Answer: "What breaks if I change this?"
 
 Replace `payments-service` with the module or library you want to trace.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -54,7 +54,7 @@ Replace `payments-service` with the module or library you want to trace.
 
 ### Find projects that depend on a shared library
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -80,7 +80,7 @@ Answer: "Help me understand this codebase."
 
 ### Find the most active contributors to a project
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -115,7 +115,7 @@ Answer: "How are our services connected?"
 
 ### Map imported definitions
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -147,7 +147,7 @@ Answer: "Where are our CI/CD problems?"
 
 ### Find projects with the most failed pipelines
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -168,7 +168,7 @@ Answer: "Where are our CI/CD problems?"
 
 ### Find failed jobs and their failure reasons
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -187,7 +187,7 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Find all critical and high vulnerabilities in a group
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -212,7 +212,7 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Count vulnerabilities by project
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -237,7 +237,7 @@ Answer: "Where are our security risks, and how did they get there?"
 
 ### Count vulnerabilities by severity
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [

@@ -30,11 +30,40 @@ Use the Orbit query language when you need GitLab data as a graph instead of a
 flat API response. A query is a JSON object. It names the entities to match,
 the relationships to follow, and the properties to return.
 
+## Request envelope
+
+When submitting a query via the REST API or `glab orbit remote query`, wrap the
+query object in a top-level `query` field:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "node_ids": [12345],
+      "columns": ["iid", "title", "state"]
+    },
+    "limit": 1
+  },
+  "response_format": "raw"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `query` | Yes | The query object documented below. |
+| `response_format` | No | `"llm"` (default when omitted; compact [GOON](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/design-documents/querying/graph_engine.md) text optimized for LLM consumption) or `"raw"` (structured JSON). Use `"raw"` when piping output into `jq`. |
+
+The `orbit query` CLI (for local graphs) takes the raw query body **without**
+the envelope.
+
 ## Query shape
 
 Every query has a `query_type` and either `node` or `nodes`.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -225,7 +254,7 @@ The `content` column is for source code. For merge request diff text, use
 
 Fetch one merge request with its full diff:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -240,7 +269,7 @@ Fetch one merge request with its full diff:
 
 Fetch per-file diff content from diff snapshots:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -287,7 +316,7 @@ history. See the ontology field descriptions on
 
 Fetch source file content:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -304,7 +333,7 @@ Fetch source file content:
 
 Find merged merge requests in a project:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -332,7 +361,7 @@ Find every pipeline that ran for one merge request. Always filter
 `Pipeline.source = "merge_request_event"` to match what the merge request's
 **Pipelines** tab shows:
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -412,7 +441,7 @@ rejected during validation.
 
 Count merged merge requests per project:
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -441,7 +470,7 @@ Count merged merge requests per project:
 
 Count detected vulnerabilities by severity:
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -485,7 +514,7 @@ Both endpoints must be bounded by `node_ids`, filters, or an `id_range` with a
 span of 500 or less. If either endpoint uses filters or `id_range`, provide
 `rel_types`.
 
-```json
+```json orbit-query
 {
   "query_type": "path_finding",
   "nodes": [
@@ -508,7 +537,7 @@ span of 500 or less. If either endpoint uses filters or `id_range`, provide
 Neighbor queries use one `node` selector and a `neighbors` object. The center
 node must be bounded by `node_ids`, filters, or a narrow `id_range`.
 
-```json
+```json orbit-query
 {
   "query_type": "neighbors",
   "node": {

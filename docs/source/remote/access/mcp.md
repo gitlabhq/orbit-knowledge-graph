@@ -205,7 +205,7 @@ You can also pass raw JSON queries directly if you want precise control over res
 
 ## Example: manual query_graph call
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [

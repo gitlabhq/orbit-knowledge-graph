@@ -156,7 +156,7 @@ Relationships connect nodes in the query:
 
 Match nodes and relationships, return matching entities.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [
@@ -179,11 +179,11 @@ Use top-level `group_by` to group aggregation rows. It applies to every
 aggregation in the query. A node group uses
 `{"kind": "node", "node": "<node-id>", "alias": "<optional-name>"}`.
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "mr", "entity": "MergeRequest"},
+    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
     {"id": "u", "entity": "User"}
   ],
   "relationships": [
@@ -209,7 +209,7 @@ caller. Virtual fields and unfilterable fields are rejected during validation.
 name when unique, or `<node>_<property>` when needed to avoid ambiguity.
 Duplicate group or aggregate output names are rejected.
 
-```json
+```json orbit-query
 {
   "query_type": "aggregation",
   "nodes": [
@@ -248,7 +248,7 @@ aggregate over dates, use `min` or `max`.
 
 Find paths between nodes using recursive CTEs.
 
-```json
+```json orbit-query
 {
   "query_type": "path_finding",
   "nodes": [
@@ -260,7 +260,7 @@ Find paths between nodes using recursive CTEs.
     "from": "start",
     "to": "end",
     "max_depth": 3,
-    "rel_types": ["CONTAINS", "DEPENDS_ON"]
+    "rel_types": ["CONTAINS"]
   }
 }
 ```
@@ -275,7 +275,7 @@ Find paths between nodes using recursive CTEs.
 
 Match a single entity type with optional filters — a `traversal` query with one node and no relationships. Use the `node` field (singular) instead of `nodes`.
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "node": {
@@ -294,7 +294,7 @@ Match a single entity type with optional filters — a `traversal` query with on
 
 Find all nodes connected to a given node. Neighbors queries use the `node` field (singular) and require a `neighbors` configuration.
 
-```json
+```json orbit-query
 {
   "query_type": "neighbors",
   "node": {"id": "u", "entity": "User", "node_ids": [100]},
@@ -319,14 +319,20 @@ The response includes the neighbor's ID, entity type, and the relationship that 
 
 The `options` object controls presentation behavior without changing query semantics. It is optional and all fields have sensible defaults.
 
-```json
+```json orbit-query
 {
   "query_type": "path_finding",
   "nodes": [
     {"id": "start", "entity": "User", "node_ids": [1]},
     {"id": "end", "entity": "Project", "node_ids": [100]}
   ],
-  "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3},
+  "path": {
+    "type": "shortest",
+    "from": "start",
+    "to": "end",
+    "max_depth": 3,
+    "rel_types": ["MEMBER_OF"]
+  },
   "options": {"dynamic_columns": "*"}
 }
 ```
@@ -512,7 +518,7 @@ The compilation step is a controlled JSON → AST → SQL translation. Free-form
 
 **Input:**
 
-```json
+```json orbit-query
 {
   "query_type": "traversal",
   "nodes": [

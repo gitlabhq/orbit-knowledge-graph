@@ -26,7 +26,7 @@ feature flag. If it is disabled for your user, every endpoint returns 404.
 
 **Cause 2 — wrong CLI path.** Make sure you are on `glab` v1.94.0+:
 
-```bash
+```shell
 glab --version
 glab orbit remote --help
 ```
@@ -39,7 +39,7 @@ If `glab orbit` is not recognised, upgrade `glab`.
 
 **Fix:**
 
-```bash
+```shell
 glab auth status
 glab auth login    # if expired
 ```
@@ -74,10 +74,25 @@ Re-run with `--format raw` and inspect stderr for details.
 
 **Cause:** Usually the query returned no rows. Confirm with a known-good probe:
 
-```bash
-cat > /tmp/q-min.json <<'JSON'
-{"query": {"query_type": "traversal", "node": {"id": "p", "entity": "Project"}, "limit": 1}}
-JSON
+Put the request body in `/tmp/q-min.json`:
+
+```json orbit-query
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {
+        "full_path": {"op": "starts_with", "value": "gitlab-org/"}
+      }
+    },
+    "limit": 1
+  }
+}
+```
+
+```shell
 glab orbit remote query --format raw /tmp/q-min.json
 ```
 
@@ -103,7 +118,7 @@ has no matches.
 **Fix:** validate against the live DSL schema, which is authoritative and
 always current. Fetch it with `glab orbit remote dsl`:
 
-```bash
+```shell
 glab orbit remote dsl
 ```
 
