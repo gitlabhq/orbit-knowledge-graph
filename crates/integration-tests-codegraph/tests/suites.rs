@@ -286,6 +286,11 @@ yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
 yaml_test!(cpp_concepts, "cpp/concepts.yaml");
 yaml_test!(cpp_templates, "cpp/templates.yaml");
 
+// Swift
+yaml_test!(swift_definitions, "swift/definitions.yaml");
+yaml_test!(swift_imports, "swift/imports.yaml");
+yaml_test!(swift_cross_file_calls, "swift/cross_file_calls.yaml");
+
 // PHP
 yaml_test!(php_resolution, "php/resolution.yaml");
 yaml_test!(php_hardcore, "php/hardcore.yaml");

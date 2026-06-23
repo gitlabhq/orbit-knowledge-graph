@@ -19,6 +19,7 @@ use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::generic::php::{PhpDsl, PhpRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
+use crate::v2::langs::generic::swift::{SwiftDsl, SwiftRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
@@ -110,6 +111,7 @@ register_v2_pipelines! {
     Elixir  => [GenericPipeline<ElixirDsl, ElixirRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Php     => [GenericPipeline<PhpDsl, PhpRules>],
+    Swift   => [GenericPipeline<SwiftDsl, SwiftRules>],
     Rust    => [RustPipeline],
     Hcl     => [GenericPipeline<HclDsl, HclRules>],
     Tag("js") => [JsPipeline],

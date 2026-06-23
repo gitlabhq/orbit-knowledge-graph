@@ -29,6 +29,7 @@ tree-sitter-cpp = { version = "0.23.4", optional = true }
 tree-sitter-elixir = { version = "0.3.5", optional = true }
 tree-sitter-php = { version = "0.24.2", optional = true }
 tree-sitter-hcl = { version = "1.1.0", optional = true }
+tree-sitter-swift = { version = "0.7.2", optional = true }
 
 [[bin]]
 name = "ast"
@@ -52,6 +53,7 @@ builtin-parser = [
   "tree-sitter-typescript",
   "tree-sitter-php",
   "tree-sitter-hcl",
+  "tree-sitter-swift",
 ]
 
 [dev-dependencies]
