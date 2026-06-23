@@ -342,18 +342,34 @@ fn normalize_doc_query(body: &str) -> Result<String, String> {
         serde_json::from_str(body).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
     let query = orbit_query_value(&value)
         .ok_or_else(|| "marked fence does not contain an Orbit query".to_string())?;
-    serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))
+    let json =
+        serde_json::to_string(query).map_err(|e| format!("serialize Orbit query JSON: {e}"))?;
+    parse_input(&json).map_err(|e| format!("invalid Orbit query JSON: {e}"))?;
+    Ok(json)
 }
 
 fn orbit_query_value(value: &serde_json::Value) -> Option<&serde_json::Value> {
     let query = value.get("query").unwrap_or(value);
-    if serde_json::from_value::<GraphResponse>(query.clone()).is_ok() {
+    if is_query_output(query) {
         return None;
     }
 
-    let json = serde_json::to_string(query).ok()?;
+    query
+        .as_object()
+        .is_some_and(|obj| obj.contains_key("query_type"))
+        .then_some(query)
+}
 
-    parse_input(&json).is_ok().then_some(query)
+fn is_query_output(value: &serde_json::Value) -> bool {
+    if serde_json::from_value::<GraphResponse>(value.clone()).is_ok() {
+        return true;
+    }
+
+    value.as_object().is_some_and(|obj| {
+        obj.contains_key("result")
+            || obj.contains_key("format_version")
+            || obj.contains_key("format_name")
+    })
 }
 
 fn relative_path(path: &Path) -> String {
