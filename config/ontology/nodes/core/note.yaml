@@ -135,7 +135,7 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: verbatim
+  type: sql
   source: siphon_notes
   query: note.sql
   order_by: [traversal_path, noteable_type, noteable_id, id]

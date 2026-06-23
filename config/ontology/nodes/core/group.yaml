@@ -82,7 +82,7 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: verbatim
+  type: sql
   source: namespace_traversal_paths
   query: group.sql
   edges:

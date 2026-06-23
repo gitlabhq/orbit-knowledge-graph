@@ -104,7 +104,7 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: verbatim
+  type: sql
   source: project_namespace_traversal_paths
   query: project.sql
   edges:

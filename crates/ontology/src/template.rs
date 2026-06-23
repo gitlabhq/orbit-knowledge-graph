@@ -108,7 +108,7 @@ impl QueryTemplate {
         &self.raw
     }
 
-    /// A verbatim extract must drive its own paging, so both runtime markers
+    /// A raw-SQL extract must drive its own paging, so both runtime markers
     /// are a construction invariant rather than a check left to the caller.
     pub fn parse_full(context: &str, sql: &str) -> Result<Self, OntologyError> {
         let template = Self::parse(context, sql)?;

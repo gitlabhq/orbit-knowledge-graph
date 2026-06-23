@@ -3028,8 +3028,8 @@ properties:
         assert_eq!(derived.transform, "system_notes");
         assert_eq!(derived.etl.scope(), crate::EtlScope::Namespaced);
         assert!(
-            matches!(derived.etl, crate::EtlConfig::Verbatim { .. }),
-            "SystemNote extract is a verbatim query file"
+            matches!(derived.etl, crate::EtlConfig::Sql { .. }),
+            "SystemNote extract is a raw SQL query file"
         );
         assert!(derived.emits.contains(&"MENTIONS".to_string()));
     }

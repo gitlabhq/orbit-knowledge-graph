@@ -401,7 +401,7 @@ fn lower_edge_select(
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> Plan {
-    // A column-less plan is a verbatim query: its source is the whole template.
+    // A column-less plan is a raw-SQL query: its source is the whole template.
     // Otherwise the source is a FROM expression the projected columns select from.
     let columns_empty = input.columns.is_empty();
     let from_sql = match input.source {

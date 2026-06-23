@@ -598,12 +598,12 @@ fn resolve_standalone_edge(
 }
 
 /// The table expression a standalone edge reads a node's enrich columns from.
-/// A `Verbatim` query is reused as a derived table with its paging elided,
+/// A `Sql` query is reused as a derived table with its paging elided,
 /// since the edge supplies its own FK bound.
 fn enrichment_source(etl: &EtlConfig) -> String {
     match etl {
         EtlConfig::Table { source, .. } => source.clone(),
-        EtlConfig::Verbatim { template, .. } => {
+        EtlConfig::Sql { template, .. } => {
             let unpaged = template.render_runtime(|_| Resolve::Elide);
             format!("(\n{unpaged}\n) AS _src")
         }
@@ -692,7 +692,7 @@ fn build_extract_plan(
                 enrichment: None,
             }
         }
-        EtlConfig::Verbatim {
+        EtlConfig::Sql {
             source,
             template,
             watermark,
@@ -700,7 +700,7 @@ fn build_extract_plan(
             order_by,
             ..
         } => {
-            // The `.sql` file is the complete extract, used verbatim; it owns
+            // The `.sql` file is the complete extract, run as-is; it owns
             // its own paging via the `{{filters}}`/`{{limit}}` markers.
             ExtractPlan {
                 destination_table: destination_table.to_string(),

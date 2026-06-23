@@ -6,7 +6,7 @@ description: >-
 emits: [MENTIONS]
 
 etl:
-  type: verbatim
+  type: sql
   transform: system_notes
   source: siphon_notes
   query: system_note.sql

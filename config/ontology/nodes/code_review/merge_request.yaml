@@ -318,7 +318,7 @@ etl:
   # Resolves metric_*, reviewers and approvals from siphon sources at extract
   # time because the upstream `merge_requests_mv` only re-fires on parent
   # inserts and routinely leaves those columns NULL on the destination.
-  type: verbatim
+  type: sql
   source: merge_requests
   query: merge_request.sql
   order_by: [traversal_path, id]

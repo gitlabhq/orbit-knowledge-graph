@@ -136,7 +136,7 @@ properties:
     description: "Per-file unified diff. Resolved from GitLab at query time. Null when too_large is true."
 
 etl:
-  type: verbatim
+  type: sql
   source: siphon_merge_request_diff_files
   query: merge_request_diff_file.sql
   order_by: [traversal_path, merge_request_diff_id, relative_order]

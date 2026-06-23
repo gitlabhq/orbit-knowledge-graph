@@ -66,11 +66,11 @@ pub(crate) enum EtlYaml {
         #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
-    /// A complete extract from a sibling `query: <file>.sql`, used verbatim.
-    /// The file owns its own paging via the `{{filters}}`/`{{limit}}`
+    /// A complete extract authored in a sibling `query: <file>.sql` and run
+    /// as-is. The file owns its own paging via the `{{filters}}`/`{{limit}}`
     /// markers and emits the `_version`/`_deleted` output columns itself.
-    #[serde(rename = "verbatim")]
-    Verbatim {
+    #[serde(rename = "sql")]
+    Sql {
         source: String,
         query: String,
         #[serde(default)]
@@ -89,7 +89,7 @@ pub(crate) enum EtlYaml {
 impl EtlYaml {
     pub(crate) fn transform(&self) -> Option<&str> {
         match self {
-            EtlYaml::Table { transform, .. } | EtlYaml::Verbatim { transform, .. } => {
+            EtlYaml::Table { transform, .. } | EtlYaml::Sql { transform, .. } => {
                 transform.as_deref()
             }
         }
@@ -591,7 +591,7 @@ pub(crate) fn render_etl_placeholders(
 
 impl EtlYaml {
     /// Lowers the surface onto [`EtlConfig`]: `type: table` → declarative
-    /// `Table`; `type: verbatim` → `Verbatim` holding the sibling `query:`
+    /// `Table`; `type: sql` → `Sql` holding the sibling `query:`
     /// file's complete extract (it owns its own paging via the
     /// `{{filters}}`/`{{limit}}` markers). No SQL is assembled from YAML —
     /// the only SQL lives in the sibling `.sql` file.
@@ -631,7 +631,7 @@ impl EtlYaml {
                     edges: convert_edge_mappings(edges)?,
                 })
             }
-            EtlYaml::Verbatim {
+            EtlYaml::Sql {
                 source,
                 query,
                 watermark,
@@ -669,7 +669,7 @@ impl EtlYaml {
                     .render(|marker| resolve_etl_marker(marker, &watermark, &deleted));
                 let template = QueryTemplate::parse(&context, &resolved)?;
 
-                Ok(EtlConfig::Verbatim {
+                Ok(EtlConfig::Sql {
                     scope,
                     source,
                     template,
@@ -1240,7 +1240,7 @@ mod tests {
         assert!(matches!(agg, StorageProjection::Aggregate { .. }));
     }
 
-    const VERBATIM_YAML: &str = r#"
+    const SQL_YAML: &str = r#"
             node_type: entity
             domain: test
             destination_table: gl_test
@@ -1249,19 +1249,18 @@ mod tests {
                 type: int64
                 source: id
             etl:
-              type: verbatim
+              type: sql
               source: source_table
               query: test.sql
             "#;
 
     #[test]
-    fn query_file_used_verbatim_as_full_query() {
+    fn query_file_run_as_full_query() {
         let full_query = "SELECT 1 AS id, traversal_path {{filters}} ORDER BY id {{limit}}";
-        let node =
-            parse_test_node_with_files(VERBATIM_YAML, &[("nodes/test/test.sql", full_query)])
-                .expect("verbatim etl should parse");
-        let EtlConfig::Verbatim { template, .. } = node.etl.unwrap() else {
-            panic!("expected Verbatim");
+        let node = parse_test_node_with_files(SQL_YAML, &[("nodes/test/test.sql", full_query)])
+            .expect("sql etl should parse");
+        let EtlConfig::Sql { template, .. } = node.etl.unwrap() else {
+            panic!("expected Sql");
         };
         assert_eq!(template.raw(), full_query);
     }
@@ -1269,7 +1268,7 @@ mod tests {
     #[test]
     fn query_file_without_paging_markers_is_rejected() {
         let err =
-            parse_test_node_with_files(VERBATIM_YAML, &[("nodes/test/test.sql", "SELECT 1 AS id")])
+            parse_test_node_with_files(SQL_YAML, &[("nodes/test/test.sql", "SELECT 1 AS id")])
                 .expect_err("a query file without paging markers should fail");
         assert!(
             err.to_string().contains("drives its own paging"),
@@ -1279,14 +1278,14 @@ mod tests {
 
     #[test]
     fn query_file_missing_is_an_error() {
-        let err = parse_test_node(VERBATIM_YAML).expect_err("missing query file should fail");
+        let err = parse_test_node(SQL_YAML).expect_err("missing query file should fail");
         assert!(err.to_string().contains("test.sql"), "got: {err}");
     }
 
     #[test]
     fn query_file_renders_watermark_and_deleted_placeholders() {
         let node = parse_test_node_with_files(
-            VERBATIM_YAML,
+            SQL_YAML,
             &[(
                 "nodes/test/test.sql",
                 "SELECT id, t.{{watermark_column}} AS _version, \
@@ -1295,8 +1294,8 @@ mod tests {
             )],
         )
         .expect("placeholders in sql file should render");
-        let EtlConfig::Verbatim { template, .. } = node.etl.unwrap() else {
-            panic!("expected Verbatim");
+        let EtlConfig::Sql { template, .. } = node.etl.unwrap() else {
+            panic!("expected Sql");
         };
         let sql = template.raw();
         assert!(
@@ -1316,7 +1315,7 @@ mod tests {
     #[test]
     fn query_file_hardcoding_watermark_is_rejected() {
         let err = parse_test_node_with_files(
-            VERBATIM_YAML,
+            SQL_YAML,
             &[("nodes/test/test.sql", "SELECT id, _siphon_watermark FROM t")],
         )
         .expect_err("hardcoded watermark in sql file should fail");
@@ -1329,7 +1328,7 @@ mod tests {
     #[test]
     fn query_file_with_unknown_placeholder_is_rejected() {
         let err = parse_test_node_with_files(
-            VERBATIM_YAML,
+            SQL_YAML,
             &[(
                 "nodes/test/test.sql",
                 "SELECT argMax(x, {{typo_column}}) AS x FROM t \

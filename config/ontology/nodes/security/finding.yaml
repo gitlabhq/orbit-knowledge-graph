@@ -105,7 +105,7 @@ properties:
     description: "Namespace path for authz."
 
 etl:
-  type: verbatim
+  type: sql
   source: siphon_security_findings
   query: finding.sql
   order_by: [traversal_path, id, partition_number]

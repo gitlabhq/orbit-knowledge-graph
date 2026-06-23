@@ -312,9 +312,9 @@
           "additionalProperties": false
         },
         {
-          "description": "Verbatim ETL: a complete extract from a sibling .sql file, run verbatim. The file owns its own paging via the {{filters}}/{{limit}} markers and emits the _version/_deleted output columns itself.",
+          "description": "SQL ETL: a complete extract authored in a sibling .sql file and run as-is. The file owns its own paging via the {{filters}}/{{limit}} markers and emits the _version/_deleted output columns itself.",
           "properties": {
-            "type": { "type": "string", "const": "verbatim" },
+            "type": { "type": "string", "const": "sql" },
             "source": {
               "type": "string",
               "description": "Underlying primary table the extract reads from."
@@ -322,7 +322,7 @@
             "query": {
               "type": "string",
               "pattern": "^[a-z0-9_]+\\.sql$",
-              "description": "Sibling .sql file holding the COMPLETE extract, used verbatim. It must drive its own paging with the {{filters}} and {{limit}} markers. Use {{watermark_column}}/{{deleted_column}} placeholders rather than hardcoding column names."
+              "description": "Sibling .sql file holding the COMPLETE extract, run as-is. It must drive its own paging with the {{filters}} and {{limit}} markers. Use {{watermark_column}}/{{deleted_column}} placeholders rather than hardcoding column names."
             },
             "watermark": {
               "type": "string",

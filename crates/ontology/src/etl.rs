@@ -62,10 +62,10 @@ pub enum EtlConfig {
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
-    /// A complete extract from a sibling `.sql` file, used verbatim. The file
-    /// owns its own paging via the `{{filters}}`/`{{limit}}` markers and
+    /// A complete extract authored in a sibling `.sql` file and run as-is. The
+    /// file owns its own paging via the `{{filters}}`/`{{limit}}` markers and
     /// emits the `_version`/`_deleted` output columns itself.
-    Verbatim {
+    Sql {
         scope: EtlScope,
         source: String,
         template: crate::QueryTemplate,
@@ -82,42 +82,42 @@ impl EtlConfig {
     pub fn scope(&self) -> EtlScope {
         match self {
             EtlConfig::Table { scope, .. } => *scope,
-            EtlConfig::Verbatim { scope, .. } => *scope,
+            EtlConfig::Sql { scope, .. } => *scope,
         }
     }
 
     pub fn source(&self) -> &str {
         match self {
             EtlConfig::Table { source, .. } => source,
-            EtlConfig::Verbatim { source, .. } => source,
+            EtlConfig::Sql { source, .. } => source,
         }
     }
 
     pub fn deleted(&self) -> &str {
         match self {
             EtlConfig::Table { deleted, .. } => deleted.as_str(),
-            EtlConfig::Verbatim { deleted, .. } => deleted.as_str(),
+            EtlConfig::Sql { deleted, .. } => deleted.as_str(),
         }
     }
 
     pub fn watermark(&self) -> &str {
         match self {
             EtlConfig::Table { watermark, .. } => watermark.as_str(),
-            EtlConfig::Verbatim { watermark, .. } => watermark.as_str(),
+            EtlConfig::Sql { watermark, .. } => watermark.as_str(),
         }
     }
 
     pub fn order_by(&self) -> &[String] {
         match self {
             EtlConfig::Table { order_by, .. } => order_by,
-            EtlConfig::Verbatim { order_by, .. } => order_by,
+            EtlConfig::Sql { order_by, .. } => order_by,
         }
     }
 
     pub fn edges(&self) -> &BTreeMap<String, Vec<EdgeMapping>> {
         match self {
             EtlConfig::Table { edges, .. } => edges,
-            EtlConfig::Verbatim { edges, .. } => edges,
+            EtlConfig::Sql { edges, .. } => edges,
         }
     }
 
@@ -136,8 +136,8 @@ impl EtlConfig {
 mod tests {
     use super::*;
 
-    fn verbatim_config() -> EtlConfig {
-        EtlConfig::Verbatim {
+    fn sql_config() -> EtlConfig {
+        EtlConfig::Sql {
             scope: EtlScope::Global,
             source: "source_table".to_string(),
             template: crate::QueryTemplate::parse(
@@ -164,7 +164,7 @@ mod tests {
         };
         assert_eq!(table.deleted(), crate::constants::siphon_deleted_column());
         assert_eq!(
-            verbatim_config().deleted(),
+            sql_config().deleted(),
             crate::constants::siphon_deleted_column()
         );
     }
@@ -184,7 +184,7 @@ mod tests {
             crate::constants::siphon_watermark_column()
         );
         assert_eq!(
-            verbatim_config().watermark(),
+            sql_config().watermark(),
             crate::constants::siphon_watermark_column()
         );
     }
