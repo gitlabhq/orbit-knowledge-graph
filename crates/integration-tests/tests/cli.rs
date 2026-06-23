@@ -189,6 +189,7 @@ fn index_db_flag_writes_to_custom_path() {
     let db_path = tmp.path().join("custom.duckdb");
     let repo = create_test_repo();
 
+    let workspace_dir = tempfile::TempDir::new().unwrap();
     let out = orbit_cmd()
         .args([
             "index",
@@ -196,6 +197,7 @@ fn index_db_flag_writes_to_custom_path() {
             "--db",
             db_path.to_str().unwrap(),
         ])
+        .env("ORBIT_DATA_DIR", workspace_dir.path())
         .output()
         .unwrap();
     assert!(
