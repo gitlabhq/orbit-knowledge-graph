@@ -81,19 +81,24 @@ pub fn extract_tar_gz<R: Read, H: FileStreamHooks>(
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
-            // A symlink is a node, never a parse candidate — we'd be parsing the
-            // link, not source. (The dir walk likewise never yields symlinks.)
-            inventory.push(FileInventoryEntry {
+            // A symlink is never a parse candidate — we'd be parsing the link, not
+            // source — so the hooks settle it (and record why); we keep only the
+            // within-root deferral, which is the source's security mechanism.
+            let mut meta = FileInventoryEntry {
                 path: relative_path.to_string_lossy().into_owned(),
                 size: entry.header().size().unwrap_or(0),
                 decision: Decision::ListOnly,
-            });
-            let link_target = entry
-                .link_name()
-                .map_err(std::io::Error::other)?
-                .map(|cow| cow.into_owned())
-                .unwrap_or_default();
-            deferred_symlinks.push((dest, link_target));
+            };
+            meta.decision = hooks.on_non_regular(&meta);
+            if meta.decision != Decision::Drop {
+                let link_target = entry
+                    .link_name()
+                    .map_err(std::io::Error::other)?
+                    .map(|cow| cow.into_owned())
+                    .unwrap_or_default();
+                deferred_symlinks.push((dest, link_target));
+                inventory.push(meta);
+            }
             continue;
         }
 

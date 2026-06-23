@@ -235,16 +235,19 @@ impl CodeGraph {
             file_size,
             definitions,
             imports,
+            crate::v2::error::FileReason::None,
         )
     }
 
     /// Add a file that should be represented in the graph but is not parsed by
-    /// any language pipeline.
+    /// any language pipeline. `reason` is the file's skip/fault outcome (or
+    /// `FileReason::None` for files indexed successfully).
     pub fn add_unparsed_file(
         &mut self,
         path: &str,
         language: Option<Language>,
         file_size: u64,
+        reason: crate::v2::error::FileReason,
     ) -> NodeIndex {
         let extension = Path::new(path)
             .extension()
@@ -252,10 +255,11 @@ impl CodeGraph {
             .unwrap_or_default()
             .to_string();
         let (file_node, _, _) =
-            self.add_file_with_language(path, &extension, language, file_size, &[], &[]);
+            self.add_file_with_language(path, &extension, language, file_size, &[], &[], reason);
         file_node
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_file_with_language(
         &mut self,
         path: &str,
@@ -264,6 +268,7 @@ impl CodeGraph {
         file_size: u64,
         definitions: &[CanonicalDefinition],
         imports: &[CanonicalImport],
+        reason: crate::v2::error::FileReason,
     ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
         let relative_path = self.relative_path(path);
         let file_path: Arc<str> = Arc::from(relative_path.as_str());
@@ -279,6 +284,7 @@ impl CodeGraph {
             extension: extension.to_string(),
             language,
             size: file_size,
+            reason,
         }));
         if let Some(fi) = &mut self.indexes.file_index {
             fi.insert(relative_path.clone(), file_node);
@@ -805,6 +811,7 @@ impl CodeGraph {
             GraphNode::File(f) => match property {
                 "extension" => Some(f.extension.clone()),
                 "language" => Some(f.language_name().to_string()),
+                "reason" => Some(f.reason.to_string()),
                 _ => None,
             },
             GraphNode::Definition { id, .. } => match property {
@@ -1183,6 +1190,7 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
         b.col("name")?.push_str(&self.file.name)?;
         b.col("extension")?.push_str(&self.file.extension)?;
         b.col("language")?.push_str(self.file.language_name())?;
+        b.col("reason")?.push_str(self.file.reason.to_string())?;
         Ok(())
     }
 }

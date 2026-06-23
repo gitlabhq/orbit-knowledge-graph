@@ -356,8 +356,17 @@ impl CodeIndexingPipeline {
         let code_graph_start = Instant::now();
         let repo_dir = repository.path.clone();
         let file_inventory = repository.file_inventory.clone();
+        let stream_reasons = repository.stream_reasons.clone();
         let result = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(&repo_dir, file_inventory, config, tracer, converter, sink)
+            Pipeline::run_with_tracer(
+                &repo_dir,
+                file_inventory,
+                config,
+                &stream_reasons,
+                tracer,
+                converter,
+                sink,
+            )
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;

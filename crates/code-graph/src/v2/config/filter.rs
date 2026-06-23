@@ -44,6 +44,7 @@ pub enum FilterSkip {
     NotUtf8,
     Minified,
     LineTooLong,
+    NonRegularFile,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -60,6 +61,7 @@ pub struct CodeFilter {
     total_bytes: Counter,
     skips: FxHashMap<FilterSkip, SkipTally>,
     detect_language: fn(&str) -> Option<Language>,
+    file_reasons: FxHashMap<String, FilterSkip>,
 }
 
 impl CodeFilter {
@@ -75,6 +77,7 @@ impl CodeFilter {
             total_bytes: Counter::new("total_bytes", max_total_bytes),
             skips: FxHashMap::default(),
             detect_language,
+            file_reasons: FxHashMap::default(),
         }
     }
 
@@ -83,10 +86,17 @@ impl CodeFilter {
         self.skips.iter().map(|(reason, tally)| (*reason, *tally))
     }
 
-    fn record(&mut self, reason: FilterSkip, bytes: u64) -> Decision {
+    /// Per-path skip reason for every file the stream settled as a bare node,
+    /// so the pipeline can stamp it onto the File node's `gl_file.reason`.
+    pub fn file_reasons(&self) -> &FxHashMap<String, FilterSkip> {
+        &self.file_reasons
+    }
+
+    fn record(&mut self, file: &FileInventoryEntry, reason: FilterSkip) -> Decision {
         let tally = self.skips.entry(reason).or_default();
         tally.count += 1;
-        tally.bytes += bytes;
+        tally.bytes += file.size;
+        self.file_reasons.insert(file.path.clone(), reason);
         Decision::ListOnly
     }
 }
@@ -98,10 +108,10 @@ impl FileStreamHooks for CodeFilter {
 
     fn on_header(&mut self, file: &FileInventoryEntry) -> Option<Decision> {
         if self.max_file_size != 0 && file.size > self.max_file_size {
-            return Some(self.record(FilterSkip::Oversize, file.size));
+            return Some(self.record(file, FilterSkip::Oversize));
         }
         if is_excluded_from_indexing(Path::new(&file.path)) {
-            return Some(self.record(FilterSkip::ExcludedExtension, file.size));
+            return Some(self.record(file, FilterSkip::ExcludedExtension));
         }
         None
     }
@@ -109,14 +119,14 @@ impl FileStreamHooks for CodeFilter {
     fn on_content(&mut self, file: &FileInventoryEntry, content: &[u8]) -> Decision {
         let sniff = &content[..content.len().min(BINARY_SNIFF_BYTES)];
         if looks_binary(sniff) {
-            return self.record(FilterSkip::Binary, file.size);
+            return self.record(file, FilterSkip::Binary);
         }
         // Parsers all need `&str`; validate once here so they can assume UTF-8.
         if std::str::from_utf8(content).is_err() {
-            return self.record(FilterSkip::NotUtf8, file.size);
+            return self.record(file, FilterSkip::NotUtf8);
         }
         if let Some(reason) = minified_skip(content) {
-            return self.record(reason, file.size);
+            return self.record(file, reason);
         }
         // A parse candidate is parsed; a non-parsable file (resolver input) is
         // loaded for resolvers but not parsed.
@@ -125,6 +135,10 @@ impl FileStreamHooks for CodeFilter {
         } else {
             Decision::Load
         }
+    }
+
+    fn on_non_regular(&mut self, file: &FileInventoryEntry) -> Decision {
+        self.record(file, FilterSkip::NonRegularFile)
     }
 }
 
@@ -234,6 +248,25 @@ mod tests {
 
     fn filter() -> CodeFilter {
         CodeFilter::new(0, 0, detect_language_from_path)
+    }
+
+    #[test]
+    fn records_per_file_reason_only_for_settled_files() {
+        let mut f = filter();
+        f.on_header(&entry("logo.png", 10));
+        f.on_content(&entry("x.bin", 10), b"a\x00b");
+        f.on_content(&entry("main.rs", 10), b"fn main() {}\n");
+        f.on_non_regular(&entry("link.rs", 5));
+        assert_eq!(
+            f.file_reasons().get("logo.png"),
+            Some(&FilterSkip::ExcludedExtension)
+        );
+        assert_eq!(f.file_reasons().get("x.bin"), Some(&FilterSkip::Binary));
+        assert_eq!(
+            f.file_reasons().get("link.rs"),
+            Some(&FilterSkip::NonRegularFile)
+        );
+        assert!(!f.file_reasons().contains_key("main.rs"));
     }
 
     #[test]

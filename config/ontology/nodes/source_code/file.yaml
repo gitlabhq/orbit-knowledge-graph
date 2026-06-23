@@ -92,6 +92,14 @@ properties:
     nullable: true
     description: "Raw source text, resolved from Gitaly at query time."
 
+  reason:
+    type: string
+    source: reason
+    nullable: false
+    mutable: true
+    description: "Why the file was skipped or failed to index (e.g. oversize, timeout_parse, invalid_utf8). Empty for files indexed successfully."
+    selectivity: low
+
 storage:
   settings:
     index_granularity: "1024"
@@ -106,6 +114,7 @@ storage:
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: extension, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: language, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: reason, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.0001)", granularity: 1}
     - {name: idx_project_id, column: project_id, type: "bloom_filter(0.0001)", granularity: 1}

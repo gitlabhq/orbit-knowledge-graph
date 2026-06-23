@@ -176,6 +176,9 @@ pub struct CanonicalFile {
     pub extension: String,
     pub language: Option<Language>,
     pub size: u64,
+    /// Why the file did not index cleanly (skip/fault), or `None`. Strictly an
+    /// enum so `gl_file.reason` can never hold an unbounded string.
+    pub reason: crate::v2::error::FileReason,
 }
 
 impl CanonicalFile {

@@ -8,6 +8,7 @@ use gkg_utils::fs_stream::{Decision, FileInventoryEntry};
 use rustc_hash::FxHashMap;
 
 use crate::v2::config::{Language, LanguageFamily, detect_language_from_path};
+use crate::v2::error::FileReason;
 use crate::v2::linker::CodeGraph;
 
 /// Input to a language pipeline: file path (source read on demand).
@@ -63,16 +64,22 @@ pub fn group_parseable_inventory(
 }
 
 /// Build the structural graph: one node per inventory entry, labeled with the
-/// language it was parsed as (if any).
+/// language it was parsed as (if any) and the reason it did not index cleanly
+/// (if any).
 pub fn build_file_inventory_graph(
     root: &Path,
     inventory: &[FileInventoryEntry],
     parsed_file_languages: &FxHashMap<String, Language>,
+    reasons: &FxHashMap<&str, FileReason>,
 ) -> CodeGraph {
     let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
     for entry in inventory {
         let language = parsed_file_languages.get(&entry.path).copied();
-        graph.add_unparsed_file(&entry.path, language, entry.size);
+        let reason = reasons
+            .get(entry.path.as_str())
+            .copied()
+            .unwrap_or_default();
+        graph.add_unparsed_file(&entry.path, language, entry.size, reason);
     }
     graph.drop_construction_indexes();
     graph

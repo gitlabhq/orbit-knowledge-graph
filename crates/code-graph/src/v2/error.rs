@@ -171,6 +171,27 @@ impl fmt::Display for FileFault {
     }
 }
 
+/// Why a file did not index cleanly: a benign skip, a genuine fault, or
+/// nothing. Carried on the File node and written to `gl_file.reason` via its
+/// `Display`, which is the only way to produce the string — so the column is
+/// strictly enum-bounded. The category prefix (`skip_` / `fault_`) composes
+/// with the inner enum's `Display` via strum, so a new variant is labelled
+/// automatically (`skip_oversize`, `fault_invalid_utf8`, …; empty for `None`).
+/// `Skip`/`Fault` come from the parse phase; `Filter` from the pre-parse file
+/// stream ([`FilterSkip`]), both labelled `skip_`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Display)]
+pub enum FileReason {
+    #[default]
+    #[strum(to_string = "")]
+    None,
+    #[strum(to_string = "skip_{0}")]
+    Skip(FileSkip),
+    #[strum(to_string = "fault_{0}")]
+    Fault(FileFault),
+    #[strum(to_string = "skip_{0}")]
+    Filter(crate::v2::config::FilterSkip),
+}
+
 /// Per-file outcome from a language analyzer. Encodes skip-vs-fault
 /// at the type level so callers route by variant, not by string match.
 #[derive(Debug)]
@@ -275,6 +296,23 @@ mod tests {
         assert_eq!(
             FileFault::RustWorkspaceMissing.as_metric_label(),
             "rust_workspace_missing"
+        );
+    }
+
+    #[test]
+    fn file_reason_labels_are_category_prefixed() {
+        assert_eq!(FileReason::None.to_string(), "");
+        assert_eq!(
+            FileReason::Skip(FileSkip::Oversize).to_string(),
+            "skip_oversize"
+        );
+        assert_eq!(
+            FileReason::Skip(FileSkip::Timeout(AbortPhase::Ssa)).to_string(),
+            "skip_timeout_ssa"
+        );
+        assert_eq!(
+            FileReason::Fault(FileFault::InvalidUtf8).to_string(),
+            "fault_invalid_utf8"
         );
     }
 }
