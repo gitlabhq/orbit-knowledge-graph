@@ -51,9 +51,7 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_ack_wait_secs")]
     pub ack_wait_secs: u64,
 
-    /// How often (seconds) a running indexing job emits an in-progress heartbeat,
-    /// which resets the `ack_wait` timer and renews its lock lease in one beat.
-    /// Must be less than `ack_wait_secs`. Defaults to 150 (half the default).
+    /// In-progress heartbeat interval (seconds): resets `ack_wait` and renews the lock lease. Must be less than `ack_wait_secs`. Defaults to 150.
     #[serde(default = "NatsConfiguration::default_progress_heartbeat_interval_secs")]
     pub progress_heartbeat_interval_secs: u64,
 

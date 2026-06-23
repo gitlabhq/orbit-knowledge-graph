@@ -156,7 +156,6 @@ pub enum DlqResult {
     Nacked,
 }
 
-/// A held lock the notifier should keep alive alongside the NATS ack.
 #[derive(Clone)]
 struct LockRenewal {
     service: Arc<dyn crate::locking::LockService>,
@@ -164,9 +163,7 @@ struct LockRenewal {
     ttl: Duration,
 }
 
-/// Tells NATS "I'm still working on this" so it doesn't redeliver the message,
-/// and (when a lock is attached) renews that lock's lease in the same beat — so
-/// one "still alive" signal keeps both the `ack_wait` timer and the lock alive.
+/// Tells NATS "still working" (resetting `ack_wait`) and, if a lock is attached, renews its lease in the same beat.
 #[derive(Clone)]
 pub struct ProgressNotifier {
     acker: Option<Arc<dyn MessageAcker>>,
@@ -181,8 +178,7 @@ impl ProgressNotifier {
         }
     }
 
-    /// Attach a held lock so every in-progress notification also renews its
-    /// lease, on the same cadence as the ack and decoupled from `ack_wait`.
+    /// Attach a held lock so each in-progress notification also renews its lease.
     pub fn with_lock_renewal(
         mut self,
         service: Arc<dyn crate::locking::LockService>,
@@ -193,8 +189,7 @@ impl ProgressNotifier {
         self
     }
 
-    /// Resets the ack wait timer (preventing redelivery while processing
-    /// continues) and renews the attached lock lease, if any.
+    /// Resets the ack wait timer (preventing redelivery) and renews the attached lock lease, if any.
     pub async fn notify_in_progress(&self) {
         if let Some(acker) = &self.acker
             && let Err(error) = acker.ack_progress().await

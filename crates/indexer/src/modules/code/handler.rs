@@ -281,11 +281,7 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
-        // One heartbeat keeps the job alive: each tick resets the NATS ack_wait
-        // timer and renews the lock lease, so a long fetch/index isn't redelivered
-        // or its lock stolen. A lost lease is logged inside the notifier, not
-        // propagated to abort the job — the ack reset in the same beat is what
-        // keeps a second worker from being dispatched in the first place.
+        // Heartbeat resets ack_wait and renews the lock lease each tick; a lost lease is logged, not propagated (the ack reset blocks redelivery).
         let heartbeat = {
             let progress = context.progress.clone().with_lock_renewal(
                 context.lock_service.clone(),

@@ -21,8 +21,7 @@ pub enum LockError {
 #[async_trait]
 pub trait LockService: Send + Sync {
     async fn try_acquire(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
-    /// Extend the lease on a lock we hold. `Ok(false)` means the lease was lost
-    /// (someone else now holds it), so the caller should stop renewing.
+    /// Extend the lease on a held lock; `Ok(false)` means the lease was lost.
     async fn renew(&self, key: &str, ttl: Duration) -> Result<bool, LockError>;
     async fn release(&self, key: &str) -> Result<(), LockError>;
 }
@@ -72,9 +71,6 @@ impl Drop for LockGuard {
 
 pub struct NatsLockService {
     nats: std::sync::Arc<dyn crate::nats::NatsServices>,
-    /// Revision of each lock we currently hold, so `renew` can CAS on the exact
-    /// revision we own — a renewal that lost the race (lock stolen after expiry)
-    /// hits a revision mismatch and reports the loss instead of stealing back.
     revisions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
@@ -405,10 +401,7 @@ mod tests {
             );
         }
 
-        // The threat model: our lease expired and another worker reclaimed the
-        // lock, bumping the KV revision out from under us. `renew` must CAS on the
-        // revision we held, detect the mismatch, and report the loss rather than
-        // overwrite (steal back) the other holder's lease.
+        // A stolen lock (revision bumped by another worker) must report loss, not steal back.
         #[tokio::test]
         async fn renew_after_steal_reports_loss_and_forgets_lock() {
             let (nats, svc) = new_service();
