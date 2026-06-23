@@ -1,10 +1,8 @@
-pub mod dispatch;
 mod handler;
 mod lower;
 mod metrics;
 pub(crate) mod store;
 
-pub use dispatch::NamespaceDeletionScheduler;
 pub use handler::NamespaceDeletionHandler;
 pub use metrics::DeletionMetrics;
 pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};

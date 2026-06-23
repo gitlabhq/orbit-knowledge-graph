@@ -6,12 +6,12 @@ use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use super::NamespaceDeletionStore;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::durability::WriteDurability;
+use crate::modules::namespace_deletion::NamespaceDeletionStore;
 use crate::nats::NatsServices;
-use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
 use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};

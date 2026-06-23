@@ -9,9 +9,9 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
 use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::nats::versioning::NATS_VERSIONER;
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::tasks::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
 use serde::Deserialize;
 use testcontainers::ImageExt;
@@ -177,7 +177,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
         ])
         .await;
 
-    let services = indexer::scheduler::connect(&context.nats_config())
+    let services = indexer::orchestrator::scheduler::connect(&context.nats_config())
         .await
         .unwrap();
     let datalake = context.clickhouse.config.build_client();
@@ -200,7 +200,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     ];
 
     let before = Utc::now();
-    indexer::scheduler::run_once(&tasks, &*lock_service)
+    indexer::orchestrator::scheduler::run_once(&tasks, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

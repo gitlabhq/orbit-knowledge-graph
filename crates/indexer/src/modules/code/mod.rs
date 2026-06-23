@@ -7,16 +7,14 @@
 mod arrow_converter;
 mod checkpoint;
 pub mod config;
-mod dispatch;
 mod handler;
 pub mod metrics;
 pub(crate) mod observer;
 mod pipeline;
 pub mod repository;
-mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 use std::sync::Arc;
 
@@ -32,7 +30,6 @@ use metrics::CodeMetrics;
 use repository::RepositoryResolver;
 
 pub use checkpoint::ClickHouseCodeCheckpointStore;
-pub use dispatch::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
 pub use handler::CodeIndexingTaskHandler;
 pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{

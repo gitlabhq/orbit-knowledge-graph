@@ -6,11 +6,6 @@ use ontology::{Ontology, OntologyError};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
-pub mod subjects {
-    pub const CODE_INDEXING_TASKS: &str = "p_knowledge_graph_code_indexing_tasks";
-    pub const KNOWLEDGE_GRAPH_ENABLED_NAMESPACES: &str = "knowledge_graph_enabled_namespaces";
-}
-
 const CODE_DOMAIN: &str = "source_code";
 
 pub struct CodeTableNames {

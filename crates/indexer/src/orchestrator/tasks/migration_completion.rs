@@ -28,11 +28,11 @@ use tracing::{info, warn};
 
 use std::sync::LazyLock;
 
-use super::metrics::CompletionMetrics;
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
-use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::schema::metrics::CompletionMetrics;
 use crate::schema::version::{
     SCHEMA_VERSION, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,

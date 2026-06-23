@@ -10,10 +10,10 @@ use uuid::Uuid;
 
 use crate::campaign::CampaignState;
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::modules::code::config::subjects;
-use crate::modules::code::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::nats::NatsServices;
-use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::siphon::decoder::{ColumnExtractor, decode_logical_replication_events};
+use crate::orchestrator::siphon::subjects;
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
@@ -482,7 +482,7 @@ mod tests {
 
     use super::*;
     use crate::modules::code::test_helpers::{EventBuilder, build_replication_events_for_table};
-    use crate::scheduler::ScheduledTaskMetrics;
+    use crate::orchestrator::scheduler::ScheduledTaskMetrics;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
     use siphon_proto::replication_event::Operation;
 

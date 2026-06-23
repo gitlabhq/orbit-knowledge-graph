@@ -11,9 +11,9 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server_config::{
     NamespaceCodeBackfillDispatcherConfig, NatsConfiguration, ScheduleConfiguration,
 };
-use indexer::modules::code::NamespaceCodeBackfillDispatcher;
 use indexer::nats::versioning::NATS_VERSIONER;
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::tasks::NamespaceCodeBackfillDispatcher;
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
     write_schema_version,
@@ -169,7 +169,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     write_migrating_version(&graph, 1).await.unwrap();
 
     // Build and run the dispatcher once.
-    let services = indexer::scheduler::connect(&context.nats_config())
+    let services = indexer::orchestrator::scheduler::connect(&context.nats_config())
         .await
         .unwrap();
 
@@ -189,7 +189,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
         campaign,
     ));
 
-    indexer::scheduler::run_once(&[task], &*services.lock_service)
+    indexer::orchestrator::scheduler::run_once(&[task], &*services.lock_service)
         .await
         .unwrap();
 
@@ -252,7 +252,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         ))
         .await;
 
-    let services = indexer::scheduler::connect(&context.nats_config())
+    let services = indexer::orchestrator::scheduler::connect(&context.nats_config())
         .await
         .unwrap();
 
@@ -268,7 +268,7 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
     ));
 
-    indexer::scheduler::run_once(&[task], &*services.lock_service)
+    indexer::orchestrator::scheduler::run_once(&[task], &*services.lock_service)
         .await
         .unwrap();
 

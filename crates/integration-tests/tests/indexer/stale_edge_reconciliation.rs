@@ -3,8 +3,8 @@ use std::sync::Arc;
 use clickhouse_client::{ClickHouseConfigurationExt, FromArrowColumn};
 use gkg_server_config::StaleEdgeReconciliationConfig;
 use indexer::checkpoint::ClickHouseCheckpointStore;
-use indexer::scheduler::stale_edge_reconciliation::StaleEdgeReconciliation;
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
+use indexer::orchestrator::tasks::stale_edge_reconciliation::StaleEdgeReconciliation;
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, run_subtests, t};
 
 // Edge `_version` is in the past so the reconcile tombstone (now64()) supersedes
