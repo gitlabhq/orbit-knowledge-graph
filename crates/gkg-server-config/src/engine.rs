@@ -246,7 +246,7 @@ fn default_code_indexing_cross_file_resolve_timeout_ms() -> u64 {
 }
 
 fn default_code_indexing_job_timeout_secs() -> u64 {
-    1800
+    250
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -280,7 +280,7 @@ pub struct CodeIndexingPipelineConfig {
     /// (import edges, call edges). 0 = no timeout.
     #[serde(default = "default_code_indexing_cross_file_resolve_timeout_ms")]
     pub cross_file_resolve_timeout_ms: u64,
-    /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. 0 = no timeout. Defaults to 1800.
+    /// Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. Keep below `nats.ack_wait_secs`. 0 = no timeout. Defaults to 250.
     #[serde(default = "default_code_indexing_job_timeout_secs")]
     pub job_timeout_secs: u64,
     /// Maximum concurrent Gitaly repository fetch operations. Controls how
@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn job_timeout_is_some_by_default_and_disabled_at_zero() {
         let cfg = CodeIndexingPipelineConfig::default();
-        assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(1800)));
+        assert_eq!(cfg.job_timeout(), Some(Duration::from_secs(250)));
         let disabled = CodeIndexingPipelineConfig {
             job_timeout_secs: 0,
             ..Default::default()
