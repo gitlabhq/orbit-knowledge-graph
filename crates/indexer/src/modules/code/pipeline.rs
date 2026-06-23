@@ -102,6 +102,11 @@ impl CodeIndexingPipeline {
         Some(self.fetch_concurrency + self.indexing_slot_count)
     }
 
+    /// Hard per-job wall-clock timeout, or `None` when disabled.
+    pub fn job_timeout(&self) -> Option<std::time::Duration> {
+        self.pipeline_config.job_timeout()
+    }
+
     #[tracing::instrument(
         name = "code_indexing_project",
         skip_all,

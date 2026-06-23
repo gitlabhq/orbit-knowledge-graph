@@ -68,6 +68,7 @@
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
+              "job_timeout_secs": 1800,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
@@ -399,6 +400,13 @@
           "default": 6,
           "minimum": 0
         },
+        "job_timeout_secs": {
+          "description": "Hard wall-clock budget (seconds) for one repository job (fetch + index); exceeding it aborts and retries. 0 = no timeout. Defaults to 1800.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 1800,
+          "minimum": 0
+        },
         "max_concurrent_languages": {
           "type": "integer",
           "format": "uint",
@@ -466,6 +474,7 @@
           "default": {
             "cross_file_resolve_timeout_ms": 180000,
             "fetch_concurrency": 6,
+            "job_timeout_secs": 1800,
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
@@ -561,6 +570,7 @@
               "pipeline": {
                 "cross_file_resolve_timeout_ms": 180000,
                 "fetch_concurrency": 6,
+                "job_timeout_secs": 1800,
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
@@ -806,6 +816,7 @@
             "pipeline": {
               "cross_file_resolve_timeout_ms": 180000,
               "fetch_concurrency": 6,
+              "job_timeout_secs": 1800,
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,

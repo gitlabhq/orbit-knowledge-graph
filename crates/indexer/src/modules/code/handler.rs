@@ -278,21 +278,29 @@ impl CodeIndexingTaskHandler {
             .record_start(&request.traversal_path, started_at)
             .await;
 
-        let result = self
+        let indexing_request = IndexingRequest {
+            project_id,
+            branch: branch.to_string(),
+            traversal_path: request.traversal_path.clone(),
+            task_id: request.task_id,
+            commit_sha: request.commit_sha.clone(),
+            had_prior_checkpoint,
+        };
+        let work = self
             .pipeline
-            .index_project(
-                context,
-                &IndexingRequest {
-                    project_id,
-                    branch: branch.to_string(),
-                    traversal_path: request.traversal_path.clone(),
-                    task_id: request.task_id,
-                    commit_sha: request.commit_sha.clone(),
-                    had_prior_checkpoint,
-                },
-                observer,
-            )
-            .await;
+            .index_project(context, &indexing_request, observer);
+        // Hard wall-clock bound on the job; a timeout is transient (retried, then
+        // DLQ'd), so a stuck repo can't pin a worker or be re-indexed forever.
+        let result = match self.pipeline.job_timeout() {
+            Some(timeout) => match tokio::time::timeout(timeout, work).await {
+                Ok(result) => result,
+                Err(_) => Err(HandlerError::Processing(format!(
+                    "code indexing job exceeded the {}s timeout",
+                    timeout.as_secs()
+                ))),
+            },
+            None => work.await,
+        };
 
         context
             .indexing_status
