@@ -50,6 +50,8 @@ struct EdgeEtlYaml {
     #[serde(default)]
     deleted: Option<String>,
     order_by: Vec<String>,
+    #[serde(rename = "where", default)]
+    filter: Option<String>,
     from: EdgeEndpointYaml,
     to: EdgeEndpointYaml,
 }
@@ -122,6 +124,7 @@ impl EdgeYaml {
                     watermark,
                     deleted,
                     order_by: etl.order_by,
+                    filter: etl.filter,
                     from,
                     to,
                 })

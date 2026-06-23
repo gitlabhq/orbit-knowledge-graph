@@ -91,6 +91,7 @@ graph TD
     User -- MERGED --> MergeRequest
     User -- REVIEWER --> MergeRequest
     User -- CLOSED --> WorkItem
+    User -- REOPENED --> WorkItem
 
     Package -- IN_PROJECT --> Project
     Package -- BUILT_BY --> Pipeline
@@ -112,6 +113,7 @@ graph TD
 | `TRIGGERED`                         | `User`         | `Pipeline`, `Job` | A user triggered a pipeline or job directly.                                                       |
 | `CLOSED`                            | `User`         | `WorkItem`, `MergeRequest` | A user closed a work item or merge request.                                                 |
 | `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
+| `REOPENED`                          | `User`         | `WorkItem`, `MergeRequest` | A user reopened a work item or merge request (sourced from `resource_state_events`, `state = 5`). |
 | `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
 | `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
 | `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |

@@ -1070,6 +1070,10 @@
           "items": { "type": "string" },
           "minItems": 1
         },
+        "where": {
+          "type": "string",
+          "description": "Optional extra WHERE predicate pushed into the extraction SQL, ANDed with the watermark/deleted/not-null filters. Lets a standalone edge select a row subset of a shared source table (e.g. one Rails enum value)."
+        },
         "from": { "$ref": "#/definitions/edgeEtlEndpoint" },
         "to": { "$ref": "#/definitions/edgeEtlEndpoint" }
       },

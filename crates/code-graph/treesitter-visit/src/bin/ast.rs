@@ -1,6 +1,28 @@
 use std::path::Path;
 use treesitter_visit::{LanguageExt, SupportLang};
 
+fn support_lang_for_extension(ext: &str) -> Option<SupportLang> {
+    Some(match ext {
+        "sh" | "bash" | "zsh" => SupportLang::Bash,
+        "c" | "h" => SupportLang::C,
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => SupportLang::Cpp,
+        "ex" | "exs" => SupportLang::Elixir,
+        "py" => SupportLang::Python,
+        "rb" => SupportLang::Ruby,
+        "rs" => SupportLang::Rust,
+        "java" => SupportLang::Java,
+        "kt" | "kts" => SupportLang::Kotlin,
+        "go" => SupportLang::Go,
+        "cs" => SupportLang::CSharp,
+        "ts" => SupportLang::TypeScript,
+        "tsx" => SupportLang::Tsx,
+        "js" | "jsx" | "mjs" | "cjs" => SupportLang::JavaScript,
+        "php" | "phtml" => SupportLang::Php,
+        "tf" | "tfvars" | "hcl" => SupportLang::Hcl,
+        _ => return None,
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -13,24 +35,9 @@ fn main() {
         std::process::exit(1);
     });
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let lang = match ext {
-        "c" | "h" => SupportLang::C,
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => SupportLang::Cpp,
-        "py" => SupportLang::Python,
-        "rb" => SupportLang::Ruby,
-        "rs" => SupportLang::Rust,
-        "java" => SupportLang::Java,
-        "kt" | "kts" => SupportLang::Kotlin,
-        "go" => SupportLang::Go,
-        "cs" => SupportLang::CSharp,
-        "ts" | "tsx" => SupportLang::TypeScript,
-        "js" | "jsx" => SupportLang::JavaScript,
-        "php" | "phtml" => SupportLang::Php,
-        "tf" | "tfvars" | "hcl" => SupportLang::Hcl,
-        _ => {
-            eprintln!("unknown extension: {ext}");
-            std::process::exit(1);
-        }
+    let Some(lang) = support_lang_for_extension(ext) else {
+        eprintln!("unknown extension: {ext}");
+        std::process::exit(1);
     };
 
     let ts_lang = lang.get_ts_language();
@@ -66,5 +73,33 @@ fn print_node(node: tree_sitter::Node, src: &str, depth: usize) {
             }
             print_node(child, src, depth + 1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn routes_shell_extensions_to_bash() {
+        assert_eq!(support_lang_for_extension("sh"), Some(SupportLang::Bash));
+        assert_eq!(support_lang_for_extension("bash"), Some(SupportLang::Bash));
+        assert_eq!(support_lang_for_extension("zsh"), Some(SupportLang::Bash));
+    }
+
+    #[test]
+    fn routes_tsx_to_tsx_grammar() {
+        assert_eq!(support_lang_for_extension("tsx"), Some(SupportLang::Tsx));
+    }
+
+    #[test]
+    fn routes_elixir_extensions() {
+        assert_eq!(support_lang_for_extension("ex"), Some(SupportLang::Elixir));
+        assert_eq!(support_lang_for_extension("exs"), Some(SupportLang::Elixir));
+    }
+
+    #[test]
+    fn rejects_unknown_extensions() {
+        assert_eq!(support_lang_for_extension("txt"), None);
     }
 }

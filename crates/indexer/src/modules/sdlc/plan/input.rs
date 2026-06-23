@@ -598,7 +598,7 @@ fn resolve_standalone_edge(
             order_by,
             namespaced,
             traversal_path_filter,
-            additional_where: None,
+            additional_where: config.filter.clone(),
             enrichment,
         },
     }
@@ -960,6 +960,50 @@ mod tests {
         assert!(
             type_filter.iter().any(|t| t == "MergeRequest"),
             "filter must keep the ontology-native MergeRequest value; got {type_filter:?}"
+        );
+    }
+
+    #[test]
+    fn reopened_standalone_plans_carry_state_filter_for_both_issuable_sides() {
+        // `resource_state_events.state == reopened` in Rails. Source of truth:
+        // app/models/resource_state_event.rb (enum :state ... .merge(reopened: 5))
+        // over app/models/concerns/issuable.rb STATE_ID_MAP
+        // (opened: 1, closed: 2, merged: 3, locked: 4).
+        const REOPENED_STATE: i64 = 5;
+
+        let ontology = Ontology::load_embedded().expect("ontology");
+        let plans = from_ontology(&ontology);
+
+        let reopened: Vec<&StandaloneEdgePlan> = plans
+            .standalone_edge_plans
+            .iter()
+            .filter(|p| p.relationship_kind == "REOPENED")
+            .collect();
+        assert_eq!(
+            reopened.len(),
+            2,
+            "REOPENED has an MR-side and a WorkItem-side ETL"
+        );
+
+        let expected_filter = format!("state = {REOPENED_STATE}");
+        for plan in &reopened {
+            assert_eq!(plan.extract.base_table, "siphon_resource_state_events");
+            assert_eq!(
+                plan.extract.additional_where.as_deref(),
+                Some(expected_filter.as_str())
+            );
+        }
+
+        let targets: Vec<&EdgeKind> = reopened.iter().map(|p| &p.target_kind).collect();
+        assert!(
+            targets
+                .iter()
+                .any(|k| matches!(k, EdgeKind::Literal(t) if t == "MergeRequest"))
+        );
+        assert!(
+            targets
+                .iter()
+                .any(|k| matches!(k, EdgeKind::Literal(t) if t == "WorkItem"))
         );
     }
 

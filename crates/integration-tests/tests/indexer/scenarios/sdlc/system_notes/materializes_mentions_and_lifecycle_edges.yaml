@@ -3,7 +3,7 @@
 # resolution to the source top-level namespace, so it still resolves and
 # the edge lands in the target's namespace partition. Note rows carry
 # _siphon_replicated_at == created_at so the watermark window selects them.
-description: System notes materialize MENTIONS and lifecycle edges, and nothing else
+description: System notes materialize MENTIONS edges, and nothing else
 scope: { namespace: 100 }
 
 seed:
@@ -19,12 +19,10 @@ seed:
     - { id: 1, note: mentioned in !5, noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
     - { id: 2, note: "mentioned in #9", noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
     - { id: 3, note: mentioned in my-group/other-proj!42, noteable_type: MergeRequest, noteable_id: 1000, author_id: 1, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
-    - { id: 4, note: reopened, noteable_type: Issue, noteable_id: 777, author_id: 2, project_id: 200, system: true, internal: false, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
   siphon_system_note_metadata:
     - { id: 1, note_id: 1, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 09:00:00", updated_at: "2024-01-15 09:00:00", _siphon_replicated_at: "2024-01-15 09:00:00" }
     - { id: 2, note_id: 2, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00", updated_at: "2024-01-15 10:00:00", _siphon_replicated_at: "2024-01-15 10:00:00" }
     - { id: 3, note_id: 3, action: cross_reference, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 11:00:00", updated_at: "2024-01-15 11:00:00", _siphon_replicated_at: "2024-01-15 11:00:00" }
-    - { id: 4, note_id: 4, action: reopened, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00", updated_at: "2024-01-15 12:00:00", _siphon_replicated_at: "2024-01-15 12:00:00" }
 
 run: system_notes
 
@@ -36,9 +34,5 @@ expect:
         - { source_id: 1000, source_kind: MergeRequest, target_id: 10, target_kind: MergeRequest }
         - { source_id: 1000, source_kind: MergeRequest, target_id: 20, target_kind: WorkItem }
         - { source_id: 1000, source_kind: MergeRequest, target_id: 30, target_kind: MergeRequest, traversal_path: "1/100/400/" }
-    - kind: REOPENED
-      count: 1
-      rows:
-        - { source_id: 2, source_kind: User, target_id: 777, target_kind: WorkItem }
   totals:
-    gl_edge: 4
+    gl_edge: 3

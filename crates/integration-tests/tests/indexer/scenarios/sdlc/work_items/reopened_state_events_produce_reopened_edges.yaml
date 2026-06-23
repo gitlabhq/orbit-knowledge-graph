@@ -1,0 +1,29 @@
+# Reopen is a resource_state_events row (state = 5), never a system-note
+# action. Only state = 5 rows produce REOPENED edges; the closed (state = 2)
+# row is seeded to prove the filter drops other lifecycle transitions.
+#
+# The work-item target (1/100/300/) is a sibling project under the same
+# top-level namespace as the merge-request target (1/100/200/); each edge must
+# land in its target's own partition, so the traversal_path assertions guard
+# the target-vs-source partition property.
+description: resource_state_events with state=5 produce User REOPENED MergeRequest / WorkItem edges
+scope: { namespace: 100 }
+
+seed:
+  namespaces:
+    - { id: 100, traversal_path: "1/100/" }
+  siphon_users:
+    - { id: 1, email: author@example.com, username: author, name: Author, state: active, organization_id: 1 }
+  merge_requests:
+    - { id: 10, iid: 5, title: Fix login, description: "", source_branch: fix, target_branch: main, state_id: 1, merge_status: unchecked, draft: false, squash: false, target_project_id: 200, author_id: 1, traversal_path: "1/100/200/" }
+  work_items:
+    - { id: 20, iid: 9, title: Bug report, description: "", project_id: 300, namespace_id: 100, work_item_type_id: 1, state_id: 1, confidential: false, created_at: "2024-01-15", updated_at: "2024-01-15", traversal_path: "1/100/300/" }
+  siphon_resource_state_events:
+    - { id: 1, user_id: 1, merge_request_id: 10, state: 5, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 10:00:00" }
+    - { id: 2, user_id: 1, issue_id: 20, state: 5, namespace_id: 100, traversal_path: "1/100/300/", created_at: "2024-01-15 11:00:00" }
+    - { id: 3, user_id: 1, merge_request_id: 10, state: 2, namespace_id: 100, traversal_path: "1/100/200/", created_at: "2024-01-15 12:00:00" }
+
+expect:
+  edges:
+    - { kind: REOPENED, from: User, to: MergeRequest, traversal_path: "1/100/200/", count: 1 }
+    - { kind: REOPENED, from: User, to: WorkItem, traversal_path: "1/100/300/", count: 1 }
