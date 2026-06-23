@@ -78,7 +78,7 @@ in the manifest table.
 | `--threads` | Worker thread count. `0` (default) auto-detects from CPU cores. |
 | `--stats` | Include detailed statistics in the JSON output. |
 | `--verbose` | Verbose logging to stderr. |
-| `--db PATH` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
+| `--db` | Override the DuckDB file path (default: `~/.orbit/graph.duckdb`). |
 
 ## Inspect the schema
 
