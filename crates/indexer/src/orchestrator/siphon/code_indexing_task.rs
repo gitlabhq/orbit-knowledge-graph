@@ -1,179 +1,44 @@
+//! CDC route: per-branch code indexing task requests.
+
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_trait::async_trait;
+use siphon_proto::LogicalReplicationEvents;
 use siphon_proto::replication_event::Operation;
-use tracing::{debug, info, warn};
-use uuid::Uuid;
+use tracing::{debug, warn};
 
-use crate::campaign::CampaignState;
 use crate::nats::NatsServices;
-use crate::orchestrator::scheduler::ScheduledTaskMetrics;
-use crate::orchestrator::scheduler::{ScheduledTask, TaskError};
-use crate::orchestrator::siphon::decoder::{ColumnExtractor, decode_logical_replication_events};
+use crate::orchestrator::scheduled::{ScheduledTaskMetrics, TaskError};
+use crate::orchestrator::siphon::decoder::ColumnExtractor;
+use crate::orchestrator::siphon::route::{CdcContext, Route, RouteOutcome};
 use crate::orchestrator::siphon::subjects;
 use crate::topic::CodeIndexingTaskRequest;
-use crate::types::{Envelope, Subscription};
-use gkg_server_config::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
+use crate::types::Envelope;
+
+const METRIC_NAME: &str = "dispatch.code.task";
 
 type ProjectBranch = (i64, String);
 
-pub struct SiphonCodeIndexingTaskDispatcher {
+pub struct CodeIndexingTaskRoute {
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
-    config: SiphonCodeIndexingTaskDispatcherConfig,
-    campaign: Arc<CampaignState>,
 }
 
-impl SiphonCodeIndexingTaskDispatcher {
-    pub fn new(
-        nats: Arc<dyn NatsServices>,
-        metrics: ScheduledTaskMetrics,
-        config: SiphonCodeIndexingTaskDispatcherConfig,
-        campaign: Arc<CampaignState>,
-    ) -> Self {
-        Self {
-            nats,
-            metrics,
-            config,
-            campaign,
-        }
-    }
-
-    fn siphon_subscription(&self) -> Subscription {
-        Subscription::new(
-            self.config.events_stream_name.clone(),
-            format!(
-                "{}.{}",
-                self.config.events_stream_name,
-                subjects::CODE_INDEXING_TASKS
-            ),
-        )
-        .manage_stream(false)
-    }
-}
-
-#[async_trait]
-impl ScheduledTask for SiphonCodeIndexingTaskDispatcher {
-    fn name(&self) -> &str {
-        "dispatch.code.task"
-    }
-
-    fn schedule(&self) -> &ScheduleConfiguration {
-        &self.config.schedule
-    }
-
-    async fn run(&self) -> Result<(), TaskError> {
-        let start = Instant::now();
-
-        let result = self.dispatch_inner().await;
-
-        let duration = start.elapsed().as_secs_f64();
-        let outcome = if result.is_ok() { "success" } else { "error" };
-        self.metrics.record_run(self.name(), outcome, duration);
-
-        result
-    }
-}
-
-impl SiphonCodeIndexingTaskDispatcher {
-    async fn dispatch_inner(&self) -> Result<(), TaskError> {
-        let subscription = self.siphon_subscription();
-        let dispatch_id = Uuid::new_v4();
-        let campaign_id = self.campaign.current();
-        let mut dispatched: u64 = 0;
-        let mut skipped: u64 = 0;
-
-        loop {
-            let messages = self
-                .nats
-                .consume_pending(&subscription, self.config.batch_size)
-                .await
-                .map_err(|error| {
-                    self.metrics.record_error(self.name(), "consume");
-                    TaskError::new(error)
-                })?;
-
-            if messages.is_empty() {
-                break;
-            }
-
-            let requests =
-                self.collect_latest_requests(&messages, dispatch_id, campaign_id.clone())?;
-
-            for request in requests.into_values() {
-                let envelope = Envelope::new(&request).map_err(|error| {
-                    self.metrics.record_error(self.name(), "publish");
-                    TaskError::new(error)
-                })?;
-
-                match self
-                    .nats
-                    .publish(&request.publish_subscription(), &envelope)
-                    .await
-                {
-                    Ok(()) => {
-                        dispatched += 1;
-                        debug!(
-                            task_id = request.task_id,
-                            project_id = request.project_id,
-                            "dispatched code indexing task request"
-                        );
-                    }
-                    Err(crate::nats::NatsError::PublishDuplicate) => {
-                        skipped += 1;
-                        debug!(
-                            task_id = request.task_id,
-                            project_id = request.project_id,
-                            "skipped code indexing task request, already in-flight"
-                        );
-                    }
-                    Err(error) => {
-                        self.metrics.record_error(self.name(), "publish");
-                        return Err(TaskError::new(error));
-                    }
-                }
-            }
-
-            for message in messages {
-                message.ack().await.map_err(|error| {
-                    self.metrics.record_error(self.name(), "ack");
-                    TaskError::new(error)
-                })?;
-            }
-        }
-
-        if dispatched > 0 || skipped > 0 {
-            self.metrics
-                .record_requests_published(self.name(), dispatched);
-            self.metrics.record_requests_skipped(self.name(), skipped);
-
-            info!(
-                dispatched,
-                skipped, "dispatched code indexing task requests"
-            );
-        }
-
-        Ok(())
+impl CodeIndexingTaskRoute {
+    pub fn new(nats: Arc<dyn NatsServices>, metrics: ScheduledTaskMetrics) -> Self {
+        Self { nats, metrics }
     }
 
     fn collect_latest_requests(
         &self,
-        messages: &[crate::nats::NatsMessage],
-        dispatch_id: Uuid,
-        campaign_id: Option<String>,
-    ) -> Result<HashMap<ProjectBranch, CodeIndexingTaskRequest>, TaskError> {
+        events: &[LogicalReplicationEvents],
+        ctx: &CdcContext,
+    ) -> HashMap<ProjectBranch, CodeIndexingTaskRequest> {
         let mut latest: HashMap<ProjectBranch, CodeIndexingTaskRequest> = HashMap::new();
 
-        for message in messages {
-            let replication_events = decode_logical_replication_events(&message.envelope.payload)
-                .map_err(|error| {
-                self.metrics.record_error(self.name(), "decode");
-                TaskError::new(error)
-            })?;
-
-            let extractor = ColumnExtractor::new(&replication_events);
+        for replication_events in events {
+            let extractor = ColumnExtractor::new(replication_events);
 
             for event in &replication_events.events {
                 if event.operation == Operation::InitialSnapshot as i32 {
@@ -215,8 +80,8 @@ impl SiphonCodeIndexingTaskDispatcher {
                     branch: Some(branch),
                     commit_sha: Some(commit_sha.to_string()),
                     traversal_path: traversal_path.to_string(),
-                    dispatch_id,
-                    campaign_id: campaign_id.clone(),
+                    dispatch_id: ctx.dispatch_id,
+                    campaign_id: ctx.campaign_id.clone(),
                 };
                 latest
                     .entry(key)
@@ -229,7 +94,66 @@ impl SiphonCodeIndexingTaskDispatcher {
             }
         }
 
-        Ok(latest)
+        latest
+    }
+}
+
+#[async_trait]
+impl Route for CodeIndexingTaskRoute {
+    fn source_table(&self) -> &str {
+        subjects::CODE_INDEXING_TASKS
+    }
+
+    async fn dispatch(
+        &self,
+        ctx: &CdcContext,
+        events: &[LogicalReplicationEvents],
+    ) -> Result<RouteOutcome, TaskError> {
+        let requests = self.collect_latest_requests(events, ctx);
+        let mut outcome = RouteOutcome::default();
+
+        for request in requests.into_values() {
+            let envelope = Envelope::new(&request).map_err(|error| {
+                self.metrics.record_error(METRIC_NAME, "publish");
+                TaskError::new(error)
+            })?;
+
+            match self
+                .nats
+                .publish(&request.publish_subscription(), &envelope)
+                .await
+            {
+                Ok(()) => {
+                    outcome.dispatched += 1;
+                    debug!(
+                        task_id = request.task_id,
+                        project_id = request.project_id,
+                        "dispatched code indexing task request"
+                    );
+                }
+                Err(crate::nats::NatsError::PublishDuplicate) => {
+                    outcome.skipped += 1;
+                    debug!(
+                        task_id = request.task_id,
+                        project_id = request.project_id,
+                        "skipped code indexing task request, already in-flight"
+                    );
+                }
+                Err(error) => {
+                    self.metrics.record_error(METRIC_NAME, "publish");
+                    return Err(TaskError::new(error));
+                }
+            }
+        }
+
+        if outcome.dispatched > 0 || outcome.skipped > 0 {
+            self.metrics
+                .record_requests_published(METRIC_NAME, outcome.dispatched);
+            self.metrics
+                .record_requests_skipped(METRIC_NAME, outcome.skipped);
+        }
+
+        Ok(outcome)
     }
 }
 
@@ -238,24 +162,30 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::campaign::CampaignState;
     use crate::modules::code::test_helpers::{
         build_replication_events, code_indexing_task_columns,
     };
-    use crate::orchestrator::scheduler::ScheduledTaskMetrics;
+    use crate::orchestrator::siphon::Siphon;
     use crate::testkit::{MockNatsServices, TestEnvelopeFactory};
-    use crate::topic::CodeIndexingTaskRequest;
+    use gkg_server_config::SiphonRouterConfig;
     use siphon_proto::replication_event::Operation;
 
     fn test_metrics() -> ScheduledTaskMetrics {
         ScheduledTaskMetrics::with_meter(&crate::testkit::test_meter())
     }
 
-    fn create_dispatcher(nats: Arc<MockNatsServices>) -> SiphonCodeIndexingTaskDispatcher {
-        SiphonCodeIndexingTaskDispatcher::new(
+    fn create_siphon(nats: Arc<MockNatsServices>) -> Siphon {
+        let route = Arc::new(CodeIndexingTaskRoute::new(
+            Arc::clone(&nats) as Arc<dyn NatsServices>,
+            test_metrics(),
+        ));
+        Siphon::new(
             nats,
             test_metrics(),
-            SiphonCodeIndexingTaskDispatcherConfig::default(),
-            Arc::new(crate::campaign::CampaignState::new()),
+            SiphonRouterConfig::default(),
+            Arc::new(CampaignState::new()),
+            vec![route],
         )
     }
 
@@ -268,8 +198,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(published.len(), 1);
@@ -298,8 +227,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         let request: CodeIndexingTaskRequest =
@@ -317,8 +245,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert!(published.is_empty());
@@ -327,9 +254,8 @@ mod tests {
     #[tokio::test]
     async fn no_messages_produces_no_dispatches() {
         let nats = Arc::new(MockNatsServices::new());
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
 
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert!(published.is_empty());
@@ -344,8 +270,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(
@@ -365,8 +290,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(published.len(), 1);
@@ -391,8 +315,7 @@ mod tests {
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(first_message));
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(second_message));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(published.len(), 1);
@@ -414,8 +337,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(published.len(), 3);
@@ -431,8 +353,7 @@ mod tests {
         ]);
         nats.add_pending_message(TestEnvelopeFactory::with_bytes(payload));
 
-        let dispatcher = create_dispatcher(Arc::clone(&nats));
-        dispatcher.run().await.unwrap();
+        create_siphon(Arc::clone(&nats)).drain_once().await.unwrap();
 
         let published = nats.get_published();
         assert_eq!(published.len(), 1);

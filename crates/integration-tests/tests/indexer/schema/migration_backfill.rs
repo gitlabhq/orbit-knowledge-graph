@@ -1,19 +1,17 @@
 //! Integration test: migration-triggered code backfill.
 //!
 //! When a schema migration is in progress (`gkg_schema_version` has a
-//! `migrating` row), `NamespaceCodeBackfillDispatcher` must dispatch
+//! `migrating` row), the shared `CodeBackfill` active sweep must dispatch
 //! code indexing tasks for **all** enabled namespaces, not only for
 //! newly-enabled ones arriving via CDC events.
 
 use std::collections::HashSet;
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_server_config::{
-    NamespaceCodeBackfillDispatcherConfig, NatsConfiguration, ScheduleConfiguration,
-};
+use gkg_server_config::NatsConfiguration;
 use indexer::nats::versioning::NATS_VERSIONER;
-use indexer::orchestrator::scheduler::{ScheduledTask, ScheduledTaskMetrics};
-use indexer::orchestrator::tasks::NamespaceCodeBackfillDispatcher;
+use indexer::orchestrator::dispatch::CodeBackfill;
+use indexer::orchestrator::scheduled::ScheduledTaskMetrics;
 use indexer::schema::version::{
     SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
     write_schema_version,
@@ -168,8 +166,7 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     write_schema_version(&graph, 0).await.unwrap();
     write_migrating_version(&graph, 1).await.unwrap();
 
-    // Build and run the dispatcher once.
-    let services = indexer::orchestrator::scheduler::connect(&context.nats_config())
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
 
@@ -177,19 +174,16 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     let campaign = std::sync::Arc::new(indexer::campaign::CampaignState::new());
     campaign.set(indexer::campaign::campaign_id_for_version(1));
 
-    let task: Box<dyn ScheduledTask> = Box::new(NamespaceCodeBackfillDispatcher::new(
+    let backfill = CodeBackfill::new(
         services.nats.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
-        NamespaceCodeBackfillDispatcherConfig {
-            schedule: ScheduleConfiguration::default(),
-            ..Default::default()
-        },
         campaign,
-    ));
+    );
 
-    indexer::orchestrator::scheduler::run_once(&[task], &*services.lock_service)
+    backfill
+        .dispatch_enabled(uuid::Uuid::new_v4())
         .await
         .unwrap();
 
@@ -252,23 +246,20 @@ async fn backfill_skips_projects_with_existing_checkpoints() {
         ))
         .await;
 
-    let services = indexer::orchestrator::scheduler::connect(&context.nats_config())
+    let services = indexer::orchestrator::scheduled::connect(&context.nats_config())
         .await
         .unwrap();
 
-    let task: Box<dyn ScheduledTask> = Box::new(NamespaceCodeBackfillDispatcher::new(
+    let backfill = CodeBackfill::new(
         services.nats.clone(),
         context.clickhouse.create_client(),
         context.clickhouse.config.build_client(),
         ScheduledTaskMetrics::new(),
-        NamespaceCodeBackfillDispatcherConfig {
-            schedule: ScheduleConfiguration::default(),
-            ..Default::default()
-        },
         std::sync::Arc::new(indexer::campaign::CampaignState::new()),
-    ));
+    );
 
-    indexer::orchestrator::scheduler::run_once(&[task], &*services.lock_service)
+    backfill
+        .dispatch_enabled(uuid::Uuid::new_v4())
         .await
         .unwrap();
 

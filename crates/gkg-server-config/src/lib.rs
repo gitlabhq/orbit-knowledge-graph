@@ -27,13 +27,12 @@ pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
-    CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, DatalakeRetryConfig,
-    EngineConfigError, EngineConfiguration, EntityHandlerConfig, GlobalDispatcherConfig,
-    HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
-    NamespaceCodeBackfillDispatcherConfig, NamespaceDeletionSchedulerConfig,
-    NamespaceDispatcherConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
-    SiphonCodeIndexingTaskDispatcherConfig, StaleEdgeReconciliationConfig, SubscriptionConfig,
-    TableCleanupConfig,
+    CodeBackfillSweepConfig, CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig,
+    DatalakeRetryConfig, EngineConfigError, EngineConfiguration, EntityHandlerConfig,
+    GlobalDispatcherConfig, HandlersConfiguration, IndexerModule, MigrationCompletionConfig,
+    NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig, ScheduleConfig,
+    ScheduleConfiguration, ScheduledTasksConfiguration, SiphonRouterConfig,
+    StaleEdgeReconciliationConfig, SubscriptionConfig, TableCleanupConfig,
 };
 pub use features::{Feature, FeatureScope, FeaturesConfig};
 pub use gitlab::{GitlabClientConfiguration, GitlabConfig, JwtConfig};
