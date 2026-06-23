@@ -1,4 +1,5 @@
-use crate::v2::config::Language;
+use crate::v2::config::{FilterSkip, Language};
+use crate::v2::error::FileReason;
 use crate::v2::inventory::{
     FamilyFileInput, FileInput, build_file_inventory_graph, group_parseable_inventory,
 };
@@ -8,7 +9,7 @@ use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
 use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -684,6 +685,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<[FileInventoryEntry]>,
         config: PipelineConfig,
+        stream_reasons: &FxHashMap<String, FilterSkip>,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
@@ -691,6 +693,7 @@ impl Pipeline {
             root,
             file_inventory,
             config,
+            stream_reasons,
             Tracer::new(false),
             converter,
             sink,
@@ -707,6 +710,7 @@ impl Pipeline {
         root: &Path,
         file_inventory: Arc<[FileInventoryEntry]>,
         mut config: PipelineConfig,
+        stream_reasons: &FxHashMap<String, FilterSkip>,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
@@ -763,26 +767,6 @@ impl Pipeline {
         let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
 
         let file_discovery_ms = t_discovery.elapsed().as_secs_f64() * 1000.0;
-
-        let t_structural = std::time::Instant::now();
-        if !file_inventory.is_empty() {
-            let structural_graph =
-                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
-            write_graph_direct(
-                structural_graph,
-                converter.as_ref(),
-                sink.as_ref(),
-                &all_errors,
-                GraphStatsCounters::new(
-                    &directories_count,
-                    &files_count,
-                    &definitions_count,
-                    &imports_count,
-                    &edges_count,
-                ),
-            );
-        }
-        let structural_graph_ms = t_structural.elapsed().as_secs_f64() * 1000.0;
 
         // Bounded channel as a semaphore: N permits = N concurrent languages
         let t_languages = std::time::Instant::now();
@@ -999,6 +983,39 @@ impl Pipeline {
             .lock()
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
+
+        // Build the structural file/directory graph after parsing so each File
+        // node carries its final reason in a single write: pre-parse stream skips,
+        // then parse-phase skips and faults.
+        let t_structural = std::time::Instant::now();
+        if !file_inventory.is_empty() {
+            let mut reasons: FxHashMap<&str, FileReason> = FxHashMap::default();
+            for (path, skip) in stream_reasons {
+                reasons.insert(path.as_str(), FileReason::Filter(*skip));
+            }
+            for s in &skipped {
+                reasons.insert(s.path.as_str(), FileReason::Skip(s.kind));
+            }
+            for f in &faults {
+                reasons.insert(f.path.as_str(), FileReason::Fault(f.kind));
+            }
+            let structural_graph =
+                build_file_inventory_graph(root, &file_inventory, &parsed_file_languages, &reasons);
+            write_graph_direct(
+                structural_graph,
+                converter.as_ref(),
+                sink.as_ref(),
+                &all_errors,
+                GraphStatsCounters::new(
+                    &directories_count,
+                    &files_count,
+                    &definitions_count,
+                    &imports_count,
+                    &edges_count,
+                ),
+            );
+        }
+        let structural_graph_ms = t_structural.elapsed().as_secs_f64() * 1000.0;
 
         let slowest_files = ctx.drain_slowest_files();
         let mut language_timings = ctx
@@ -1766,6 +1783,7 @@ mod tests {
                 decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -1800,6 +1818,7 @@ mod tests {
                 per_file_ssa_timeout: Some(std::time::Duration::ZERO),
                 ..PipelineConfig::default()
             },
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -1847,6 +1866,7 @@ mod tests {
                 })),
                 ..PipelineConfig::default()
             },
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TestCapture::new()),
             Arc::new(NullSink),
@@ -1874,6 +1894,7 @@ mod tests {
                 decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(OffsetOverflowOnParsedGraph),
             Arc::new(NullSink),
@@ -1910,6 +1931,7 @@ mod tests {
                 decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             Arc::new(TypedOffsetOverflowOnParsedGraph),
             Arc::new(NullSink),
@@ -1966,6 +1988,7 @@ mod tests {
             root,
             Arc::from(inventory),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(NullSink),
@@ -2015,6 +2038,7 @@ mod tests {
                 decision: Decision::Parse,
             }]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(NullSink),
@@ -2214,6 +2238,7 @@ namespace MyApp {
                 },
             ]),
             PipelineConfig::default(),
+            &FxHashMap::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             sink,

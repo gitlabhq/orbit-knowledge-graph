@@ -3,10 +3,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use code_graph::v2::FileInventoryEntry;
-use code_graph::v2::config::{CodeFilter, detect_language_from_path};
+use code_graph::v2::config::{CodeFilter, FilterSkip, detect_language_from_path};
 use futures::StreamExt;
 use gkg_utils::archive::extract_tar_gz;
 use gkg_utils::fs_stream::StreamError;
+use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
@@ -37,6 +38,9 @@ pub enum RepositoryCacheError {
 pub struct CachedRepository {
     pub path: PathBuf,
     pub file_inventory: Arc<[FileInventoryEntry]>,
+    /// Per-path reason for files the stream settled as bare nodes, carried to the
+    /// pipeline so each File node's `gl_file.reason` reflects the stream skip.
+    pub stream_reasons: FxHashMap<String, FilterSkip>,
 }
 
 impl std::ops::Deref for CachedRepository {
@@ -159,6 +163,7 @@ impl RepositoryCache for LocalRepositoryCache {
         Ok(CachedRepository {
             path: repo_dir,
             file_inventory: Arc::from(file_inventory),
+            stream_reasons: filter.file_reasons().clone(),
         })
     }
 

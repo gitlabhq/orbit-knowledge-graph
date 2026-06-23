@@ -152,7 +152,7 @@ pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
      configured per-file ceiling), `binary` (a NUL byte in the first 8000 \
      bytes, git-style, with a UTF BOM rescue), `not_utf8` (content is not valid \
      UTF-8), `minified` / `line_too_long` (high average line length or a \
-     >64 KiB line).",
+     >64 KiB line), `non_regular_file` (a symlink — a node, never parsed).",
     None,
     &[labels::REASON],
     DOMAIN,

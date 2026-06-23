@@ -514,6 +514,7 @@ fn index_repo(
         std::path::Path::new(&root_path),
         file_inventory,
         pipeline_config.clone(),
+        filter.file_reasons(),
         tracer,
         converter,
         sink,

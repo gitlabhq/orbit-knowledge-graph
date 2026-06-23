@@ -35,7 +35,11 @@ pub fn walk_dir<H: FileStreamHooks>(
 
     for result in walker {
         let dir_entry = result.map_err(|e| StreamError::Io(std::io::Error::other(e)))?;
-        if !dir_entry.file_type().is_some_and(|t| t.is_file()) {
+        let file_type = dir_entry.file_type();
+        let is_file = file_type.is_some_and(|t| t.is_file());
+        let is_symlink = file_type.is_some_and(|t| t.is_symlink());
+        // Directories (and other non-regular, non-symlink entries) are not nodes.
+        if !is_file && !is_symlink {
             continue;
         }
         let abs_path = dir_entry.path();
@@ -46,12 +50,18 @@ pub fn walk_dir<H: FileStreamHooks>(
         let mut meta = FileInventoryEntry {
             path: rel_path.to_string_lossy().into_owned(),
             size,
-            decision: Decision::Parse,
+            decision: Decision::ListOnly,
         };
 
-        meta.decision = step(hooks, &meta, &mut content, |buf| {
-            std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
-        })?;
+        // A symlink has no content to sniff and is never a parse candidate; the
+        // hooks settle it (and record why), same as the tar source.
+        meta.decision = if is_symlink {
+            hooks.on_non_regular(&meta)
+        } else {
+            step(hooks, &meta, &mut content, |buf| {
+                std::fs::File::open(abs_path)?.read_to_end(buf).map(|_| ())
+            })?
+        };
         if meta.decision != Decision::Drop {
             inventory.push(meta);
         }
@@ -146,5 +156,22 @@ mod tests {
             Decision::ListOnly
         );
         assert!(by_path(".gitignore").is_some(), "dotfiles must be listed");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn symlink_is_a_bare_node_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(root, "src/lib.rs", b"pub fn x() {}");
+        std::os::unix::fs::symlink("src/lib.rs", root.join("link.rs")).unwrap();
+
+        let inv = walk_dir(root, &mut TestFilter).unwrap();
+        let by_path = |p: &str| inv.iter().find(|e| e.path == p);
+
+        // Routed through on_non_regular (default ListOnly), not read as content —
+        // so the `.rs` symlink is a node, not a parse candidate.
+        assert_eq!(by_path("link.rs").unwrap().decision, Decision::ListOnly);
+        assert_eq!(by_path("src/lib.rs").unwrap().decision, Decision::Parse);
     }
 }
